@@ -57,8 +57,12 @@ int main(void)
   extern void test_upstream_200_roundtrip(void);
   extern void test_upstream_500_passthrough(void);
   extern void test_upstream_timeout(void);
+  extern void test_upstream_fail_all_toggle(void);
   extern void test_um_counters_and_drain(void);
   extern void test_metrics_acl(void);
+  extern void test_core_pipeline(void);
+  extern void test_provider_azure_build(void);
+  extern void test_provider_default_params_merge(void);
   test_register("log_smoke", test_log_smoke);
   test_register("log_concurrent", test_log_concurrent);
   test_register("sha256_kat", test_sha256_kat);
@@ -91,8 +95,12 @@ int main(void)
   test_register("upstream_200", test_upstream_200_roundtrip);
   test_register("upstream_500", test_upstream_500_passthrough);
   test_register("upstream_timeout", test_upstream_timeout);
+  test_register("upstream_fail_all", test_upstream_fail_all_toggle);
   test_register("um_counters", test_um_counters_and_drain);
   test_register("metrics_acl", test_metrics_acl);
+  test_register("core_pipeline", test_core_pipeline);
+  test_register("provider_azure_build", test_provider_azure_build);
+  test_register("provider_merge_params", test_provider_default_params_merge);
 
   int failed = 0;
   for (int i = 0; i < g_n_tests; i++) {

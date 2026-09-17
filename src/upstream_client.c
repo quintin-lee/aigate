@@ -41,23 +41,10 @@ static size_t append_body(char *buf, size_t size, size_t nmemb, void *ud)
   return total;
 }
 
-static int build_url(const model_rec_t *route, const char *path, char *out,
-                     size_t cap)
-{
-  int n = snprintf(out, cap, "%s%s", route->endpoint, path);
-  if (n < 0 || (size_t)n >= cap)
-    return -1;
-  return 0;
-}
-
-int upstream_call(const model_rec_t *route, const char *path,
+int upstream_call(const char *url, const char *upstream_key,
                   const char *body_json, size_t body_len, long timeout_ms,
                   int *out_status, char **out_body, size_t *out_body_len)
 {
-  char url[1024];
-  if (build_url(route, path, url, sizeof url) != 0)
-    return -502;
-
   struct resp_buf rb = {0};
   struct curl_slist *hdrs = NULL;
   int rc = -502;
@@ -68,10 +55,9 @@ int upstream_call(const model_rec_t *route, const char *path,
   if (c == NULL)
     goto done;
 
-  if (route->upstream_key[0] != '\0') {
+  if (upstream_key != NULL && upstream_key[0] != '\0') {
     char auth[1080];
-    snprintf(auth, sizeof auth, "Authorization: Bearer %s",
-             route->upstream_key);
+    snprintf(auth, sizeof auth, "Authorization: Bearer %s", upstream_key);
     hdrs = curl_slist_append(hdrs, auth);
   }
   hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
@@ -80,17 +66,21 @@ int upstream_call(const model_rec_t *route, const char *path,
   curl_easy_setopt(c, CURLOPT_URL, url);
   curl_easy_setopt(c, CURLOPT_POST, 1L);
   curl_easy_setopt(c, CURLOPT_POSTFIELDS, body_json);
-  curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)body_len);
+  /* body_len == 0 → use strlen of the NUL-terminated body_json */
+  curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE,
+                   body_len > 0 ? (long)body_len : (long)strlen(body_json));
   curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
   curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, append_body);
   curl_easy_setopt(c, CURLOPT_WRITEDATA, &rb);
-  curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, timeout_ms > 0 ? timeout_ms : 60000L);
+  curl_easy_setopt(c, CURLOPT_TIMEOUT_MS,
+                   timeout_ms > 0 ? timeout_ms : 60000L);
   curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
 
   CURLcode cret = curl_easy_perform(c);
   if (cret == CURLE_OK) {
-    if (curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code) == CURLE_OK) {
+    if (curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code) ==
+        CURLE_OK) {
       *out_status = (int)http_code;
       *out_body = rb.data ? rb.data : (char *)"";
       *out_body_len = rb.len;
@@ -99,8 +89,7 @@ int upstream_call(const model_rec_t *route, const char *path,
   } else if (cret == CURLE_OPERATION_TIMEDOUT) {
     rc = -110;
   } else {
-    AIGATE_LOG_WARN("upstream transport error: %s",
-                    curl_easy_strerror(cret));
+    AIGATE_LOG_WARN("upstream transport error: %s", curl_easy_strerror(cret));
     rc = -502;
   }
 

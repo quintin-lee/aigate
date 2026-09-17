@@ -4,24 +4,21 @@
 #include "upstream_client.h"
 #include "mock_upstream.h"
 #include <jansson.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 TEST_CASE(test_upstream_200_roundtrip)
 {
-  const char *base = mock_upstream_start();
-  TEST_ASSERT(base != NULL, "mock started");
-
-  model_rec_t route;
-  memset(&route, 0, sizeof route);
-  strcpy(route.provider, "openai");
-  strcpy(route.endpoint, base); /* + path "/chat" */
-  strcpy(route.upstream_key, "sk-mock");
+  mock_upstream_t *mu = mock_upstream_start();
+  TEST_ASSERT(mu != NULL, "mock started");
+  char url[256];
+  snprintf(url, sizeof url, "%s/chat", mock_upstream_base(mu));
 
   int status = 0;
   char *body = NULL;
   size_t blen = 0;
-  int rc = upstream_call(&route, "/chat",
+  int rc = upstream_call(url, "sk-mock",
                          "{\"model\":\"gpt-4o\",\"messages\":[]}", 0, 5000,
                          &status, &body, &blen);
   TEST_ASSERT(rc == 0, "transport ok, rc=%d", rc);
@@ -38,42 +35,64 @@ TEST_CASE(test_upstream_200_roundtrip)
               "completion_tokens 11");
   json_decref(j);
   free(body);
+
+  /* mock recorded the request with its body */
+  TEST_ASSERT(mock_upstream_request_count(mu) == 1, "one request served");
+  TEST_ASSERT(strcmp(mock_upstream_last_path(mu), "/chat") == 0, "path /chat");
+  TEST_ASSERT(strstr(mock_upstream_last_body(mu), "gpt-4o") != NULL,
+              "body recorded");
+  mock_upstream_stop(mu);
 }
 
 TEST_CASE(test_upstream_500_passthrough)
 {
-  const char *base = mock_upstream_start();
-  TEST_ASSERT(base != NULL, "mock started");
-
-  model_rec_t route;
-  memset(&route, 0, sizeof route);
-  strcpy(route.provider, "openai");
-  strcpy(route.endpoint, base);
+  mock_upstream_t *mu = mock_upstream_start();
+  TEST_ASSERT(mu != NULL, "mock started");
+  char url[256];
+  snprintf(url, sizeof url, "%s/fail", mock_upstream_base(mu));
 
   int status = 0;
   char *body = NULL;
   size_t blen = 0;
-  int rc = upstream_call(&route, "/fail", "{}", 0, 5000, &status, &body, &blen);
+  int rc = upstream_call(url, "", "{}", 0, 5000, &status, &body, &blen);
   TEST_ASSERT(rc == 0, "transport ok even on 5xx, rc=%d", rc);
   TEST_ASSERT(status == 500, "status 500, got %d", status);
   free(body);
+  mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_upstream_fail_all_toggle)
+{
+  mock_upstream_t *mu = mock_upstream_start();
+  TEST_ASSERT(mu != NULL, "mock started");
+  char url[256];
+  snprintf(url, sizeof url, "%s/chat/completions", mock_upstream_base(mu));
+
+  int status = 0;
+  char *body = NULL;
+  size_t blen = 0;
+  int rc = upstream_call(url, "", "{}", 0, 5000, &status, &body, &blen);
+  TEST_ASSERT(rc == 0 && status == 200, "baseline 200, got %d", status);
+  free(body);
+
+  mock_upstream_fail_all(mu, 1);
+  rc = upstream_call(url, "", "{}", 0, 5000, &status, &body, &blen);
+  TEST_ASSERT(rc == 0 && status == 500, "toggled 500, got %d", status);
+  free(body);
+  mock_upstream_stop(mu);
 }
 
 TEST_CASE(test_upstream_timeout)
 {
-  const char *base = mock_upstream_start();
-  TEST_ASSERT(base != NULL, "mock started");
-
-  model_rec_t route;
-  memset(&route, 0, sizeof route);
-  strcpy(route.provider, "openai");
-  strcpy(route.endpoint, base);
+  mock_upstream_t *mu = mock_upstream_start();
+  TEST_ASSERT(mu != NULL, "mock started");
+  char url[256];
+  snprintf(url, sizeof url, "%s/slow", mock_upstream_base(mu));
 
   int status = 0;
   char *body = NULL;
   size_t blen = 0;
-  int rc = upstream_call(&route, "/slow", "{}", 0, 200, &status, &body, &blen);
+  int rc = upstream_call(url, "", "{}", 0, 200, &status, &body, &blen);
   TEST_ASSERT(rc == -110, "timeout → -110, got %d", rc);
-  free(body);
-  mock_upstream_stop();
+  mock_upstream_stop(mu);
 }

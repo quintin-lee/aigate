@@ -14,81 +14,63 @@ int provider_openai_supports(const char *provider)
           strcmp(provider, "azure") == 0);
 }
 
-int provider_openai_build(const model_rec_t *route, const char *in_body,
-                          char *url_out, size_t url_cap, char **out_body,
-                          size_t *out_body_len)
+int provider_openai_build(const model_rec_t *route, const char *up_path,
+                         const char *in_body, char *url_out, size_t url_cap,
+                         char **out_body, size_t *out_body_len)
 {
+  /* start from the request body object (may be empty) */
   json_t *req = json_object();
-  json_t *defaults = NULL;
-  const char *base = route->endpoint;
-  const char *path = "";
-  char merged_url[1024];
-
-  /* parse inputs; a malformed request body is the caller's problem upstream —
-   * we merge only what parses cleanly. */
   if (in_body != NULL && in_body[0] != '\0') {
     json_t *parsed = json_loads(in_body, 0, NULL);
-    if (parsed != NULL) {
+    if (parsed == NULL) {
+      /* malformed request JSON: treat as empty; the upstream will reject it */
+      AIGATE_LOG_WARN("request body for model %s is not valid JSON",
+                       route->name);
+    } else {
       json_object_update(req, parsed);
       json_decref(parsed);
     }
   }
+  /* merge default_params under the request body (request wins on conflict) */
   if (route->default_params_json[0] != '\0') {
-    defaults = json_loads(route->default_params_json, 0, NULL);
+    json_t *defaults = json_loads(route->default_params_json, 0, NULL);
     if (defaults == NULL) {
       AIGATE_LOG_WARN("bad default_params for model %s", route->name);
     } else {
-      /* defaults first so the request body wins on conflict */
-      json_t *base = json_object();
-      json_object_update(base, defaults);
-      json_object_update(base, req);
+      json_t *merged = json_object();
+      json_object_update(merged, defaults); /* defaults first */
+      json_object_update(merged, req);      /* request wins */
       json_decref(req);
       json_decref(defaults);
-      req = base;
+      req = merged;
     }
   }
 
-  /* path: use "model" → standard /chat/completions only if body lacks a
-   * provider-specific path hint; the gateway routes by endpoint, so keep it
-   * simple: caller passes the path via default_params "path" when needed. */
-  json_t *jpath = json_object_get(req, "path");
-  if (jpath != NULL && json_is_string(jpath)) {
-    path = json_string_value(jpath);
-    json_object_del(req, "path");
-  }
-
-  char *url_buf = malloc(url_cap);
-  if (url_buf == NULL || out_body == NULL) {
-    json_decref(req);
-    free(url_buf);
-    return -1;
-  }
-
+  /* URL: endpoint + up_path; for azure, append ?api-version= (from params). */
+  const char *ver = "";
   if (strcmp(route->provider, "azure") == 0) {
-    json_t *jver = json_object_get(req, "api-version");
-    const char *ver =
-        (jver != NULL && json_is_string(jver)) ? json_string_value(jver) : "";
-    if (ver[0] != '\0') {
-      snprintf(url_buf, url_cap, "%s%s?api-version=%s", base, path, ver);
-      json_object_del(req, "api-version");
-    } else {
-      snprintf(url_buf, url_cap, "%s%s", base, path);
-    }
-  } else {
-    snprintf(url_buf, url_cap, "%s%s", base, path);
+    json_t *jv = json_object_get(req, "api-version");
+    if (jv != NULL && json_is_string(jv))
+      ver = json_string_value(jv);
   }
-  snprintf(merged_url, sizeof merged_url, "%s", url_buf);
+
+  char packed_url[1024];
+  if (ver[0] != '\0') {
+    snprintf(packed_url, sizeof packed_url, "%s%s?api-version=%s",
+             route->endpoint, up_path != NULL ? up_path : "", ver);
+    json_object_del(req, "api-version");
+  } else {
+    snprintf(packed_url, sizeof packed_url, "%s%s", route->endpoint,
+             up_path != NULL ? up_path : "");
+  }
+  snprintf(url_out, url_cap, "%s", packed_url);
 
   char *packed = json_dumps(req, JSON_COMPACT);
   json_decref(req);
-  if (packed == NULL) {
-    free(url_buf);
+  if (packed == NULL)
     return -1;
-  }
-  snprintf(url_out, url_cap, "%s", merged_url);
   *out_body = packed;
   if (out_body_len != NULL)
     *out_body_len = strlen(packed);
-  free(url_buf);
   return 0;
 }

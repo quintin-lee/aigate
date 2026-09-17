@@ -22,7 +22,7 @@ int aigate_core_init(aigate_core *ac, pg_store_t *ps, const uint8_t *master32,
                      int default_timeout_ms, int flush_interval_s)
 {
   memset(ac, 0, sizeof *ac);
-  if (auth_key_init(&ac->keys, ps, NULL) != 0)
+  if (auth_key_init(&ac->keys, ps) != 0)
     return -1;
   ac->rl = ratelimit_new();
   ac->router = model_router_new(ps, master32);
@@ -122,10 +122,12 @@ int aigate_handle_request(aigate_core *ac, aigate_request_ctx *rq,
   long retry_ms = 0;
   int rrc = rl_allow_request(ac->rl, krec.key_id, krec.rate_qps, &retry_ms);
   if (rrc != 0) {
-    int ra = (int)((retry_ms + 999) / 1000);
-    if (rc->set_header != NULL)
-      rc->set_header(rc->impl, "Retry-After", ra < 1 ? "1" :
-                        (char[]){ra / 100 + '0', ra / 10 % 10 + '0', ra % 10 + '0', 0});
+    long ra_s = (retry_ms + 999) / 1000;
+    if (ra_s < 1)
+      ra_s = 1;
+    char ra[32];
+    snprintf(ra, sizeof ra, "%ld", ra_s);
+    rc->set_header(rc->impl, "Retry-After", ra);
     aigate_write_error(rc, PIPE_RATE, "rate_limit", "rate limit exceeded");
     json_decref(jbody);
     key_rec_free(&krec);
@@ -149,10 +151,18 @@ int aigate_handle_request(aigate_core *ac, aigate_request_ctx *rq,
     key_rec_free(&krec);
     return 0;
   }
+  /* upstream path mirrors the gateway path (spec §4.1 non-streaming set) */
+  const char *up_path = "/chat/completions";
+  if (strcmp(rq->path, "/v1/embeddings") == 0)
+    up_path = "/embeddings";
+  else if (strcmp(rq->path, "/v1/completions") == 0)
+    up_path = "/completions";
+
   char url[1024];
   char *merged = NULL;
   size_t mlen = 0;
-  if (provider_openai_build(&route, jbody ? (const char *)rq->body : NULL,
+  if (provider_openai_build(&route, up_path,
+                            rq->body != NULL ? (const char *)rq->body : NULL,
                             url, sizeof url, &merged, &mlen) != 0) {
     aigate_write_error(rc, 500, "internal", "failed to build upstream request");
     json_decref(jbody);
@@ -162,24 +172,19 @@ int aigate_handle_request(aigate_core *ac, aigate_request_ctx *rq,
   }
 
   /* --- upstream call with a single retry on 5xx --- */
-  const char *up_path = "/chat/completions";
-  if (strcmp(rq->path, "/v1/embeddings") == 0)
-    up_path = "/embeddings";
-  else if (strcmp(rq->path, "/v1/completions") == 0)
-    up_path = "/completions";
-
   int status = 0;
   char *ubody = NULL;
   size_t ulen = 0;
   uint64_t t0 = mono_ns();
-  int urc = upstream_call(&route, up_path, merged, mlen,
-                          ac->default_timeout_ms, &status, &ubody, &ulen);
+  int urc =
+      upstream_call(url, route.upstream_key, merged, mlen,
+                    ac->default_timeout_ms, &status, &ubody, &ulen);
   if (urc == 0 && status >= 500) {
     free(ubody);
     ubody = NULL;
     struct timespec sl = {0, 200 * 1000000}; /* 200ms */
     nanosleep(&sl, NULL);
-    urc = upstream_call(&route, up_path, merged, mlen,
+    urc = upstream_call(url, route.upstream_key, merged, mlen,
                         ac->default_timeout_ms, &status, &ubody, &ulen);
   }
   uint64_t lat = mono_ns() - t0;
@@ -220,7 +225,7 @@ int aigate_handle_request(aigate_core *ac, aigate_request_ctx *rq,
   }
   um_record(ac->um, krec.key_id, model, status, ptok, ctok, lat,
             route.provider);
-  rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_quota, ptok + ctok);
+  rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
   int rv = aigate_write_json(rc, status, ubody ? ubody : "", ulen);
   free(ubody);

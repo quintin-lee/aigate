@@ -1,4 +1,5 @@
 .build/
+.asan/
 docs/.superpowers/
 __pycache__/
 *.o

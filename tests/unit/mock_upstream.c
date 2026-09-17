@@ -1,19 +1,20 @@
 /** @file mock_upstream.c
- *  @brief In-process blocking-socket mock upstream for upstream_client tests.
+ *  @brief In-process blocking-socket mock upstream (see mock_upstream.h).
  *
- *  A single pthread accepts connections on a random 127.0.0.1 port and
- *  answers a minimal HTTP/1.1 POST contract:
- *    /chat → 200 OpenAI-shaped body with usage {7,11}
- *    /fail → 500 error body
- *    /slow → sleeps 2s then 200 (for timeout tests)
- *  The server reads the request (headers + body per Content-Length) then
- *  replies; one connection is handled at a time, which is fine for the
- *  sequential test cases.
+ *  A single joinable pthread accepts connections on a random 127.0.0.1
+ *  port (poll-based so stop is prompt) and answers a minimal HTTP/1.1
+ *  POST contract:
+ *    /chat, /chat/completions → 200 OpenAI-shaped body, usage {7, 11}
+ *    (or 500 when mock_upstream_fail_all is enabled)
+ *    /fail                     → 500 error body
+ *    /slow                     → sleeps 2s then 200 {} (timeout tests)
+ *  The last request's path + body are recorded for assertions.
  */
 #include "mock_upstream.h"
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,47 +23,63 @@
 #include <time.h>
 #include <unistd.h>
 
-char g_mock_base[64] = {0};
-int g_mock_port = 0;
-int g_mock_listen_fd = -1;
+#define MAX_BODY 4096
+
+struct mock_upstream {
+  int listen_fd;
+  int port;
+  char base[64];
+  pthread_t thread;
+  int running;
+  int fail_all;
+  int request_count;
+  char last_path[256];
+  char last_body[MAX_BODY];
+  pthread_mutex_t mtx; /* guards recorded fields + flag reads */
+};
 
 static void *server_thread(void *arg)
 {
-  int lfd = g_mock_listen_fd;
+  mock_upstream_t *mu = arg;
   for (;;) {
+    struct pollfd pfd;
+    pfd.fd = mu->listen_fd;
+    pfd.events = POLLIN;
+    if (poll(&pfd, 1, 100) <= 0)
+      continue;
+    if (!mu->running)
+      break;
+
     struct sockaddr_in cli;
     socklen_t clilen = sizeof cli;
-    int cfd = accept(lfd, (struct sockaddr *)&cli, &clilen);
+    int cfd = accept(mu->listen_fd, (struct sockaddr *)&cli, &clilen);
     if (cfd < 0)
       continue;
 
-    /* read request until headers complete */
-    char buf[65536];
+    /* read headers, then body (body may already be partially in the buffer) */
+    char buf[MAX_BODY];
     int total = 0;
     int content_length = 0;
-    int hdr_done = 0;
-    while (!hdr_done) {
+    int hdr_off = -1; /* offset of first body byte, -1 until known */
+    for (;;) {
       int r = read(cfd, buf + total, sizeof buf - 1 - total);
       if (r <= 0)
         break;
       total += r;
       buf[total] = '\0';
-      const char *hrc = strstr(buf, "\r\n\r\n");
-      if (hrc != NULL) {
-        hdr_done = 1;
-        /* parse Content-Length from headers */
-        char *cl = strstr(buf, "Content-Length:");
-        if (cl != NULL)
-          content_length = atoi(cl + 15);
+      if (hdr_off < 0) {
+        const char *hrc = strstr(buf, "\r\n\r\n");
+        if (hrc != NULL) {
+          hdr_off = (int)(hrc - buf) + 4;
+          char *cl = strstr(buf, "Content-Length:");
+          if (cl != NULL)
+            content_length = atoi(cl + 15);
+          if (content_length <= 0)
+            break; /* no body expected */
+        }
       }
-    }
-    /* read any remaining body bytes not yet received */
-    while (total < content_length && total < (int)sizeof buf - 1) {
-      int r = read(cfd, buf + total, sizeof buf - 1 - total);
-      if (r <= 0)
-        break;
-      total += r;
-      buf[total] = '\0';
+      if (hdr_off >= 0 && total >= hdr_off + content_length)
+        break; /* full request received */
     }
 
     char path[256] = "/";
@@ -76,7 +93,35 @@ static void *server_thread(void *arg)
       path[plen] = '\0';
     }
 
-    if (strcmp(path, "/slow") == 0) {
+    /* record the request for test assertions */
+    pthread_mutex_lock(&mu->mtx);
+    mu->request_count++;
+    snprintf(mu->last_path, sizeof mu->last_path, "%s", path);
+    const char *hstart = strstr(buf, "\r\n\r\n");
+    size_t body_off = hstart != NULL ? (size_t)(hstart - buf + 4) : 0;
+    snprintf(mu->last_body, sizeof mu->last_body, "%s",
+             buf + body_off);
+    int fail = mu->fail_all;
+    pthread_mutex_unlock(&mu->mtx);
+
+    int is_fail = 0;
+    if (strcmp(path, "/fail") == 0)
+      is_fail = 1;
+    else if (fail &&
+             (strcmp(path, "/chat") == 0 ||
+              strcmp(path, "/chat/completions") == 0))
+      is_fail = 1;
+
+    if (is_fail) {
+      const char *body = "{\"error\":{\"message\":\"boom\"}}";
+      char resp[512];
+      int blen = snprintf(resp, sizeof resp,
+                          "HTTP/1.1 500 Internal Server Error\r\n"
+                          "Content-Type: application/json\r\n"
+                          "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                          (int)strlen(body), body);
+      write(cfd, resp, (size_t)blen);
+    } else if (strcmp(path, "/slow") == 0) {
       struct timespec ts = {2, 0};
       nanosleep(&ts, NULL);
       const char *body = "{}";
@@ -86,16 +131,7 @@ static void *server_thread(void *arg)
                           "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                           (int)strlen(body), body);
       write(cfd, resp, (size_t)blen);
-    } else if (strcmp(path, "/fail") == 0) {
-      const char *body = "{\"error\":{\"message\":\"boom\"}}";
-      char resp[512];
-      int blen = snprintf(resp, sizeof resp,
-                          "HTTP/1.1 500 Internal Server Error\r\n"
-                          "Content-Type: application/json\r\n"
-                          "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                          (int)strlen(body), body);
-      write(cfd, resp, (size_t)blen);
-    } else { /* /chat */
+    } else { /* /chat, /chat/completions, /embeddings, default */
       const char *body =
           "{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion\","
           "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
@@ -114,11 +150,18 @@ static void *server_thread(void *arg)
   return NULL;
 }
 
-const char *mock_upstream_start(void)
+mock_upstream_t *mock_upstream_start(void)
 {
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0)
+  mock_upstream_t *mu = calloc(1, sizeof *mu);
+  if (mu == NULL)
     return NULL;
+  pthread_mutex_init(&mu->mtx, NULL);
+
+  int fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) {
+    free(mu);
+    return NULL;
+  }
   int on = 1;
   setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
   struct sockaddr_in addr;
@@ -128,31 +171,61 @@ const char *mock_upstream_start(void)
   addr.sin_port = 0; /* OS picks */
   if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0) {
     close(fd);
+    free(mu);
     return NULL;
   }
   socklen_t alen = sizeof addr;
   getsockname(fd, (struct sockaddr *)&addr, &alen);
-  g_mock_port = ntohs(addr.sin_port);
+  mu->port = ntohs(addr.sin_port);
   if (listen(fd, 16) != 0) {
     close(fd);
+    free(mu);
     return NULL;
   }
-  g_mock_listen_fd = fd;
-  pthread_t th;
-  if (pthread_create(&th, NULL, server_thread, NULL) != 0) {
+  mu->listen_fd = fd;
+  mu->running = 1;
+  if (pthread_create(&mu->thread, NULL, server_thread, mu) != 0) {
     close(fd);
-    g_mock_listen_fd = -1;
+    free(mu);
     return NULL;
   }
-  pthread_detach(th);
-  snprintf(g_mock_base, sizeof g_mock_base, "http://127.0.0.1:%d", g_mock_port);
-  return g_mock_base;
+  snprintf(mu->base, sizeof mu->base, "http://127.0.0.1:%d", mu->port);
+  return mu;
 }
 
-void mock_upstream_stop(void)
+void mock_upstream_stop(mock_upstream_t *mu)
 {
-  if (g_mock_listen_fd >= 0) {
-    close(g_mock_listen_fd);
-    g_mock_listen_fd = -1;
-  }
+  if (mu == NULL)
+    return;
+  mu->running = 0;
+  close(mu->listen_fd);
+  pthread_join(mu->thread, NULL);
+  free(mu);
+}
+
+const char *mock_upstream_base(const mock_upstream_t *mu)
+{
+  return mu->base;
+}
+
+void mock_upstream_fail_all(mock_upstream_t *mu, int fail)
+{
+  pthread_mutex_lock(&mu->mtx);
+  mu->fail_all = fail;
+  pthread_mutex_unlock(&mu->mtx);
+}
+
+int mock_upstream_request_count(const mock_upstream_t *mu)
+{
+  return mu->request_count;
+}
+
+const char *mock_upstream_last_body(const mock_upstream_t *mu)
+{
+  return mu->last_body;
+}
+
+const char *mock_upstream_last_path(const mock_upstream_t *mu)
+{
+  return mu->last_path;
 }
