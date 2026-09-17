@@ -47,6 +47,11 @@ int main(void)
   extern void test_auth_key_resolve_normal(void);
   extern void test_auth_key_unknown_revoked_expired(void);
   extern void test_key_allows_model(void);
+  extern void test_rl_qps_boundary(void);
+  extern void test_rl_unlimited(void);
+  extern void test_rl_daily_quota(void);
+  extern void test_rl_reset_day(void);
+  extern void test_rl_concurrent_smoke(void);
   test_register("log_smoke", test_log_smoke);
   test_register("log_concurrent", test_log_concurrent);
   test_register("sha256_kat", test_sha256_kat);
@@ -69,6 +74,11 @@ int main(void)
   test_register("auth_key_resolve", test_auth_key_resolve_normal);
   test_register("auth_key_flags", test_auth_key_unknown_revoked_expired);
   test_register("key_allows_model", test_key_allows_model);
+  test_register("rl_qps_boundary", test_rl_qps_boundary);
+  test_register("rl_unlimited", test_rl_unlimited);
+  test_register("rl_daily_quota", test_rl_daily_quota);
+  test_register("rl_reset_day", test_rl_reset_day);
+  test_register("rl_concurrent", test_rl_concurrent_smoke);
 
   int failed = 0;
   for (int i = 0; i < g_n_tests; i++) {
