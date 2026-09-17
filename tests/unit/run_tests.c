@@ -52,6 +52,11 @@ int main(void)
   extern void test_rl_daily_quota(void);
   extern void test_rl_reset_day(void);
   extern void test_rl_concurrent_smoke(void);
+  extern void test_model_router_env_key(void);
+  extern void test_model_router_missing_env_key(void);
+  extern void test_upstream_200_roundtrip(void);
+  extern void test_upstream_500_passthrough(void);
+  extern void test_upstream_timeout(void);
   test_register("log_smoke", test_log_smoke);
   test_register("log_concurrent", test_log_concurrent);
   test_register("sha256_kat", test_sha256_kat);
@@ -79,6 +84,11 @@ int main(void)
   test_register("rl_daily_quota", test_rl_daily_quota);
   test_register("rl_reset_day", test_rl_reset_day);
   test_register("rl_concurrent", test_rl_concurrent_smoke);
+  test_register("model_router_env", test_model_router_env_key);
+  test_register("model_router_missing", test_model_router_missing_env_key);
+  test_register("upstream_200", test_upstream_200_roundtrip);
+  test_register("upstream_500", test_upstream_500_passthrough);
+  test_register("upstream_timeout", test_upstream_timeout);
 
   int failed = 0;
   for (int i = 0; i < g_n_tests; i++) {
