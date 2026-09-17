@@ -41,6 +41,12 @@ int main(void)
   extern void test_pg_fake_usage_flush_and_query(void);
   extern void test_pg_migrate_noop_for_fake(void);
   extern void test_pg_real_roundtrip(void);
+  extern void test_secret_roundtrip(void);
+  extern void test_secret_tamper_and_wrong_key(void);
+  extern void test_secret_hex_to_bytes(void);
+  extern void test_auth_key_resolve_normal(void);
+  extern void test_auth_key_unknown_revoked_expired(void);
+  extern void test_key_allows_model(void);
   test_register("log_smoke", test_log_smoke);
   test_register("log_concurrent", test_log_concurrent);
   test_register("sha256_kat", test_sha256_kat);
@@ -57,6 +63,12 @@ int main(void)
   test_register("pg_fake_usage_flush_and_query", test_pg_fake_usage_flush_and_query);
   test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
   test_register("pg_real_roundtrip", test_pg_real_roundtrip);
+  test_register("secret_roundtrip", test_secret_roundtrip);
+  test_register("secret_tamper", test_secret_tamper_and_wrong_key);
+  test_register("secret_hex", test_secret_hex_to_bytes);
+  test_register("auth_key_resolve", test_auth_key_resolve_normal);
+  test_register("auth_key_flags", test_auth_key_unknown_revoked_expired);
+  test_register("key_allows_model", test_key_allows_model);
 
   int failed = 0;
   for (int i = 0; i < g_n_tests; i++) {
