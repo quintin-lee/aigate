@@ -32,6 +32,10 @@ int main(void)
   extern void test_config_defaults(void);
   extern void test_config_missing_required(void);
   extern void test_config_bad_master_key(void);
+  extern void test_lru_eviction_order(void);
+  extern void test_lru_recency_refresh(void);
+  extern void test_lru_replace_and_invalidate(void);
+  extern void test_lru_concurrent_smoke(void);
   test_register("log_smoke", test_log_smoke);
   test_register("log_concurrent", test_log_concurrent);
   test_register("sha256_kat", test_sha256_kat);
@@ -39,6 +43,10 @@ int main(void)
   test_register("config_defaults", test_config_defaults);
   test_register("config_missing_required", test_config_missing_required);
   test_register("config_bad_master_key", test_config_bad_master_key);
+  test_register("lru_eviction_order", test_lru_eviction_order);
+  test_register("lru_recency_refresh", test_lru_recency_refresh);
+  test_register("lru_replace_and_invalidate", test_lru_replace_and_invalidate);
+  test_register("lru_concurrent_smoke", test_lru_concurrent_smoke);
 
   int failed = 0;
   for (int i = 0; i < g_n_tests; i++) {
