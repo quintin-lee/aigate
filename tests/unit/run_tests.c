@@ -27,8 +27,18 @@ int main(void)
 {
   extern void test_log_smoke(void);
   extern void test_log_concurrent(void);
+  extern void test_sha256_kat(void);
+  extern void test_sha256_equal(void);
+  extern void test_config_defaults(void);
+  extern void test_config_missing_required(void);
+  extern void test_config_bad_master_key(void);
   test_register("log_smoke", test_log_smoke);
   test_register("log_concurrent", test_log_concurrent);
+  test_register("sha256_kat", test_sha256_kat);
+  test_register("sha256_equal", test_sha256_equal);
+  test_register("config_defaults", test_config_defaults);
+  test_register("config_missing_required", test_config_missing_required);
+  test_register("config_bad_master_key", test_config_bad_master_key);
 
   int failed = 0;
   for (int i = 0; i < g_n_tests; i++) {
