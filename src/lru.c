@@ -173,10 +173,13 @@ void lru_put(lru_t *lr, const char *key, void *val)
   pthread_mutex_lock(&lr->mtx);
   old = find_node(lr, key);
   if (old != NULL) {
+    void *oval = old->val;
     old->val = val;
     rec_move_to_head(lr, old);
     pthread_mutex_unlock(&lr->mtx);
-    free(kcopy);
+    /* LRU owns values: hand the displaced old value to the owner. */
+    if (lr->on_evict != NULL)
+      lr->on_evict(oval);
     return;
   }
   n = malloc(sizeof *n);
@@ -215,9 +218,16 @@ int lru_invalidate(lru_t *lr, const char *key)
   if (n != NULL) {
     rec_unlink(lr, n);
     bkt_remove(lr, n);
+    void *val = n->val;
     destroy_node(n);
     lr->count--;
     found = 1;
+    pthread_mutex_unlock(&lr->mtx);
+    /* the LRU owns the value: hand it to the evict callback, matching
+     * capacity-eviction and lru_free behavior. */
+    if (lr->on_evict != NULL)
+      lr->on_evict(val);
+    return found;
   }
   pthread_mutex_unlock(&lr->mtx);
   return found;

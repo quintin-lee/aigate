@@ -90,37 +90,40 @@ int auth_key_resolve(auth_key_cache *akc, const char *bearer, key_rec_t *out)
     key_rec_free(&fresh);
     return -1;
   }
-  *copy = fresh;
 
-  /* A same-key replacement via lru_put drops the old value without the
-   * evict callback; free it manually. */
-  key_rec_t *old = lru_get(akc->recs, hash);
-  lru_put(akc->recs, hash, copy);
-  key_rec_free(&fresh);
-  if (old != NULL)
-    free_rec_cb(old);
-
+  /* Resolve the outcome from the stack record while it still fully owns
+   * its fields; negative results are not cached. */
+  int result = 0;
   if (fresh.revoked)
-    return -2;
-  if (fresh.has_expiry && fresh.expires_at < time(NULL))
-    return -3;
-  if (deep_copy_rec(out, copy) != 0)
-    return -1;
-  return 0;
+    result = -2;
+  else if (fresh.has_expiry && fresh.expires_at < time(NULL))
+    result = -3;
+
+  if (result == 0) {
+    if (deep_copy_rec(out, &fresh) != 0) {
+      key_rec_free(&fresh);
+      free(copy);
+      return -1;
+    }
+    *copy = fresh;
+    fresh.allowed_models = NULL; /* the array is now owned by copy */
+    fresh.n_allowed = 0;
+    /* The LRU owns copy; a same-key replacement frees the old value. */
+    lru_put(akc->recs, hash, copy);
+    return 0;
+  }
+
+  /* revoked / expired: release both records, do not cache the negative. */
+  key_rec_free(&fresh);
+  free(copy);
+  return result;
 }
 
 void auth_key_invalidate(auth_key_cache *akc, const char *key_hash)
 {
-  if (akc->recs != NULL) {
-    key_rec_t *old = lru_get(akc->recs, key_hash);
-    if (old != NULL)
-      lru_invalidate(akc->recs, key_hash); /* get refreshes; invalidate removes */
-    /* lru_invalidate does NOT invoke evict; free manually */
-    if (old != NULL) {
-      /* we already refreshed it above; re-fetch not needed - free now */
-      free_rec_cb(old);
-    }
-  }
+  /* lru_invalidate invokes the evict callback (free_rec_cb) for the
+   * removed record, which frees the allowlist and the record itself. */
+  lru_invalidate(akc->recs, key_hash);
 }
 
 int key_allows_model(const key_rec_t *k, const char *model)

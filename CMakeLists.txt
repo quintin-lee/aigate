@@ -22,12 +22,13 @@ FetchContent_MakeAvailable(civetweb_dep)
 file(GLOB AIGATE_SRC src/*.c)
 list(REMOVE_ITEM AIGATE_SRC ${CMAKE_SOURCE_DIR}/src/main.c)
 add_library(libaigate STATIC ${AIGATE_SRC})
-add_dependencies(libaigate civetweb-c-library)
+add_dependencies(libaigate civetweb-c-library hdr_histogram_static)
 target_include_directories(libaigate PUBLIC src)
 target_compile_options(libaigate PRIVATE -Wall -Wextra -Werror)
 target_include_directories(libaigate PUBLIC ${JANSSON_INCLUDE_DIRS} ${LIBPQ_INCLUDE_DIRS})
 target_link_libraries(libaigate PUBLIC
   ${JANSSON_LIBRARIES}
+  hdr_histogram_static
   CURL::libcurl ${LIBPQ_LIBRARIES} OpenSSL::Crypto ${CMAKE_THREAD_LIBS_INIT})
 
 add_executable(aigate src/main.c)

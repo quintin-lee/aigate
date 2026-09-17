@@ -45,15 +45,20 @@ TEST_CASE(test_lru_replace_and_invalidate)
 {
   lru_t *lr = lru_new(4, count_evict);
   lru_put(lr, "k", (void *)0x1);
+  g_evictions = 0;
   lru_put(lr, "k", (void *)0x2);
   TEST_ASSERT(lru_size(lr) == 1, "replace does not grow size");
   TEST_ASSERT(lru_get(lr, "k") == (void *)0x2, "replaced value");
+  TEST_ASSERT(g_evictions == 1, "replacement evicted the old value");
+  g_evictions = 0;
   TEST_ASSERT(lru_invalidate(lr, "k") == 1, "invalidate present");
+  TEST_ASSERT(g_evictions == 1, "invalidate evicted the value");
   TEST_ASSERT(lru_invalidate(lr, "k") == 0, "invalidate absent");
   TEST_ASSERT(lru_size(lr) == 0, "empty after invalidate");
+  lru_put(lr, "j", (void *)0x9);
   g_evictions = 0;
-  lru_free(lr); /* on_evict NOT called for invalidated entries, called for remaining */
-  TEST_ASSERT(g_evictions == 0, "invalidate skips evict cb");
+  lru_free(lr); /* remaining value evicted on free */
+  TEST_ASSERT(g_evictions == 1, "free evicts remaining value");
 }
 
 struct cc_arg { lru_t *lr; int ops_per_thread; };
