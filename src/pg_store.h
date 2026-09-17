@@ -1,0 +1,109 @@
+/** @file pg_store.h
+ *  @brief PostgreSQL persistence layer: schema migration + an ops table so
+ *  that every caller (auth cache, admin API, flush worker) talks to a
+ *  uniform interface that unit tests can fake (spec section 3).
+ *
+ *  Canonical record types are defined here and shared by all modules.
+ */
+#ifndef AIGATE_PG_STORE_H
+#define AIGATE_PG_STORE_H
+
+#include <time.h>
+
+/** @brief Client API key record (api_keys row; allowed_models is a copy). */
+typedef struct key_rec {
+  long key_id;
+  char key_hash[65];            /* 64 lowercase hex + NUL */
+  char name[128];
+  char **allowed_models;        /* NUL-terminated-ish: exactly n_allowed entries */
+  int  n_allowed;               /* 0 = all models allowed */
+  int  rate_qps;                /* 0 = unlimited */
+  long daily_token_quota;       /* 0 = unlimited */
+  time_t expires_at;
+  int  has_expiry;
+  int  revoked;
+} key_rec_t;
+
+/** @brief Model route record (models row + resolved upstream key). */
+typedef struct model_rec {
+  char name[128];
+  char provider[32];
+  char endpoint[512];
+  char upstream_key_ref[256];  /* "env:NAME" | "pg:<blob>" | "" */
+  char default_params_json[1024]; /* jansson object; default_params win < request */
+  int  enabled;
+  char upstream_key[1024];     /* filled by model_router, not stored */
+} model_rec_t;
+
+/** @brief One usage_daily row. */
+typedef struct usage_row {
+  long key_id;
+  char model_name[128];
+  time_t day;                  /* midnight UTC */
+  long requests, prompt_tokens, completion_tokens, errors;
+} usage_row_t;
+
+/* update_key / update_model field masks (bit flags). */
+#define KMASK_RATE        (1 << 0)
+#define KMASK_QUOTA       (1 << 1)
+#define KMASK_ALLOWLIST   (1 << 2)
+#define KMASK_EXPIRY      (1 << 3)
+
+#define MMASK_ENDPOINT    (1 << 0)
+#define MMASK_PARAMS      (1 << 1)
+#define MMASK_ENABLED     (1 << 2)
+#define MMASK_KEYREF      (1 << 3)
+
+/** @brief Uniform persistence operations; real libpq or in-memory fakes.
+ *
+ *  All functions return 0 on success, -1 on error. out parameters may be
+ *  NULL when unused. @p ctx is the implementation's private state.
+ *  Thread-safety: implementations MUST be re-entrant safe; the libpq
+ *  implementation serializes with an internal mutex. */
+typedef struct pg_ops {
+  void *ctx;
+
+  int (*get_key_by_hash)(void *ctx, const char *key_hash, key_rec_t *out);
+  int (*list_models)(void *ctx, model_rec_t *out, int cap, int *n);
+  int (*get_model)(void *ctx, const char *name, model_rec_t *out);
+
+  int (*create_key)(void *ctx, const key_rec_t *k, long *out_key_id);
+  int (*update_key)(void *ctx, const key_rec_t *k, int mask);
+  int (*revoke_key)(void *ctx, long key_id);
+
+  int (*create_model)(void *ctx, const model_rec_t *m);
+  int (*update_model)(void *ctx, const model_rec_t *m, int mask);
+  int (*delete_model)(void *ctx, const char *name);
+
+  int (*flush_usage)(void *ctx, const usage_row_t *rows, int n);
+  int (*query_usage)(void *ctx, long key_id, const char *model, time_t from,
+                     time_t to, usage_row_t *out, int cap, int *n);
+} pg_ops_t;
+
+typedef struct pg_store pg_store_t;
+
+/** @brief Open a store over @p dsn.
+ * @param dsn  PostgreSQL connection string; ignored when @p ops is non-NULL.
+ * @param ops  custom ops table (unit-test fakes); when NULL the real libpq
+ *             ops are used and @p ctx is set to the internal connection.
+ * @return store handle, or NULL on connection failure.
+ * @note Ownership: when @p ops is provided, its ->ctx is used as-is; when
+ *       NULL, the store allocates the libpq context and frees it on close. */
+pg_store_t *pg_store_open(const char *dsn, const pg_ops_t *ops);
+
+/** @brief Close the store; when it owns a libpq connection, disconnects it. */
+void pg_store_close(pg_store_t *ps);
+
+/** @brief Apply embedded schema.sql for any unapplied version. @return 0 ok, -1 error. */
+int pg_store_migrate(pg_store_t *ps);
+
+/** @brief Access the live ops table (real or fake). */
+const pg_ops_t *pg_store_ops(const pg_store_t *ps);
+
+/** @brief Free a key_rec_t populated by get_key_by_hash (frees allowed_models). */
+void key_rec_free(key_rec_t *k);
+
+/** @brief Free a model_rec_t populated by list_models (frees endpoint copies). */
+void model_rec_free(model_rec_t *m);
+
+#endif /* AIGATE_PG_STORE_H */

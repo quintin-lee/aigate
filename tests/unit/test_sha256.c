@@ -20,7 +20,8 @@ TEST_CASE(test_sha256_kat)
 
 TEST_CASE(test_sha256_equal)
 {
-  const char a[65] = "aa11" "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+  const char a[65] =
+    "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90";
   char b[65];
   strcpy(b, a);
   TEST_ASSERT(sha256_hex_equal(a, b) == 1, "equal digests");

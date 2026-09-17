@@ -36,6 +36,11 @@ int main(void)
   extern void test_lru_recency_refresh(void);
   extern void test_lru_replace_and_invalidate(void);
   extern void test_lru_concurrent_smoke(void);
+  extern void test_pg_fake_key_lifecycle(void);
+  extern void test_pg_fake_model_lifecycle(void);
+  extern void test_pg_fake_usage_flush_and_query(void);
+  extern void test_pg_migrate_noop_for_fake(void);
+  extern void test_pg_real_roundtrip(void);
   test_register("log_smoke", test_log_smoke);
   test_register("log_concurrent", test_log_concurrent);
   test_register("sha256_kat", test_sha256_kat);
@@ -47,6 +52,11 @@ int main(void)
   test_register("lru_recency_refresh", test_lru_recency_refresh);
   test_register("lru_replace_and_invalidate", test_lru_replace_and_invalidate);
   test_register("lru_concurrent_smoke", test_lru_concurrent_smoke);
+  test_register("pg_fake_key_lifecycle", test_pg_fake_key_lifecycle);
+  test_register("pg_fake_model_lifecycle", test_pg_fake_model_lifecycle);
+  test_register("pg_fake_usage_flush_and_query", test_pg_fake_usage_flush_and_query);
+  test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
+  test_register("pg_real_roundtrip", test_pg_real_roundtrip);
 
   int failed = 0;
   for (int i = 0; i < g_n_tests; i++) {
