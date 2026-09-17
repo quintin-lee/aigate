@@ -6,7 +6,7 @@ Status: Approved (brainstorming complete)
 ## 1. Overview
 
 A single-binary C (C11/C17) AI gateway that proxies LLM requests from clients
-speakin OpenAI-compatible protocols to multiple upstream providers, with:
+speaking OpenAI-compatible protocol to multiple upstream providers, with:
 
 - **Secure model access**: per-client API keys (hashed, revocable, expiring,
   per-key model allowlists, rate limits), admin-token-protected management API.
