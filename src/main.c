@@ -6,8 +6,9 @@
  */
 #include "aigate_log.h"
 
-int main(void)
+int
+main(void)
 {
-  AIGATE_LOG_INFO("aigate bootstrap OK");
-  return 0;
+    AIGATE_LOG_INFO("aigate bootstrap OK");
+    return 0;
 }

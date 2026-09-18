@@ -18,11 +18,11 @@
  *    aigate_upstream_latency_ns_sum{provider="<p>"}
  *    aigate_upstream_latency_ns_count{provider="<p>"}
  */
-int metrics_render(usage_meter_t *um, char *out, size_t cap);
+int metrics_render(usage_meter_t* um, char* out, size_t cap);
 
 /** @brief 1 when @p ip (dotted-quad string) is contained in the comma-
  *  separated CIDR/IPv4 list @p acl ("127.0.0.1,10.0.0.0/8").
  *  @note ACL is IPv4-only by design (spec §5); empty @p acl → allow all. */
-int metrics_acl_allows(const char *ip, const char *acl);
+int metrics_acl_allows(const char* ip, const char* acl);
 
 #endif /* AIGATE_METRICS_H */

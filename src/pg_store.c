@@ -22,697 +22,755 @@
 #include <time.h>
 
 struct pg_store {
-  pg_ops_t ops;  /* live ops table (libpq or fake) */
-  void *ctx;     /* pq_ctx when owns_ctx, else caller-provided */
-  int owns_ctx;
+    pg_ops_t ops; /* live ops table (libpq or fake) */
+    void*    ctx; /* pq_ctx when owns_ctx, else caller-provided */
+    int      owns_ctx;
 };
 
 struct pq_ctx {
-  PGconn *db;
-  pthread_mutex_t mtx;
+    PGconn*         db;
+    pthread_mutex_t mtx;
 };
 
 /* ------------------------------------------------------------ helpers */
 
-void key_rec_free(key_rec_t *k)
+void
+key_rec_free(key_rec_t* k)
 {
-  if (k == NULL)
-    return;
-  for (int i = 0; i < k->n_allowed; i++)
-    free(k->allowed_models[i]);
-  free(k->allowed_models);
-  k->allowed_models = NULL;
-  k->n_allowed = 0;
+    if (k == NULL) {
+        return;
+    }
+    for (int i = 0; i < k->n_allowed; i++) {
+        free(k->allowed_models[i]);
+    }
+    free(k->allowed_models);
+    k->allowed_models = NULL;
+    k->n_allowed = 0;
 }
 
-void model_rec_free(model_rec_t *m)
+void
+model_rec_free(model_rec_t* m)
 {
-  (void)m; /* fixed-size records; nothing dynamic to free */
+    (void)m; /* fixed-size records; nothing dynamic to free */
 }
 
-static void copy_field(char *dst, size_t cap, const char *src)
+static void
+copy_field(char* dst, size_t cap, const char* src)
 {
-  snprintf(dst, cap, "%s", src == NULL ? "" : src);
+    snprintf(dst, cap, "%s", src == NULL ? "" : src);
 }
 
 /** @brief Format a UTC day (midnight) as "YYYY-MM-DD".
  * @note Out-of-range years are clamped to 1970-01-01 to keep %04d safe. */
-static void fmt_day(time_t day, char out[24])
+static void
+fmt_day(time_t day, char out[24])
 {
-  struct tm tmv;
-  int y, m, d;
-  if (gmtime_r(&day, &tmv) == NULL)
-    y = 1970, m = 1, d = 1;
-  else {
-    y = tmv.tm_year + 1900;
-    m = tmv.tm_mon + 1;
-    d = tmv.tm_mday;
-  }
-  if (y < 1000 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31)
-    y = 1970, m = 1, d = 1;
-  snprintf(out, 24, "%04d-%02d-%02d", y, m, d);
+    struct tm tmv;
+    int       y, m, d;
+    if (gmtime_r(&day, &tmv) == NULL) {
+        y = 1970, m = 1, d = 1;
+    } else {
+        y = tmv.tm_year + 1900;
+        m = tmv.tm_mon + 1;
+        d = tmv.tm_mday;
+    }
+    if (y < 1000 || y > 9999 || m < 1 || m > 12 || d < 1 || d > 31) {
+        y = 1970, m = 1, d = 1;
+    }
+    snprintf(out, 24, "%04d-%02d-%02d", y, m, d);
 }
 
 /** @brief Parse "YYYY-MM-DD" (UTC) to a midnight-UTC time_t. */
-static time_t parse_day(const char *s)
+static time_t
+parse_day(const char* s)
 {
-  struct tm tmv;
-  memset(&tmv, 0, sizeof tmv);
-  tmv.tm_year = atoi(s) - 1900;
-  tmv.tm_mon = atoi(s + 5) - 1;
-  tmv.tm_mday = atoi(s + 8);
-  return timegm(&tmv);
+    struct tm tmv;
+    memset(&tmv, 0, sizeof tmv);
+    tmv.tm_year = atoi(s) - 1900;
+    tmv.tm_mon = atoi(s + 5) - 1;
+    tmv.tm_mday = atoi(s + 8);
+    return timegm(&tmv);
 }
 
 /** @brief Parse a "|"-joined model list; empty string means allow-all.
  * @return 0 ok, -1 allocation failure (out params reset). */
-static int parse_model_list(const char *joined, char ***out_vec, int *out_n)
+static int
+parse_model_list(const char* joined, char*** out_vec, int* out_n)
 {
-  *out_vec = NULL;
-  *out_n = 0;
-  if (joined == NULL)
-    return 0;
-  int n = 1;
-  for (const char *p = joined; *p; p++)
-    if (*p == '|')
-      n++;
-  char **v = malloc(sizeof *v * (size_t)n);
-  if (v == NULL)
-    return -1;
-  int idx = 0;
-  const char *start = joined;
-  for (const char *p = joined; ; p++) {
-    if (*p == '|' || *p == '\0') {
-      char *tok = malloc((size_t)(p - start) + 1);
-      if (tok == NULL) {
-        for (int i = 0; i < idx; i++)
-          free(v[i]);
-        free(v);
-        return -1;
-      }
-      memcpy(tok, start, (size_t)(p - start));
-      tok[p - start] = '\0';
-      if (p - start > 0)
-        v[idx++] = tok;
-      else
-        free(tok);
-      if (*p == '\0')
-        break;
-      start = p + 1;
+    *out_vec = NULL;
+    *out_n = 0;
+    if (joined == NULL) {
+        return 0;
     }
-  }
-  *out_vec = v;
-  *out_n = idx;
-  return 0;
+    int n = 1;
+    for (const char* p = joined; *p; p++) {
+        if (*p == '|') {
+            n++;
+        }
+    }
+    char** v = malloc(sizeof *v * (size_t)n);
+    if (v == NULL) {
+        return -1;
+    }
+    int         idx = 0;
+    const char* start = joined;
+    for (const char* p = joined;; p++) {
+        if (*p == '|' || *p == '\0') {
+            char* tok = malloc((size_t)(p - start) + 1);
+            if (tok == NULL) {
+                for (int i = 0; i < idx; i++) {
+                    free(v[i]);
+                }
+                free(v);
+                return -1;
+            }
+            memcpy(tok, start, (size_t)(p - start));
+            tok[p - start] = '\0';
+            if (p - start > 0) {
+                v[idx++] = tok;
+            } else {
+                free(tok);
+            }
+            if (*p == '\0') {
+                break;
+            }
+            start = p + 1;
+        }
+    }
+    *out_vec = v;
+    *out_n = idx;
+    return 0;
 }
 
 /** @brief Join a key's allowlist to a "|"-string ("" when empty). */
-static int join_model_list(const key_rec_t *k, char *buf, size_t cap)
+static int
+join_model_list(const key_rec_t* k, char* buf, size_t cap)
 {
-  int off = 0;
-  for (int i = 0; i < k->n_allowed; i++) {
-    int w = snprintf(buf + off, cap - (size_t)off, "%s%s",
-                     i > 0 ? "|" : "", k->allowed_models[i]);
-    if (w < 0 || (size_t)w >= cap - (size_t)off)
-      return -1;
-    off += w;
-  }
-  return 0;
+    int off = 0;
+    for (int i = 0; i < k->n_allowed; i++) {
+        int w =
+            snprintf(buf + off, cap - (size_t)off, "%s%s", i > 0 ? "|" : "", k->allowed_models[i]);
+        if (w < 0 || (size_t)w >= cap - (size_t)off) {
+            return -1;
+        }
+        off += w;
+    }
+    return 0;
 }
 
 /* ------------------------------------------------------------ libpq ops */
 
-static void pq_lock(struct pq_ctx *px)
+static void
+pq_lock(struct pq_ctx* px)
 {
-  pthread_mutex_lock(&px->mtx);
+    pthread_mutex_lock(&px->mtx);
 }
 
-static void pq_unlock(struct pq_ctx *px)
+static void
+pq_unlock(struct pq_ctx* px)
 {
-  pthread_mutex_unlock(&px->mtx);
+    pthread_mutex_unlock(&px->mtx);
 }
 
-static int pq_get_key_by_hash(void *vctx, const char *key_hash,
-                             key_rec_t *out)
+static int
+pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
 {
-  struct pq_ctx *px = vctx;
-  static const char q[] =
-    "SELECT key_id, key_hash, name, array_to_string(allowed_models, '|'), "
-    "rate_qps, daily_token_quota, expires_at, revoked_at "
-    "FROM api_keys WHERE key_hash = $1";
-  const char *val[1] = { key_hash };
-  int plen[1] = { 0 };
-  int rc = -1;
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "SELECT key_id, key_hash, name, array_to_string(allowed_models, '|'), "
+                            "rate_qps, daily_token_quota, expires_at, revoked_at "
+                            "FROM api_keys WHERE key_hash = $1";
+    const char*       val[1] = {key_hash};
+    int               plen[1] = {0};
+    int               rc = -1;
 
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, q, 1, NULL, val, plen, NULL, 0);
-  pq_unlock(px);
-  if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
-    if (res != NULL)
-      AIGATE_LOG_ERROR("pg get_key_by_hash: %s", PQerrorMessage(px->db));
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, val, plen, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        if (res != NULL) {
+            AIGATE_LOG_ERROR("pg get_key_by_hash: %s", PQerrorMessage(px->db));
+        }
+        PQclear(res);
+        return -1;
+    }
+    if (PQntuples(res) > 0) {
+        memset(out, 0, sizeof *out);
+        out->key_id = atol(PQgetvalue(res, 0, 0));
+        copy_field(out->key_hash, sizeof out->key_hash, PQgetvalue(res, 0, 1));
+        copy_field(out->name, sizeof out->name, PQgetvalue(res, 0, 2));
+        if (parse_model_list(PQgetvalue(res, 0, 3), &out->allowed_models, &out->n_allowed) == 0) {
+            out->rate_qps = atoi(PQgetvalue(res, 0, 4));
+            out->daily_token_quota = atol(PQgetvalue(res, 0, 5));
+            const char* exp = PQgetvalue(res, 0, 6);
+            const char* rev = PQgetvalue(res, 0, 7);
+            if (exp[0] != '\0') {
+                out->expires_at = (time_t)atol(exp);
+                out->has_expiry = 1;
+            }
+            out->revoked = rev[0] != '\0';
+            rc = 0;
+        } else {
+            key_rec_free(out);
+        }
+    }
     PQclear(res);
-    return -1;
-  }
-  if (PQntuples(res) > 0) {
+    return rc; /* 0 found, -1 unknown/error */
+}
+
+static int
+fill_model_row(PGresult* res, int row, model_rec_t* out)
+{
     memset(out, 0, sizeof *out);
-    out->key_id = atol(PQgetvalue(res, 0, 0));
-    copy_field(out->key_hash, sizeof out->key_hash, PQgetvalue(res, 0, 1));
-    copy_field(out->name, sizeof out->name, PQgetvalue(res, 0, 2));
-    if (parse_model_list(PQgetvalue(res, 0, 3), &out->allowed_models,
-                         &out->n_allowed) == 0) {
-      out->rate_qps = atoi(PQgetvalue(res, 0, 4));
-      out->daily_token_quota = atol(PQgetvalue(res, 0, 5));
-      const char *exp = PQgetvalue(res, 0, 6);
-      const char *rev = PQgetvalue(res, 0, 7);
-      if (exp[0] != '\0') {
-        out->expires_at = (time_t)atol(exp);
-        out->has_expiry = 1;
-      }
-      out->revoked = rev[0] != '\0';
-      rc = 0;
+    copy_field(out->name, sizeof out->name, PQgetvalue(res, row, 0));
+    copy_field(out->provider, sizeof out->provider, PQgetvalue(res, row, 1));
+    copy_field(out->endpoint, sizeof out->endpoint, PQgetvalue(res, row, 2));
+    copy_field(out->upstream_key_ref, sizeof out->upstream_key_ref, PQgetvalue(res, row, 3));
+    copy_field(out->default_params_json, sizeof out->default_params_json, PQgetvalue(res, row, 4));
+    out->enabled = strcmp(PQgetvalue(res, row, 5), "t") == 0;
+    return 0;
+}
+
+static int
+pq_get_model(void* vctx, const char* name, model_rec_t* out)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
+        "default_params::text, enabled "
+        "FROM models WHERE model_name = $1 AND enabled = true";
+    const char* val[1] = {name};
+    int         plen[1] = {0};
+    int         rc = -1;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, val, plen, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        if (res != NULL) {
+            AIGATE_LOG_ERROR("pg get_model: %s", PQerrorMessage(px->db));
+        }
+        PQclear(res);
+        return -1;
+    }
+    if (PQntuples(res) > 0) {
+        fill_model_row(res, 0, out);
+        rc = 0;
+    }
+    PQclear(res);
+    return rc;
+}
+
+static int
+pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
+        "default_params::text, enabled FROM models ORDER BY model_name";
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_models: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        fill_model_row(res, i, &out[i]);
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
+static int
+pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
+                            "daily_token_quota, expires_at) "
+                            "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
+                            "ELSE string_to_array($3, '|') END, $4, $5, "
+                            "CASE WHEN $6 = 'null' THEN NULL "
+                            "ELSE to_timestamp($6)::timestamp with time zone END) RETURNING key_id";
+    char              joined[512], rate[16], quota[32], exp[32];
+    const char*       vals[6];
+    int               plens[6] = {0};
+    long              id = -1;
+
+    if (join_model_list(k, joined, sizeof joined) != 0) {
+        return -1;
+    }
+    snprintf(rate, sizeof rate, "%d", k->rate_qps);
+    snprintf(quota, sizeof quota, "%ld", k->daily_token_quota);
+    if (k->has_expiry) {
+        snprintf(exp, sizeof exp, "%ld", (long)k->expires_at);
     } else {
-      key_rec_free(out);
+        strcpy(exp, "null");
     }
-  }
-  PQclear(res);
-  return rc; /* 0 found, -1 unknown/error */
-}
+    vals[0] = k->key_hash;
+    vals[1] = k->name;
+    vals[2] = joined;
+    vals[3] = rate;
+    vals[4] = quota;
+    vals[5] = exp;
 
-static int fill_model_row(PGresult *res, int row, model_rec_t *out)
-{
-  memset(out, 0, sizeof *out);
-  copy_field(out->name, sizeof out->name, PQgetvalue(res, row, 0));
-  copy_field(out->provider, sizeof out->provider, PQgetvalue(res, row, 1));
-  copy_field(out->endpoint, sizeof out->endpoint, PQgetvalue(res, row, 2));
-  copy_field(out->upstream_key_ref, sizeof out->upstream_key_ref,
-             PQgetvalue(res, row, 3));
-  copy_field(out->default_params_json, sizeof out->default_params_json,
-             PQgetvalue(res, row, 4));
-  out->enabled = strcmp(PQgetvalue(res, row, 5), "t") == 0;
-  return 0;
-}
-
-static int pq_get_model(void *vctx, const char *name, model_rec_t *out)
-{
-  struct pq_ctx *px = vctx;
-  static const char q[] =
-    "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
-    "default_params::text, enabled "
-    "FROM models WHERE model_name = $1 AND enabled = true";
-  const char *val[1] = { name };
-  int plen[1] = { 0 };
-  int rc = -1;
-
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, q, 1, NULL, val, plen, NULL, 0);
-  pq_unlock(px);
-  if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
-    if (res != NULL)
-      AIGATE_LOG_ERROR("pg get_model: %s", PQerrorMessage(px->db));
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 6, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
+        id = atol(PQgetvalue(res, 0, 0));
+    } else {
+        AIGATE_LOG_ERROR("pg create_key: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    }
     PQclear(res);
-    return -1;
-  }
-  if (PQntuples(res) > 0) {
-    fill_model_row(res, 0, out);
-    rc = 0;
-  }
-  PQclear(res);
-  return rc;
+    if (id < 0) {
+        return -1;
+    }
+    *out_key_id = id;
+    return 0;
 }
 
-static int pq_list_models(void *vctx, model_rec_t *out, int cap, int *n)
+static int
+pq_update_key(void* vctx, const key_rec_t* k, int mask)
 {
-  struct pq_ctx *px = vctx;
-  static const char q[] =
-    "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
-    "default_params::text, enabled FROM models ORDER BY model_name";
-  *n = 0;
+    struct pq_ctx* px = vctx;
+    char           sql[1024], joined[512], rate[16], quota[32], exp[32], id[32];
+    const char*    vals[5];
+    int            plens[5] = {0};
+    int            nv = 0, off;
 
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
-  pq_unlock(px);
-  if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
-    AIGATE_LOG_ERROR("pg list_models: %s",
-                     res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    if (mask == 0) {
+        return 0;
+    }
+    if (join_model_list(k, joined, sizeof joined) != 0) {
+        return -1;
+    }
+    snprintf(rate, sizeof rate, "%d", k->rate_qps);
+    snprintf(quota, sizeof quota, "%ld", k->daily_token_quota);
+    if (k->has_expiry) {
+        snprintf(exp, sizeof exp, "%ld", (long)k->expires_at);
+    } else {
+        strcpy(exp, "null");
+    }
+    snprintf(id, sizeof id, "%ld", k->key_id);
+
+    off = snprintf(sql, sizeof sql, "UPDATE api_keys SET ");
+    if (mask & KMASK_RATE) {
+        nv++;
+        off += snprintf(sql + off, sizeof sql - (size_t)off, "rate_qps = $%d", nv);
+        vals[nv - 1] = rate;
+    }
+    if (mask & KMASK_QUOTA) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sdaily_token_quota = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = quota;
+    }
+    if (mask & KMASK_ALLOWLIST) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sallowed_models = CASE WHEN $%d = '' THEN '{}'::text[] "
+                        "ELSE string_to_array($%d, '|') END",
+                        nv > 1 ? ", " : "",
+                        nv,
+                        nv);
+        vals[nv - 1] = joined;
+    }
+    if (mask & KMASK_EXPIRY) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sexpires_at = CASE WHEN $%d = 'null' THEN NULL "
+                        "ELSE to_timestamp($%d)::timestamp with time zone END",
+                        nv > 1 ? ", " : "",
+                        nv,
+                        nv);
+        vals[nv - 1] = exp;
+    }
+    nv++;
+    off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE key_id = $%d", nv);
+    vals[nv - 1] = id;
+
+    int ok = 0;
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, sql, nv, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        ok = 1;
+    } else {
+        AIGATE_LOG_ERROR("pg update_key: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    }
     PQclear(res);
-    return -1;
-  }
-  int nt = PQntuples(res);
-  if (nt > cap)
-    nt = cap;
-  for (int i = 0; i < nt; i++)
-    fill_model_row(res, i, &out[i]);
-  *n = nt;
-  PQclear(res);
-  return 0;
+    return ok ? 0 : -1;
 }
 
-static int pq_create_key(void *vctx, const key_rec_t *k, long *out_key_id)
+static int
+pq_revoke_key(void* vctx, long key_id)
 {
-  struct pq_ctx *px = vctx;
-  static const char q[] =
-    "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
-    "daily_token_quota, expires_at) "
-    "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
-    "ELSE string_to_array($3, '|') END, $4, $5, "
-    "CASE WHEN $6 = 'null' THEN NULL "
-    "ELSE to_timestamp($6)::timestamp with time zone END) RETURNING key_id";
-  char joined[512], rate[16], quota[32], exp[32];
-  const char *vals[6];
-  int plens[6] = { 0 };
-  long id = -1;
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "UPDATE api_keys SET revoked_at = now() "
+                            "WHERE key_id = $1 AND revoked_at IS NULL";
+    char              id[32];
+    const char*       vals[1];
+    int               plens[1] = {0};
+    int               n = 0;
 
-  if (join_model_list(k, joined, sizeof joined) != 0)
-    return -1;
-  snprintf(rate, sizeof rate, "%d", k->rate_qps);
-  snprintf(quota, sizeof quota, "%ld", k->daily_token_quota);
-  if (k->has_expiry)
-    snprintf(exp, sizeof exp, "%ld", (long)k->expires_at);
-  else
-    strcpy(exp, "null");
-  vals[0] = k->key_hash;
-  vals[1] = k->name;
-  vals[2] = joined;
-  vals[3] = rate;
-  vals[4] = quota;
-  vals[5] = exp;
+    snprintf(id, sizeof id, "%ld", key_id);
+    vals[0] = id;
 
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, q, 6, NULL, vals, plens, NULL, 0);
-  pq_unlock(px);
-  if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK &&
-      PQntuples(res) > 0)
-    id = atol(PQgetvalue(res, 0, 0));
-  else
-    AIGATE_LOG_ERROR("pg create_key: %s",
-                     res != NULL ? PQerrorMessage(px->db)
-                                 : "query alloc failed");
-  PQclear(res);
-  if (id < 0)
-    return -1;
-  *out_key_id = id;
-  return 0;
-}
-
-static int pq_update_key(void *vctx, const key_rec_t *k, int mask)
-{
-  struct pq_ctx *px = vctx;
-  char sql[1024], joined[512], rate[16], quota[32], exp[32], id[32];
-  const char *vals[5];
-  int plens[5] = { 0 };
-  int nv = 0, off;
-
-  if (mask == 0)
-    return 0;
-  if (join_model_list(k, joined, sizeof joined) != 0)
-    return -1;
-  snprintf(rate, sizeof rate, "%d", k->rate_qps);
-  snprintf(quota, sizeof quota, "%ld", k->daily_token_quota);
-  if (k->has_expiry)
-    snprintf(exp, sizeof exp, "%ld", (long)k->expires_at);
-  else
-    strcpy(exp, "null");
-  snprintf(id, sizeof id, "%ld", k->key_id);
-
-  off = snprintf(sql, sizeof sql, "UPDATE api_keys SET ");
-  if (mask & KMASK_RATE) {
-    nv++;
-    off += snprintf(sql + off, sizeof sql - (size_t)off, "rate_qps = $%d", nv);
-    vals[nv - 1] = rate;
-  }
-  if (mask & KMASK_QUOTA) {
-    nv++;
-    off += snprintf(sql + off, sizeof sql - (size_t)off,
-                    "%sdaily_token_quota = $%d", nv > 1 ? ", " : "", nv);
-    vals[nv - 1] = quota;
-  }
-  if (mask & KMASK_ALLOWLIST) {
-    nv++;
-    off += snprintf(sql + off, sizeof sql - (size_t)off,
-                    "%sallowed_models = CASE WHEN $%d = '' THEN '{}'::text[] "
-                    "ELSE string_to_array($%d, '|') END",
-                    nv > 1 ? ", " : "", nv, nv);
-    vals[nv - 1] = joined;
-  }
-  if (mask & KMASK_EXPIRY) {
-    nv++;
-    off += snprintf(sql + off, sizeof sql - (size_t)off,
-                    "%sexpires_at = CASE WHEN $%d = 'null' THEN NULL "
-                    "ELSE to_timestamp($%d)::timestamp with time zone END",
-                    nv > 1 ? ", " : "", nv, nv);
-    vals[nv - 1] = exp;
-  }
-  nv++;
-  off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE key_id = $%d", nv);
-  vals[nv - 1] = id;
-
-  int ok = 0;
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, sql, nv, NULL, vals, plens, NULL, 0);
-  pq_unlock(px);
-  if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK)
-    ok = 1;
-  else
-    AIGATE_LOG_ERROR("pg update_key: %s",
-                     res != NULL ? PQerrorMessage(px->db)
-                                 : "query alloc failed");
-  PQclear(res);
-  return ok ? 0 : -1;
-}
-
-static int pq_revoke_key(void *vctx, long key_id)
-{
-  struct pq_ctx *px = vctx;
-  static const char q[] =
-    "UPDATE api_keys SET revoked_at = now() "
-    "WHERE key_id = $1 AND revoked_at IS NULL";
-  char id[32];
-  const char *vals[1];
-  int plens[1] = { 0 };
-  int n = 0;
-
-  snprintf(id, sizeof id, "%ld", key_id);
-  vals[0] = id;
-
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
-  pq_unlock(px);
-  if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK)
-    n = atoi(PQcmdTuples(res));
-  else
-    AIGATE_LOG_ERROR("pg revoke_key: %s",
-                     res != NULL ? PQerrorMessage(px->db)
-                                 : "query alloc failed");
-  PQclear(res);
-  return n > 0 ? 0 : -1;
-}
-
-static int pq_create_model(void *vctx, const model_rec_t *m)
-{
-  struct pq_ctx *px = vctx;
-  static const char q[] =
-    "INSERT INTO models(model_name, provider, endpoint, upstream_key_ref, "
-    "default_params) "
-    "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb)";
-  const char *vals[5];
-  int plens[5] = { 0 };
-
-  vals[0] = m->name;
-  vals[1] = m->provider;
-  vals[2] = m->endpoint;
-  vals[3] = m->upstream_key_ref;
-  vals[4] = m->default_params_json;
-
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, q, 5, NULL, vals, plens, NULL, 0);
-  pq_unlock(px);
-  if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
-    AIGATE_LOG_ERROR("pg create_model: %s",
-                     res != NULL ? PQerrorMessage(px->db)
-                                 : "query alloc failed");
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        n = atoi(PQcmdTuples(res));
+    } else {
+        AIGATE_LOG_ERROR("pg revoke_key: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    }
     PQclear(res);
-    return -1;
-  }
-  PQclear(res);
-  return 0;
+    return n > 0 ? 0 : -1;
 }
 
-static int pq_update_model(void *vctx, const model_rec_t *m, int mask)
+static int
+pq_create_model(void* vctx, const model_rec_t* m)
 {
-  struct pq_ctx *px = vctx;
-  char sql[2048];
-  const char *vals[5];
-  int plens[5] = { 0 };
-  int nv = 0, off;
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO models(model_name, provider, endpoint, upstream_key_ref, "
+        "default_params) "
+        "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb)";
+    const char* vals[5];
+    int         plens[5] = {0};
 
-  if (mask == 0)
-    return 0;
+    vals[0] = m->name;
+    vals[1] = m->provider;
+    vals[2] = m->endpoint;
+    vals[3] = m->upstream_key_ref;
+    vals[4] = m->default_params_json;
 
-  off = snprintf(sql, sizeof sql, "UPDATE models SET ");
-  if (mask & MMASK_ENDPOINT) {
-    nv++;
-    off += snprintf(sql + off, sizeof sql - (size_t)off, "endpoint = $%d", nv);
-    vals[nv - 1] = m->endpoint;
-  }
-  if (mask & MMASK_PARAMS) {
-    nv++;
-    off += snprintf(sql + off, sizeof sql - (size_t)off,
-                    "%sdefault_params = $%d::jsonb", nv > 1 ? ", " : "", nv);
-    vals[nv - 1] = m->default_params_json;
-  }
-  if (mask & MMASK_KEYREF) {
-    nv++;
-    off += snprintf(sql + off, sizeof sql - (size_t)off,
-                    "%supstream_key_ref = CASE WHEN $%d = '' THEN NULL "
-                    "ELSE $%d END",
-                    nv > 1 ? ", " : "", nv, nv);
-    vals[nv - 1] = m->upstream_key_ref;
-  }
-  if (mask & MMASK_ENABLED) {
-    nv++;
-    off += snprintf(sql + off, sizeof sql - (size_t)off, "enabled = $%d", nv);
-    vals[nv - 1] = m->enabled ? "true" : "false";
-  }
-  nv++;
-  off += snprintf(sql + off, sizeof sql - (size_t)off,
-                  " WHERE model_name = $%d", nv);
-  vals[nv - 1] = m->name;
-
-  int ok = 0;
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, sql, nv, NULL, vals, plens, NULL, 0);
-  pq_unlock(px);
-  if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK)
-    ok = 1;
-  else
-    AIGATE_LOG_ERROR("pg update_model: %s",
-                     res != NULL ? PQerrorMessage(px->db)
-                                 : "query alloc failed");
-  PQclear(res);
-  return ok ? 0 : -1;
-}
-
-static int pq_delete_model(void *vctx, const char *name)
-{
-  struct pq_ctx *px = vctx;
-  static const char q[] = "DELETE FROM models WHERE model_name = $1";
-  const char *vals[1] = { name };
-  int plens[1] = { 0 };
-  int n = 0;
-
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
-  pq_unlock(px);
-  if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK)
-    n = atoi(PQcmdTuples(res));
-  else
-    AIGATE_LOG_ERROR("pg delete_model: %s",
-                     res != NULL ? PQerrorMessage(px->db)
-                                 : "query alloc failed");
-  PQclear(res);
-  return n > 0 ? 0 : -1;
-}
-
-static int pq_flush_usage(void *vctx, const usage_row_t *rows, int n)
-{
-  struct pq_ctx *px = vctx;
-  static const char q[] =
-    "INSERT INTO usage_daily(key_id, model_name, day, requests, prompt_tokens, "
-    "completion_tokens, errors) "
-    "VALUES($1, $2, to_date($3, 'YYYY-MM-DD'), $4, $5, $6, $7) "
-    "ON CONFLICT (key_id, model_name, day) DO UPDATE SET "
-    "requests = usage_daily.requests + EXCLUDED.requests, "
-    "prompt_tokens = usage_daily.prompt_tokens + EXCLUDED.prompt_tokens, "
-    "completion_tokens = usage_daily.completion_tokens + EXCLUDED.completion_tokens, "
-    "errors = usage_daily.errors + EXCLUDED.errors";
-  int rc = 0;
-
-  if (n <= 0)
-    return 0;
-
-  char day[24], num[32];
-  const char *vals[7];
-  int plens[7] = { 0 };
-
-  pq_lock(px);
-  PQclear(PQexec(px->db, "BEGIN"));
-  for (int i = 0; i < n; i++) {
-    fmt_day(rows[i].day, day);
-    snprintf(num, sizeof num, "%ld", rows[i].key_id);
-    vals[0] = num;
-    vals[1] = rows[i].model_name;
-    vals[2] = day;
-    snprintf(num, sizeof num, "%ld", rows[i].requests);
-    vals[3] = num;
-    snprintf(num, sizeof num, "%ld", rows[i].prompt_tokens);
-    vals[4] = num;
-    snprintf(num, sizeof num, "%ld", rows[i].completion_tokens);
-    vals[5] = num;
-    snprintf(num, sizeof num, "%ld", rows[i].errors);
-    vals[6] = num;
-    PGresult *res = PQexecParams(px->db, q, 7, NULL, vals, plens, NULL, 0);
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 5, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
     if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
-      AIGATE_LOG_ERROR("pg flush_usage: %s",
-                       res != NULL ? PQerrorMessage(px->db)
-                                   : "query alloc failed");
-      PQclear(res);
-      PQclear(PQexec(px->db, "ROLLBACK"));
-      rc = -1;
-      break;
+        AIGATE_LOG_ERROR("pg create_model: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
     }
     PQclear(res);
-  }
-  PQclear(PQexec(px->db, "COMMIT"));
-  pq_unlock(px);
-  return rc;
+    return 0;
 }
 
-static int pq_query_usage(void *vctx, long key_id, const char *model,
-                          time_t from, time_t to, usage_row_t *out, int cap,
-                          int *n)
+static int
+pq_update_model(void* vctx, const model_rec_t* m, int mask)
 {
-  struct pq_ctx *px = vctx;
-  static const char q[] =
-    "SELECT key_id, model_name, day, requests, prompt_tokens, "
-    "completion_tokens, errors FROM usage_daily "
-    "WHERE key_id = $1 AND ($2 = 'all' OR model_name = $2) "
-    "AND day >= to_date($3, 'YYYY-MM-DD') AND day <= to_date($4, 'YYYY-MM-DD') "
-    "ORDER BY day";
-  char key[32], dfrom[24], dto[24];
-  const char *vals[4];
-  int plens[4] = { 0 };
+    struct pq_ctx* px = vctx;
+    char           sql[2048];
+    const char*    vals[5];
+    int            plens[5] = {0};
+    int            nv = 0, off;
 
-  fmt_day(from, dfrom);
-  fmt_day(to, dto);
-  snprintf(key, sizeof key, "%ld", key_id);
-  vals[0] = key;
-  vals[1] = (model == NULL || model[0] == '\0') ? "all" : model;
-  vals[2] = dfrom;
-  vals[3] = dto;
+    if (mask == 0) {
+        return 0;
+    }
 
-  *n = 0;
-  pq_lock(px);
-  PGresult *res = PQexecParams(px->db, q, 4, NULL, vals, plens, NULL, 0);
-  pq_unlock(px);
-  if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
-    AIGATE_LOG_ERROR("pg query_usage: %s",
-                     res != NULL ? PQerrorMessage(px->db)
-                                 : "query alloc failed");
+    off = snprintf(sql, sizeof sql, "UPDATE models SET ");
+    if (mask & MMASK_ENDPOINT) {
+        nv++;
+        off += snprintf(sql + off, sizeof sql - (size_t)off, "endpoint = $%d", nv);
+        vals[nv - 1] = m->endpoint;
+    }
+    if (mask & MMASK_PARAMS) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sdefault_params = $%d::jsonb",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = m->default_params_json;
+    }
+    if (mask & MMASK_KEYREF) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%supstream_key_ref = CASE WHEN $%d = '' THEN NULL "
+                        "ELSE $%d END",
+                        nv > 1 ? ", " : "",
+                        nv,
+                        nv);
+        vals[nv - 1] = m->upstream_key_ref;
+    }
+    if (mask & MMASK_ENABLED) {
+        nv++;
+        off += snprintf(sql + off, sizeof sql - (size_t)off, "enabled = $%d", nv);
+        vals[nv - 1] = m->enabled ? "true" : "false";
+    }
+    nv++;
+    off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE model_name = $%d", nv);
+    vals[nv - 1] = m->name;
+
+    int ok = 0;
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, sql, nv, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        ok = 1;
+    } else {
+        AIGATE_LOG_ERROR("pg update_model: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    }
     PQclear(res);
-    return -1;
-  }
-  int nt = PQntuples(res);
-  if (nt > cap)
-    nt = cap;
-  for (int i = 0; i < nt; i++) {
-    out[i].key_id = atol(PQgetvalue(res, i, 0));
-    copy_field(out[i].model_name, sizeof out[i].model_name,
-               PQgetvalue(res, i, 1));
-    out[i].day = parse_day(PQgetvalue(res, i, 2));
-    out[i].requests = atol(PQgetvalue(res, i, 3));
-    out[i].prompt_tokens = atol(PQgetvalue(res, i, 4));
-    out[i].completion_tokens = atol(PQgetvalue(res, i, 5));
-    out[i].errors = atol(PQgetvalue(res, i, 6));
-  }
-  *n = nt;
-  PQclear(res);
-  return 0;
+    return ok ? 0 : -1;
+}
+
+static int
+pq_delete_model(void* vctx, const char* name)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "DELETE FROM models WHERE model_name = $1";
+    const char*       vals[1] = {name};
+    int               plens[1] = {0};
+    int               n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        n = atoi(PQcmdTuples(res));
+    } else {
+        AIGATE_LOG_ERROR("pg delete_model: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    }
+    PQclear(res);
+    return n > 0 ? 0 : -1;
+}
+
+static int
+pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO usage_daily(key_id, model_name, day, requests, prompt_tokens, "
+        "completion_tokens, errors) "
+        "VALUES($1, $2, to_date($3, 'YYYY-MM-DD'), $4, $5, $6, $7) "
+        "ON CONFLICT (key_id, model_name, day) DO UPDATE SET "
+        "requests = usage_daily.requests + EXCLUDED.requests, "
+        "prompt_tokens = usage_daily.prompt_tokens + EXCLUDED.prompt_tokens, "
+        "completion_tokens = usage_daily.completion_tokens + EXCLUDED.completion_tokens, "
+        "errors = usage_daily.errors + EXCLUDED.errors";
+    int rc = 0;
+
+    if (n <= 0) {
+        return 0;
+    }
+
+    char        day[24], num[32];
+    const char* vals[7];
+    int         plens[7] = {0};
+
+    pq_lock(px);
+    PQclear(PQexec(px->db, "BEGIN"));
+    for (int i = 0; i < n; i++) {
+        fmt_day(rows[i].day, day);
+        snprintf(num, sizeof num, "%ld", rows[i].key_id);
+        vals[0] = num;
+        vals[1] = rows[i].model_name;
+        vals[2] = day;
+        snprintf(num, sizeof num, "%ld", rows[i].requests);
+        vals[3] = num;
+        snprintf(num, sizeof num, "%ld", rows[i].prompt_tokens);
+        vals[4] = num;
+        snprintf(num, sizeof num, "%ld", rows[i].completion_tokens);
+        vals[5] = num;
+        snprintf(num, sizeof num, "%ld", rows[i].errors);
+        vals[6] = num;
+        PGresult* res = PQexecParams(px->db, q, 7, NULL, vals, plens, NULL, 0);
+        if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
+            AIGATE_LOG_ERROR("pg flush_usage: %s",
+                             res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+            PQclear(res);
+            PQclear(PQexec(px->db, "ROLLBACK"));
+            rc = -1;
+            break;
+        }
+        PQclear(res);
+    }
+    PQclear(PQexec(px->db, "COMMIT"));
+    pq_unlock(px);
+    return rc;
+}
+
+static int
+pq_query_usage(void*        vctx,
+               long         key_id,
+               const char*  model,
+               time_t       from,
+               time_t       to,
+               usage_row_t* out,
+               int          cap,
+               int*         n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT key_id, model_name, day, requests, prompt_tokens, "
+        "completion_tokens, errors FROM usage_daily "
+        "WHERE key_id = $1 AND ($2 = 'all' OR model_name = $2) "
+        "AND day >= to_date($3, 'YYYY-MM-DD') AND day <= to_date($4, 'YYYY-MM-DD') "
+        "ORDER BY day";
+    char        key[32], dfrom[24], dto[24];
+    const char* vals[4];
+    int         plens[4] = {0};
+
+    fmt_day(from, dfrom);
+    fmt_day(to, dto);
+    snprintf(key, sizeof key, "%ld", key_id);
+    vals[0] = key;
+    vals[1] = (model == NULL || model[0] == '\0') ? "all" : model;
+    vals[2] = dfrom;
+    vals[3] = dto;
+
+    *n = 0;
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 4, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg query_usage: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        out[i].key_id = atol(PQgetvalue(res, i, 0));
+        copy_field(out[i].model_name, sizeof out[i].model_name, PQgetvalue(res, i, 1));
+        out[i].day = parse_day(PQgetvalue(res, i, 2));
+        out[i].requests = atol(PQgetvalue(res, i, 3));
+        out[i].prompt_tokens = atol(PQgetvalue(res, i, 4));
+        out[i].completion_tokens = atol(PQgetvalue(res, i, 5));
+        out[i].errors = atol(PQgetvalue(res, i, 6));
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
 }
 
 /* ------------------------------------------------------- store lifecycle */
 
-pg_store_t *pg_store_open(const char *dsn, const pg_ops_t *ops)
+pg_store_t*
+pg_store_open(const char* dsn, const pg_ops_t* ops)
 {
-  pg_store_t *ps = calloc(1, sizeof *ps);
-  if (ps == NULL)
-    return NULL;
-
-  if (ops != NULL) { /* fake mode: borrow the caller's ops table */
-    ps->ops = *ops;
-    ps->ctx = ops->ctx;
-    ps->owns_ctx = 0;
-    return ps;
-  }
-
-  struct pq_ctx *px = calloc(1, sizeof *px);
-  if (px == NULL) {
-    free(ps);
-    return NULL;
-  }
-  px->db = PQconnectdb(dsn);
-  if (PQstatus(px->db) != CONNECTION_OK) {
-    AIGATE_LOG_ERROR("pg_store_open: %s", PQerrorMessage(px->db));
-    PQfinish(px->db);
-    free(px);
-    free(ps);
-    return NULL;
-  }
-  pthread_mutex_init(&px->mtx, NULL);
-
-  ps->ops.get_key_by_hash = pq_get_key_by_hash;
-  ps->ops.list_models = pq_list_models;
-  ps->ops.get_model = pq_get_model;
-  ps->ops.create_key = pq_create_key;
-  ps->ops.update_key = pq_update_key;
-  ps->ops.revoke_key = pq_revoke_key;
-  ps->ops.create_model = pq_create_model;
-  ps->ops.update_model = pq_update_model;
-  ps->ops.delete_model = pq_delete_model;
-  ps->ops.flush_usage = pq_flush_usage;
-  ps->ops.query_usage = pq_query_usage;
-  ps->ops.ctx = px;
-  ps->ctx = px;
-  ps->owns_ctx = 1;
-  return ps;
-}
-
-void pg_store_close(pg_store_t *ps)
-{
-  if (ps == NULL)
-    return;
-  if (ps->owns_ctx) {
-    struct pq_ctx *px = ps->ctx;
-    PQfinish(px->db);
-    pthread_mutex_destroy(&px->mtx);
-    free(px);
-  }
-  free(ps);
-}
-
-int pg_store_migrate(pg_store_t *ps)
-{
-  if (ps == NULL)
-    return -1;
-  /* Fake stores cannot migrate; the caller manages their own schema. */
-  if (ps->ops.flush_usage != pq_flush_usage)
-    return 0;
-
-  struct pq_ctx *px = ps->ctx;
-  int rc = 0;
-
-  pq_lock(px);
-  {
-    char vsql[64];
-    snprintf(vsql, sizeof vsql,
-             "SELECT 1 FROM schema_migrations WHERE version = 1");
-    PGresult *res = PQexec(px->db, vsql);
-    int applied = res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK &&
-                  PQntuples(res) > 0;
-    PQclear(res);
-    if (applied) {
-      rc = 0;
-    } else {
-      PQclear(PQexec(px->db, "BEGIN"));
-      PQclear(PQexec(px->db, SCHEMA_SQL));
-      PQclear(PQexec(px->db, "COMMIT"));
-      rc = 0;
+    pg_store_t* ps = calloc(1, sizeof *ps);
+    if (ps == NULL) {
+        return NULL;
     }
-  }
-  pq_unlock(px);
-  return rc;
+
+    if (ops != NULL) { /* fake mode: borrow the caller's ops table */
+        ps->ops = *ops;
+        ps->ctx = ops->ctx;
+        ps->owns_ctx = 0;
+        return ps;
+    }
+
+    struct pq_ctx* px = calloc(1, sizeof *px);
+    if (px == NULL) {
+        free(ps);
+        return NULL;
+    }
+    px->db = PQconnectdb(dsn);
+    if (PQstatus(px->db) != CONNECTION_OK) {
+        AIGATE_LOG_ERROR("pg_store_open: %s", PQerrorMessage(px->db));
+        PQfinish(px->db);
+        free(px);
+        free(ps);
+        return NULL;
+    }
+    pthread_mutex_init(&px->mtx, NULL);
+
+    ps->ops.get_key_by_hash = pq_get_key_by_hash;
+    ps->ops.list_models = pq_list_models;
+    ps->ops.get_model = pq_get_model;
+    ps->ops.create_key = pq_create_key;
+    ps->ops.update_key = pq_update_key;
+    ps->ops.revoke_key = pq_revoke_key;
+    ps->ops.create_model = pq_create_model;
+    ps->ops.update_model = pq_update_model;
+    ps->ops.delete_model = pq_delete_model;
+    ps->ops.flush_usage = pq_flush_usage;
+    ps->ops.query_usage = pq_query_usage;
+    ps->ops.ctx = px;
+    ps->ctx = px;
+    ps->owns_ctx = 1;
+    return ps;
 }
 
-const pg_ops_t *pg_store_ops(const pg_store_t *ps)
+void
+pg_store_close(pg_store_t* ps)
 {
-  return ps != NULL ? &ps->ops : NULL;
+    if (ps == NULL) {
+        return;
+    }
+    if (ps->owns_ctx) {
+        struct pq_ctx* px = ps->ctx;
+        PQfinish(px->db);
+        pthread_mutex_destroy(&px->mtx);
+        free(px);
+    }
+    free(ps);
+}
+
+int
+pg_store_migrate(pg_store_t* ps)
+{
+    if (ps == NULL) {
+        return -1;
+    }
+    /* Fake stores cannot migrate; the caller manages their own schema. */
+    if (ps->ops.flush_usage != pq_flush_usage) {
+        return 0;
+    }
+
+    struct pq_ctx* px = ps->ctx;
+    int            rc = 0;
+
+    pq_lock(px);
+    {
+        char vsql[64];
+        snprintf(vsql, sizeof vsql, "SELECT 1 FROM schema_migrations WHERE version = 1");
+        PGresult* res = PQexec(px->db, vsql);
+        int applied = res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0;
+        PQclear(res);
+        if (applied) {
+            rc = 0;
+        } else {
+            PQclear(PQexec(px->db, "BEGIN"));
+            PQclear(PQexec(px->db, SCHEMA_SQL));
+            PQclear(PQexec(px->db, "COMMIT"));
+            rc = 0;
+        }
+    }
+    pq_unlock(px);
+    return rc;
+}
+
+const pg_ops_t*
+pg_store_ops(const pg_store_t* ps)
+{
+    return ps != NULL ? &ps->ops : NULL;
 }

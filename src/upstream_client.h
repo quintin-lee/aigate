@@ -25,8 +25,13 @@
  * @param out_body_len receives body length
  * @return 0 on transport success (even on 4xx/5xx responses, status in
  *         out_status); -110 timeout; -502 transport failure. */
-int upstream_call(const char *url, const char *upstream_key,
-                  const char *body_json, size_t body_len, long timeout_ms,
-                  int *out_status, char **out_body, size_t *out_body_len);
+int upstream_call(const char* url,
+                  const char* upstream_key,
+                  const char* body_json,
+                  size_t      body_len,
+                  long        timeout_ms,
+                  int*        out_status,
+                  char**      out_body,
+                  size_t*     out_body_len);
 
 #endif /* AIGATE_UPSTREAM_CLIENT_H */

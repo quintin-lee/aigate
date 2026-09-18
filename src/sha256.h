@@ -15,7 +15,7 @@
  * @param out    output buffer, MUST be at least 65 bytes (64 hex + NUL)
  * @return 0 on success, -1 on EVP failure.
  * @note @p out is filled with exactly 65 bytes (64 lowercase hex chars + NUL). */
-int sha256_hex(const void *in, size_t in_len, char out[65]);
+int sha256_hex(const void* in, size_t in_len, char out[65]);
 
 /** @brief Constant-time comparison of two 64-char lowercase hex digests.
  * @return 1 if equal, 0 if not; -1 on length mismatch.

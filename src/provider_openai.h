@@ -11,7 +11,7 @@
 #include "pg_store.h"
 
 /** @brief 1 when @p provider label is handled by this adapter. */
-int provider_openai_supports(const char *provider);
+int provider_openai_supports(const char* provider);
 
 /** @brief Build the exact upstream request for an openai-compatible backend.
  * @param route      resolved model route
@@ -29,8 +29,12 @@ int provider_openai_supports(const char *provider);
  *       verbatim; admin controls naming, this adapter does not rewrite it.
  * @note Merged body: jansson object-merge where request fields win over
  *       default_params fields. */
-int provider_openai_build(const model_rec_t *route, const char *up_path,
-                         const char *in_body, char *url_out, size_t url_cap,
-                         char **out_body, size_t *out_body_len);
+int provider_openai_build(const model_rec_t* route,
+                          const char*        up_path,
+                          const char*        in_body,
+                          char*              url_out,
+                          size_t             url_cap,
+                          char**             out_body,
+                          size_t*            out_body_len);
 
 #endif /* AIGATE_PROVIDER_OPENAI_H */
