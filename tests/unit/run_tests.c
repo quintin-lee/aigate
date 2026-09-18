@@ -11,106 +11,111 @@
 int g_failures = 0;
 
 typedef void (*test_fn)(void);
-static struct { const char *name; test_fn fn; } g_tests[256];
+static struct {
+    const char* name;
+    test_fn     fn;
+} g_tests[256];
 static int g_n_tests = 0;
 
-void test_register(const char *name, test_fn fn)
+void
+test_register(const char* name, test_fn fn)
 {
-  if (g_n_tests < (int)(sizeof g_tests / sizeof g_tests[0])) {
-    g_tests[g_n_tests].name = name;
-    g_tests[g_n_tests].fn = fn;
-    g_n_tests++;
-  }
+    if (g_n_tests < (int)(sizeof g_tests / sizeof g_tests[0])) {
+        g_tests[g_n_tests].name = name;
+        g_tests[g_n_tests].fn = fn;
+        g_n_tests++;
+    }
 }
 
-int main(void)
+int
+main(void)
 {
-  extern void test_log_smoke(void);
-  extern void test_log_concurrent(void);
-  extern void test_sha256_kat(void);
-  extern void test_sha256_equal(void);
-  extern void test_config_defaults(void);
-  extern void test_config_missing_required(void);
-  extern void test_config_bad_master_key(void);
-  extern void test_lru_eviction_order(void);
-  extern void test_lru_recency_refresh(void);
-  extern void test_lru_replace_and_invalidate(void);
-  extern void test_lru_concurrent_smoke(void);
-  extern void test_pg_fake_key_lifecycle(void);
-  extern void test_pg_fake_model_lifecycle(void);
-  extern void test_pg_fake_usage_flush_and_query(void);
-  extern void test_pg_migrate_noop_for_fake(void);
-  extern void test_pg_real_roundtrip(void);
-  extern void test_secret_roundtrip(void);
-  extern void test_secret_tamper_and_wrong_key(void);
-  extern void test_secret_hex_to_bytes(void);
-  extern void test_auth_key_resolve_normal(void);
-  extern void test_auth_key_unknown_revoked_expired(void);
-  extern void test_key_allows_model(void);
-  extern void test_rl_qps_boundary(void);
-  extern void test_rl_unlimited(void);
-  extern void test_rl_daily_quota(void);
-  extern void test_rl_reset_day(void);
-  extern void test_rl_concurrent_smoke(void);
-  extern void test_model_router_env_key(void);
-  extern void test_model_router_missing_env_key(void);
-  extern void test_upstream_200_roundtrip(void);
-  extern void test_upstream_500_passthrough(void);
-  extern void test_upstream_timeout(void);
-  extern void test_upstream_fail_all_toggle(void);
-  extern void test_um_counters_and_drain(void);
-  extern void test_metrics_acl(void);
-  extern void test_core_pipeline(void);
-  extern void test_provider_azure_build(void);
-  extern void test_provider_default_params_merge(void);
-  test_register("log_smoke", test_log_smoke);
-  test_register("log_concurrent", test_log_concurrent);
-  test_register("sha256_kat", test_sha256_kat);
-  test_register("sha256_equal", test_sha256_equal);
-  test_register("config_defaults", test_config_defaults);
-  test_register("config_missing_required", test_config_missing_required);
-  test_register("config_bad_master_key", test_config_bad_master_key);
-  test_register("lru_eviction_order", test_lru_eviction_order);
-  test_register("lru_recency_refresh", test_lru_recency_refresh);
-  test_register("lru_replace_and_invalidate", test_lru_replace_and_invalidate);
-  test_register("lru_concurrent_smoke", test_lru_concurrent_smoke);
-  test_register("pg_fake_key_lifecycle", test_pg_fake_key_lifecycle);
-  test_register("pg_fake_model_lifecycle", test_pg_fake_model_lifecycle);
-  test_register("pg_fake_usage_flush_and_query", test_pg_fake_usage_flush_and_query);
-  test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
-  test_register("pg_real_roundtrip", test_pg_real_roundtrip);
-  test_register("secret_roundtrip", test_secret_roundtrip);
-  test_register("secret_tamper", test_secret_tamper_and_wrong_key);
-  test_register("secret_hex", test_secret_hex_to_bytes);
-  test_register("auth_key_resolve", test_auth_key_resolve_normal);
-  test_register("auth_key_flags", test_auth_key_unknown_revoked_expired);
-  test_register("key_allows_model", test_key_allows_model);
-  test_register("rl_qps_boundary", test_rl_qps_boundary);
-  test_register("rl_unlimited", test_rl_unlimited);
-  test_register("rl_daily_quota", test_rl_daily_quota);
-  test_register("rl_reset_day", test_rl_reset_day);
-  test_register("rl_concurrent", test_rl_concurrent_smoke);
-  test_register("model_router_env", test_model_router_env_key);
-  test_register("model_router_missing", test_model_router_missing_env_key);
-  test_register("upstream_200", test_upstream_200_roundtrip);
-  test_register("upstream_500", test_upstream_500_passthrough);
-  test_register("upstream_timeout", test_upstream_timeout);
-  test_register("upstream_fail_all", test_upstream_fail_all_toggle);
-  test_register("um_counters", test_um_counters_and_drain);
-  test_register("metrics_acl", test_metrics_acl);
-  test_register("core_pipeline", test_core_pipeline);
-  test_register("provider_azure_build", test_provider_azure_build);
-  test_register("provider_merge_params", test_provider_default_params_merge);
+    extern void test_log_smoke(void);
+    extern void test_log_concurrent(void);
+    extern void test_sha256_kat(void);
+    extern void test_sha256_equal(void);
+    extern void test_config_defaults(void);
+    extern void test_config_missing_required(void);
+    extern void test_config_bad_master_key(void);
+    extern void test_lru_eviction_order(void);
+    extern void test_lru_recency_refresh(void);
+    extern void test_lru_replace_and_invalidate(void);
+    extern void test_lru_concurrent_smoke(void);
+    extern void test_pg_fake_key_lifecycle(void);
+    extern void test_pg_fake_model_lifecycle(void);
+    extern void test_pg_fake_usage_flush_and_query(void);
+    extern void test_pg_migrate_noop_for_fake(void);
+    extern void test_pg_real_roundtrip(void);
+    extern void test_secret_roundtrip(void);
+    extern void test_secret_tamper_and_wrong_key(void);
+    extern void test_secret_hex_to_bytes(void);
+    extern void test_auth_key_resolve_normal(void);
+    extern void test_auth_key_unknown_revoked_expired(void);
+    extern void test_key_allows_model(void);
+    extern void test_rl_qps_boundary(void);
+    extern void test_rl_unlimited(void);
+    extern void test_rl_daily_quota(void);
+    extern void test_rl_reset_day(void);
+    extern void test_rl_concurrent_smoke(void);
+    extern void test_model_router_env_key(void);
+    extern void test_model_router_missing_env_key(void);
+    extern void test_upstream_200_roundtrip(void);
+    extern void test_upstream_500_passthrough(void);
+    extern void test_upstream_timeout(void);
+    extern void test_upstream_fail_all_toggle(void);
+    extern void test_um_counters_and_drain(void);
+    extern void test_metrics_acl(void);
+    extern void test_core_pipeline(void);
+    extern void test_provider_azure_build(void);
+    extern void test_provider_default_params_merge(void);
+    test_register("log_smoke", test_log_smoke);
+    test_register("log_concurrent", test_log_concurrent);
+    test_register("sha256_kat", test_sha256_kat);
+    test_register("sha256_equal", test_sha256_equal);
+    test_register("config_defaults", test_config_defaults);
+    test_register("config_missing_required", test_config_missing_required);
+    test_register("config_bad_master_key", test_config_bad_master_key);
+    test_register("lru_eviction_order", test_lru_eviction_order);
+    test_register("lru_recency_refresh", test_lru_recency_refresh);
+    test_register("lru_replace_and_invalidate", test_lru_replace_and_invalidate);
+    test_register("lru_concurrent_smoke", test_lru_concurrent_smoke);
+    test_register("pg_fake_key_lifecycle", test_pg_fake_key_lifecycle);
+    test_register("pg_fake_model_lifecycle", test_pg_fake_model_lifecycle);
+    test_register("pg_fake_usage_flush_and_query", test_pg_fake_usage_flush_and_query);
+    test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
+    test_register("pg_real_roundtrip", test_pg_real_roundtrip);
+    test_register("secret_roundtrip", test_secret_roundtrip);
+    test_register("secret_tamper", test_secret_tamper_and_wrong_key);
+    test_register("secret_hex", test_secret_hex_to_bytes);
+    test_register("auth_key_resolve", test_auth_key_resolve_normal);
+    test_register("auth_key_flags", test_auth_key_unknown_revoked_expired);
+    test_register("key_allows_model", test_key_allows_model);
+    test_register("rl_qps_boundary", test_rl_qps_boundary);
+    test_register("rl_unlimited", test_rl_unlimited);
+    test_register("rl_daily_quota", test_rl_daily_quota);
+    test_register("rl_reset_day", test_rl_reset_day);
+    test_register("rl_concurrent", test_rl_concurrent_smoke);
+    test_register("model_router_env", test_model_router_env_key);
+    test_register("model_router_missing", test_model_router_missing_env_key);
+    test_register("upstream_200", test_upstream_200_roundtrip);
+    test_register("upstream_500", test_upstream_500_passthrough);
+    test_register("upstream_timeout", test_upstream_timeout);
+    test_register("upstream_fail_all", test_upstream_fail_all_toggle);
+    test_register("um_counters", test_um_counters_and_drain);
+    test_register("metrics_acl", test_metrics_acl);
+    test_register("core_pipeline", test_core_pipeline);
+    test_register("provider_azure_build", test_provider_azure_build);
+    test_register("provider_merge_params", test_provider_default_params_merge);
 
-  int failed = 0;
-  for (int i = 0; i < g_n_tests; i++) {
-    g_failures = 0;
-    g_tests[i].fn();
-    if (g_failures > 0) {
-      failed++;
-      fprintf(stderr, "FAILED: %s\n", g_tests[i].name);
+    int failed = 0;
+    for (int i = 0; i < g_n_tests; i++) {
+        g_failures = 0;
+        g_tests[i].fn();
+        if (g_failures > 0) {
+            failed++;
+            fprintf(stderr, "FAILED: %s\n", g_tests[i].name);
+        }
     }
-  }
-  printf("PASS: %d/%d test(s), %d failure(s)\n", g_n_tests - failed, g_n_tests, failed);
-  return failed;
+    printf("PASS: %d/%d test(s), %d failure(s)\n", g_n_tests - failed, g_n_tests, failed);
+    return failed;
 }

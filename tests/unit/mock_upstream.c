@@ -26,206 +26,227 @@
 #define MAX_BODY 4096
 
 struct mock_upstream {
-  int listen_fd;
-  int port;
-  char base[64];
-  pthread_t thread;
-  int running;
-  int fail_all;
-  int request_count;
-  char last_path[256];
-  char last_body[MAX_BODY];
-  pthread_mutex_t mtx; /* guards recorded fields + flag reads */
+    int             listen_fd;
+    int             port;
+    char            base[64];
+    pthread_t       thread;
+    int             running;
+    int             fail_all;
+    int             request_count;
+    char            last_path[256];
+    char            last_body[MAX_BODY];
+    pthread_mutex_t mtx; /* guards recorded fields + flag reads */
 };
 
-static void *server_thread(void *arg)
+static void*
+server_thread(void* arg)
 {
-  mock_upstream_t *mu = arg;
-  for (;;) {
-    struct pollfd pfd;
-    pfd.fd = mu->listen_fd;
-    pfd.events = POLLIN;
-    if (poll(&pfd, 1, 100) <= 0)
-      continue;
-    if (!mu->running)
-      break;
-
-    struct sockaddr_in cli;
-    socklen_t clilen = sizeof cli;
-    int cfd = accept(mu->listen_fd, (struct sockaddr *)&cli, &clilen);
-    if (cfd < 0)
-      continue;
-
-    /* read headers, then body (body may already be partially in the buffer) */
-    char buf[MAX_BODY];
-    int total = 0;
-    int content_length = 0;
-    int hdr_off = -1; /* offset of first body byte, -1 until known */
+    mock_upstream_t* mu = arg;
     for (;;) {
-      int r = read(cfd, buf + total, sizeof buf - 1 - total);
-      if (r <= 0)
-        break;
-      total += r;
-      buf[total] = '\0';
-      if (hdr_off < 0) {
-        const char *hrc = strstr(buf, "\r\n\r\n");
-        if (hrc != NULL) {
-          hdr_off = (int)(hrc - buf) + 4;
-          char *cl = strstr(buf, "Content-Length:");
-          if (cl != NULL)
-            content_length = atoi(cl + 15);
-          if (content_length <= 0)
-            break; /* no body expected */
+        struct pollfd pfd;
+        pfd.fd = mu->listen_fd;
+        pfd.events = POLLIN;
+        if (poll(&pfd, 1, 100) <= 0) {
+            continue;
         }
-      }
-      if (hdr_off >= 0 && total >= hdr_off + content_length)
-        break; /* full request received */
-    }
+        if (!mu->running) {
+            break;
+        }
 
-    char path[256] = "/";
-    char *sp1 = strchr(buf, ' ');
-    char *sp2 = sp1 ? strchr(sp1 + 1, ' ') : NULL;
-    if (sp1 && sp2) {
-      int plen = sp2 - sp1 - 1;
-      if (plen > (int)sizeof path - 1)
-        plen = sizeof path - 1;
-      memcpy(path, sp1 + 1, (size_t)plen);
-      path[plen] = '\0';
-    }
+        struct sockaddr_in cli;
+        socklen_t          clilen = sizeof cli;
+        int                cfd = accept(mu->listen_fd, (struct sockaddr*)&cli, &clilen);
+        if (cfd < 0) {
+            continue;
+        }
 
-    /* record the request for test assertions */
+        /* read headers, then body (body may already be partially in the buffer) */
+        char buf[MAX_BODY];
+        int  total = 0;
+        int  content_length = 0;
+        int  hdr_off = -1; /* offset of first body byte, -1 until known */
+        for (;;) {
+            int r = read(cfd, buf + total, sizeof buf - 1 - total);
+            if (r <= 0) {
+                break;
+            }
+            total += r;
+            buf[total] = '\0';
+            if (hdr_off < 0) {
+                const char* hrc = strstr(buf, "\r\n\r\n");
+                if (hrc != NULL) {
+                    hdr_off = (int)(hrc - buf) + 4;
+                    char* cl = strstr(buf, "Content-Length:");
+                    if (cl != NULL) {
+                        content_length = atoi(cl + 15);
+                    }
+                    if (content_length <= 0) {
+                        break; /* no body expected */
+                    }
+                }
+            }
+            if (hdr_off >= 0 && total >= hdr_off + content_length) {
+                break; /* full request received */
+            }
+        }
+
+        char  path[256] = "/";
+        char* sp1 = strchr(buf, ' ');
+        char* sp2 = sp1 ? strchr(sp1 + 1, ' ') : NULL;
+        if (sp1 && sp2) {
+            int plen = sp2 - sp1 - 1;
+            if (plen > (int)sizeof path - 1) {
+                plen = sizeof path - 1;
+            }
+            memcpy(path, sp1 + 1, (size_t)plen);
+            path[plen] = '\0';
+        }
+
+        /* record the request for test assertions */
+        pthread_mutex_lock(&mu->mtx);
+        mu->request_count++;
+        snprintf(mu->last_path, sizeof mu->last_path, "%s", path);
+        const char* hstart = strstr(buf, "\r\n\r\n");
+        size_t      body_off = hstart != NULL ? (size_t)(hstart - buf + 4) : 0;
+        snprintf(mu->last_body, sizeof mu->last_body, "%s", buf + body_off);
+        int fail = mu->fail_all;
+        pthread_mutex_unlock(&mu->mtx);
+
+        int is_fail = 0;
+        if (strcmp(path, "/fail") == 0) {
+            is_fail = 1;
+        } else if (fail && (strcmp(path, "/chat") == 0 || strcmp(path, "/chat/completions") == 0)) {
+            is_fail = 1;
+        }
+
+        if (is_fail) {
+            const char* body = "{\"error\":{\"message\":\"boom\"}}";
+            char        resp[512];
+            int         blen = snprintf(resp,
+                                        sizeof resp,
+                                        "HTTP/1.1 500 Internal Server Error\r\n"
+                                        "Content-Type: application/json\r\n"
+                                        "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                        (int)strlen(body),
+                                        body);
+            write(cfd, resp, (size_t)blen);
+        } else if (strcmp(path, "/slow") == 0) {
+            struct timespec ts = {2, 0};
+            nanosleep(&ts, NULL);
+            const char* body = "{}";
+            char        resp[512];
+            int         blen = snprintf(resp,
+                                        sizeof resp,
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                        "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                        (int)strlen(body),
+                                        body);
+            write(cfd, resp, (size_t)blen);
+        } else { /* /chat, /chat/completions, /embeddings, default */
+            const char* body = "{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion\","
+                               "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
+                               "\"content\":\"hi\"},\"finish_reason\":\"stop\"}],"
+                               "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11,"
+                               "\"total_tokens\":18}}";
+            char        resp[2048];
+            int         blen = snprintf(resp,
+                                        sizeof resp,
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                        "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                        (int)strlen(body),
+                                        body);
+            write(cfd, resp, (size_t)blen);
+        }
+        close(cfd);
+    }
+    return NULL;
+}
+
+mock_upstream_t*
+mock_upstream_start(void)
+{
+    mock_upstream_t* mu = calloc(1, sizeof *mu);
+    if (mu == NULL) {
+        return NULL;
+    }
+    pthread_mutex_init(&mu->mtx, NULL);
+
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) {
+        free(mu);
+        return NULL;
+    }
+    int on = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
+    addr.sin_port = 0; /* OS picks */
+    if (bind(fd, (struct sockaddr*)&addr, sizeof addr) != 0) {
+        close(fd);
+        free(mu);
+        return NULL;
+    }
+    socklen_t alen = sizeof addr;
+    getsockname(fd, (struct sockaddr*)&addr, &alen);
+    mu->port = ntohs(addr.sin_port);
+    if (listen(fd, 16) != 0) {
+        close(fd);
+        free(mu);
+        return NULL;
+    }
+    mu->listen_fd = fd;
+    mu->running = 1;
+    if (pthread_create(&mu->thread, NULL, server_thread, mu) != 0) {
+        close(fd);
+        free(mu);
+        return NULL;
+    }
+    snprintf(mu->base, sizeof mu->base, "http://127.0.0.1:%d", mu->port);
+    return mu;
+}
+
+void
+mock_upstream_stop(mock_upstream_t* mu)
+{
+    if (mu == NULL) {
+        return;
+    }
+    mu->running = 0;
+    close(mu->listen_fd);
+    pthread_join(mu->thread, NULL);
+    free(mu);
+}
+
+const char*
+mock_upstream_base(const mock_upstream_t* mu)
+{
+    return mu->base;
+}
+
+void
+mock_upstream_fail_all(mock_upstream_t* mu, int fail)
+{
     pthread_mutex_lock(&mu->mtx);
-    mu->request_count++;
-    snprintf(mu->last_path, sizeof mu->last_path, "%s", path);
-    const char *hstart = strstr(buf, "\r\n\r\n");
-    size_t body_off = hstart != NULL ? (size_t)(hstart - buf + 4) : 0;
-    snprintf(mu->last_body, sizeof mu->last_body, "%s",
-             buf + body_off);
-    int fail = mu->fail_all;
+    mu->fail_all = fail;
     pthread_mutex_unlock(&mu->mtx);
-
-    int is_fail = 0;
-    if (strcmp(path, "/fail") == 0)
-      is_fail = 1;
-    else if (fail &&
-             (strcmp(path, "/chat") == 0 ||
-              strcmp(path, "/chat/completions") == 0))
-      is_fail = 1;
-
-    if (is_fail) {
-      const char *body = "{\"error\":{\"message\":\"boom\"}}";
-      char resp[512];
-      int blen = snprintf(resp, sizeof resp,
-                          "HTTP/1.1 500 Internal Server Error\r\n"
-                          "Content-Type: application/json\r\n"
-                          "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                          (int)strlen(body), body);
-      write(cfd, resp, (size_t)blen);
-    } else if (strcmp(path, "/slow") == 0) {
-      struct timespec ts = {2, 0};
-      nanosleep(&ts, NULL);
-      const char *body = "{}";
-      char resp[512];
-      int blen = snprintf(resp, sizeof resp,
-                          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                          "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                          (int)strlen(body), body);
-      write(cfd, resp, (size_t)blen);
-    } else { /* /chat, /chat/completions, /embeddings, default */
-      const char *body =
-          "{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion\","
-          "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
-          "\"content\":\"hi\"},\"finish_reason\":\"stop\"}],"
-          "\"usage\":{\"prompt_tokens\":7,\"completion_tokens\":11,"
-          "\"total_tokens\":18}}";
-      char resp[2048];
-      int blen = snprintf(resp, sizeof resp,
-                          "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                          "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                          (int)strlen(body), body);
-      write(cfd, resp, (size_t)blen);
-    }
-    close(cfd);
-  }
-  return NULL;
 }
 
-mock_upstream_t *mock_upstream_start(void)
+int
+mock_upstream_request_count(const mock_upstream_t* mu)
 {
-  mock_upstream_t *mu = calloc(1, sizeof *mu);
-  if (mu == NULL)
-    return NULL;
-  pthread_mutex_init(&mu->mtx, NULL);
-
-  int fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
-    free(mu);
-    return NULL;
-  }
-  int on = 1;
-  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &on, sizeof on);
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof addr);
-  addr.sin_family = AF_INET;
-  inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
-  addr.sin_port = 0; /* OS picks */
-  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0) {
-    close(fd);
-    free(mu);
-    return NULL;
-  }
-  socklen_t alen = sizeof addr;
-  getsockname(fd, (struct sockaddr *)&addr, &alen);
-  mu->port = ntohs(addr.sin_port);
-  if (listen(fd, 16) != 0) {
-    close(fd);
-    free(mu);
-    return NULL;
-  }
-  mu->listen_fd = fd;
-  mu->running = 1;
-  if (pthread_create(&mu->thread, NULL, server_thread, mu) != 0) {
-    close(fd);
-    free(mu);
-    return NULL;
-  }
-  snprintf(mu->base, sizeof mu->base, "http://127.0.0.1:%d", mu->port);
-  return mu;
+    return mu->request_count;
 }
 
-void mock_upstream_stop(mock_upstream_t *mu)
+const char*
+mock_upstream_last_body(const mock_upstream_t* mu)
 {
-  if (mu == NULL)
-    return;
-  mu->running = 0;
-  close(mu->listen_fd);
-  pthread_join(mu->thread, NULL);
-  free(mu);
+    return mu->last_body;
 }
 
-const char *mock_upstream_base(const mock_upstream_t *mu)
+const char*
+mock_upstream_last_path(const mock_upstream_t* mu)
 {
-  return mu->base;
-}
-
-void mock_upstream_fail_all(mock_upstream_t *mu, int fail)
-{
-  pthread_mutex_lock(&mu->mtx);
-  mu->fail_all = fail;
-  pthread_mutex_unlock(&mu->mtx);
-}
-
-int mock_upstream_request_count(const mock_upstream_t *mu)
-{
-  return mu->request_count;
-}
-
-const char *mock_upstream_last_body(const mock_upstream_t *mu)
-{
-  return mu->last_body;
-}
-
-const char *mock_upstream_last_path(const mock_upstream_t *mu)
-{
-  return mu->last_path;
+    return mu->last_path;
 }
