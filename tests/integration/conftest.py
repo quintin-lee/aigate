@@ -41,11 +41,18 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
     if not os.path.exists(bin_path):
         pytest.fail(f"aigate binary not found at {bin_path}. Run cmake --build build first.")
 
+    # Clean DB state for tests
+    try:
+        subprocess.run(["psql", pg_dsn, "-c", "DELETE FROM models; DELETE FROM api_keys; DELETE FROM usage_daily;"], capture_output=True)
+    except Exception:
+        pass
+
     env = os.environ.copy()
     env["AIGATE_LISTEN"] = f":{port}"
     env["AIGATE_PG_DSN"] = pg_dsn
     env["AIGATE_ADMIN_TOKEN"] = ADMIN_TOKEN
     env["AIGATE_METRICS_ACL"] = "127.0.0.1"
+    env["ANTHROPIC_API_KEY"] = "sk-ant-test-key"
 
     proc = subprocess.Popen([bin_path], env=env)
     base_url = f"http://127.0.0.1:{port}"

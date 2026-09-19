@@ -387,7 +387,7 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
                             "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
                             "ELSE string_to_array($3, '|') END, $4, $5, "
                             "CASE WHEN $6 = 'null' THEN NULL "
-                            "ELSE to_timestamp($6)::timestamp with time zone END) RETURNING key_id";
+                            "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END) RETURNING key_id";
     char              joined[512], rate[16], quota[32], exp[32];
     const char*       vals[6];
     int               plens[6] = {0};
@@ -482,7 +482,7 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
         off += snprintf(sql + off,
                         sizeof sql - (size_t)off,
                         "%sexpires_at = CASE WHEN $%d = 'null' THEN NULL "
-                        "ELSE to_timestamp($%d)::timestamp with time zone END",
+                        "ELSE to_timestamp(($%d)::double precision)::timestamp with time zone END",
                         nv > 1 ? ", " : "",
                         nv,
                         nv);

@@ -218,7 +218,11 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     /* --- handle GET /v1/models (data plane: list allowed enabled models) --- */
     if (rq->path != NULL && strcmp(rq->path, "/v1/models") == 0) {
         if (rq->method != NULL && strcmp(rq->method, "GET") == 0) {
-            model_rec_t     recs[256];
+            model_rec_t*    recs = calloc(256, sizeof(model_rec_t));
+            if (recs == NULL) {
+                key_rec_free(&krec);
+                return aigate_write_error(rc, 500, "internal_error", "out of memory");
+            }
             int             n = 0;
             const pg_ops_t* ops = ac->ps != NULL ? pg_store_ops(ac->ps) : NULL;
             if (ops != NULL && ops->list_models != NULL) {
@@ -237,6 +241,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 }
                 model_rec_free(&recs[i]);
             }
+            free(recs);
             json_t* root = json_object();
             json_object_set_new(root, "object", json_string("list"));
             json_object_set_new(root, "data", arr);

@@ -41,11 +41,16 @@ provider_anthropic_build(const model_rec_t* route,
     static const char* s_hdr_version = "anthropic-version";
     static const char* s_hdr_apikey = "x-api-key";
 
-    headers_kv[0][0] = s_hdr_apikey;
-    headers_kv[0][1] = route->upstream_key;
-    headers_kv[1][0] = s_hdr_version;
-    headers_kv[1][1] = s_anthropic_ver;
-    *n_headers = 2;
+    int n_hdrs = 0;
+    if (route->upstream_key[0] != '\0') {
+        headers_kv[n_hdrs][0] = s_hdr_apikey;
+        headers_kv[n_hdrs][1] = route->upstream_key;
+        n_hdrs++;
+    }
+    headers_kv[n_hdrs][0] = s_hdr_version;
+    headers_kv[n_hdrs][1] = s_anthropic_ver;
+    n_hdrs++;
+    *n_headers = n_hdrs;
 
     /* Parse inbound OpenAI request */
     json_t* in_req = NULL;

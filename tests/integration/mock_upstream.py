@@ -7,6 +7,8 @@ import socketserver
 import threading
 from typing import List, Dict, Any
 
+import time
+
 class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
     recorded_requests: List[Dict[str, Any]] = []
 
@@ -32,7 +34,137 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(b'{"error":"simulated internal failure"}')
             return
 
+        if self.path in ("/messages", "/v1/messages"):
+            if body_json and body_json.get("stream") is True:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+
+                # 1. message_start
+                m_start = {
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_mock_stream_123",
+                        "type": "message",
+                        "role": "assistant",
+                        "model": body_json.get("model", "claude-3-5-sonnet"),
+                        "usage": {"input_tokens": 15, "output_tokens": 1}
+                    }
+                }
+                self.wfile.write(f"event: message_start\ndata: {json.dumps(m_start)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.01)
+
+                # 2. content_block_delta 1
+                cbd1 = {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "Hello from "}
+                }
+                self.wfile.write(f"event: content_block_delta\ndata: {json.dumps(cbd1)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.01)
+
+                # 3. content_block_delta 2
+                cbd2 = {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "text_delta", "text": "Anthropic Claude!"}
+                }
+                self.wfile.write(f"event: content_block_delta\ndata: {json.dumps(cbd2)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.01)
+
+                # 4. message_delta
+                md = {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn"},
+                    "usage": {"output_tokens": 22}
+                }
+                self.wfile.write(f"event: message_delta\ndata: {json.dumps(md)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.01)
+
+                # 5. message_stop
+                m_stop = {"type": "message_stop"}
+                self.wfile.write(f"event: message_stop\ndata: {json.dumps(m_stop)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                return
+            else:
+                # Non-streaming Claude
+                response = {
+                    "id": "msg_mock_nonstream_123",
+                    "type": "message",
+                    "role": "assistant",
+                    "model": body_json.get("model", "claude-3-5-sonnet") if body_json else "claude-3-5-sonnet",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Hello from Anthropic mock!"
+                        }
+                    ],
+                    "stop_reason": "end_turn",
+                    "usage": {
+                        "input_tokens": 14,
+                        "output_tokens": 26
+                    }
+                }
+                resp_bytes = json.dumps(response).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp_bytes)))
+                self.end_headers()
+                self.wfile.write(resp_bytes)
+                return
+
         if self.path in ("/chat/completions", "/v1/chat/completions"):
+            if body_json and body_json.get("stream") is True:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+
+                # Chunk 1
+                c1 = {
+                    "id": "chatcmpl-stream",
+                    "object": "chat.completion.chunk",
+                    "created": 1726700000,
+                    "model": body_json.get("model", "mock-model"),
+                    "choices": [{"index": 0, "delta": {"role": "assistant", "content": "Hello "}, "finish_reason": None}],
+                }
+                self.wfile.write(f"data: {json.dumps(c1)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.01)
+
+                # Chunk 2
+                c2 = {
+                    "id": "chatcmpl-stream",
+                    "object": "chat.completion.chunk",
+                    "created": 1726700000,
+                    "model": body_json.get("model", "mock-model"),
+                    "choices": [{"index": 0, "delta": {"content": "from stream!"}, "finish_reason": "stop"}],
+                }
+                self.wfile.write(f"data: {json.dumps(c2)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.01)
+
+                # Usage chunk
+                c3 = {
+                    "id": "chatcmpl-stream",
+                    "object": "chat.completion.chunk",
+                    "created": 1726700000,
+                    "model": body_json.get("model", "mock-model"),
+                    "choices": [],
+                    "usage": {"prompt_tokens": 8, "completion_tokens": 12, "total_tokens": 20},
+                }
+                self.wfile.write(f"data: {json.dumps(c3)}\n\n".encode("utf-8"))
+                self.wfile.write(b"data: [DONE]\n\n")
+                self.wfile.flush()
+                return
+
             response = {
                 "id": "chatcmpl-mock",
                 "object": "chat.completion",
