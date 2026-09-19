@@ -1,12 +1,13 @@
-/** @file upstream_client.c
- *  @brief libcurl non-streaming upstream transport (see upstream_client.h). */
 #include "upstream_client.h"
 #include "aigate_log.h"
 
 #include <curl/curl.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <time.h>
 
 static pthread_once_t g_curl_once = PTHREAD_ONCE_INIT;
 static void
@@ -113,3 +114,143 @@ done:
     }
     return rc;
 }
+
+static uint64_t
+mono_ns(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
+}
+
+struct stream_ctx {
+    upstream_chunk_fn on_chunk;
+    void*             user_data;
+    uint64_t          last_chunk_mono_ns;
+    uint64_t          silence_timeout_ns;
+    int               aborted;
+};
+
+static size_t
+stream_write_cb(char* buf, size_t size, size_t nmemb, void* ud)
+{
+    struct stream_ctx* sc = ud;
+    size_t             total = size * nmemb;
+    sc->last_chunk_mono_ns = mono_ns();
+    if (sc->on_chunk != NULL && total > 0) {
+        if (sc->on_chunk(sc->user_data, buf, total) != 0) {
+            sc->aborted = 1;
+            return 0; /* abort transfer */
+        }
+    }
+    return total;
+}
+
+static int
+stream_xferinfo_cb(
+    void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow)
+{
+    (void)dltotal;
+    (void)dlnow;
+    (void)ultotal;
+    (void)ulnow;
+    struct stream_ctx* sc = clientp;
+    if (sc->silence_timeout_ns > 0) {
+        uint64_t now = mono_ns();
+        if (now - sc->last_chunk_mono_ns > sc->silence_timeout_ns) {
+            sc->aborted = 2; /* silence timeout */
+            return 1;        /* abort transfer */
+        }
+    }
+    return 0;
+}
+
+int
+upstream_stream_call(const char*       url,
+                     const char*       upstream_key,
+                     const char*       extra_headers_kv[][2],
+                     int               n_extra_headers,
+                     const char*       body_json,
+                     size_t            body_len,
+                     long              silence_timeout_ms,
+                     upstream_chunk_fn on_chunk,
+                     void*             user_data,
+                     int*              out_status)
+{
+    struct stream_ctx  sc = {0};
+    struct curl_slist* hdrs = NULL;
+    int                rc = -502;
+    long               http_code = 0;
+
+    sc.on_chunk = on_chunk;
+    sc.user_data = user_data;
+    sc.last_chunk_mono_ns = mono_ns();
+    sc.silence_timeout_ns =
+        (silence_timeout_ms > 0 ? silence_timeout_ms : 30000L) * 1000000ull;
+
+    pthread_once(&g_curl_once, curl_init_once);
+    CURL* c = curl_easy_init();
+    if (c == NULL) {
+        goto done;
+    }
+
+    int has_custom_auth = 0;
+    if (extra_headers_kv != NULL && n_extra_headers > 0) {
+        for (int i = 0; i < n_extra_headers; i++) {
+            if (extra_headers_kv[i][0] != NULL && extra_headers_kv[i][1] != NULL) {
+                if (strcasecmp(extra_headers_kv[i][0], "x-api-key") == 0 ||
+                    strcasecmp(extra_headers_kv[i][0], "Authorization") == 0) {
+                    has_custom_auth = 1;
+                }
+                char hdr[1024];
+                snprintf(hdr, sizeof hdr, "%s: %s", extra_headers_kv[i][0], extra_headers_kv[i][1]);
+                hdrs = curl_slist_append(hdrs, hdr);
+            }
+        }
+    }
+
+    if (!has_custom_auth && upstream_key != NULL && upstream_key[0] != '\0') {
+        char auth[1080];
+        snprintf(auth, sizeof auth, "Authorization: Bearer %s", upstream_key);
+        hdrs = curl_slist_append(hdrs, auth);
+    }
+    hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
+    hdrs = curl_slist_append(hdrs, "Accept: text/event-stream, application/json");
+
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_POST, 1L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, body_json);
+    curl_easy_setopt(
+        c, CURLOPT_POSTFIELDSIZE, body_len > 0 ? (long)body_len : (long)strlen(body_json));
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, stream_write_cb);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &sc);
+    curl_easy_setopt(c, CURLOPT_NOPROGRESS, 0L);
+    curl_easy_setopt(c, CURLOPT_XFERINFOFUNCTION, stream_xferinfo_cb);
+    curl_easy_setopt(c, CURLOPT_XFERINFODATA, &sc);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 0L);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+
+    CURLcode cret = curl_easy_perform(c);
+    if (curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code) == CURLE_OK) {
+        *out_status = (int)http_code;
+    }
+
+    if (cret == CURLE_OK) {
+        rc = 0;
+    } else if (cret == CURLE_ABORTED_BY_CALLBACK && sc.aborted == 2) {
+        rc = -110; /* silence timeout */
+    } else if (cret == CURLE_OPERATION_TIMEDOUT) {
+        rc = -110;
+    } else {
+        AIGATE_LOG_WARN("upstream stream transport error: %s", curl_easy_strerror(cret));
+        rc = -502;
+    }
+
+done:
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(c);
+    return rc;
+}
+

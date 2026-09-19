@@ -116,6 +116,11 @@ main(void)
     test_register("admin_models_lifecycle", test_admin_models_lifecycle);
     test_register("admin_usage_query", test_admin_usage_query);
 
+    extern void test_upstream_stream_normal(void);
+    extern void test_upstream_stream_silence_timeout(void);
+    test_register("upstream_stream_normal", test_upstream_stream_normal);
+    test_register("upstream_stream_silence_timeout", test_upstream_stream_silence_timeout);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

@@ -141,7 +141,30 @@ server_thread(void* arg)
                                         "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                         (int)strlen(body),
                                         body);
-            write(cfd, resp, (size_t)blen);
+        } else if (strcmp(path, "/mock/stream") == 0) {
+            const char* hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+            write(cfd, hdr, strlen(hdr));
+            const char* c1 = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n";
+            write(cfd, c1, strlen(c1));
+            struct timespec sl = {0, 10 * 1000000}; /* 10ms */
+            nanosleep(&sl, NULL);
+            const char* c2 = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n";
+            write(cfd, c2, strlen(c2));
+            nanosleep(&sl, NULL);
+            const char* c3 = "data: {\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\n";
+            write(cfd, c3, strlen(c3));
+            nanosleep(&sl, NULL);
+            const char* c4 = "data: [DONE]\n\n";
+            write(cfd, c4, strlen(c4));
+        } else if (strcmp(path, "/mock/stream-slow") == 0) {
+            const char* hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+            write(cfd, hdr, strlen(hdr));
+            const char* c1 = "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"start\"}}]}\n\n";
+            write(cfd, c1, strlen(c1));
+            struct timespec sl = {1, 200 * 1000000}; /* 1200ms */
+            nanosleep(&sl, NULL);
+            const char* c2 = "data: [DONE]\n\n";
+            write(cfd, c2, strlen(c2));
         } else { /* /chat, /chat/completions, /embeddings, default */
             const char* body = "{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion\","
                                "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","

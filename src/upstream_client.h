@@ -34,4 +34,30 @@ int upstream_call(const char* url,
                   char**      out_body,
                   size_t*     out_body_len);
 
+/** @brief Streaming chunk callback. Return 0 on success; non-zero aborts transfer. */
+typedef int (*upstream_chunk_fn)(void* user_data, const void* chunk, size_t len);
+
+/** @brief Issue one upstream HTTP POST in streaming mode.
+ * @param url                fully formed request URL
+ * @param upstream_key       bearer token ("" = none)
+ * @param extra_headers_kv   optional array of [key, value] headers, or NULL
+ * @param n_extra_headers    count of extra headers
+ * @param body_json          request body (JSON)
+ * @param body_len           body length (0 = strlen(body_json))
+ * @param silence_timeout_ms inter-chunk silence timeout in ms (0 = default 30000)
+ * @param on_chunk           called on every incoming data chunk
+ * @param user_data          passed to on_chunk
+ * @param out_status         receives HTTP status code
+ * @return 0 on success; -110 on timeout; -502 on transport error. */
+int upstream_stream_call(const char*       url,
+                         const char*       upstream_key,
+                         const char*       extra_headers_kv[][2],
+                         int               n_extra_headers,
+                         const char*       body_json,
+                         size_t            body_len,
+                         long              silence_timeout_ms,
+                         upstream_chunk_fn on_chunk,
+                         void*             user_data,
+                         int*              out_status);
+
 #endif /* AIGATE_UPSTREAM_CLIENT_H */
