@@ -60,6 +60,11 @@ main(void)
     extern void test_rl_concurrent_smoke(void);
     extern void test_model_router_env_key(void);
     extern void test_model_router_missing_env_key(void);
+    extern void test_model_router_multi_target_keys(void);
+    extern void test_model_router_priority_selection(void);
+    extern void test_model_router_round_robin(void);
+    extern void test_model_router_weighted(void);
+    extern void test_model_router_cb_exclusion_and_fallback(void);
     extern void test_upstream_200_roundtrip(void);
     extern void test_upstream_500_passthrough(void);
     extern void test_upstream_timeout(void);
@@ -99,6 +104,11 @@ main(void)
     test_register("rl_concurrent", test_rl_concurrent_smoke);
     test_register("model_router_env", test_model_router_env_key);
     test_register("model_router_missing", test_model_router_missing_env_key);
+    test_register("model_router_multi_target_keys", test_model_router_multi_target_keys);
+    test_register("model_router_priority_selection", test_model_router_priority_selection);
+    test_register("model_router_round_robin", test_model_router_round_robin);
+    test_register("model_router_weighted", test_model_router_weighted);
+    test_register("model_router_cb_exclusion", test_model_router_cb_exclusion_and_fallback);
     test_register("upstream_200", test_upstream_200_roundtrip);
     test_register("upstream_500", test_upstream_500_passthrough);
     test_register("upstream_timeout", test_upstream_timeout);

@@ -50,41 +50,87 @@ model_router_free(model_router_t* mr)
     free(mr);
 }
 
+#include <stdatomic.h>
+#include <stdbool.h>
+
+static _Atomic unsigned long g_rr_counter = 0;
+
 static int
-resolve_key(model_router_t* mr, const model_rec_t* rec, model_rec_t* out)
+resolve_single_key(model_router_t* mr,
+                   const char*     key_ref,
+                   char*           out_key,
+                   size_t          out_sz,
+                   const char*     model_name)
 {
-    /* out->upstream_key_ref already copied; produce out->upstream_key. */
-    if (rec->upstream_key_ref[0] == '\0') {
-        out->upstream_key[0] = '\0';
+    if (key_ref == NULL || key_ref[0] == '\0') {
+        out_key[0] = '\0';
         return 0; /* no auth needed (local ollama etc.) */
     }
-    if (strncmp(rec->upstream_key_ref, "env:", 4) == 0) {
-        const char* env = getenv(rec->upstream_key_ref + 4);
+    if (strncmp(key_ref, "env:", 4) == 0) {
+        const char* env = getenv(key_ref + 4);
         if (env == NULL || env[0] == '\0') {
             AIGATE_LOG_ERROR(
-                "env key %s missing for model %s", rec->upstream_key_ref + 4, rec->name);
+                "env key %s missing for model %s", key_ref + 4, model_name);
             return -1;
         }
-        snprintf(out->upstream_key, sizeof out->upstream_key, "%s", env);
+        snprintf(out_key, out_sz, "%s", env);
         return 0;
     }
-    if (strncmp(rec->upstream_key_ref, "pg:", 3) == 0) {
+    if (strncmp(key_ref, "pg:", 3) == 0) {
         if (!mr->have_master) {
             AIGATE_LOG_ERROR("pg secret ref but no AIGATE_MASTER_KEY");
             return -1;
         }
         if (secret_decrypt(mr->master,
-                           rec->upstream_key_ref + 3,
-                           out->upstream_key,
-                           sizeof out->upstream_key,
+                           key_ref + 3,
+                           out_key,
+                           out_sz,
                            NULL) != 0) {
-            AIGATE_LOG_ERROR("secret_decrypt failed for model %s", rec->name);
+            AIGATE_LOG_ERROR("secret_decrypt failed for model %s", model_name);
             return -1;
         }
         return 0;
     }
-    AIGATE_LOG_ERROR("unknown key ref format: %s", rec->upstream_key_ref);
+    AIGATE_LOG_ERROR("unknown key ref format: %s", key_ref);
     return -1;
+}
+
+static int
+resolve_key(model_router_t* mr, const model_rec_t* rec, model_rec_t* out)
+{
+    int rc = 0;
+    /* Primary key ref */
+    if (rec->upstream_key_ref[0] != '\0') {
+        if (resolve_single_key(mr, rec->upstream_key_ref, out->upstream_key, sizeof out->upstream_key, rec->name) != 0) {
+            rc = -1;
+        }
+    } else {
+        out->upstream_key[0] = '\0';
+    }
+
+    /* Target key refs */
+    for (int i = 0; i < out->n_targets && i < MAX_TARGETS_PER_MODEL; i++) {
+        upstream_target_t* tgt = &out->targets[i];
+        const char* ref = tgt->upstream_key_ref[0] != '\0' ? tgt->upstream_key_ref : rec->upstream_key_ref;
+        if (ref[0] != '\0') {
+            if (resolve_single_key(mr, ref, tgt->upstream_key, sizeof tgt->upstream_key, rec->name) != 0) {
+                tgt->upstream_key[0] = '\0';
+            }
+        } else {
+            tgt->upstream_key[0] = '\0';
+        }
+    }
+
+    /* Harmonize primary and target 0 keys if one is set and the other is empty */
+    if (out->n_targets > 0) {
+        if (out->targets[0].upstream_key[0] != '\0' && out->upstream_key[0] == '\0') {
+            snprintf(out->upstream_key, sizeof out->upstream_key, "%s", out->targets[0].upstream_key);
+        } else if (out->upstream_key[0] != '\0' && out->targets[0].upstream_key[0] == '\0') {
+            snprintf(out->targets[0].upstream_key, sizeof out->targets[0].upstream_key, "%s", out->upstream_key);
+        }
+    }
+
+    return rc;
 }
 
 int
@@ -123,4 +169,190 @@ model_router_invalidate(model_router_t* mr, const char* model)
     if (mr->routes != NULL) {
         lru_invalidate(mr->routes, model);
     }
+}
+
+int
+model_router_select_candidates(circuit_breaker_t* cb,
+                               const model_rec_t* model,
+                               upstream_target_t* out_candidates,
+                               int                cap,
+                               int*               out_count)
+{
+    if (model == NULL || out_candidates == NULL || cap <= 0 || out_count == NULL) {
+        return -1;
+    }
+    *out_count = 0;
+
+    int n_tgts = model->n_targets;
+    upstream_target_t src_targets[MAX_TARGETS_PER_MODEL];
+    if (n_tgts <= 0) {
+        if (model->endpoint[0] == '\0') {
+            return -1;
+        }
+        n_tgts = 1;
+        memset(&src_targets[0], 0, sizeof(src_targets[0]));
+        snprintf(src_targets[0].provider, sizeof(src_targets[0].provider), "%s",
+                 model->provider[0] != '\0' ? model->provider : "openai");
+        snprintf(src_targets[0].endpoint, sizeof(src_targets[0].endpoint), "%s", model->endpoint);
+        snprintf(src_targets[0].upstream_key_ref, sizeof(src_targets[0].upstream_key_ref), "%s",
+                 model->upstream_key_ref);
+        snprintf(src_targets[0].upstream_key, sizeof(src_targets[0].upstream_key), "%s",
+                 model->upstream_key);
+        src_targets[0].weight = 1;
+        src_targets[0].priority = 0;
+    } else {
+        if (n_tgts > MAX_TARGETS_PER_MODEL) {
+            n_tgts = MAX_TARGETS_PER_MODEL;
+        }
+        for (int i = 0; i < n_tgts; i++) {
+            src_targets[i] = model->targets[i];
+            if (src_targets[i].provider[0] == '\0') {
+                snprintf(src_targets[i].provider, sizeof(src_targets[i].provider), "%s",
+                         model->provider[0] != '\0' ? model->provider : "openai");
+            }
+            if (src_targets[i].weight <= 0) {
+                src_targets[i].weight = 1;
+            }
+            if (src_targets[i].upstream_key[0] == '\0' && model->upstream_key[0] != '\0') {
+                snprintf(src_targets[i].upstream_key, sizeof(src_targets[i].upstream_key), "%s",
+                         model->upstream_key);
+            }
+        }
+    }
+
+    /* Collect distinct priorities sorted ascending */
+    int prios[MAX_TARGETS_PER_MODEL];
+    int n_prios = 0;
+    for (int i = 0; i < n_tgts; i++) {
+        int p = src_targets[i].priority;
+        bool found = false;
+        for (int j = 0; j < n_prios; j++) {
+            if (prios[j] == p) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            prios[n_prios++] = p;
+        }
+    }
+    /* Insertion sort priorities */
+    for (int i = 0; i < n_prios - 1; i++) {
+        for (int j = i + 1; j < n_prios; j++) {
+            if (prios[j] < prios[i]) {
+                int tmp = prios[i];
+                prios[i] = prios[j];
+                prios[j] = tmp;
+            }
+        }
+    }
+
+    int total_added = 0;
+    int healthy_count = 0;
+
+    /* First pass: count healthy targets */
+    for (int i = 0; i < n_tgts; i++) {
+        if (cb == NULL || cb_allow_request(cb, model->name, src_targets[i].endpoint)) {
+            healthy_count++;
+        }
+    }
+
+    if (healthy_count > 0) {
+        /* Iterate through priority tiers ascending */
+        for (int pi = 0; pi < n_prios && total_added < cap; pi++) {
+            int p = prios[pi];
+            upstream_target_t tier_healthy[MAX_TARGETS_PER_MODEL];
+            int n_th = 0;
+            for (int i = 0; i < n_tgts; i++) {
+                if (src_targets[i].priority == p) {
+                    if (cb == NULL || cb_allow_request(cb, model->name, src_targets[i].endpoint)) {
+                        tier_healthy[n_th++] = src_targets[i];
+                    }
+                }
+            }
+            if (n_th == 0) {
+                continue; /* Skip empty / fully tripped tier */
+            }
+
+            /* Apply LB policy within this tier */
+            if (strcmp(model->lb_policy, "round_robin") == 0 && n_th > 1) {
+                unsigned long start = atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) % (unsigned long)n_th;
+                for (int k = 0; k < n_th && total_added < cap; k++) {
+                    out_candidates[total_added++] = tier_healthy[(start + (unsigned long)k) % (unsigned long)n_th];
+                }
+            } else if (strcmp(model->lb_policy, "weighted") == 0 && n_th > 1) {
+                int total_w = 0;
+                for (int k = 0; k < n_th; k++) {
+                    total_w += tier_healthy[k].weight;
+                }
+                if (total_w <= 0) total_w = n_th;
+                unsigned long pick = atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) % (unsigned long)total_w;
+                int chosen_idx = 0;
+                int acc = 0;
+                for (int k = 0; k < n_th; k++) {
+                    acc += tier_healthy[k].weight;
+                    if ((unsigned long)acc > pick) {
+                        chosen_idx = k;
+                        break;
+                    }
+                }
+                /* Add chosen target first */
+                out_candidates[total_added++] = tier_healthy[chosen_idx];
+                /* Add remaining targets sorted by weight descending */
+                upstream_target_t rem[MAX_TARGETS_PER_MODEL];
+                int n_rem = 0;
+                for (int k = 0; k < n_th; k++) {
+                    if (k != chosen_idx) {
+                        rem[n_rem++] = tier_healthy[k];
+                    }
+                }
+                for (int a = 0; a < n_rem - 1; a++) {
+                    for (int b = a + 1; b < n_rem; b++) {
+                        if (rem[b].weight > rem[a].weight) {
+                            upstream_target_t tmp = rem[a];
+                            rem[a] = rem[b];
+                            rem[b] = tmp;
+                        }
+                    }
+                }
+                for (int k = 0; k < n_rem && total_added < cap; k++) {
+                    out_candidates[total_added++] = rem[k];
+                }
+            } else {
+                /* Default "priority": retain original definition order */
+                for (int k = 0; k < n_th && total_added < cap; k++) {
+                    out_candidates[total_added++] = tier_healthy[k];
+                }
+            }
+        }
+    } else {
+        /* ALL targets are tripped: fallback to target with earliest open_until */
+        struct tripped_tgt {
+            upstream_target_t tgt;
+            time_t            open_until;
+        } tripped[MAX_TARGETS_PER_MODEL];
+
+        for (int i = 0; i < n_tgts; i++) {
+            tripped[i].tgt = src_targets[i];
+            tripped[i].open_until = cb_get_open_until(cb, model->name, src_targets[i].endpoint);
+        }
+        /* Sort tripped targets by open_until ascending, then by priority ascending */
+        for (int i = 0; i < n_tgts - 1; i++) {
+            for (int j = i + 1; j < n_tgts; j++) {
+                if (tripped[j].open_until < tripped[i].open_until ||
+                    (tripped[j].open_until == tripped[i].open_until &&
+                     tripped[j].tgt.priority < tripped[i].tgt.priority)) {
+                    struct tripped_tgt tmp = tripped[i];
+                    tripped[i] = tripped[j];
+                    tripped[j] = tmp;
+                }
+            }
+        }
+        for (int i = 0; i < n_tgts && total_added < cap; i++) {
+            out_candidates[total_added++] = tripped[i].tgt;
+        }
+    }
+
+    *out_count = total_added;
+    return 0;
 }

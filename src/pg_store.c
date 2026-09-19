@@ -972,21 +972,15 @@ pg_store_migrate(pg_store_t* ps)
     struct pq_ctx* px = ps->ctx;
     int            rc = 0;
 
+    /* SCHEMA_SQL is idempotent (IF NOT EXISTS / ON CONFLICT DO NOTHING),
+     * so always apply it: databases created before v2/v3 still need the
+     * ALTERs even though version 1 is already recorded. */
     pq_lock(px);
     {
-        char vsql[64];
-        snprintf(vsql, sizeof vsql, "SELECT 1 FROM schema_migrations WHERE version = 1");
-        PGresult* res = PQexec(px->db, vsql);
-        int applied = res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0;
-        PQclear(res);
-        if (applied) {
-            rc = 0;
-        } else {
-            PQclear(PQexec(px->db, "BEGIN"));
-            PQclear(PQexec(px->db, SCHEMA_SQL));
-            PQclear(PQexec(px->db, "COMMIT"));
-            rc = 0;
-        }
+        PQclear(PQexec(px->db, "BEGIN"));
+        PQclear(PQexec(px->db, SCHEMA_SQL));
+        PQclear(PQexec(px->db, "COMMIT"));
+        rc = 0;
     }
     pq_unlock(px);
     return rc;

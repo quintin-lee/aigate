@@ -37,7 +37,24 @@ void model_router_free(model_router_t* mr);
  * @note out->upstream_key is filled from an env lookup or pg decrypt. */
 int model_router_resolve(model_router_t* mr, const char* model, model_rec_t* out);
 
+#include "circuit_breaker.h"
+
 /** @brief Invalidate the cached route after an admin model mutation. */
 void model_router_invalidate(model_router_t* mr, const char* model);
+
+/** @brief Select ordered candidate targets for a request based on priority,
+ *         load balancing policy, and circuit breaker status.
+ * @param cb             Optional circuit breaker to check target health (can be NULL).
+ * @param model          Model record containing targets and lb_policy.
+ * @param out_candidates Array of size @p cap to receive ordered candidates.
+ * @param cap            Maximum number of candidates (e.g. MAX_TARGETS_PER_MODEL).
+ * @param out_count      Receives number of candidates placed in @p out_candidates.
+ * @return 0 on success, -1 on error (e.g. invalid arguments or 0 targets).
+ */
+int model_router_select_candidates(circuit_breaker_t* cb,
+                                   const model_rec_t* model,
+                                   upstream_target_t* out_candidates,
+                                   int                cap,
+                                   int*               out_count);
 
 #endif /* AIGATE_MODEL_ROUTER_H */
