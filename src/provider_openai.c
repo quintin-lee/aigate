@@ -325,6 +325,76 @@ openai_bridge_free(stream_bridge_t* b)
     free(b);
 }
 
+int
+provider_openai_build_embeddings(const model_rec_t* route,
+                                 const char*        in_body,
+                                 char*              url_out,
+                                 size_t             url_cap,
+                                 const char*        extra_headers[4][2],
+                                 int*               n_extra_headers,
+                                 char**             out_body,
+                                 size_t*            out_body_len)
+{
+    (void)extra_headers;
+    *n_extra_headers = 0;
+
+    const char* up_path = "/embeddings";
+    size_t elen = strlen(route->endpoint);
+    bool has_v1 = (strstr(route->endpoint, "/v1") != NULL);
+    if (!has_v1) {
+        up_path = "/v1/embeddings";
+    }
+    if (elen > 0 && route->endpoint[elen - 1] == '/') {
+        if (up_path[0] == '/') {
+            up_path++;
+        }
+    }
+
+    return provider_openai_build(route, up_path, in_body, url_out, url_cap, out_body, out_body_len);
+}
+
+int
+provider_openai_parse_embeddings(const char* raw_body,
+                                 size_t      raw_len,
+                                 const char* model,
+                                 int*        http_status,
+                                 char**      out_body,
+                                 size_t*     out_len,
+                                 long*       out_ptok)
+{
+    (void)model;
+    if (out_ptok) *out_ptok = 0;
+    *http_status = 200;
+
+    if (raw_body != NULL && raw_len > 0) {
+        json_t* root = json_loads(raw_body, 0, NULL);
+        if (root != NULL) {
+            json_t* jusage = json_object_get(root, "usage");
+            if (jusage != NULL && json_is_object(jusage)) {
+                json_t* jp = json_object_get(jusage, "prompt_tokens");
+                if (json_is_integer(jp) && out_ptok) {
+                    *out_ptok = json_integer_value(jp);
+                } else {
+                    json_t* jt = json_object_get(jusage, "total_tokens");
+                    if (json_is_integer(jt) && out_ptok) {
+                        *out_ptok = json_integer_value(jt);
+                    }
+                }
+            }
+            json_decref(root);
+        }
+    }
+
+    *out_body = malloc(raw_len + 1);
+    if (*out_body == NULL) {
+        return -1;
+    }
+    memcpy(*out_body, raw_body, raw_len);
+    (*out_body)[raw_len] = '\0';
+    *out_len = raw_len;
+    return 0;
+}
+
 const provider_adapter_t g_provider_openai = {
     .name = "openai",
     .supports = adapter_openai_supports,
@@ -336,7 +406,7 @@ const provider_adapter_t g_provider_openai = {
     .stream_bridge_headers_sent = openai_bridge_headers_sent,
     .stream_bridge_get_tokens = openai_bridge_get_tokens,
     .stream_bridge_free = openai_bridge_free,
-    .build_embeddings = NULL,
-    .parse_embeddings_response = NULL,
+    .build_embeddings = provider_openai_build_embeddings,
+    .parse_embeddings_response = provider_openai_parse_embeddings,
 };
 

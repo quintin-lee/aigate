@@ -74,6 +74,7 @@ upstream_call_ext(const char* url,
         for (int i = 0; i < n_extra_headers; i++) {
             if (extra_headers_kv[i][0] != NULL && extra_headers_kv[i][1] != NULL) {
                 if (strcasecmp(extra_headers_kv[i][0], "x-api-key") == 0 ||
+                    strcasecmp(extra_headers_kv[i][0], "x-goog-api-key") == 0 ||
                     strcasecmp(extra_headers_kv[i][0], "Authorization") == 0) {
                     has_custom_auth = 1;
                 }
@@ -252,6 +253,7 @@ upstream_stream_call(const char*       url,
         for (int i = 0; i < n_extra_headers; i++) {
             if (extra_headers_kv[i][0] != NULL && extra_headers_kv[i][1] != NULL) {
                 if (strcasecmp(extra_headers_kv[i][0], "x-api-key") == 0 ||
+                    strcasecmp(extra_headers_kv[i][0], "x-goog-api-key") == 0 ||
                     strcasecmp(extra_headers_kv[i][0], "Authorization") == 0) {
                     has_custom_auth = 1;
                 }

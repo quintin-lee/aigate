@@ -162,6 +162,23 @@ main(void)
     test_register("gemini_streaming_bridge_chunks", test_gemini_streaming_bridge_chunks);
     test_register("gemini_streaming_fragmented_tcp", test_gemini_streaming_fragmented_tcp);
 
+    extern void test_openai_embeddings_build(void);
+    extern void test_openai_embeddings_parse(void);
+    extern void test_gemini_embeddings_build_single(void);
+    extern void test_gemini_embeddings_build_batch(void);
+    extern void test_gemini_embeddings_parse_single(void);
+    extern void test_gemini_embeddings_parse_batch(void);
+    extern void test_gemini_embeddings_parse_error(void);
+    extern void test_embeddings_pipeline_e2e(void);
+    test_register("openai_embeddings_build", test_openai_embeddings_build);
+    test_register("openai_embeddings_parse", test_openai_embeddings_parse);
+    test_register("gemini_embeddings_build_single", test_gemini_embeddings_build_single);
+    test_register("gemini_embeddings_build_batch", test_gemini_embeddings_build_batch);
+    test_register("gemini_embeddings_parse_single", test_gemini_embeddings_parse_single);
+    test_register("gemini_embeddings_parse_batch", test_gemini_embeddings_parse_batch);
+    test_register("gemini_embeddings_parse_error", test_gemini_embeddings_parse_error);
+    test_register("embeddings_pipeline_e2e", test_embeddings_pipeline_e2e);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

@@ -40,4 +40,23 @@ int provider_openai_build(const model_rec_t* route,
                           char**             out_body,
                           size_t*            out_body_len);
 
+/** @brief Build upstream request for OpenAI-compatible embeddings. */
+int provider_openai_build_embeddings(const model_rec_t* route,
+                                     const char*        in_body,
+                                     char*              url_out,
+                                     size_t             url_cap,
+                                     const char*        extra_headers[4][2],
+                                     int*               n_extra_headers,
+                                     char**             out_body,
+                                     size_t*            out_body_len);
+
+/** @brief Parse OpenAI embeddings response and extract prompt tokens. */
+int provider_openai_parse_embeddings(const char* raw_body,
+                                     size_t      raw_len,
+                                     const char* model,
+                                     int*        http_status,
+                                     char**      out_body,
+                                     size_t*     out_len,
+                                     long*       out_ptok);
+
 #endif /* AIGATE_PROVIDER_OPENAI_H */

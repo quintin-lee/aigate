@@ -34,4 +34,23 @@ int provider_gemini_resp_to_openai(const char* gemini_resp,
                                    long*       out_ptok,
                                    long*       out_ctok);
 
+/** @brief Build Gemini request for embeddings (single -> embedContent, array -> batchEmbedContents). */
+int provider_gemini_build_embeddings(const model_rec_t* route,
+                                     const char*        in_body,
+                                     char*              url_out,
+                                     size_t             url_cap,
+                                     const char*        extra_headers[4][2],
+                                     int*               n_extra_headers,
+                                     char**             out_body,
+                                     size_t*            out_body_len);
+
+/** @brief Parse Gemini embedding response and translate to OpenAI standard format. */
+int provider_gemini_parse_embeddings(const char* raw_body,
+                                     size_t      raw_len,
+                                     const char* model,
+                                     int*        http_status,
+                                     char**      out_body,
+                                     size_t*     out_len,
+                                     long*       out_ptok);
+
 #endif /* AIGATE_PROVIDER_GEMINI_H */

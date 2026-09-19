@@ -584,6 +584,249 @@ gemini_parse_chat_response(const char* raw_body,
     return provider_gemini_resp_to_openai(raw_body, model, out_body, out_len, out_ptok, out_ctok);
 }
 
+int
+provider_gemini_build_embeddings(const model_rec_t* route,
+                                 const char*        in_body,
+                                 char*              url_out,
+                                 size_t             url_cap,
+                                 const char*        extra_headers[4][2],
+                                 int*               n_extra_headers,
+                                 char**             out_body,
+                                 size_t*            out_body_len)
+{
+    /* Endpoint handling: default to google api url if empty */
+    const char* ep = route->endpoint;
+    if (ep == NULL || ep[0] == '\0' || strcmp(ep, "/") == 0) {
+        ep = "https://generativelanguage.googleapis.com";
+    }
+    char base_ep[512];
+    snprintf(base_ep, sizeof base_ep, "%s", ep);
+    size_t elen = strlen(base_ep);
+    if (elen > 0 && base_ep[elen - 1] == '/') {
+        base_ep[elen - 1] = '\0';
+    }
+
+    /* Auth header: x-goog-api-key */
+    int n_hdrs = 0;
+    if (route->upstream_key[0] != '\0') {
+        extra_headers[n_hdrs][0] = "x-goog-api-key";
+        extra_headers[n_hdrs][1] = route->upstream_key;
+        n_hdrs++;
+    }
+    *n_extra_headers = n_hdrs;
+
+    /* Parse inbound OpenAI request */
+    json_t* in_req = NULL;
+    if (in_body != NULL && in_body[0] != '\0') {
+        in_req = json_loads(in_body, 0, NULL);
+    }
+    if (in_req == NULL) {
+        return -1;
+    }
+
+    const char* model_name = route->name;
+    json_t* jm = json_object_get(in_req, "model");
+    if (jm != NULL && json_is_string(jm)) {
+        model_name = json_string_value(jm);
+    }
+
+    const char* url_model = model_name;
+    if (strncmp(url_model, "models/", 7) == 0) {
+        url_model += 7;
+    }
+
+    json_t* jdim = json_object_get(in_req, "dimensions");
+    json_t* jinput = json_object_get(in_req, "input");
+
+    json_t* gem_req = json_object();
+    if (jinput != NULL && json_is_array(jinput)) {
+        /* Batch mode: /v1beta/models/{model}:batchEmbedContents */
+        snprintf(url_out, url_cap, "%s/v1beta/models/%s:batchEmbedContents", base_ep, url_model);
+
+        char model_path[256];
+        if (strncmp(model_name, "models/", 7) == 0) {
+            snprintf(model_path, sizeof model_path, "%s", model_name);
+        } else {
+            snprintf(model_path, sizeof model_path, "models/%s", model_name);
+        }
+
+        json_t* reqs = json_array();
+        size_t idx;
+        json_t* item;
+        json_array_foreach(jinput, idx, item) {
+            const char* text = json_is_string(item) ? json_string_value(item) : "";
+            json_t* robj = json_object();
+            json_object_set_new(robj, "model", json_string(model_path));
+
+            json_t* content = json_object();
+            json_t* parts = json_array();
+            json_t* p = json_object();
+            json_object_set_new(p, "text", json_string(text));
+            json_array_append_new(parts, p);
+            json_object_set_new(content, "parts", parts);
+            json_object_set_new(robj, "content", content);
+
+            if (jdim != NULL && json_is_integer(jdim)) {
+                json_object_set_new(
+                    robj, "outputDimensionality", json_integer(json_integer_value(jdim)));
+            }
+            json_array_append_new(reqs, robj);
+        }
+        json_object_set_new(gem_req, "requests", reqs);
+    } else if (jinput != NULL && json_is_string(jinput)) {
+        /* Single mode: /v1beta/models/{model}:embedContent */
+        snprintf(url_out, url_cap, "%s/v1beta/models/%s:embedContent", base_ep, url_model);
+
+        const char* text = json_string_value(jinput);
+        json_t* content = json_object();
+        json_t* parts = json_array();
+        json_t* p = json_object();
+        json_object_set_new(p, "text", json_string(text ? text : ""));
+        json_array_append_new(parts, p);
+        json_object_set_new(content, "parts", parts);
+        json_object_set_new(gem_req, "content", content);
+
+        if (jdim != NULL && json_is_integer(jdim)) {
+            json_object_set_new(
+                gem_req, "outputDimensionality", json_integer(json_integer_value(jdim)));
+        }
+    } else {
+        json_decref(gem_req);
+        json_decref(in_req);
+        return -1;
+    }
+
+    json_decref(in_req);
+
+    char* packed = json_dumps(gem_req, JSON_COMPACT);
+    json_decref(gem_req);
+    if (packed == NULL) {
+        return -1;
+    }
+
+    *out_body = packed;
+    if (out_body_len != NULL) {
+        *out_body_len = strlen(packed);
+    }
+    return 0;
+}
+
+int
+provider_gemini_parse_embeddings(const char* raw_body,
+                                 size_t      raw_len,
+                                 const char* model,
+                                 int*        http_status,
+                                 char**      out_body,
+                                 size_t*     out_len,
+                                 long*       out_ptok)
+{
+    (void)raw_len;
+    if (out_ptok) *out_ptok = 0;
+    *http_status = 200;
+
+    if (raw_body == NULL || raw_body[0] == '\0') {
+        return -1;
+    }
+
+    json_t* root = json_loads(raw_body, 0, NULL);
+    if (root == NULL) {
+        return -1;
+    }
+
+    /* Check for upstream error */
+    json_t* jerr = json_object_get(root, "error");
+    if (jerr != NULL && json_is_object(jerr)) {
+        json_t* jcode = json_object_get(jerr, "code");
+        json_t* jmsg = json_object_get(jerr, "message");
+        int err_code = json_is_integer(jcode) ? (int)json_integer_value(jcode) : 400;
+        const char* err_msg = json_is_string(jmsg) ? json_string_value(jmsg) : "Gemini error";
+        *http_status = err_code;
+
+        json_t* err_resp = json_pack("{s:{s:s,s:s,s:i}}",
+                                     "error",
+                                     "message", err_msg,
+                                     "type", "upstream_error",
+                                     "code", err_code);
+        json_decref(root);
+        char* packed_err = json_dumps(err_resp, JSON_COMPACT);
+        json_decref(err_resp);
+        if (packed_err == NULL) return -1;
+        *out_body = packed_err;
+        *out_len = strlen(packed_err);
+        return 0;
+    }
+
+    /* Extract usage token count */
+    long ptok = 0;
+    json_t* um = json_object_get(root, "usageMetadata");
+    if (um != NULL && json_is_object(um)) {
+        json_t* pt = json_object_get(um, "promptTokenCount");
+        if (json_is_integer(pt)) {
+            ptok = json_integer_value(pt);
+        }
+    }
+
+    json_t* data_arr = json_array();
+    json_t* jemb = json_object_get(root, "embedding");
+    json_t* jembs = json_object_get(root, "embeddings");
+
+    if (jemb != NULL && json_is_object(jemb)) {
+        json_t* jvals = json_object_get(jemb, "values");
+        if (jvals != NULL && json_is_array(jvals)) {
+            json_t* item = json_object();
+            json_object_set_new(item, "object", json_string("embedding"));
+            json_object_set_new(item, "index", json_integer(0));
+            json_incref(jvals);
+            json_object_set_new(item, "embedding", jvals);
+            json_array_append_new(data_arr, item);
+        }
+        if (ptok == 0) ptok = 1;
+    } else if (jembs != NULL && json_is_array(jembs)) {
+        size_t idx;
+        json_t* entry;
+        json_array_foreach(jembs, idx, entry) {
+            json_t* jvals = json_object_get(entry, "values");
+            if (jvals != NULL && json_is_array(jvals)) {
+                json_t* item = json_object();
+                json_object_set_new(item, "object", json_string("embedding"));
+                json_object_set_new(item, "index", json_integer(idx));
+                json_incref(jvals);
+                json_object_set_new(item, "embedding", jvals);
+                json_array_append_new(data_arr, item);
+            }
+        }
+        if (ptok == 0) ptok = (long)json_array_size(jembs);
+    } else {
+        json_decref(data_arr);
+        json_decref(root);
+        return -1;
+    }
+
+    if (out_ptok) *out_ptok = ptok;
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "object", json_string("list"));
+    json_object_set_new(resp, "data", data_arr);
+    json_object_set_new(resp, "model", json_string(model ? model : "text-embedding-004"));
+
+    json_t* usage = json_object();
+    json_object_set_new(usage, "prompt_tokens", json_integer(ptok));
+    json_object_set_new(usage, "total_tokens", json_integer(ptok));
+    json_object_set_new(resp, "usage", usage);
+
+    json_decref(root);
+
+    char* packed = json_dumps(resp, JSON_COMPACT);
+    json_decref(resp);
+    if (packed == NULL) {
+        return -1;
+    }
+
+    *out_body = packed;
+    *out_len = strlen(packed);
+    return 0;
+}
+
 const provider_adapter_t g_provider_gemini = {
     .name = "gemini",
     .supports = adapter_gemini_supports,
@@ -595,6 +838,6 @@ const provider_adapter_t g_provider_gemini = {
     .stream_bridge_headers_sent = gemini_stream_bridge_headers_sent,
     .stream_bridge_get_tokens = gemini_stream_bridge_get_tokens,
     .stream_bridge_free = gemini_stream_bridge_free,
-    .build_embeddings = NULL,
-    .parse_embeddings_response = NULL,
+    .build_embeddings = provider_gemini_build_embeddings,
+    .parse_embeddings_response = provider_gemini_parse_embeddings,
 };

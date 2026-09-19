@@ -209,6 +209,91 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return 0;
     }
 
+    /* --- handle /v1/embeddings --- */
+    if (rq->path != NULL && strcmp(rq->path, "/v1/embeddings") == 0) {
+        if (adapter->build_embeddings == NULL || adapter->parse_embeddings_response == NULL) {
+            aigate_write_error(
+                rc, 400, "unsupported_endpoint", "model or provider does not support embeddings");
+            json_decref(jbody);
+            key_rec_free(&krec);
+            return 0;
+        }
+
+        char        url[1024];
+        char*       merged = NULL;
+        size_t      mlen = 0;
+        const char* extra_hdrs[4][2] = {{0}};
+        int         n_extra_hdrs = 0;
+
+        if (adapter->build_embeddings(&route,
+                                      rq->body != NULL ? (const char*)rq->body : NULL,
+                                      url,
+                                      sizeof url,
+                                      extra_hdrs,
+                                      &n_extra_hdrs,
+                                      &merged,
+                                      &mlen) != 0) {
+            aigate_write_error(rc, 500, "internal", "failed to build embeddings request");
+            json_decref(jbody);
+            key_rec_free(&krec);
+            free(merged);
+            return 0;
+        }
+
+        int      status = 0;
+        char*    ubody = NULL;
+        size_t   ulen = 0;
+        uint64_t t0 = mono_ns();
+        int      urc = upstream_call_ext(
+            url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
+        if (urc == 0 && status >= 500) {
+            free(ubody);
+            ubody = NULL;
+            struct timespec sl = {0, 200 * 1000000}; /* 200ms */
+            nanosleep(&sl, NULL);
+            urc = upstream_call_ext(
+                url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
+        }
+        uint64_t lat = mono_ns() - t0;
+        free(merged);
+
+        if (urc != 0 || status >= 500) {
+            if (rc->set_header != NULL) {
+                rc->set_header(rc->impl, "X-Upstream-Provider", route.provider);
+            }
+            aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream embeddings request failed");
+            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, lat, route.provider);
+            free(ubody);
+            json_decref(jbody);
+            key_rec_free(&krec);
+            return 0;
+        }
+
+        char*  parsed_body = NULL;
+        size_t parsed_len = 0;
+        long   ptok = 0;
+        int    parsed_status = status;
+        if (adapter->parse_embeddings_response(ubody ? ubody : "", ulen, model, &parsed_status, &parsed_body, &parsed_len, &ptok) != 0) {
+            aigate_write_error(rc, 502, "upstream_error", "failed to parse upstream embeddings response");
+            free(ubody);
+            json_decref(jbody);
+            key_rec_free(&krec);
+            return 0;
+        }
+        free(ubody);
+
+        um_record(ac->um, krec.key_id, model, parsed_status, ptok, 0, 0, lat, route.provider);
+        if (ptok > 0) {
+            rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok);
+        }
+
+        int rv = aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
+        free(parsed_body);
+        json_decref(jbody);
+        key_rec_free(&krec);
+        return rv;
+    }
+
     char        url[1024];
     char*       merged = NULL;
     size_t      mlen = 0;
