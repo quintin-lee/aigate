@@ -9,6 +9,9 @@
 #define AIGATE_PROVIDER_OPENAI_H
 
 #include "pg_store.h"
+#include "provider_adapter.h"
+
+extern const provider_adapter_t g_provider_openai;
 
 /** @brief 1 when @p provider label is handled by this adapter. */
 int provider_openai_supports(const char* provider);

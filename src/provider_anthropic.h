@@ -6,8 +6,11 @@
 
 #include "aigate_core.h"
 #include "pg_store.h"
+#include "provider_adapter.h"
 
 #include <stddef.h>
+
+extern const provider_adapter_t g_provider_anthropic;
 
 /** @brief 1 when provider label is "anthropic". */
 int provider_anthropic_supports(const char* provider);

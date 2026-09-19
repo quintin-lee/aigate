@@ -551,3 +551,109 @@ anthropic_bridge_finish(anthropic_bridge_t* b)
     }
     return 0;
 }
+
+/* ------------------------------------------------------------ adapter impl */
+
+static bool
+adapter_anthropic_supports(const char* provider)
+{
+    return provider_anthropic_supports(provider) != 0;
+}
+
+static int
+anthropic_build_chat(const model_rec_t* route,
+                     const char*        in_body,
+                     char*              url_out,
+                     size_t             url_cap,
+                     const char*        extra_headers[4][2],
+                     int*               n_extra_headers,
+                     char**             out_body,
+                     size_t*            out_body_len)
+{
+    return provider_anthropic_build(
+        route, in_body, url_out, url_cap, extra_headers, n_extra_headers, out_body, out_body_len);
+}
+
+static int
+anthropic_parse_chat_response(const char* raw_body,
+                              size_t      raw_len,
+                              const char* model,
+                              int*        http_status,
+                              char**      out_body,
+                              size_t*     out_len,
+                              long*       out_ptok,
+                              long*       out_ctok,
+                              long*       out_cached_tok)
+{
+    (void)raw_len;
+    if (out_cached_tok != NULL) {
+        *out_cached_tok = 0;
+    }
+    *http_status = 200;
+    return provider_anthropic_resp_to_openai(raw_body, model, out_body, out_len, out_ptok, out_ctok);
+}
+
+static stream_bridge_t*
+anthropic_bridge_new(aigate_response_ctx* rc, const char* model)
+{
+    (void)model;
+    anthropic_bridge_t* b = calloc(1, sizeof(*b));
+    if (b == NULL) {
+        return NULL;
+    }
+    anthropic_bridge_init(b, rc);
+    return (stream_bridge_t*)b;
+}
+
+static int
+anthropic_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
+{
+    return anthropic_bridge_feed((anthropic_bridge_t*)bridge, chunk, len);
+}
+
+static int
+anthropic_stream_bridge_finish(stream_bridge_t* b)
+{
+    return anthropic_bridge_finish((anthropic_bridge_t*)b);
+}
+
+static bool
+anthropic_stream_bridge_headers_sent(stream_bridge_t* b)
+{
+    anthropic_bridge_t* ab = (anthropic_bridge_t*)b;
+    return ab->headers_sent;
+}
+
+static void
+anthropic_stream_bridge_get_tokens(stream_bridge_t* b,
+                                   long*            out_ptok,
+                                   long*            out_ctok,
+                                   long*            out_cached_tok)
+{
+    anthropic_bridge_t* ab = (anthropic_bridge_t*)b;
+    if (out_ptok) *out_ptok = ab->input_tokens;
+    if (out_ctok) *out_ctok = ab->output_tokens;
+    if (out_cached_tok) *out_cached_tok = 0;
+}
+
+static void
+anthropic_stream_bridge_free(stream_bridge_t* b)
+{
+    free(b);
+}
+
+const provider_adapter_t g_provider_anthropic = {
+    .name = "anthropic",
+    .supports = adapter_anthropic_supports,
+    .build_chat = anthropic_build_chat,
+    .parse_chat_response = anthropic_parse_chat_response,
+    .stream_bridge_new = anthropic_bridge_new,
+    .stream_bridge_feed = anthropic_stream_bridge_feed,
+    .stream_bridge_finish = anthropic_stream_bridge_finish,
+    .stream_bridge_headers_sent = anthropic_stream_bridge_headers_sent,
+    .stream_bridge_get_tokens = anthropic_stream_bridge_get_tokens,
+    .stream_bridge_free = anthropic_stream_bridge_free,
+    .build_embeddings = NULL,
+    .parse_embeddings_response = NULL,
+};
+

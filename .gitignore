@@ -1,8 +1,10 @@
 build/
 .build/
 .asan/
+.cache/
 docs/.superpowers/
 __pycache__/
 *.o
 .env
+compile_commands.json
 

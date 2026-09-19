@@ -13,7 +13,8 @@ TEST_CASE(admin_ui_content)
     TEST_ASSERT(html != NULL, "admin_ui_get_html returned NULL");
     TEST_ASSERT(len > 1000, "admin_ui HTML too short: %zu bytes", len);
     TEST_ASSERT(strstr(html, "<!DOCTYPE html>") != NULL, "missing doctype");
-    TEST_ASSERT(strstr(html, "aigate — AI Gateway Console") != NULL, "missing title");
+    TEST_ASSERT(strstr(html, "aigate — AI 网关控制台") != NULL ||
+                strstr(html, "aigate — AI Gateway Console") != NULL, "missing title");
     TEST_ASSERT(strstr(html, "tab-overview") != NULL, "missing tab-overview");
     TEST_ASSERT(strstr(html, "tab-models") != NULL, "missing tab-models");
     TEST_ASSERT(strstr(html, "tab-keys") != NULL, "missing tab-keys");

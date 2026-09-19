@@ -3,8 +3,7 @@
 #include "aigate_core.h"
 #include "aigate_log.h"
 #include "model_router.h"
-#include "provider_anthropic.h"
-#include "provider_openai.h"
+#include "provider_adapter.h"
 #include "upstream_client.h"
 
 #include <jansson.h>
@@ -18,108 +17,6 @@ mono_ns(void)
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
-}
-
-typedef struct {
-    aigate_response_ctx* rc;
-    bool                 headers_sent;
-    char                 line_buf[4096];
-    size_t               line_len;
-    long                 prompt_tokens;
-    long                 completion_tokens;
-    bool                 has_usage;
-} stream_accum_t;
-
-static void
-stream_process_line(stream_accum_t* acc, const char* line)
-{
-    const char* d = strstr(line, "data:");
-    if (d == NULL) {
-        return;
-    }
-    const char* u = strstr(d, "\"usage\"");
-    if (u == NULL) {
-        return;
-    }
-    const char* jstart = strchr(d, '{');
-    if (jstart == NULL) {
-        return;
-    }
-    json_t* root = json_loads(jstart, 0, NULL);
-    if (root == NULL) {
-        return;
-    }
-    json_t* jusage = json_object_get(root, "usage");
-    if (jusage != NULL && json_is_object(jusage)) {
-        json_t* jp = json_object_get(jusage, "prompt_tokens");
-        json_t* jc = json_object_get(jusage, "completion_tokens");
-        if (json_is_integer(jp)) {
-            acc->prompt_tokens = json_integer_value(jp);
-            acc->has_usage = true;
-        }
-        if (json_is_integer(jc)) {
-            acc->completion_tokens = json_integer_value(jc);
-            acc->has_usage = true;
-        }
-    }
-    json_decref(root);
-}
-
-static int
-stream_chunk_handler(void* user_data, const void* chunk, size_t len)
-{
-    stream_accum_t* acc = user_data;
-    if (!acc->headers_sent) {
-        acc->rc->status = 200;
-        if (acc->rc->set_header != NULL) {
-            acc->rc->set_header(acc->rc->impl, "Content-Type", "text/event-stream; charset=utf-8");
-            acc->rc->set_header(acc->rc->impl, "Cache-Control", "no-cache");
-            acc->rc->set_header(acc->rc->impl, "Connection", "keep-alive");
-        }
-        acc->headers_sent = true;
-        acc->rc->headers_sent = true;
-    }
-
-    if (acc->rc->write != NULL && len > 0) {
-        if (acc->rc->write(acc->rc->impl, chunk, len, false) != 0) {
-            return -1;
-        }
-    }
-
-    const char* p = chunk;
-    const char* end = p + len;
-    while (p < end) {
-        const char* nl = memchr(p, '\n', (size_t)(end - p));
-        if (nl != NULL) {
-            size_t seg = (size_t)(nl - p);
-            if (acc->line_len + seg < sizeof(acc->line_buf)) {
-                memcpy(acc->line_buf + acc->line_len, p, seg);
-                acc->line_len += seg;
-                acc->line_buf[acc->line_len] = '\0';
-                stream_process_line(acc, acc->line_buf);
-            }
-            acc->line_len = 0;
-            p = nl + 1;
-        } else {
-            size_t seg = (size_t)(end - p);
-            if (acc->line_len + seg < sizeof(acc->line_buf) - 1) {
-                memcpy(acc->line_buf + acc->line_len, p, seg);
-                acc->line_len += seg;
-                acc->line_buf[acc->line_len] = '\0';
-            } else {
-                acc->line_len = 0;
-            }
-            p = end;
-        }
-    }
-    return 0;
-}
-
-static int
-anthropic_stream_chunk_handler(void* user_data, const void* chunk, size_t len)
-{
-    anthropic_bridge_t* b = user_data;
-    return anthropic_bridge_feed(b, chunk, len);
 }
 
 int
@@ -303,9 +200,8 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     }
 
     /* --- provider check & build --- */
-    int is_openai = provider_openai_supports(route.provider);
-    int is_anthropic = provider_anthropic_supports(route.provider);
-    if (!is_openai && !is_anthropic) {
+    const provider_adapter_t* adapter = provider_find(route.provider);
+    if (adapter == NULL) {
         aigate_write_error(
             rc, PIPE_UNSUPPORTED, "unsupported_provider", "provider not supported by this build");
         json_decref(jbody);
@@ -319,41 +215,19 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     const char* extra_hdrs[4][2] = {{0}};
     int         n_extra_hdrs = 0;
 
-    if (is_openai) {
-        const char* up_path = "/chat/completions";
-        if (strcmp(rq->path, "/v1/embeddings") == 0) {
-            up_path = "/embeddings";
-        } else if (strcmp(rq->path, "/v1/completions") == 0) {
-            up_path = "/completions";
-        }
-        if (provider_openai_build(&route,
-                                  up_path,
-                                  rq->body != NULL ? (const char*)rq->body : NULL,
-                                  url,
-                                  sizeof url,
-                                  &merged,
-                                  &mlen) != 0) {
-            aigate_write_error(rc, 500, "internal", "failed to build upstream request");
-            json_decref(jbody);
-            key_rec_free(&krec);
-            free(merged);
-            return 0;
-        }
-    } else if (is_anthropic) {
-        if (provider_anthropic_build(&route,
-                                     rq->body != NULL ? (const char*)rq->body : NULL,
-                                     url,
-                                     sizeof url,
-                                     extra_hdrs,
-                                     &n_extra_hdrs,
-                                     &merged,
-                                     &mlen) != 0) {
-            aigate_write_error(rc, 500, "internal", "failed to build upstream request");
-            json_decref(jbody);
-            key_rec_free(&krec);
-            free(merged);
-            return 0;
-        }
+    if (adapter->build_chat(&route,
+                            rq->body != NULL ? (const char*)rq->body : NULL,
+                            url,
+                            sizeof url,
+                            extra_hdrs,
+                            &n_extra_hdrs,
+                            &merged,
+                            &mlen) != 0) {
+        aigate_write_error(rc, 500, "internal", "failed to build upstream request");
+        json_decref(jbody);
+        key_rec_free(&krec);
+        free(merged);
+        return 0;
     }
 
     /* Check if streaming */
@@ -361,17 +235,13 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     bool is_streaming = (jstream != NULL && json_is_true(jstream));
 
     if (is_streaming) {
-        stream_accum_t     s_acc;
-        memset(&s_acc, 0, sizeof s_acc);
-        anthropic_bridge_t bridge;
-        upstream_chunk_fn  chunk_fn = stream_chunk_handler;
-        void*              chunk_ctx = &s_acc;
-        s_acc.rc = rc;
-
-        if (is_anthropic) {
-            anthropic_bridge_init(&bridge, rc);
-            chunk_fn = anthropic_stream_chunk_handler;
-            chunk_ctx = &bridge;
+        stream_bridge_t* bridge = adapter->stream_bridge_new(rc, model);
+        if (bridge == NULL) {
+            aigate_write_error(rc, 500, "internal", "failed to initialize stream bridge");
+            json_decref(jbody);
+            key_rec_free(&krec);
+            free(merged);
+            return 0;
         }
 
         int      status = 0;
@@ -380,16 +250,16 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
         int      urc = upstream_stream_call(
             url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, silence_timeout_ms,
-            chunk_fn, chunk_ctx, &status);
-        bool headers_sent = is_anthropic ? bridge.headers_sent : s_acc.headers_sent;
+            (upstream_chunk_fn)adapter->stream_bridge_feed, bridge, &status);
+        bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
 
         if (!headers_sent && (urc != 0 || status >= 500)) {
             struct timespec sl = {0, 200 * 1000000}; /* 200ms */
             nanosleep(&sl, NULL);
             urc = upstream_stream_call(
                 url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, silence_timeout_ms,
-                chunk_fn, chunk_ctx, &status);
-            headers_sent = is_anthropic ? bridge.headers_sent : s_acc.headers_sent;
+                (upstream_chunk_fn)adapter->stream_bridge_feed, bridge, &status);
+            headers_sent = adapter->stream_bridge_headers_sent(bridge);
         }
         uint64_t lat = mono_ns() - t0;
         free(merged);
@@ -400,13 +270,14 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             }
             aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
             um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, lat, route.provider);
+            adapter->stream_bridge_free(bridge);
             json_decref(jbody);
             key_rec_free(&krec);
             return 0;
         }
 
-        long ptok = is_anthropic ? bridge.input_tokens : s_acc.prompt_tokens;
-        long ctok = is_anthropic ? bridge.output_tokens : s_acc.completion_tokens;
+        long ptok = 0, ctok = 0, cached_tok = 0;
+        adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
 
         if (urc != 0) {
             const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
@@ -423,19 +294,16 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             if (ptok + ctok > 0) {
                 rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
             }
+            adapter->stream_bridge_free(bridge);
             json_decref(jbody);
             key_rec_free(&krec);
             return 0;
         }
 
-        if (is_anthropic) {
-            anthropic_bridge_finish(&bridge);
-        } else if (rc->write != NULL) {
-            rc->write(rc->impl, "", 0, true);
-        }
-
+        adapter->stream_bridge_finish(bridge);
         um_record(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, lat, route.provider);
         rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+        adapter->stream_bridge_free(bridge);
 
         json_decref(jbody);
         key_rec_free(&krec);
@@ -473,53 +341,24 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return 0;
     }
 
-    if (is_anthropic) {
-        char*  oai_resp = NULL;
-        size_t oai_len = 0;
-        long   ptok = 0, ctok = 0;
-        if (provider_anthropic_resp_to_openai(ubody ? ubody : "", model, &oai_resp, &oai_len, &ptok, &ctok) != 0) {
-            aigate_write_error(rc, 502, "upstream_error", "failed to parse anthropic response");
-            free(ubody);
-            json_decref(jbody);
-            key_rec_free(&krec);
-            return 0;
-        }
-        um_record(ac->um, krec.key_id, model, status, ptok, ctok, lat, route.provider);
-        rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
-        int rv = aigate_write_json(rc, status, oai_resp, oai_len);
-        free(oai_resp);
+    char*  parsed_body = NULL;
+    size_t parsed_len = 0;
+    long   ptok = 0, ctok = 0, cached_tok = 0;
+    int    parsed_status = status;
+    if (adapter->parse_chat_response(ubody ? ubody : "", ulen, model, &parsed_status, &parsed_body, &parsed_len, &ptok, &ctok, &cached_tok) != 0) {
+        aigate_write_error(rc, 502, "upstream_error", "failed to parse upstream response");
         free(ubody);
         json_decref(jbody);
         key_rec_free(&krec);
-        return rv;
+        return 0;
     }
+    free(ubody);
 
-    /* --- OpenAI parse usage (missing → 0/0) --- */
-    long ptok = 0, ctok = 0;
-    if (ubody != NULL) {
-        json_t* jup = json_loads(ubody, 0, NULL);
-        if (jup != NULL) {
-            json_t* jusage = json_object_get(jup, "usage");
-            if (jusage != NULL) {
-                json_t* jp = json_object_get(jusage, "prompt_tokens");
-                json_t* jc = json_object_get(jusage, "completion_tokens");
-                if (json_is_integer(jp)) {
-                    ptok = json_integer_value(jp);
-                }
-                if (json_is_integer(jc)) {
-                    ctok = json_integer_value(jc);
-                }
-            }
-            json_decref(jup);
-        } else {
-            AIGATE_LOG_WARN("upstream body for %s is not JSON", model);
-        }
-    }
-    um_record(ac->um, krec.key_id, model, status, ptok, ctok, lat, route.provider);
+    um_record(ac->um, krec.key_id, model, parsed_status, ptok, ctok, lat, route.provider);
     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
-    int rv = aigate_write_json(rc, status, ubody ? ubody : "", ulen);
-    free(ubody);
+    int rv = aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
+    free(parsed_body);
     json_decref(jbody);
     key_rec_free(&krec);
     return rv;
