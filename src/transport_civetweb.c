@@ -30,6 +30,7 @@ struct cw_response_state {
     bool                  headers_sent;
     char                  header_buf[4096];
     size_t                header_len;
+    aigate_response_ctx*  rc;
 };
 
 static const char*
@@ -73,15 +74,19 @@ cw_write(void* impl, const void* buf, size_t len, bool fin)
     (void)fin;
     struct cw_response_state* st = impl;
     if (!st->headers_sent) {
+        int status = (st->rc != NULL && st->rc->status != 0) ? st->rc->status : st->status;
         mg_printf(st->conn,
                   "HTTP/1.1 %d %s\r\n%s\r\n",
-                  st->status,
-                  http_reason(st->status),
+                  status,
+                  http_reason(status),
                   st->header_buf);
         st->headers_sent = true;
     }
     if (len > 0 && buf != NULL) {
-        mg_write(st->conn, buf, len);
+        int n = mg_write(st->conn, buf, len);
+        if (n < 0) {
+            return -1;
+        }
     }
     return 0;
 }
@@ -147,6 +152,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     rc.impl = &resp_state;
     rc.set_header = cw_set_header;
     rc.write = cw_write;
+    resp_state.rc = &rc;
 
     aigate_request_ctx rq;
     memset(&rq, 0, sizeof rq);

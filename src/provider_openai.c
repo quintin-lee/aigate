@@ -74,6 +74,18 @@ provider_openai_build(const model_rec_t* route,
     }
     snprintf(url_out, url_cap, "%s", packed_url);
 
+    /* If stream is requested, auto-inject stream_options: {"include_usage": true} */
+    json_t* st = json_object_get(req, "stream");
+    if (st != NULL && json_is_true(st)) {
+        json_t* so = json_object_get(req, "stream_options");
+        if (so == NULL) {
+            so = json_pack("{s:b}", "include_usage", 1);
+            json_object_set_new(req, "stream_options", so);
+        } else if (json_is_object(so)) {
+            json_object_set_new(so, "include_usage", json_true());
+        }
+    }
+
     char* packed = json_dumps(req, JSON_COMPACT);
     json_decref(req);
     if (packed == NULL) {

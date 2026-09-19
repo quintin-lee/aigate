@@ -121,6 +121,13 @@ main(void)
     test_register("upstream_stream_normal", test_upstream_stream_normal);
     test_register("upstream_stream_silence_timeout", test_upstream_stream_silence_timeout);
 
+    extern void test_stream_pipeline_normal(void);
+    extern void test_stream_pipeline_early_error(void);
+    extern void test_stream_pipeline_silence_timeout(void);
+    test_register("stream_pipeline_normal", test_stream_pipeline_normal);
+    test_register("stream_pipeline_early_error", test_stream_pipeline_early_error);
+    test_register("stream_pipeline_silence_timeout", test_stream_pipeline_silence_timeout);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

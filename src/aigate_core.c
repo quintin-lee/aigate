@@ -19,6 +19,101 @@ mono_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+typedef struct {
+    aigate_response_ctx* rc;
+    bool                 headers_sent;
+    char                 line_buf[4096];
+    size_t               line_len;
+    long                 prompt_tokens;
+    long                 completion_tokens;
+    bool                 has_usage;
+} stream_accum_t;
+
+static void
+stream_process_line(stream_accum_t* acc, const char* line)
+{
+    const char* d = strstr(line, "data:");
+    if (d == NULL) {
+        return;
+    }
+    const char* u = strstr(d, "\"usage\"");
+    if (u == NULL) {
+        return;
+    }
+    const char* jstart = strchr(d, '{');
+    if (jstart == NULL) {
+        return;
+    }
+    json_t* root = json_loads(jstart, 0, NULL);
+    if (root == NULL) {
+        return;
+    }
+    json_t* jusage = json_object_get(root, "usage");
+    if (jusage != NULL && json_is_object(jusage)) {
+        json_t* jp = json_object_get(jusage, "prompt_tokens");
+        json_t* jc = json_object_get(jusage, "completion_tokens");
+        if (json_is_integer(jp)) {
+            acc->prompt_tokens = json_integer_value(jp);
+            acc->has_usage = true;
+        }
+        if (json_is_integer(jc)) {
+            acc->completion_tokens = json_integer_value(jc);
+            acc->has_usage = true;
+        }
+    }
+    json_decref(root);
+}
+
+static int
+stream_chunk_handler(void* user_data, const void* chunk, size_t len)
+{
+    stream_accum_t* acc = user_data;
+    if (!acc->headers_sent) {
+        acc->rc->status = 200;
+        if (acc->rc->set_header != NULL) {
+            acc->rc->set_header(acc->rc->impl, "Content-Type", "text/event-stream; charset=utf-8");
+            acc->rc->set_header(acc->rc->impl, "Cache-Control", "no-cache");
+            acc->rc->set_header(acc->rc->impl, "Connection", "keep-alive");
+        }
+        acc->headers_sent = true;
+        acc->rc->headers_sent = true;
+    }
+
+    if (acc->rc->write != NULL && len > 0) {
+        if (acc->rc->write(acc->rc->impl, chunk, len, false) != 0) {
+            return -1;
+        }
+    }
+
+    const char* p = chunk;
+    const char* end = p + len;
+    while (p < end) {
+        const char* nl = memchr(p, '\n', (size_t)(end - p));
+        if (nl != NULL) {
+            size_t seg = (size_t)(nl - p);
+            if (acc->line_len + seg < sizeof(acc->line_buf)) {
+                memcpy(acc->line_buf + acc->line_len, p, seg);
+                acc->line_len += seg;
+                acc->line_buf[acc->line_len] = '\0';
+                stream_process_line(acc, acc->line_buf);
+            }
+            acc->line_len = 0;
+            p = nl + 1;
+        } else {
+            size_t seg = (size_t)(end - p);
+            if (acc->line_len + seg < sizeof(acc->line_buf) - 1) {
+                memcpy(acc->line_buf + acc->line_len, p, seg);
+                acc->line_len += seg;
+                acc->line_buf[acc->line_len] = '\0';
+            } else {
+                acc->line_len = 0;
+            }
+            p = end;
+        }
+    }
+    return 0;
+}
+
 int
 aigate_core_init(aigate_core*   ac,
                  pg_store_t*    ps,
@@ -224,6 +319,78 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         json_decref(jbody);
         key_rec_free(&krec);
         free(merged);
+        return 0;
+    }
+
+    /* Check if streaming */
+    json_t* jstream = (jbody != NULL) ? json_object_get(jbody, "stream") : NULL;
+    bool is_streaming = (jstream != NULL && json_is_true(jstream));
+
+    if (is_streaming) {
+        stream_accum_t s_acc;
+        memset(&s_acc, 0, sizeof s_acc);
+        s_acc.rc = rc;
+
+        int      status = 0;
+        uint64_t t0 = mono_ns();
+        long     silence_timeout_ms =
+            ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
+        int      urc = upstream_stream_call(
+            url, route.upstream_key, NULL, 0, merged, mlen, silence_timeout_ms,
+            stream_chunk_handler, &s_acc, &status);
+        if (!s_acc.headers_sent && (urc != 0 || status >= 500)) {
+            struct timespec sl = {0, 200 * 1000000}; /* 200ms */
+            nanosleep(&sl, NULL);
+            urc = upstream_stream_call(
+                url, route.upstream_key, NULL, 0, merged, mlen, silence_timeout_ms,
+                stream_chunk_handler, &s_acc, &status);
+        }
+        uint64_t lat = mono_ns() - t0;
+        free(merged);
+
+        if (!s_acc.headers_sent) {
+            if (rc->set_header != NULL) {
+                rc->set_header(rc->impl, "X-Upstream-Provider", route.provider);
+            }
+            aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
+            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, lat, route.provider);
+            json_decref(jbody);
+            key_rec_free(&krec);
+            return 0;
+        }
+
+        if (urc != 0) {
+            const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
+                                                : "stream interrupted: transport error";
+            char sse_err[256];
+            snprintf(sse_err, sizeof sse_err,
+                     "data: {\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
+                     "data: [DONE]\n\n",
+                     err_msg);
+            if (rc->write != NULL) {
+                rc->write(rc->impl, sse_err, strlen(sse_err), true);
+            }
+            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, s_acc.prompt_tokens,
+                      s_acc.completion_tokens, lat, route.provider);
+            if (s_acc.prompt_tokens + s_acc.completion_tokens > 0) {
+                rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota,
+                                  s_acc.prompt_tokens + s_acc.completion_tokens);
+            }
+            json_decref(jbody);
+            key_rec_free(&krec);
+            return 0;
+        }
+
+        if (rc->write != NULL) {
+            rc->write(rc->impl, "", 0, true);
+        }
+        um_record(ac->um, krec.key_id, model, status > 0 ? status : 200, s_acc.prompt_tokens,
+                  s_acc.completion_tokens, lat, route.provider);
+        rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota,
+                          s_acc.prompt_tokens + s_acc.completion_tokens);
+
+        json_decref(jbody);
+        key_rec_free(&krec);
         return 0;
     }
 

@@ -129,6 +129,8 @@ struct stream_ctx {
     uint64_t          last_chunk_mono_ns;
     uint64_t          silence_timeout_ns;
     int               aborted;
+    CURL*             curl;
+    int               status;
 };
 
 static size_t
@@ -137,6 +139,18 @@ stream_write_cb(char* buf, size_t size, size_t nmemb, void* ud)
     struct stream_ctx* sc = ud;
     size_t             total = size * nmemb;
     sc->last_chunk_mono_ns = mono_ns();
+
+    if (sc->status == 0 && sc->curl != NULL) {
+        long code = 0;
+        if (curl_easy_getinfo(sc->curl, CURLINFO_RESPONSE_CODE, &code) == CURLE_OK) {
+            sc->status = (int)code;
+        }
+    }
+
+    if (sc->status >= 400) {
+        return total;
+    }
+
     if (sc->on_chunk != NULL && total > 0) {
         if (sc->on_chunk(sc->user_data, buf, total) != 0) {
             sc->aborted = 1;
@@ -193,6 +207,7 @@ upstream_stream_call(const char*       url,
     if (c == NULL) {
         goto done;
     }
+    sc.curl = c;
 
     int has_custom_auth = 0;
     if (extra_headers_kv != NULL && n_extra_headers > 0) {
