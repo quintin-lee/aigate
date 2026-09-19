@@ -806,3 +806,116 @@ def test_multi_upstream_load_balancing(gateway):
         assert r.status_code == 200, r.text
 
 
+def test_provider_management_and_multi_model_routing(gateway):
+    """Test provider CRUD, auto-sync of multiple models, direct API key resolution, and completions."""
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Create a provider with 2 models and a direct raw API key
+    provider_name = "e2e-provider-deepseek"
+    raw_api_key = "sk-deepseek-direct-key-987654"
+    models_list = ["ds-chat-v3", "ds-reasoner-r1"]
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "name": provider_name,
+            "provider_type": "deepseek",
+            "endpoint": mock_url,
+            "api_key": raw_api_key,
+            "models": models_list,
+            "enabled": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    p_data = resp.json()
+    assert p_data["created"] is True
+    provider_id = p_data["id"]
+    assert provider_id > 0
+
+    # 2. List providers and verify masked API key & models
+    resp = requests.get(f"{base_url}/admin/v1/providers", headers=admin_headers)
+    assert resp.status_code == 200
+    providers = resp.json().get("providers", [])
+    matched = [p for p in providers if p["id"] == provider_id]
+    assert len(matched) == 1
+    prov = matched[0]
+    assert prov["name"] == provider_name
+    assert prov["endpoint"] == mock_url
+    assert prov["models"] == models_list
+    assert prov["enabled"] == 1 or prov["enabled"] is True
+    # Masked API key display
+    assert "••••" in prov["api_key"]
+    assert prov["api_key"].endswith("7654")
+
+    # 3. Verify auto-synced models in /admin/v1/models
+    resp = requests.get(f"{base_url}/admin/v1/models", headers=admin_headers)
+    assert resp.status_code == 200
+    all_models = {m["name"]: m for m in resp.json().get("models", [])}
+    assert "ds-chat-v3" in all_models
+    assert "ds-reasoner-r1" in all_models
+    assert all_models["ds-chat-v3"]["endpoint"] == mock_url
+
+    # 4. Create client API key with access to ds-chat-v3
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "provider-client-key",
+            "allowed_models": ["ds-chat-v3"],
+            "rate_qps": 50,
+            "daily_token_quota": 50000,
+        },
+    )
+    assert resp.status_code == 201
+    client_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {client_key}",
+        "Content-Type": "application/json",
+    }
+
+    # 5. Successful chat completions using auto-synced model with provider's direct key
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={
+            "model": "ds-chat-v3",
+            "messages": [{"role": "user", "content": "hello deepseek"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    chat_res = resp.json()
+    assert "choices" in chat_res
+    assert chat_res["choices"][0]["message"]["content"] == "Hello from mock upstream!"
+
+    # 6. Update provider (PATCH)
+    resp = requests.patch(
+        f"{base_url}/admin/v1/providers/{provider_id}",
+        headers=admin_headers,
+        json={
+            "endpoint": f"{mock_url}/v2",
+            "enabled": False,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 7. Delete provider
+    resp = requests.delete(f"{base_url}/admin/v1/providers/{provider_id}", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+
+    # Verify provider list no longer contains this provider
+    resp = requests.get(f"{base_url}/admin/v1/providers", headers=admin_headers)
+    assert resp.status_code == 200
+    providers = resp.json().get("providers", [])
+    assert not any(p["id"] == provider_id for p in providers)
+
+
+

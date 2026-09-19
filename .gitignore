@@ -3,6 +3,8 @@ build/
 .asan/
 .cache/
 .superpowers/
+.codegraph/
+.cursor/
 docs/.superpowers/
 __pycache__/
 *.o

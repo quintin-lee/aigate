@@ -55,6 +55,39 @@ model_rec_free(model_rec_t* m)
     (void)m; /* fixed-size records; nothing dynamic to free */
 }
 
+void
+provider_rec_free(provider_rec_t* p)
+{
+    if (p == NULL) {
+        return;
+    }
+    if (p->models != NULL) {
+        for (int i = 0; i < p->n_models; i++) {
+            free(p->models[i]);
+        }
+        free(p->models);
+        p->models = NULL;
+    }
+    p->n_models = 0;
+}
+
+static int
+join_provider_models(const provider_rec_t* p, char* buf, size_t cap)
+{
+    int off = 0;
+    for (int i = 0; i < p->n_models; i++) {
+        int w = snprintf(buf + off, cap - (size_t)off, "%s%s", i > 0 ? "|" : "", p->models[i]);
+        if (w < 0 || (size_t)w >= cap - (size_t)off) {
+            return -1;
+        }
+        off += w;
+    }
+    if (p->n_models == 0 && cap > 0) {
+        buf[0] = '\0';
+    }
+    return 0;
+}
+
 static void
 copy_field(char* dst, size_t cap, const char* src)
 {
@@ -777,6 +810,224 @@ pq_delete_model(void* vctx, const char* name)
 }
 
 static int
+fill_provider_row(PGresult* res, int row, provider_rec_t* out)
+{
+    memset(out, 0, sizeof *out);
+    out->id = atol(PQgetvalue(res, row, 0));
+    copy_field(out->name, sizeof out->name, PQgetvalue(res, row, 1));
+    copy_field(out->provider_type, sizeof out->provider_type, PQgetvalue(res, row, 2));
+    copy_field(out->endpoint, sizeof out->endpoint, PQgetvalue(res, row, 3));
+    copy_field(out->api_key, sizeof out->api_key, PQgetvalue(res, row, 4));
+    if (parse_model_list(PQgetvalue(res, row, 5), &out->models, &out->n_models) != 0) {
+        provider_rec_free(out);
+        return -1;
+    }
+    out->enabled = strcmp(PQgetvalue(res, row, 6), "t") == 0;
+    const char* cat = PQgetvalue(res, row, 7);
+    if (cat != NULL && cat[0] != '\0') {
+        out->created_at = (time_t)atol(cat);
+    }
+    return 0;
+}
+
+static int
+pq_list_providers(void* vctx, provider_rec_t* out, int cap, int* n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT id, name, provider_type, endpoint, COALESCE(api_key, ''), "
+        "array_to_string(models, '|'), enabled, EXTRACT(EPOCH FROM created_at)::bigint "
+        "FROM providers ORDER BY id";
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_providers: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        fill_provider_row(res, i, &out[i]);
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
+static int
+pq_get_provider(void* vctx, long id, provider_rec_t* out)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT id, name, provider_type, endpoint, COALESCE(api_key, ''), "
+        "array_to_string(models, '|'), enabled, EXTRACT(EPOCH FROM created_at)::bigint "
+        "FROM providers WHERE id = $1";
+    char        id_str[32];
+    const char* val[1] = {id_str};
+    int         plen[1] = {0};
+    int         rc = -1;
+
+    snprintf(id_str, sizeof id_str, "%ld", id);
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, val, plen, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        if (res != NULL) {
+            AIGATE_LOG_ERROR("pg get_provider: %s", PQerrorMessage(px->db));
+        }
+        PQclear(res);
+        return -1;
+    }
+    if (PQntuples(res) > 0) {
+        fill_provider_row(res, 0, out);
+        rc = 0;
+    }
+    PQclear(res);
+    return rc;
+}
+
+static int
+pq_create_provider(void* vctx, const provider_rec_t* p, long* out_id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO providers(name, provider_type, endpoint, api_key, models, enabled) "
+        "VALUES($1, $2, $3, $4, "
+        "CASE WHEN $5 = '' THEN '{}'::text[] ELSE string_to_array($5, '|') END, $6::boolean) "
+        "RETURNING id";
+    char        joined[4096];
+    const char* vals[6];
+    int         plens[6] = {0};
+    long        id = -1;
+
+    if (join_provider_models(p, joined, sizeof joined) != 0) {
+        return -1;
+    }
+    vals[0] = p->name;
+    vals[1] = p->provider_type;
+    vals[2] = p->endpoint;
+    vals[3] = p->api_key;
+    vals[4] = joined;
+    vals[5] = p->enabled ? "true" : "false";
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 6, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
+        id = atol(PQgetvalue(res, 0, 0));
+    } else {
+        AIGATE_LOG_ERROR("pg create_provider: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    }
+    PQclear(res);
+    if (id < 0) {
+        return -1;
+    }
+    if (out_id != NULL) {
+        *out_id = id;
+    }
+    return 0;
+}
+
+static int
+pq_update_provider(void* vctx, const provider_rec_t* p, int mask)
+{
+    struct pq_ctx* px = vctx;
+    char           sql[2048], joined[4096], id[32];
+    const char*    vals[7];
+    int            plens[7] = {0};
+    int            nv = 0, off;
+
+    if (mask == 0) {
+        return 0;
+    }
+    if (mask & PMASK_MODELS) {
+        if (join_provider_models(p, joined, sizeof joined) != 0) {
+            return -1;
+        }
+    }
+    snprintf(id, sizeof id, "%ld", p->id);
+
+    off = snprintf(sql, sizeof sql, "UPDATE providers SET updated_at = now()");
+    if (mask & PMASK_TYPE) {
+        nv++;
+        off += snprintf(sql + off, sizeof sql - (size_t)off, ", provider_type = $%d", nv);
+        vals[nv - 1] = p->provider_type;
+    }
+    if (mask & PMASK_ENDPOINT) {
+        nv++;
+        off += snprintf(sql + off, sizeof sql - (size_t)off, ", endpoint = $%d", nv);
+        vals[nv - 1] = p->endpoint;
+    }
+    if (mask & PMASK_API_KEY) {
+        nv++;
+        off += snprintf(sql + off, sizeof sql - (size_t)off, ", api_key = $%d", nv);
+        vals[nv - 1] = p->api_key;
+    }
+    if (mask & PMASK_MODELS) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        ", models = CASE WHEN $%d = '' THEN '{}'::text[] "
+                        "ELSE string_to_array($%d, '|') END",
+                        nv, nv);
+        vals[nv - 1] = joined;
+    }
+    if (mask & PMASK_ENABLED) {
+        nv++;
+        off += snprintf(sql + off, sizeof sql - (size_t)off, ", enabled = $%d::boolean", nv);
+        vals[nv - 1] = p->enabled ? "true" : "false";
+    }
+    nv++;
+    off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE id = $%d", nv);
+    vals[nv - 1] = id;
+
+    int ok = 0;
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, sql, nv, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        ok = 1;
+    } else {
+        AIGATE_LOG_ERROR("pg update_provider: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    }
+    PQclear(res);
+    return ok ? 0 : -1;
+}
+
+static int
+pq_delete_provider(void* vctx, long id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "DELETE FROM providers WHERE id = $1";
+    char              id_str[32];
+    const char*       vals[1] = {id_str};
+    int               plens[1] = {0};
+    int               n = 0;
+
+    snprintf(id_str, sizeof id_str, "%ld", id);
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        n = atoi(PQcmdTuples(res));
+    } else {
+        AIGATE_LOG_ERROR("pg delete_provider: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+    }
+    PQclear(res);
+    return n > 0 ? 0 : -1;
+}
+
+static int
 pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
 {
     struct pq_ctx*    px = vctx;
@@ -935,6 +1186,11 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.create_model = pq_create_model;
     ps->ops.update_model = pq_update_model;
     ps->ops.delete_model = pq_delete_model;
+    ps->ops.list_providers = pq_list_providers;
+    ps->ops.get_provider = pq_get_provider;
+    ps->ops.create_provider = pq_create_provider;
+    ps->ops.update_provider = pq_update_provider;
+    ps->ops.delete_provider = pq_delete_provider;
     ps->ops.flush_usage = pq_flush_usage;
     ps->ops.query_usage = pq_query_usage;
     ps->ops.ctx = px;

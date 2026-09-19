@@ -143,6 +143,9 @@
         <button id="nav-overview" onclick="switchTab('overview')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-white bg-slate-800 shadow-sm">
           📊 总览
         </button>
+        <button id="nav-providers" onclick="switchTab('providers')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
+          🏢 供应商
+        </button>
         <button id="nav-models" onclick="switchTab('models')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
           🤖 模型
         </button>
@@ -193,6 +196,7 @@
     </div>
     <nav class="flex flex-col gap-1 p-3">
       <button data-tab="overview" onclick="switchTab('overview')" class="side-link side-link-active">📊 总览</button>
+      <button data-tab="providers" onclick="switchTab('providers')" class="side-link">🏢 供应商</button>
       <button data-tab="models" onclick="switchTab('models')" class="side-link">🤖 模型</button>
       <button data-tab="keys" onclick="switchTab('keys')" class="side-link">🔑 API 密钥</button>
       <button data-tab="usage" onclick="switchTab('usage')" class="side-link">📈 用量</button>
@@ -205,6 +209,7 @@
   <!-- 移动端导航 -->
   <div id="mobileNav" class="md:hidden flex overflow-x-auto custom-scroll bg-slate-900 border-b border-slate-800 p-2 space-x-2">
     <button onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-slate-800 font-medium whitespace-nowrap">📊 总览</button>
+    <button onclick="switchTab('providers')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🏢 供应商</button>
     <button onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🤖 模型</button>
     <button onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🔑 API 密钥</button>
     <button onclick="switchTab('usage')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">📈 用量</button>
@@ -361,6 +366,47 @@
               <span class="font-mono text-slate-200">OpenAI & Anthropic</span>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 标签页：供应商 ==================== -->
+    <div id="tab-providers" class="tab-content hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-white">模型供应商 (Providers)</h2>
+          <p class="text-xs text-slate-400 mt-0.5">集中配置供应商接入点与 API 密钥，统一管理并自动同步多个模型至网关</p>
+        </div>
+        <div class="flex items-center space-x-3">
+          <input type="text" id="providerSearchInput" oninput="filterProvidersTable()" placeholder="搜索供应商..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
+          <button onclick="openProviderModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/20 transition flex items-center space-x-1.5">
+            <span>+</span>
+            <span>新建供应商</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 供应商表格 -->
+      <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
+        <div class="overflow-x-auto custom-scroll">
+          <table class="w-full text-left border-collapse text-xs data-tbl">
+            <thead>
+              <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 uppercase tracking-wider font-semibold">
+                <th class="py-3 px-4">供应商 / 类型</th>
+                <th class="py-3 px-4">接入地址 (Endpoint)</th>
+                <th class="py-3 px-4">API 密钥</th>
+                <th class="py-3 px-4">包含模型</th>
+                <th class="py-3 px-4 text-center">状态</th>
+                <th class="py-3 px-4 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="providersTableBody" class="divide-y divide-slate-800/60">
+              <!-- 动态插入行 -->
+            </tbody>
+          </table>
+        </div>
+        <div id="providersEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
+          尚未配置模型供应商，点击 <span class="text-brand-400 font-semibold cursor-pointer" onclick="openProviderModal()">+ 新建供应商</span> 添加一个。
         </div>
       </div>
     </div>
@@ -664,6 +710,85 @@
     </div>
   </div>
 
+  <!-- 1.5 供应商配置弹窗 -->
+  <div id="providerModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll">
+      <div class="flex items-center justify-between">
+        <h3 id="providerModalTitle" class="text-lg font-bold text-white">新建供应商</h3>
+        <button onclick="closeProviderModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+      <form id="providerForm" onsubmit="handleProviderSubmit(event)" class="space-y-4 text-xs">
+        <input type="hidden" id="pFormId" value="">
+
+        <!-- 快捷模板填充 -->
+        <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1.5">
+          <div class="text-[11px] font-semibold text-slate-400">快速填入主流供应商接入点与模型预设：</div>
+          <div class="flex flex-wrap gap-1.5 text-[11px]">
+            <button type="button" onclick="applyProviderPreset('deepseek')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition">DeepSeek</button>
+            <button type="button" onclick="applyProviderPreset('openai')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-emerald-300 border border-slate-700 transition">OpenAI</button>
+            <button type="button" onclick="applyProviderPreset('anthropic')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-purple-300 border border-slate-700 transition">Anthropic</button>
+            <button type="button" onclick="applyProviderPreset('siliconflow')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition">SiliconFlow (硅基流动)</button>
+            <button type="button" onclick="applyProviderPreset('kimi')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-indigo-300 border border-slate-700 transition">Moonshot (Kimi)</button>
+            <button type="button" onclick="applyProviderPreset('ollama')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">Ollama 本地</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">供应商名称 / 标识 *</label>
+            <input type="text" id="pFormName" required placeholder="例如 deepseek、openai" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">协议类型 *</label>
+            <select id="pFormType" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-medium">
+              <option value="openai">OpenAI 兼容协议 (Chat Completions)</option>
+              <option value="anthropic">Anthropic 协议 (Messages API)</option>
+              <option value="deepseek">DeepSeek (OpenAI 兼容)</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="custom">自定义 (Custom)</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">接入基地址 (Endpoint) *</label>
+          <input type="text" id="pFormEndpoint" required placeholder="https://api.deepseek.com/v1" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="font-semibold text-slate-300">上游 API 密钥 (API Key)</label>
+            <span class="text-[11px] text-slate-400">页面直接配置 · 安全存储</span>
+          </div>
+          <div class="relative">
+            <input type="password" id="pFormApiKey" placeholder="输入 API Key，例如 sk-..." class="w-full px-3 py-2 pr-16 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+            <button type="button" onclick="togglePasswordVisibility('pFormApiKey', this)" class="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white text-xs px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">显示</button>
+          </div>
+          <p class="text-[10px] text-slate-500 mt-1">保存时网关将安全存储或使用 AIGATE_MASTER_KEY 自动加密保存，列表以掩码展示。编辑时若不变更密钥可留空或保持原有掩码。</p>
+        </div>
+
+        <div>
+          <div class="flex items-center justify-between mb-1">
+            <label class="font-semibold text-slate-300">绑定的模型列表 (多模型支持)</label>
+            <span class="text-[11px] text-slate-400">逗号或换行分隔</span>
+          </div>
+          <textarea id="pFormModels" rows="3" placeholder="deepseek-chat&#10;deepseek-reasoner" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono"></textarea>
+          <p class="text-[10px] text-slate-500 mt-1">保存后网关将自动为上述模型同步路由并绑定该供应商的地址与密钥凭证。</p>
+        </div>
+
+        <div class="flex items-center space-x-2 pt-1">
+          <input type="checkbox" id="pFormEnabled" checked class="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500 w-4 h-4">
+          <label for="pFormEnabled" class="text-xs text-slate-300 font-medium">启用供应商</label>
+        </div>
+
+        <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
+          <button type="button" onclick="closeProviderModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition">取消</button>
+          <button type="submit" class="px-4 py-2 rounded-xl font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">保存供应商与模型</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- 2. 注册/编辑模型弹窗 -->
   <div id="modelModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll">
@@ -809,12 +934,14 @@
     const state = {
       adminToken: localStorage.getItem("aigate_admin_token") || "",
       activeTab: "overview",
+      providers: [],
       models: [],
       keys: [],
       usageRows: [],
       metricsText: "",
       editingModelName: null,
       editingKeyId: null,
+      editingProviderId: null,
       overviewChart: null,
       streamAbortController: null,
     };
@@ -838,13 +965,14 @@
       // ESC closes any open modal
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
-          ["tokenModal", "modelModal", "keyModal", "newKeySuccessModal"].forEach(id => {
+          ["tokenModal", "providerModal", "modelModal", "keyModal", "newKeySuccessModal"].forEach(id => {
             document.getElementById(id).classList.add("hidden");
           });
           if (!document.getElementById("confirmModal").classList.contains("hidden")) {
             closeConfirmModal();
           }
           state.editingModelName = null;
+          state.editingProviderId = null;
         }
       });
     });
@@ -958,6 +1086,8 @@
     function refreshCurrentTab() {
       if (state.activeTab === "overview") {
         fetchOverviewData();
+      } else if (state.activeTab === "providers") {
+        fetchProviders();
       } else if (state.activeTab === "models") {
         fetchModels();
       } else if (state.activeTab === "keys") {
@@ -973,7 +1103,7 @@
 
     // --- Overview Logic ---
     async function fetchOverviewData() {
-      await Promise.all([fetchModels(), fetchKeys(), fetchUsageData(true)]);
+      await Promise.all([fetchModels(), fetchProviders(), fetchKeys(), fetchUsageData(true)]);
       renderOverviewStats();
     }
 
@@ -1057,6 +1187,254 @@
             }
           }
         });
+      }
+    }
+
+    // --- Providers Management ---
+    const PROVIDER_PRESETS = {
+      deepseek: {
+        type: "deepseek",
+        endpoint: "https://api.deepseek.com/v1",
+        models: ["deepseek-chat", "deepseek-reasoner"]
+      },
+      openai: {
+        type: "openai",
+        endpoint: "https://api.openai.com/v1",
+        models: ["gpt-4o", "gpt-4o-mini", "o1", "o3-mini"]
+      },
+      anthropic: {
+        type: "anthropic",
+        endpoint: "https://api.anthropic.com",
+        models: ["claude-3-7-sonnet-20250219", "claude-3-5-haiku-20241022"]
+      },
+      siliconflow: {
+        type: "openai",
+        endpoint: "https://api.siliconflow.cn/v1",
+        models: ["deepseek-ai/DeepSeek-V3", "deepseek-ai/DeepSeek-R1"]
+      },
+      kimi: {
+        type: "openai",
+        endpoint: "https://api.moonshot.cn/v1",
+        models: ["moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"]
+      },
+      ollama: {
+        type: "openai",
+        endpoint: "http://localhost:11434/v1",
+        models: ["llama3:latest", "qwen2.5:latest"]
+      }
+    };
+
+    function applyProviderPreset(name) {
+      const preset = PROVIDER_PRESETS[name];
+      if (!preset) return;
+      document.getElementById("pFormName").value = name;
+      document.getElementById("pFormType").value = preset.type;
+      document.getElementById("pFormEndpoint").value = preset.endpoint;
+      document.getElementById("pFormModels").value = preset.models.join("\n");
+      showToast(`已应用 ${name.toUpperCase()} 预设`, "info");
+    }
+
+    function togglePasswordVisibility(inputId, btn) {
+      const input = document.getElementById(inputId);
+      if (!input) return;
+      if (input.type === "password") {
+        input.type = "text";
+        btn.innerText = "隐藏";
+      } else {
+        input.type = "password";
+        btn.innerText = "显示";
+      }
+    }
+
+    async function fetchProviders() {
+      const tbody = document.getElementById("providersTableBody");
+      if (!tbody) return;
+      tbody.innerHTML = `<tr><td colspan="6" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载供应商…</td></tr>`;
+      document.getElementById("providersEmptyState").classList.add("hidden");
+      const resp = await apiCall("/admin/v1/providers");
+      if (!resp || !resp.ok) return;
+      const data = await resp.json();
+      state.providers = data.providers || [];
+      renderProvidersTable();
+    }
+
+    function renderProvidersTable(list = state.providers) {
+      const tbody = document.getElementById("providersTableBody");
+      const empty = document.getElementById("providersEmptyState");
+      if (!tbody || !empty) return;
+      tbody.innerHTML = "";
+
+      if (!list || list.length === 0) {
+        empty.classList.remove("hidden");
+        return;
+      }
+      empty.classList.add("hidden");
+
+      list.forEach(p => {
+        const id = p.id;
+        const name = p.name || "unknown";
+        const type = p.provider_type || "openai";
+        const endpoint = p.endpoint || "";
+        const apiKey = p.api_key || "";
+        const models = p.models || [];
+        const enabled = !!p.enabled;
+
+        let typeBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">${type}</span>`;
+        if (type === "anthropic") {
+          typeBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">Anthropic</span>`;
+        } else if (type === "deepseek") {
+          typeBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">DeepSeek</span>`;
+        }
+
+        const modelBadges = models.map(m =>
+          `<span class="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[10px] border border-slate-700/60 inline-block mr-1 mb-1">${m}</span>`
+        ).join("") || `<span class="text-slate-500 text-[11px]">（未绑定模型）</span>`;
+
+        const keyDisplay = apiKey
+          ? `<div class="flex items-center space-x-1.5 font-mono text-slate-300 text-xs">
+              <span>${apiKey}</span>
+              <button type="button" onclick="navigator.clipboard.writeText('${apiKey}'); showToast('已复制密钥掩码', 'info')" title="复制" class="text-slate-500 hover:text-slate-300 text-[11px]">📋</button>
+             </div>`
+          : `<span class="text-slate-500 text-[11px]">无密钥 / 本地</span>`;
+
+        const statusBadge = enabled
+          ? `<button onclick="toggleProviderEnabled(${id}, false)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition">● 已启用</button>`
+          : `<button onclick="toggleProviderEnabled(${id}, true)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition">○ 已停用</button>`;
+
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-900/40 transition";
+        tr.innerHTML = `
+          <td class="py-3 px-4 font-mono font-bold text-slate-100 whitespace-nowrap">
+            <div class="flex items-center space-x-2">
+              <span class="text-sm text-white">${name}</span>
+              ${typeBadge}
+            </div>
+          </td>
+          <td class="py-3 px-4">
+            <div class="font-mono text-slate-300 truncate max-w-[240px]" title="${endpoint}">${endpoint}</div>
+          </td>
+          <td class="py-3 px-4 whitespace-nowrap">
+            ${keyDisplay}
+          </td>
+          <td class="py-3 px-4">
+            <div class="max-w-[320px]">
+              ${modelBadges}
+            </div>
+          </td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">${statusBadge}</td>
+          <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
+            <button onclick="editProvider(${id})" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
+            <button onclick="deleteProvider(${id}, '${name}')" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterProvidersTable() {
+      const q = (document.getElementById("providerSearchInput").value || "").toLowerCase();
+      const filtered = state.providers.filter(p => {
+        const name = (p.name || "").toLowerCase();
+        const type = (p.provider_type || "").toLowerCase();
+        const endpoint = (p.endpoint || "").toLowerCase();
+        const matchModel = (p.models || []).some(m => m.toLowerCase().includes(q));
+        return name.includes(q) || type.includes(q) || endpoint.includes(q) || matchModel;
+      });
+      renderProvidersTable(filtered);
+    }
+
+    function openProviderModal(prov = null) {
+      state.editingProviderId = prov ? prov.id : null;
+      document.getElementById("providerModalTitle").innerText = prov ? `编辑供应商：${prov.name}` : "新建供应商";
+      document.getElementById("pFormId").value = prov ? prov.id : "";
+      document.getElementById("pFormName").value = prov ? prov.name : "";
+      document.getElementById("pFormName").readOnly = !!prov;
+      document.getElementById("pFormType").value = prov ? (prov.provider_type || "openai") : "openai";
+      document.getElementById("pFormEndpoint").value = prov ? prov.endpoint : "";
+      document.getElementById("pFormApiKey").value = prov ? prov.api_key : "";
+      document.getElementById("pFormModels").value = prov && prov.models ? prov.models.join("\n") : "";
+      document.getElementById("pFormEnabled").checked = prov ? !!prov.enabled : true;
+
+      document.getElementById("providerModal").classList.remove("hidden");
+    }
+
+    function closeProviderModal() {
+      document.getElementById("providerModal").classList.add("hidden");
+      state.editingProviderId = null;
+    }
+
+    function editProvider(id) {
+      const prov = state.providers.find(p => p.id === id);
+      if (prov) {
+        openProviderModal(prov);
+      }
+    }
+
+    async function handleProviderSubmit(e) {
+      e.preventDefault();
+      const id = document.getElementById("pFormId").value;
+      const name = document.getElementById("pFormName").value.trim();
+      const type = document.getElementById("pFormType").value;
+      const endpoint = document.getElementById("pFormEndpoint").value.trim();
+      const apiKey = document.getElementById("pFormApiKey").value.trim();
+      const rawModels = document.getElementById("pFormModels").value;
+      const enabled = document.getElementById("pFormEnabled").checked;
+
+      if (!name || !endpoint) {
+        showToast("供应商名称和接入地址为必填项", "warning");
+        return;
+      }
+
+      // Split models by comma or newline
+      const models = rawModels.split(/[\n,]+/).map(s => s.trim()).filter(Boolean);
+
+      const payload = {
+        name,
+        provider_type: type,
+        endpoint,
+        models,
+        enabled
+      };
+      if (apiKey) {
+        payload.api_key = apiKey;
+      }
+
+      const isEdit = !!id;
+      const url = isEdit ? `/admin/v1/providers/${id}` : "/admin/v1/providers";
+      const method = isEdit ? "PATCH" : "POST";
+
+      const resp = await apiCall(url, { method, body: payload });
+      if (!resp || !resp.ok) {
+        const err = resp ? await resp.json().catch(() => ({})) : {};
+        showToast(`保存失败: ${err.error?.message || "未知错误"}`, "error");
+        return;
+      }
+
+      showToast(`供应商 ${name} 及 ${models.length} 个模型已成功同步保存`, "success");
+      closeProviderModal();
+      fetchProviders();
+      fetchModels(); // Refresh models too since they were auto-synced
+    }
+
+    async function toggleProviderEnabled(id, enabled) {
+      const resp = await apiCall(`/admin/v1/providers/${id}`, {
+        method: "PATCH",
+        body: { enabled }
+      });
+      if (resp && resp.ok) {
+        showToast(`供应商状态已${enabled ? "启用" : "停用"}`, "success");
+        fetchProviders();
+        fetchModels();
+      }
+    }
+
+    async function deleteProvider(id, name) {
+      const ok = await showConfirmModal("确认删除供应商", `确定要删除供应商 "${name}" 吗？此操作不可撤销。已同步的模型将被保留。`);
+      if (!ok) return;
+      const resp = await apiCall(`/admin/v1/providers/${id}`, { method: "DELETE" });
+      if (resp && resp.ok) {
+        showToast(`供应商 "${name}" 已删除`, "success");
+        fetchProviders();
       }
     }
 

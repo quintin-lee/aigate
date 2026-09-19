@@ -91,8 +91,9 @@ resolve_single_key(model_router_t* mr,
         }
         return 0;
     }
-    AIGATE_LOG_ERROR("unknown key ref format: %s", key_ref);
-    return -1;
+    /* Direct API key string (e.g. sk-..., entered via Web Console or API) */
+    snprintf(out_key, out_sz, "%s", key_ref);
+    return 0;
 }
 
 static int

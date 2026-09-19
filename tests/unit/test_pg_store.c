@@ -18,13 +18,20 @@ struct fake_key {
     key_rec_t k;
 };
 
+struct fake_provider {
+    int            in_use;
+    provider_rec_t p;
+};
+
 struct fake_db {
-    struct fake_key keys[FAKE_CAP];
-    model_rec_t     models[FAKE_CAP];
-    int             n_models;
-    usage_row_t     usage[FAKE_CAP];
-    int             n_usage;
-    long            next_key_id;
+    struct fake_key      keys[FAKE_CAP];
+    model_rec_t          models[FAKE_CAP];
+    int                  n_models;
+    struct fake_provider providers[FAKE_CAP];
+    long                 next_provider_id;
+    usage_row_t          usage[FAKE_CAP];
+    int                  n_usage;
+    long                 next_key_id;
     /* counters for assertions */
     int lookup_calls;
 };
@@ -43,6 +50,27 @@ deep_copy_allowlist(key_rec_t* dst, const key_rec_t* src)
             dst->allowed_models[j] = strdup(src->allowed_models[j]);
             if (dst->allowed_models[j] == NULL) {
                 key_rec_free(dst);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int
+deep_copy_provider_models(provider_rec_t* dst, const provider_rec_t* src)
+{
+    dst->models = NULL;
+    dst->n_models = src->n_models;
+    if (src->n_models > 0) {
+        dst->models = malloc(sizeof(char*) * (size_t)src->n_models);
+        if (dst->models == NULL) {
+            return -1;
+        }
+        for (int j = 0; j < src->n_models; j++) {
+            dst->models[j] = strdup(src->models[j]);
+            if (dst->models[j] == NULL) {
+                provider_rec_free(dst);
                 return -1;
             }
         }
@@ -343,6 +371,109 @@ fake_query_usage(void*        ctx,
     return 0;
 }
 
+static int
+fake_list_providers(void* ctx, provider_rec_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (!fp->in_use) continue;
+        out[*n] = fp->p;
+        out[*n].models = NULL;
+        out[*n].n_models = 0;
+        if (deep_copy_provider_models(&out[*n], &fp->p) != 0) {
+            return -1;
+        }
+        (*n)++;
+    }
+    return 0;
+}
+
+static int
+fake_get_provider(void* ctx, long id, provider_rec_t* out)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (fp->in_use && fp->p.id == id) {
+            *out = fp->p;
+            out->models = NULL;
+            out->n_models = 0;
+            if (deep_copy_provider_models(out, &fp->p) != 0) {
+                return -1;
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_create_provider(void* ctx, const provider_rec_t* p, long* out_id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (!fp->in_use) {
+            fp->in_use = 1;
+            fp->p = *p;
+            fp->p.id = ++db->next_provider_id;
+            fp->p.models = NULL;
+            fp->p.n_models = 0;
+            if (deep_copy_provider_models(&fp->p, p) != 0) {
+                fp->in_use = 0;
+                return -1;
+            }
+            *out_id = fp->p.id;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_update_provider(void* ctx, const provider_rec_t* p, int mask)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (fp->in_use && fp->p.id == p->id) {
+            if (mask & PMASK_TYPE) snprintf(fp->p.provider_type, sizeof fp->p.provider_type, "%s", p->provider_type);
+            if (mask & PMASK_ENDPOINT) snprintf(fp->p.endpoint, sizeof fp->p.endpoint, "%s", p->endpoint);
+            if (mask & PMASK_API_KEY) snprintf(fp->p.api_key, sizeof fp->p.api_key, "%s", p->api_key);
+            if (mask & PMASK_ENABLED) fp->p.enabled = p->enabled;
+            if (mask & PMASK_MODELS) {
+                for (int m = 0; m < fp->p.n_models; m++) free(fp->p.models[m]);
+                free(fp->p.models);
+                fp->p.models = NULL;
+                fp->p.n_models = 0;
+                if (deep_copy_provider_models(&fp->p, p) != 0) return -1;
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_delete_provider(void* ctx, long id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (fp->in_use && fp->p.id == id) {
+            for (int m = 0; m < fp->p.n_models; m++) free(fp->p.models[m]);
+            free(fp->p.models);
+            fp->p.models = NULL;
+            fp->p.n_models = 0;
+            fp->in_use = 0;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
 {
@@ -359,6 +490,11 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->create_model = fake_create_model;
     ops->update_model = fake_update_model;
     ops->delete_model = fake_delete_model;
+    ops->list_providers = fake_list_providers;
+    ops->get_provider = fake_get_provider;
+    ops->create_provider = fake_create_provider;
+    ops->update_provider = fake_update_provider;
+    ops->delete_provider = fake_delete_provider;
     ops->flush_usage = fake_flush_usage;
     ops->query_usage = fake_query_usage;
 }
@@ -617,5 +753,121 @@ TEST_CASE(test_pg_real_roundtrip)
     TEST_ASSERT(pg_store_ops(ps)->create_key(pg_store_ops(ps)->ctx, &k, &id) == 0,
                 "real create_key");
     (void)id;
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_pg_fake_provider_crud)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    provider_rec_t p, out;
+    long           p_id = 0;
+
+    memset(&db, 0, sizeof db);
+    build_fake_ops(&db, &ops);
+    ps = pg_store_open("unused", &ops);
+    TEST_ASSERT(ps != NULL, "fake store open");
+
+    memset(&p, 0, sizeof p);
+    snprintf(p.name, sizeof p.name, "deepseek");
+    snprintf(p.provider_type, sizeof p.provider_type, "deepseek");
+    snprintf(p.endpoint, sizeof p.endpoint, "https://api.deepseek.com/v1");
+    snprintf(p.api_key, sizeof p.api_key, "sk-test-key-123");
+    p.enabled = 1;
+    char* mnames[] = {"deepseek-chat", "deepseek-reasoner"};
+    p.models = mnames;
+    p.n_models = 2;
+
+    TEST_ASSERT(pg_store_ops(ps)->create_provider(&db, &p, &p_id) == 0, "create provider");
+    TEST_ASSERT(p_id > 0, "provider id > 0");
+
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(pg_store_ops(ps)->get_provider(&db, p_id, &out) == 0, "get provider");
+    TEST_ASSERT(strcmp(out.name, "deepseek") == 0, "provider name");
+    TEST_ASSERT(strcmp(out.provider_type, "deepseek") == 0, "provider type");
+    TEST_ASSERT(strcmp(out.endpoint, "https://api.deepseek.com/v1") == 0, "provider endpoint");
+    TEST_ASSERT(strcmp(out.api_key, "sk-test-key-123") == 0, "provider api_key");
+    TEST_ASSERT(out.n_models == 2, "2 models");
+    TEST_ASSERT(strcmp(out.models[0], "deepseek-chat") == 0, "model 0");
+    TEST_ASSERT(strcmp(out.models[1], "deepseek-reasoner") == 0, "model 1");
+    provider_rec_free(&out);
+
+    provider_rec_t plist[4];
+    int n_prov = 0;
+    TEST_ASSERT(pg_store_ops(ps)->list_providers(&db, plist, 4, &n_prov) == 0, "list providers");
+    TEST_ASSERT(n_prov == 1, "1 provider listed");
+    provider_rec_free(&plist[0]);
+
+    p.id = p_id;
+    snprintf(p.endpoint, sizeof p.endpoint, "https://new.deepseek.com/v1");
+    p.enabled = 0;
+    TEST_ASSERT(pg_store_ops(ps)->update_provider(&db, &p, PMASK_ENDPOINT | PMASK_ENABLED) == 0, "update provider");
+
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(pg_store_ops(ps)->get_provider(&db, p_id, &out) == 0, "get updated provider");
+    TEST_ASSERT(strcmp(out.endpoint, "https://new.deepseek.com/v1") == 0, "endpoint updated");
+    TEST_ASSERT(out.enabled == 0, "enabled updated");
+    provider_rec_free(&out);
+
+    TEST_ASSERT(pg_store_ops(ps)->delete_provider(&db, p_id) == 0, "delete provider");
+    TEST_ASSERT(pg_store_ops(ps)->get_provider(&db, p_id, &out) == -1, "provider gone");
+
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_pg_real_provider_crud)
+{
+    const char* dsn = getenv("TEST_PG_DSN");
+    if (dsn == NULL || dsn[0] == '\0') {
+        return;
+    }
+
+    pg_store_t* ps = pg_store_open(dsn, NULL);
+    TEST_ASSERT(ps != NULL, "real store open");
+    TEST_ASSERT(pg_store_migrate(ps) == 0, "migrate");
+
+    provider_rec_t p, out;
+    long           p_id = 0;
+
+    memset(&p, 0, sizeof p);
+    snprintf(p.name, sizeof p.name, "itest-provider");
+    snprintf(p.provider_type, sizeof p.provider_type, "openai");
+    snprintf(p.endpoint, sizeof p.endpoint, "https://api.openai.com/v1");
+    snprintf(p.api_key, sizeof p.api_key, "sk-itest-raw-key");
+    p.enabled = 1;
+    char* mnames[] = {"itest-m1", "itest-m2"};
+    p.models = mnames;
+    p.n_models = 2;
+
+    const pg_ops_t* ops = pg_store_ops(ps);
+    /* In case old test left it, delete it first */
+    ops->delete_provider(ops->ctx, 999999);
+
+    TEST_ASSERT(ops->create_provider(ops->ctx, &p, &p_id) == 0, "real create_provider");
+    TEST_ASSERT(p_id > 0, "real provider id > 0");
+
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(ops->get_provider(ops->ctx, p_id, &out) == 0, "real get_provider");
+    TEST_ASSERT(strcmp(out.name, "itest-provider") == 0, "real name");
+    TEST_ASSERT(strcmp(out.endpoint, "https://api.openai.com/v1") == 0, "real endpoint");
+    TEST_ASSERT(strcmp(out.api_key, "sk-itest-raw-key") == 0, "real api_key");
+    TEST_ASSERT(out.n_models == 2, "real 2 models");
+    provider_rec_free(&out);
+
+    p.id = p_id;
+    snprintf(p.endpoint, sizeof p.endpoint, "https://updated.endpoint.com/v1");
+    p.enabled = 0;
+    TEST_ASSERT(ops->update_provider(ops->ctx, &p, PMASK_ENDPOINT | PMASK_ENABLED) == 0, "real update_provider");
+
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(ops->get_provider(ops->ctx, p_id, &out) == 0, "real get updated");
+    TEST_ASSERT(strcmp(out.endpoint, "https://updated.endpoint.com/v1") == 0, "real endpoint updated");
+    TEST_ASSERT(out.enabled == 0, "real disabled");
+    provider_rec_free(&out);
+
+    TEST_ASSERT(ops->delete_provider(ops->ctx, p_id) == 0, "real delete_provider");
+    TEST_ASSERT(ops->get_provider(ops->ctx, p_id, &out) == -1, "real deleted");
+
     pg_store_close(ps);
 }

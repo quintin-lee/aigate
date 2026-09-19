@@ -19,13 +19,20 @@ struct fake_key {
     key_rec_t k;
 };
 
+struct fake_provider {
+    int            in_use;
+    provider_rec_t p;
+};
+
 struct fake_db {
-    struct fake_key keys[FAKE_CAP];
-    model_rec_t     models[FAKE_CAP];
-    int             n_models;
-    usage_row_t     usage[FAKE_CAP];
-    int             n_usage;
-    long            next_key_id;
+    struct fake_key      keys[FAKE_CAP];
+    model_rec_t          models[FAKE_CAP];
+    int                  n_models;
+    struct fake_provider providers[FAKE_CAP];
+    long                 next_provider_id;
+    usage_row_t          usage[FAKE_CAP];
+    int                  n_usage;
+    long                 next_key_id;
 };
 
 static int
@@ -42,6 +49,27 @@ deep_copy_allowlist(key_rec_t* dst, const key_rec_t* src)
             dst->allowed_models[j] = strdup(src->allowed_models[j]);
             if (dst->allowed_models[j] == NULL) {
                 key_rec_free(dst);
+                return -1;
+            }
+        }
+    }
+    return 0;
+}
+
+static int
+deep_copy_provider_models(provider_rec_t* dst, const provider_rec_t* src)
+{
+    dst->models = NULL;
+    dst->n_models = src->n_models;
+    if (src->n_models > 0) {
+        dst->models = malloc(sizeof(char*) * (size_t)src->n_models);
+        if (dst->models == NULL) {
+            return -1;
+        }
+        for (int j = 0; j < src->n_models; j++) {
+            dst->models[j] = strdup(src->models[j]);
+            if (dst->models[j] == NULL) {
+                provider_rec_free(dst);
                 return -1;
             }
         }
@@ -298,6 +326,107 @@ fake_query_usage(void* ctx, long key_id, const char* model, time_t from, time_t 
     return 0;
 }
 
+static int
+fake_list_providers(void* ctx, provider_rec_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (!fp->in_use) continue;
+        out[*n] = fp->p;
+        out[*n].models = NULL;
+        out[*n].n_models = 0;
+        if (deep_copy_provider_models(&out[*n], &fp->p) != 0) {
+            return -1;
+        }
+        (*n)++;
+    }
+    return 0;
+}
+
+static int
+fake_get_provider(void* ctx, long id, provider_rec_t* out)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (fp->in_use && fp->p.id == id) {
+            *out = fp->p;
+            out->models = NULL;
+            out->n_models = 0;
+            if (deep_copy_provider_models(out, &fp->p) != 0) {
+                return -1;
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_create_provider(void* ctx, const provider_rec_t* p, long* out_id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (!fp->in_use) {
+            fp->in_use = 1;
+            fp->p = *p;
+            fp->p.id = ++db->next_provider_id;
+            fp->p.models = NULL;
+            fp->p.n_models = 0;
+            if (deep_copy_provider_models(&fp->p, p) != 0) {
+                fp->in_use = 0;
+                return -1;
+            }
+            *out_id = fp->p.id;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_update_provider(void* ctx, const provider_rec_t* p, int mask)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (fp->in_use && fp->p.id == p->id) {
+            if (mask & PMASK_TYPE) snprintf(fp->p.provider_type, sizeof fp->p.provider_type, "%s", p->provider_type);
+            if (mask & PMASK_ENDPOINT) snprintf(fp->p.endpoint, sizeof fp->p.endpoint, "%s", p->endpoint);
+            if (mask & PMASK_API_KEY) snprintf(fp->p.api_key, sizeof fp->p.api_key, "%s", p->api_key);
+            if (mask & PMASK_ENABLED) fp->p.enabled = p->enabled;
+            if (mask & PMASK_MODELS) {
+                for (int m = 0; m < fp->p.n_models; m++) free(fp->p.models[m]);
+                free(fp->p.models);
+                fp->p.models = NULL;
+                fp->p.n_models = 0;
+                if (deep_copy_provider_models(&fp->p, p) != 0) return -1;
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_delete_provider(void* ctx, long id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_provider* fp = &db->providers[i];
+        if (fp->in_use && fp->p.id == id) {
+            for (int m = 0; m < fp->p.n_models; m++) free(fp->p.models[m]);
+            free(fp->p.models);
+            fp->in_use = 0;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
 {
@@ -314,6 +443,11 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->create_model = fake_create_model;
     ops->update_model = fake_update_model;
     ops->delete_model = fake_delete_model;
+    ops->list_providers = fake_list_providers;
+    ops->get_provider = fake_get_provider;
+    ops->create_provider = fake_create_provider;
+    ops->update_provider = fake_update_provider;
+    ops->delete_provider = fake_delete_provider;
     ops->flush_usage = fake_flush_usage;
     ops->query_usage = fake_query_usage;
 }
@@ -324,6 +458,7 @@ setup_admin(struct fake_db* db, pg_ops_t* ops, pg_store_t** out_ps,
 {
     memset(db, 0, sizeof *db);
     db->next_key_id = 1;
+    db->next_provider_id = 1;
     build_fake_ops(db, ops);
     *out_ps = pg_store_open("unused", ops);
 
@@ -343,6 +478,9 @@ teardown_admin(pg_store_t* ps, aigate_core* core, struct fake_db* db)
     for (int i = 0; i < FAKE_CAP; i++) {
         if (db->keys[i].in_use) {
             key_rec_free(&db->keys[i].k);
+        }
+        if (db->providers[i].in_use) {
+            provider_rec_free(&db->providers[i].p);
         }
     }
     pg_store_close(ps);
@@ -640,6 +778,120 @@ TEST_CASE(test_admin_usage_query)
     TEST_ASSERT(json_integer_value(json_object_get(r0, "requests")) == 100, "requests == 100");
     TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 5000, "prompt_tokens == 5000");
     json_decref(j);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_create_and_list)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int status = 0;
+    char* body = NULL;
+    size_t len = 0;
+
+    const char* req =
+        "{\"name\":\"deepseek\",\"provider_type\":\"deepseek\",\"endpoint\":\"https://api.deepseek.com/v1\","
+        "\"api_key\":\"sk-0123456789abcdef\",\"models\":[\"deepseek-chat\",\"deepseek-reasoner\"],\"enabled\":true}";
+
+    int rc = admin_dispatch(&adm, "/admin/v1/providers", "POST", "admin-secret-token", req, strlen(req), &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 201, "provider create 201");
+    json_t* res = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(res != NULL, "parsed create resp");
+    TEST_ASSERT(json_is_true(json_object_get(res, "created")), "created is true");
+    long id = (long)json_integer_value(json_object_get(res, "id"));
+    TEST_ASSERT(id > 0, "id > 0");
+    json_decref(res);
+
+    /* Verify auto-synced models in models table */
+    model_rec_t m_chat, m_reasoner;
+    TEST_ASSERT(fake_get_model(&db, "deepseek-chat", &m_chat) == 0, "deepseek-chat created");
+    TEST_ASSERT(strcmp(m_chat.endpoint, "https://api.deepseek.com/v1") == 0, "m_chat endpoint matches");
+    TEST_ASSERT(strcmp(m_chat.upstream_key_ref, "sk-0123456789abcdef") == 0, "m_chat key matches");
+    TEST_ASSERT(fake_get_model(&db, "deepseek-reasoner", &m_reasoner) == 0, "deepseek-reasoner created");
+
+    /* List providers */
+    body = NULL;
+    rc = admin_dispatch(&adm, "/admin/v1/providers", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "provider list 200");
+    res = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(res != NULL, "parsed list resp");
+    json_t* parr = json_object_get(res, "providers");
+    TEST_ASSERT(parr != NULL && json_array_size(parr) == 1, "1 provider in list");
+    json_t* p0 = json_array_get(parr, 0);
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(p0, "name")), "deepseek") == 0, "name deepseek");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(p0, "endpoint")), "https://api.deepseek.com/v1") == 0, "endpoint deepseek");
+    /* Masked API key */
+    const char* masked = json_string_value(json_object_get(p0, "api_key"));
+    TEST_ASSERT(masked != NULL && strstr(masked, "••••") != NULL, "masked api key contains dots");
+    json_t* marr = json_object_get(p0, "models");
+    TEST_ASSERT(marr != NULL && json_array_size(marr) == 2, "2 models in provider");
+    json_decref(res);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_patch_and_delete)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int status = 0;
+    char* body = NULL;
+    size_t len = 0;
+
+    const char* req =
+        "{\"name\":\"anthropic\",\"provider_type\":\"anthropic\",\"endpoint\":\"https://api.anthropic.com\","
+        "\"api_key\":\"sk-ant-testkey123\",\"models\":[\"claude-3-7-sonnet\"],\"enabled\":true}";
+
+    int rc = admin_dispatch(&adm, "/admin/v1/providers", "POST", "admin-secret-token", req, strlen(req), &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 201, "anthropic created");
+    free(body);
+
+    /* PATCH provider 1 */
+    const char* patch_req =
+        "{\"endpoint\":\"https://api.anthropic.com/v2\",\"models\":[\"claude-3-7-sonnet\",\"claude-3-5-haiku\"],\"enabled\":false}";
+    body = NULL;
+    rc = admin_dispatch(&adm, "/admin/v1/providers/1", "PATCH", "admin-secret-token", patch_req, strlen(patch_req), &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "provider patched");
+    free(body);
+
+    /* Verify updated models in models table */
+    model_rec_t m;
+    TEST_ASSERT(fake_get_model(&db, "claude-3-7-sonnet", &m) == 0, "claude-3-7-sonnet exists");
+    TEST_ASSERT(strcmp(m.endpoint, "https://api.anthropic.com/v2") == 0, "endpoint updated");
+    TEST_ASSERT(m.enabled == 0, "enabled updated to 0");
+    TEST_ASSERT(fake_get_model(&db, "claude-3-5-haiku", &m) == 0, "claude-3-5-haiku auto-created");
+
+    /* DELETE provider 1 */
+    body = NULL;
+    rc = admin_dispatch(&adm, "/admin/v1/providers/1", "DELETE", "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "provider deleted");
+    free(body);
+
+    /* List should be empty */
+    body = NULL;
+    rc = admin_dispatch(&adm, "/admin/v1/providers", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "provider list after delete");
+    json_t* res = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(json_array_size(json_object_get(res, "providers")) == 0, "0 providers");
+    json_decref(res);
 
     teardown_admin(ps, &core, &db);
 }

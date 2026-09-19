@@ -29,7 +29,7 @@ typedef struct key_rec {
 typedef struct upstream_target {
     char provider[32];
     char endpoint[512];
-    char upstream_key_ref[256];
+    char upstream_key_ref[1024];
     char upstream_key[1024]; /* resolved in-memory */
     int  weight;             /* weight > 0, default 1 */
     int  priority;           /* 0 = primary tier, 1 = fallback tier, etc. */
@@ -40,7 +40,7 @@ typedef struct model_rec {
     char name[128];
     char provider[32];              /* primary / fallback default */
     char endpoint[512];             /* primary / fallback default */
-    char upstream_key_ref[256];     /* "env:NAME" | "pg:<blob>" | "" */
+    char upstream_key_ref[1024];    /* "env:NAME" | "pg:<blob>" | "" */
     char default_params_json[1024]; /* jansson object; default_params win < request */
     int  enabled;
     char upstream_key[1024];        /* filled by model_router, not stored */
@@ -60,7 +60,7 @@ typedef struct usage_row {
     long   cached_prompt_tokens;
 } usage_row_t;
 
-/* update_key / update_model field masks (bit flags). */
+/* update_key / update_model / update_provider field masks (bit flags). */
 #define KMASK_RATE (1 << 0)
 #define KMASK_QUOTA (1 << 1)
 #define KMASK_ALLOWLIST (1 << 2)
@@ -72,6 +72,25 @@ typedef struct usage_row {
 #define MMASK_KEYREF (1 << 3)
 #define MMASK_TARGETS (1 << 4)
 #define MMASK_LB_POLICY (1 << 5)
+
+#define PMASK_TYPE (1 << 0)
+#define PMASK_ENDPOINT (1 << 1)
+#define PMASK_API_KEY (1 << 2)
+#define PMASK_MODELS (1 << 3)
+#define PMASK_ENABLED (1 << 4)
+
+/** @brief Provider record (providers row). */
+typedef struct provider_rec {
+    long   id;
+    char   name[64];
+    char   provider_type[32];
+    char   endpoint[512];
+    char   api_key[1024];
+    char** models;
+    int    n_models;
+    int    enabled;
+    time_t created_at;
+} provider_rec_t;
 
 /** @brief Uniform persistence operations; real libpq or in-memory fakes.
  *
@@ -95,6 +114,12 @@ typedef struct pg_ops {
     int (*create_model)(void* ctx, const model_rec_t* m);
     int (*update_model)(void* ctx, const model_rec_t* m, int mask);
     int (*delete_model)(void* ctx, const char* name);
+
+    int (*list_providers)(void* ctx, provider_rec_t* out, int cap, int* n);
+    int (*get_provider)(void* ctx, long id, provider_rec_t* out);
+    int (*create_provider)(void* ctx, const provider_rec_t* p, long* out_id);
+    int (*update_provider)(void* ctx, const provider_rec_t* p, int mask);
+    int (*delete_provider)(void* ctx, long id);
 
     int (*flush_usage)(void* ctx, const usage_row_t* rows, int n);
     int (*query_usage)(void*        ctx,
@@ -132,5 +157,8 @@ void key_rec_free(key_rec_t* k);
 
 /** @brief Free a model_rec_t populated by list_models (frees endpoint copies). */
 void model_rec_free(model_rec_t* m);
+
+/** @brief Free a provider_rec_t populated by list_providers or get_provider. */
+void provider_rec_free(provider_rec_t* p);
 
 #endif /* AIGATE_PG_STORE_H */

@@ -61,3 +61,18 @@ ALTER TABLE models ADD COLUMN IF NOT EXISTS targets JSONB NOT NULL DEFAULT '[]';
 ALTER TABLE models ADD COLUMN IF NOT EXISTS lb_policy TEXT NOT NULL DEFAULT 'priority';
 INSERT INTO schema_migrations(version) VALUES (3) ON CONFLICT (version) DO NOTHING;
 
+-- Migration v4: upstream providers management
+CREATE TABLE IF NOT EXISTS providers (
+  id            BIGSERIAL PRIMARY KEY,
+  name          TEXT NOT NULL UNIQUE,
+  provider_type TEXT NOT NULL,
+  endpoint      TEXT NOT NULL,
+  api_key       TEXT NOT NULL DEFAULT '',
+  models        TEXT[] NOT NULL DEFAULT '{}',
+  enabled       BOOLEAN NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+INSERT INTO schema_migrations(version) VALUES (4) ON CONFLICT (version) DO NOTHING;
+
+

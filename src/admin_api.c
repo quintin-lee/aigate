@@ -14,6 +14,7 @@
 #include "auth_key.h"
 #include "circuit_breaker.h"
 #include "model_router.h"
+#include "secrets.h"
 #include "sha256.h"
 
 #include <jansson.h>
@@ -25,9 +26,28 @@
 
 #define KEY_LIST_CAP 512
 #define MODEL_LIST_CAP 256
+#define PROVIDER_LIST_CAP 128
 #define USAGE_LIST_CAP 256
 
 /* ------------------------------------------------------------ helpers */
+
+static void
+copy_field(char* dst, size_t cap, const char* src)
+{
+    if (cap == 0) {
+        return;
+    }
+    if (src == NULL) {
+        dst[0] = '\0';
+        return;
+    }
+    size_t len = strlen(src);
+    if (len >= cap) {
+        len = cap - 1;
+    }
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
 
 static int
 admin_auth_ok(admin_ctx_t* adm, const char* bearer)
@@ -655,6 +675,361 @@ model_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char
     return finish_json(status, body, len, 200, out);
 }
 
+/* ------------------------------------------------------------ providers */
+
+static void
+mask_api_key(const char* raw_or_ref, char* out, size_t out_cap, const uint8_t* master, int have_master)
+{
+    char plain[1024];
+    plain[0] = '\0';
+    if (raw_or_ref == NULL || raw_or_ref[0] == '\0') {
+        out[0] = '\0';
+        return;
+    }
+    if (strncmp(raw_or_ref, "pg:", 3) == 0) {
+        if (have_master && master != NULL) {
+            secret_decrypt(master, raw_or_ref + 3, plain, sizeof plain, NULL);
+        }
+    } else {
+        snprintf(plain, sizeof plain, "%s", raw_or_ref);
+    }
+    size_t len = strlen(plain);
+    if (len == 0) {
+        snprintf(out, out_cap, "%s", raw_or_ref[0] != '\0' ? "••••••••" : "");
+        return;
+    }
+    if (len <= 8) {
+        snprintf(out, out_cap, "••••••••");
+        return;
+    }
+    char prefix[8];
+    size_t pre_len = (len > 7 && strncmp(plain, "sk-", 3) == 0) ? 3 : 2;
+    memcpy(prefix, plain, pre_len);
+    prefix[pre_len] = '\0';
+    const char* suffix = plain + (len - 4);
+    snprintf(out, out_cap, "%s••••%s", prefix, suffix);
+}
+
+static void
+process_api_key_for_storage(admin_ctx_t* adm, const char* input_key, char* out_key, size_t out_sz)
+{
+    if (input_key == NULL || input_key[0] == '\0') {
+        out_key[0] = '\0';
+        return;
+    }
+    if (strncmp(input_key, "env:", 4) == 0 || strncmp(input_key, "pg:", 3) == 0) {
+        snprintf(out_key, out_sz, "%s", input_key);
+        return;
+    }
+    if (adm->ac != NULL && adm->ac->router != NULL && adm->ac->router->have_master) {
+        char enc[1024];
+        if (secret_encrypt(adm->ac->router->master, input_key, strlen(input_key), enc, sizeof enc) == 0) {
+            snprintf(out_key, out_sz, "pg:%s", enc);
+            return;
+        }
+    }
+    snprintf(out_key, out_sz, "%s", input_key);
+}
+
+static int
+parse_provider_models_json(const json_t* jarr, char*** out_models, int* out_n)
+{
+    *out_models = NULL;
+    *out_n = 0;
+    if (jarr == NULL || !json_is_array(jarr)) {
+        return 0;
+    }
+    size_t sz = json_array_size(jarr);
+    if (sz == 0) {
+        return 0;
+    }
+    if (sz > 256) {
+        return -1;
+    }
+    char** arr = calloc(sz, sizeof(char*));
+    if (arr == NULL) {
+        return -1;
+    }
+    size_t idx;
+    json_t* item;
+    int count = 0;
+    json_array_foreach(jarr, idx, item) {
+        if (json_is_string(item)) {
+            const char* s = json_string_value(item);
+            if (s != NULL && s[0] != '\0') {
+                arr[count] = strdup(s);
+                if (arr[count] == NULL) {
+                    for (int j = 0; j < count; j++) {
+                        free(arr[j]);
+                    }
+                    free(arr);
+                    return -1;
+                }
+                count++;
+            }
+        }
+    }
+    *out_models = arr;
+    *out_n = count;
+    return 0;
+}
+
+static void
+sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
+{
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    for (int i = 0; i < p->n_models; i++) {
+        const char* m_name = p->models[i];
+        if (m_name == NULL || m_name[0] == '\0') {
+            continue;
+        }
+        model_rec_t existing;
+        memset(&existing, 0, sizeof existing);
+        if (ops->get_model(ops->ctx, m_name, &existing) == 0) {
+            copy_field(existing.endpoint, sizeof existing.endpoint, p->endpoint);
+            copy_field(existing.upstream_key_ref, sizeof existing.upstream_key_ref, p->api_key);
+            existing.enabled = p->enabled;
+            if (p->provider_type[0] != '\0') {
+                copy_field(existing.provider, sizeof existing.provider, p->provider_type);
+            }
+            if (existing.n_targets > 0) {
+                copy_field(existing.targets[0].endpoint, sizeof existing.targets[0].endpoint, p->endpoint);
+                copy_field(existing.targets[0].upstream_key_ref, sizeof existing.targets[0].upstream_key_ref, p->api_key);
+                if (p->provider_type[0] != '\0') {
+                    copy_field(existing.targets[0].provider, sizeof existing.targets[0].provider, p->provider_type);
+                }
+                ops->update_model(ops->ctx, &existing, MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED | MMASK_TARGETS);
+            } else {
+                ops->update_model(ops->ctx, &existing, MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED);
+            }
+            model_rec_free(&existing);
+        } else {
+            model_rec_t m;
+            memset(&m, 0, sizeof m);
+            copy_field(m.name, sizeof m.name, m_name);
+            copy_field(m.provider, sizeof m.provider, p->provider_type[0] != '\0' ? p->provider_type : "openai");
+            copy_field(m.endpoint, sizeof m.endpoint, p->endpoint);
+            copy_field(m.upstream_key_ref, sizeof m.upstream_key_ref, p->api_key);
+            copy_field(m.lb_policy, sizeof m.lb_policy, "priority");
+            m.enabled = p->enabled;
+            ops->create_model(ops->ctx, &m);
+        }
+        if (adm->ac != NULL && adm->ac->router != NULL) {
+            model_router_invalidate(adm->ac->router, m_name);
+        }
+    }
+}
+
+static int
+provider_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+    const char* name = jstring(jbody, "name", NULL);
+    const char* endpoint = jstring(jbody, "endpoint", NULL);
+    if (name == NULL || name[0] == '\0' || endpoint == NULL || endpoint[0] == '\0') {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "name and endpoint required");
+    }
+
+    provider_rec_t p;
+    memset(&p, 0, sizeof p);
+    snprintf(p.name, sizeof p.name, "%s", name);
+    snprintf(p.endpoint, sizeof p.endpoint, "%s", endpoint);
+
+    const char* ptype = jstring(jbody, "provider_type", NULL);
+    if (ptype == NULL || ptype[0] == '\0') {
+        ptype = jstring(jbody, "provider", "openai");
+    }
+    snprintf(p.provider_type, sizeof p.provider_type, "%s", ptype);
+
+    const char* key = jstring(jbody, "api_key", "");
+    process_api_key_for_storage(adm, key, p.api_key, sizeof p.api_key);
+
+    json_t* jenabled = json_object_get(jbody, "enabled");
+    p.enabled = (jenabled == NULL || json_is_true(jenabled));
+
+    json_t* jmodels = json_object_get(jbody, "models");
+    if (parse_provider_models_json(jmodels, &p.models, &p.n_models) != 0) {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "invalid models array");
+    }
+    json_decref(jbody);
+
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    long new_id = 0;
+    if (ops->create_provider(ops->ctx, &p, &new_id) != 0) {
+        provider_rec_free(&p);
+        return finish_error(status, body, len, 400, "bad_request", "provider create failed (duplicate name?)");
+    }
+    p.id = new_id;
+
+    /* Auto-sync models into models table */
+    sync_provider_models(adm, &p);
+
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(new_id));
+    json_object_set_new(out, "name", json_string(p.name));
+    json_object_set_new(out, "created", json_true());
+    provider_rec_free(&p);
+    return finish_json(status, body, len, 201, out);
+}
+
+static int
+provider_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    provider_rec_t* recs = calloc(PROVIDER_LIST_CAP, sizeof *recs);
+    if (recs == NULL) {
+        return -1;
+    }
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    int n = 0;
+    if (ops->list_providers(ops->ctx, recs, PROVIDER_LIST_CAP, &n) != 0) {
+        free(recs);
+        return finish_error(status, body, len, 500, "internal_error", "provider list failed");
+    }
+
+    const uint8_t* master = NULL;
+    int have_master = 0;
+    if (adm->ac != NULL && adm->ac->router != NULL && adm->ac->router->have_master) {
+        master = adm->ac->router->master;
+        have_master = 1;
+    }
+
+    json_t* arr = json_array();
+    for (int i = 0; i < n; i++) {
+        json_t* o = json_object();
+        json_object_set_new(o, "id", json_integer(recs[i].id));
+        json_object_set_new(o, "name", json_string(recs[i].name));
+        json_object_set_new(o, "provider_type", json_string(recs[i].provider_type));
+        json_object_set_new(o, "endpoint", json_string(recs[i].endpoint));
+
+        char masked[128];
+        mask_api_key(recs[i].api_key, masked, sizeof masked, master, have_master);
+        json_object_set_new(o, "api_key", json_string(masked));
+        json_object_set_new(o, "has_key", json_boolean(recs[i].api_key[0] != '\0'));
+        json_object_set_new(o, "enabled", json_integer(recs[i].enabled));
+        json_object_set_new(o, "created_at", json_integer((json_int_t)recs[i].created_at));
+
+        json_t* marr = json_array();
+        for (int m = 0; m < recs[i].n_models; m++) {
+            json_array_append_new(marr, json_string(recs[i].models[m]));
+        }
+        json_object_set_new(o, "models", marr);
+
+        json_array_append_new(arr, o);
+        provider_rec_free(&recs[i]);
+    }
+    free(recs);
+
+    json_t* root = json_object();
+    json_object_set_new(root, "providers", arr);
+    return finish_json(status, body, len, 200, root);
+}
+
+static int
+provider_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
+{
+    if (rest[0] == '\0') {
+        return finish_error(status, body, len, 404, "not_found", "provider id not found");
+    }
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid provider id");
+    }
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    provider_rec_t existing;
+    if (ops->get_provider(ops->ctx, id, &existing) != 0) {
+        return finish_error(status, body, len, 404, "not_found", "provider not found");
+    }
+
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        provider_rec_free(&existing);
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+    int mask = 0;
+    provider_rec_t p = existing;
+
+    json_t* v = json_object_get(jbody, "provider_type");
+    if (v != NULL && json_is_string(v)) {
+        snprintf(p.provider_type, sizeof p.provider_type, "%s", json_string_value(v));
+        mask |= PMASK_TYPE;
+    }
+    v = json_object_get(jbody, "endpoint");
+    if (v != NULL && json_is_string(v)) {
+        snprintf(p.endpoint, sizeof p.endpoint, "%s", json_string_value(v));
+        mask |= PMASK_ENDPOINT;
+    }
+    v = json_object_get(jbody, "api_key");
+    if (v != NULL && json_is_string(v)) {
+        const char* raw_key = json_string_value(v);
+        /* If user provided a new key and didn't just submit masked dots */
+        if (strstr(raw_key, "••••") == NULL && raw_key[0] != '\0') {
+            process_api_key_for_storage(adm, raw_key, p.api_key, sizeof p.api_key);
+            mask |= PMASK_API_KEY;
+        }
+    }
+    v = json_object_get(jbody, "enabled");
+    if (v != NULL && json_is_boolean(v)) {
+        p.enabled = json_is_true(v);
+        mask |= PMASK_ENABLED;
+    }
+    v = json_object_get(jbody, "models");
+    if (v != NULL && json_is_array(v)) {
+        char** new_models = NULL;
+        int n_new = 0;
+        if (parse_provider_models_json(v, &new_models, &n_new) == 0) {
+            for (int i = 0; i < p.n_models; i++) {
+                free(p.models[i]);
+            }
+            free(p.models);
+            p.models = new_models;
+            p.n_models = n_new;
+            mask |= PMASK_MODELS;
+        }
+    }
+    json_decref(jbody);
+
+    int rc = ops->update_provider(ops->ctx, &p, mask);
+    if (rc != 0) {
+        provider_rec_free(&p);
+        return finish_error(status, body, len, 500, "internal_error", "provider update failed");
+    }
+
+    /* Auto-sync models to models table */
+    sync_provider_models(adm, &p);
+
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(p.id));
+    json_object_set_new(out, "name", json_string(p.name));
+    json_object_set_new(out, "updated", json_true());
+    provider_rec_free(&p);
+    return finish_json(status, body, len, 200, out);
+}
+
+static int
+provider_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
+{
+    if (rest[0] == '\0') {
+        return finish_error(status, body, len, 404, "not_found", "provider id not found");
+    }
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid provider id");
+    }
+    int rc = pg_store_ops(adm->ps)->delete_provider(pg_store_ops(adm->ps)->ctx, id);
+    if (rc != 0) {
+        return finish_error(status, body, len, 404, "not_found", "provider not found");
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(id));
+    json_object_set_new(out, "deleted", json_true());
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ usage */
 
 /** @brief "YYYY-MM-DD" (UTC) or ""/"today" → UTC-midnight time_t. */
@@ -836,6 +1211,23 @@ admin_dispatch(admin_ctx_t* adm, const char* uri, const char* method, const char
             }
             if (strcmp(method, "DELETE") == 0) {
                 return model_delete(adm, out_status, out_body, out_len, rest + 7);
+            }
+        }
+    } else if (strncmp(rest, "providers", 9) == 0) {
+        if (strcmp(rest, "providers") == 0) {
+            if (strcmp(method, "POST") == 0) {
+                return provider_create(adm, out_status, out_body, out_len, body);
+            }
+            if (strcmp(method, "GET") == 0) {
+                return provider_list(adm, out_status, out_body, out_len);
+            }
+        }
+        if (rest[9] == '/') {
+            if (strcmp(method, "PATCH") == 0 || strcmp(method, "PUT") == 0) {
+                return provider_patch(adm, out_status, out_body, out_len, rest + 10, body);
+            }
+            if (strcmp(method, "DELETE") == 0) {
+                return provider_delete(adm, out_status, out_body, out_len, rest + 10);
             }
         }
     } else if (strcmp(rest, "usage") == 0 && strcmp(method, "GET") == 0) {
