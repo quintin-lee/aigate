@@ -40,8 +40,50 @@
     #mainNav { display: none; }
     #mobileNav { display: flex; }
     @media (min-width: 768px) {
-      #mainNav { display: flex !important; }
+      #mainNav { display: none !important; }
       #mobileNav { display: none !important; }
+    }
+    /* 视觉重设计色板 token */
+    :root {
+      --bg-side: #0f172a; --bg-main: #1e293b; --bg-card: #0f172a;
+      --line: #334155; --brand: #6366f1; --ok: #22c55e; --amber: #f59e0b;
+      --blue: #3b82f6; --danger: #ef4444; --txt: #f1f5f9; --txt-dim: #94a3b8;
+    }
+    /* 侧边栏：定位/显隐纯 CSS 实现，有无 Tailwind 均一致 */
+    #sideNav { display: none; }
+    #sideNav.side-open {
+      display: flex; position: fixed; top: 0; bottom: 0; left: 0; width: 16rem;
+      flex-direction: column; background: var(--bg-side);
+      border-right: 1px solid var(--line); z-index: 50;
+    }
+    @media (min-width: 768px) {
+      #sideNav {
+        display: flex; position: fixed; top: 0; bottom: 0; left: 0; width: 15rem;
+        flex-direction: column; background: var(--bg-side);
+        border-right: 1px solid var(--line); z-index: 40;
+      }
+      #mainNav { display: none !important; }
+      #pageMain { margin-left: 15rem; }
+    }
+    /* 侧边导航链接 */
+    .side-link {
+      display: flex; align-items: center; gap: .65rem; width: 100%;
+      text-align: left; padding: .6rem .9rem; border-radius: .75rem;
+      font-size: .875rem; color: var(--txt-dim);
+      border: 1px solid transparent; background: transparent; cursor: pointer;
+    }
+    .side-link:hover { color: var(--txt); background: rgba(148,163,184,.08); }
+    .side-link-active {
+      color: #fff !important; background: var(--brand) !important;
+      box-shadow: 0 4px 14px rgba(99,102,241,.4);
+    }
+    /* 汉堡按钮：仅移动端可见 */
+    #navToggle {
+      display: inline-block; background: none; border: none; cursor: pointer;
+      color: var(--txt-dim); font-size: 1.25rem; line-height: 1; padding: .25rem;
+    }
+    @media (min-width: 768px) {
+      #navToggle { display: none !important; }
     }
   </style>
 </head>
@@ -50,6 +92,7 @@
   <!-- TOP NAVIGATION BAR -->
   <header class="sticky top-0 z-40 glass-panel border-b border-slate-800/80 px-4 lg:px-8 py-3 flex items-center justify-between">
     <div class="flex items-center space-x-6">
+      <button id="navToggle" onclick="document.getElementById('sideNav').classList.toggle('side-open')" aria-label="打开导航菜单">☰</button>
       <div class="flex items-center space-x-3 cursor-pointer" onclick="switchTab('overview')">
         <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 font-black text-white text-lg">
           ⚡
@@ -104,6 +147,29 @@
     </div>
   </header>
 
+  <!-- 侧边导航（桌面端常驻 / 移动端抽屉） -->
+  <aside id="sideNav">
+    <div class="flex items-center gap-3 px-5 h-16 border-b border-slate-700/60">
+      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 font-black text-white text-lg">⚡</div>
+      <div>
+        <div class="flex items-center gap-2">
+          <span class="font-extrabold text-lg tracking-tight text-white">aigate</span>
+          <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v1.0 C17</span>
+        </div>
+        <div class="text-[11px] text-slate-400">高性能 LLM 网关</div>
+      </div>
+    </div>
+    <nav class="flex flex-col gap-1 p-3">
+      <button data-tab="overview" onclick="switchTab('overview')" class="side-link side-link-active">📊 总览</button>
+      <button data-tab="models" onclick="switchTab('models')" class="side-link">🤖 模型</button>
+      <button data-tab="keys" onclick="switchTab('keys')" class="side-link">🔑 API 密钥</button>
+      <button data-tab="usage" onclick="switchTab('usage')" class="side-link">📈 用量</button>
+      <button data-tab="playground" onclick="switchTab('playground')" class="side-link">⚡ 调试场</button>
+      <button data-tab="metrics" onclick="switchTab('metrics')" class="side-link">🛠️ 监控指标</button>
+    </nav>
+    <div class="mt-auto px-5 py-4 text-[11px] text-slate-500 border-t border-slate-700/60">AI 网关控制台 · 单文件构建</div>
+  </aside>
+
   <!-- 移动端导航 -->
   <div id="mobileNav" class="md:hidden flex overflow-x-auto custom-scroll bg-slate-900 border-b border-slate-800 p-2 space-x-2">
     <button onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-slate-800 font-medium whitespace-nowrap">📊 总览</button>
@@ -118,7 +184,7 @@
   <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
 
   <!-- MAIN VIEWPORT CONTAINER -->
-  <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
+  <main id="pageMain" class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
 
     <!-- ==================== 标签页 1：总览 ==================== -->
     <div id="tab-overview" class="tab-content space-y-6">
@@ -838,6 +904,13 @@
       if (activeBtn) {
         activeBtn.className = "nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-white bg-slate-800 shadow-sm";
       }
+
+      // 同步侧边导航高亮
+      document.querySelectorAll(".side-link").forEach(el => {
+        el.classList.toggle("side-link-active", el.dataset.tab === tabId);
+      });
+      // 移动端抽屉选中后自动收起
+      document.getElementById("sideNav").classList.remove("side-open");
 
       refreshCurrentTab();
     }
