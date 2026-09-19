@@ -52,7 +52,7 @@ aigate/
 - Create: `src/provider_adapter.h`, `src/provider_adapter.c`
 - Modify: `src/provider_openai.h`, `src/provider_openai.c`, `src/provider_anthropic.h`, `src/provider_anthropic.c`, `src/aigate_core.c`, `CMakeLists.txt`
 
-- [ ] **Step 1: Define `provider_adapter_t` in `src/provider_adapter.h`**
+- [x] **Step 1: Define `provider_adapter_t` in `src/provider_adapter.h`**
   Declare function pointer types:
   - `supports(const char* provider)`
   - `build_chat(...)`
@@ -61,15 +61,15 @@ aigate/
   - `build_embeddings(...)`, `parse_embeddings_response(...)`
   - Declare `const provider_adapter_t* provider_find(const char* provider);`
 
-- [ ] **Step 2: Implement Registry in `src/provider_adapter.c`**
+- [x] **Step 2: Implement Registry in `src/provider_adapter.c`**
   - Register `g_provider_openai`, `g_provider_anthropic`, `g_provider_gemini`.
   - Implement `provider_find`: iterate over list, match `adapter->supports(provider)`.
 
-- [ ] **Step 3: Export Adapters from `provider_openai.c` and `provider_anthropic.c`**
+- [x] **Step 3: Export Adapters from `provider_openai.c` and `provider_anthropic.c`**
   - Define `extern const provider_adapter_t g_provider_openai;` and `extern const provider_adapter_t g_provider_anthropic;`.
   - Wrap existing build/parse/stream functions to conform to the VTable signatures.
 
-- [ ] **Step 4: Refactor `aigate_core.c` Dispatch**
+- [x] **Step 4: Refactor `aigate_core.c` Dispatch**
   - In `aigate_handle_request`, lookup `adapter = provider_find(route.provider)`.
   - Replace hardcoded `if (is_openai) ... else if (is_anthropic)` with `adapter->build_chat()` and streaming bridge calls.
   - Compile and run `ctest` to ensure zero regressions on existing tests.
@@ -82,22 +82,22 @@ aigate/
 - Modify: `schema/schema.sql`, `src/schema_sql.h`, `src/pg_store.h`, `src/pg_store.c`, `src/usage_meter.h`, `src/usage_meter.c`, `src/metrics.c`, `src/provider_openai.c`, `src/admin_api.c`
 - Create: `tests/unit/test_provider_deepseek.c`
 
-- [ ] **Step 1: Schema Migration v2 in `schema.sql` & `pg_store.c`**
+- [x] **Step 1: Schema Migration v2 in `schema.sql` & `pg_store.c`**
   - Add column `cached_prompt_tokens BIGINT NOT NULL DEFAULT 0` to `usage_daily`.
   - Record migration version 2 in `schema_migrations`.
   - Update `pg_store_ops` usage upsert query to include `cached_prompt_tokens`.
 
-- [ ] **Step 2: Extend Usage Metering & Prometheus Metrics**
+- [x] **Step 2: Extend Usage Metering & Prometheus Metrics**
   - Update `um_record(...)` signature to accept `long cached_prompt_tokens`.
   - Add Prometheus metric `aigate_tokens_cached_total` in `metrics.c`.
   - Update `admin_api.c` `/admin/v1/usage` to return `cached_tokens` in JSON response.
 
-- [ ] **Step 3: Extract Cache Tokens & Preserve `reasoning_content` in `provider_openai.c`**
+- [x] **Step 3: Extract Cache Tokens & Preserve `reasoning_content` in `provider_openai.c`**
   - In streaming accumulator and non-streaming response parser, detect `usage.prompt_tokens_details.cached_tokens` or `usage.prompt_cache_hit_tokens`.
   - Pass `cached_prompt_tokens` to `um_record`.
   - In `choices[0].message`, preserve `reasoning_content` field when parsing/forwarding responses.
 
-- [ ] **Step 4: Unit Test `test_provider_deepseek.c`**
+- [x] **Step 4: Unit Test `test_provider_deepseek.c`**
   - Verify `reasoning_content` preservation in non-streaming response.
   - Verify extraction of cache hit tokens from DeepSeek usage payload.
   - Add test to CMakeLists.txt and verify `ctest` passes.
@@ -110,13 +110,13 @@ aigate/
 - Create: `src/provider_gemini.h`, `src/provider_gemini.c`, `tests/unit/test_provider_gemini.c`
 - Modify: `CMakeLists.txt`
 
-- [ ] **Step 1: Header Declaration (`src/provider_gemini.h`)**
+- [x] **Step 1: Header Declaration (`src/provider_gemini.h`)**
   - Declare `provider_gemini_supports(const char* provider)` (matches `"gemini"`, `"google"`).
   - Declare `provider_gemini_build(...)`.
   - Declare `provider_gemini_parse_response(...)`.
   - Declare external adapter descriptor `extern const provider_adapter_t g_provider_gemini;`.
 
-- [ ] **Step 2: Implement Request Translation (`provider_gemini_build`)**
+- [x] **Step 2: Implement Request Translation (`provider_gemini_build`)**
   - Construct target URL: `{endpoint}/v1beta/models/{model}:generateContent`.
   - Add header `x-goog-api-key: <key>` to `extra_headers`.
   - Translate `messages`:
@@ -125,13 +125,13 @@ aigate/
     - Role `"assistant"` -> `contents: [{role: "model", parts: [{text: ...}]}]`.
   - Map `generationConfig`: `temperature`, `maxOutputTokens`, `topP`, `stopSequences`.
 
-- [ ] **Step 3: Implement Non-Streaming Response Translation (`provider_gemini_parse_response`)**
+- [x] **Step 3: Implement Non-Streaming Response Translation (`provider_gemini_parse_response`)**
   - Parse `candidates[0].content.parts[0].text`.
   - Map `finishReason`: `STOP` -> `"stop"`, `MAX_TOKENS` -> `"length"`, `SAFETY` -> `"content_filter"`.
   - Extract `usageMetadata`: `promptTokenCount`, `candidatesTokenCount`, `totalTokenCount`.
   - Construct standard OpenAI chat completion JSON payload.
 
-- [ ] **Step 4: Unit Test `test_provider_gemini.c`**
+- [x] **Step 4: Unit Test `test_provider_gemini.c`**
   - Test simple request conversion, multi-turn conversation, and system prompt extraction.
   - Test response conversion and token counts extraction.
   - Verify error response wrapping on 400 `INVALID_ARGUMENT`.
@@ -145,12 +145,12 @@ aigate/
 - Create: `tests/unit/test_gemini_stream.c`
 - Modify: `CMakeLists.txt`
 
-- [ ] **Step 1: Design `gemini_bridge_t` State Machine**
+- [x] **Step 1: Design `gemini_bridge_t` State Machine**
   - Define line accumulation buffer (4096 bytes).
   - Track `headers_sent`, `prompt_tokens`, `completion_tokens`, `model_name`.
   - URL for streaming: `{endpoint}/v1beta/models/{model}:streamGenerateContent?alt=sse`.
 
-- [ ] **Step 2: Implement `gemini_bridge_feed`**
+- [x] **Step 2: Implement `gemini_bridge_feed`**
   - Split incoming bytes on `\n`.
   - When line starts with `data: `, parse JSON.
   - Extract delta text from `candidates[0].content.parts[0].text`.
@@ -158,11 +158,11 @@ aigate/
   - Format and write OpenAI chunk: `data: {"id":"chatcmpl-gemini-...","choices":[{"index":0,"delta":{"content":"..."},"finish_reason":null}]}\n\n`.
   - Extract `usageMetadata` and `finishReason` on candidate completion.
 
-- [ ] **Step 3: Implement `gemini_bridge_finish`**
+- [x] **Step 3: Implement `gemini_bridge_finish`**
   - If `finishReason` was observed, emit final chunk with finish_reason and usage object.
   - Emit terminal `data: [DONE]\n\n`.
 
-- [ ] **Step 4: Unit Test `test_gemini_stream.c`**
+- [x] **Step 4: Unit Test `test_gemini_stream.c`**
   - Mock Gemini SSE streams with single-part and multi-part chunks.
   - Test stream fragmented across arbitrary byte packet boundaries.
   - Verify token counts and terminal `[DONE]` frame.
@@ -176,11 +176,11 @@ aigate/
 - Create: `tests/unit/test_embeddings.c`
 - Modify: `CMakeLists.txt`
 
-- [ ] **Step 1: Mode A (Direct Pass-Through in `provider_openai.c`)**
+- [x] **Step 1: Mode A (Direct Pass-Through in `provider_openai.c`)**
   - Implement `provider_openai_build_embeddings`: route to `{endpoint}/v1/embeddings`.
   - Implement `provider_openai_parse_embeddings`: parse OpenAI embedding response and extract `usage.prompt_tokens`.
 
-- [ ] **Step 2: Mode B (Gemini Translation in `provider_gemini.c`)**
+- [x] **Step 2: Mode B (Gemini Translation in `provider_gemini.c`)**
   - Implement `provider_gemini_build_embeddings`:
     - Single input -> `{endpoint}/v1beta/models/{model}:embedContent` with `{"content": {"parts": [{"text": str}]}}`.
     - Batch input -> `{endpoint}/v1beta/models/{model}:batchEmbedContents` with `{"requests": [...]}`.
@@ -188,7 +188,7 @@ aigate/
     - Parse `embedding.values` or `embeddings[].values`.
     - Construct OpenAI embedding list JSON response with prompt tokens.
 
-- [ ] **Step 3: Pipeline Integration in `transport_civetweb.c` & `aigate_core.c`**
+- [x] **Step 3: Pipeline Integration in `transport_civetweb.c` & `aigate_core.c`**
   - In `transport_civetweb.c`, bind route `/v1/embeddings` to `aigate_handle_request`.
   - In `aigate_core.c`, handle `path == "/v1/embeddings"`:
     - Validate auth & allowlist.
@@ -198,7 +198,7 @@ aigate/
     - Reserve token quota (`rl_reserve_tokens`) and record usage (`um_record`).
     - Write JSON response to client.
 
-- [ ] **Step 4: Unit Test `test_embeddings.c`**
+- [x] **Step 4: Unit Test `test_embeddings.c`**
   - Verify Mode A direct pass-through parsing and usage tracking.
   - Verify Mode B Gemini single and batch embedding translation.
   - Verify quota deduction on embeddings requests.
@@ -210,19 +210,20 @@ aigate/
 **Files:**
 - Modify: `tests/integration/mock_upstream.py`, `tests/integration/test_gateway.py`
 
-- [ ] **Step 1: Add Mock Endpoints in `mock_upstream.py`**
+- [x] **Step 1: Add Mock Endpoints in `mock_upstream.py`**
   - Add Gemini `:generateContent`, `:streamGenerateContent?alt=sse`, and `:embedContent`.
   - Add DeepSeek reasoning content mock and prompt cache usage mock.
   - Add OpenAI embeddings mock `/v1/embeddings`.
 
-- [ ] **Step 2: Add Pytest Scenarios in `test_gateway.py`**
+- [x] **Step 2: Add Pytest Scenarios in `test_gateway.py`**
   - Test Gemini non-streaming chat completion.
   - Test Gemini streaming chat completion (`stream: true`).
   - Test DeepSeek streaming response with `reasoning_content` and prompt cache usage.
   - Test `/v1/embeddings` with OpenAI upstream.
   - Test `/v1/embeddings` with Gemini upstream.
 
-- [ ] **Step 3: Execute Test Suites & Smoke Test**
+- [x] **Step 3: Execute Test Suites & Smoke Test**
   - Run `ctest --test-dir build --output-on-failure`.
   - Run `pytest tests/integration/test_gateway.py`.
   - Verify 100% test pass rate.
+
