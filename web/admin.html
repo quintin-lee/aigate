@@ -36,6 +36,13 @@
     .typewriter-cursor::after { content: "▋"; animation: blink 1s infinite; color: #6366f1; }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     .hidden { display: none !important; }
+    /* 导航兜底：Tailwind CDN 失败时仍按 hidden md:flex / md:hidden 逻辑显示菜单 */
+    #mainNav { display: none; }
+    #mobileNav { display: flex; }
+    @media (min-width: 768px) {
+      #mainNav { display: flex !important; }
+      #mobileNav { display: none !important; }
+    }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-brand-500 selection:text-white">
@@ -57,7 +64,7 @@
       </div>
 
       <!-- 导航标签页 -->
-      <nav class="hidden md:flex items-center space-x-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
+      <nav id="mainNav" class="hidden md:flex items-center space-x-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
         <button id="nav-overview" onclick="switchTab('overview')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-white bg-slate-800 shadow-sm">
           📊 总览
         </button>
@@ -98,7 +105,7 @@
   </header>
 
   <!-- 移动端导航 -->
-  <div class="md:hidden flex overflow-x-auto custom-scroll bg-slate-900 border-b border-slate-800 p-2 space-x-2">
+  <div id="mobileNav" class="md:hidden flex overflow-x-auto custom-scroll bg-slate-900 border-b border-slate-800 p-2 space-x-2">
     <button onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-slate-800 font-medium whitespace-nowrap">📊 总览</button>
     <button onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🤖 模型</button>
     <button onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🔑 API 密钥</button>
