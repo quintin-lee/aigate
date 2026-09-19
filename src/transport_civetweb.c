@@ -6,6 +6,7 @@
 
 #include "transport_civetweb.h"
 #include "admin_api.h"
+#include "admin_ui.h"
 #include "aigate_log.h"
 #include "metrics.h"
 
@@ -257,6 +258,39 @@ handle_metrics(struct mg_connection* conn, void* cbdata)
     return 1;
 }
 
+static int
+handle_admin_ui(struct mg_connection* conn, void* cbdata)
+{
+    (void)cbdata;
+    const struct mg_request_info* ri = mg_get_request_info(conn);
+    if (ri == NULL) {
+        return 0;
+    }
+    if (strcmp(ri->request_method, "GET") != 0 && strcmp(ri->request_method, "HEAD") != 0) {
+        mg_send_http_error(conn, 405, "Method Not Allowed");
+        return 1;
+    }
+    return admin_ui_serve(conn);
+}
+
+static int
+handle_root(struct mg_connection* conn, void* cbdata)
+{
+    (void)cbdata;
+    const struct mg_request_info* ri = mg_get_request_info(conn);
+    if (ri == NULL) {
+        return 0;
+    }
+    if (strcmp(ri->local_uri, "/") == 0) {
+        mg_printf(conn,
+                  "HTTP/1.1 302 Found\r\n"
+                  "Location: /admin\r\n"
+                  "Content-Length: 0\r\n\r\n");
+        return 1;
+    }
+    return 0;
+}
+
 transport_civetweb_t*
 transport_civetweb_start(aigate_core* ac,
                          pg_store_t*  ps,
@@ -305,7 +339,9 @@ transport_civetweb_start(aigate_core* ac,
 
     mg_set_request_handler(cw->ctx, "/v1/", handle_v1, cw);
     mg_set_request_handler(cw->ctx, "/admin/v1", handle_admin, cw);
+    mg_set_request_handler(cw->ctx, "/admin", handle_admin_ui, cw);
     mg_set_request_handler(cw->ctx, "/metrics", handle_metrics, cw);
+    mg_set_request_handler(cw->ctx, "/$", handle_root, cw);
 
     AIGATE_LOG_INFO("transport_civetweb: listening on %s", port_spec);
     return cw;

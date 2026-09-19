@@ -19,11 +19,23 @@ set(CIVETWEB_ENABLE_SERVER_EXECUTABLE OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(civetweb_dep URL https://github.com/civetweb/civetweb/archive/refs/tags/v1.16.tar.gz)
 FetchContent_MakeAvailable(civetweb_dep)
 
+# Generate embedded admin UI header
+set(ADMIN_UI_HTML_SRC ${CMAKE_SOURCE_DIR}/web/admin.html)
+set(ADMIN_UI_HTML_HDR ${CMAKE_BINARY_DIR}/generated/admin_ui_html.h)
+add_custom_command(
+    OUTPUT ${ADMIN_UI_HTML_HDR}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/generated
+    COMMAND python3 ${CMAKE_SOURCE_DIR}/scripts/embed_html.py ${ADMIN_UI_HTML_SRC} ${ADMIN_UI_HTML_HDR}
+    DEPENDS ${ADMIN_UI_HTML_SRC} ${CMAKE_SOURCE_DIR}/scripts/embed_html.py
+    COMMENT "Generating ${ADMIN_UI_HTML_HDR} from ${ADMIN_UI_HTML_SRC}"
+)
+add_custom_target(generate_admin_ui_html DEPENDS ${ADMIN_UI_HTML_HDR})
+
 file(GLOB AIGATE_SRC src/*.c)
 list(REMOVE_ITEM AIGATE_SRC ${CMAKE_SOURCE_DIR}/src/main.c)
 add_library(libaigate STATIC ${AIGATE_SRC})
-add_dependencies(libaigate civetweb-c-library hdr_histogram_static)
-target_include_directories(libaigate PUBLIC src)
+add_dependencies(libaigate generate_admin_ui_html civetweb-c-library hdr_histogram_static)
+target_include_directories(libaigate PUBLIC src ${CMAKE_BINARY_DIR}/generated)
 target_compile_options(libaigate PRIVATE -Wall -Wextra -Werror)
 target_include_directories(libaigate PUBLIC ${JANSSON_INCLUDE_DIRS} ${LIBPQ_INCLUDE_DIRS})
 target_link_libraries(libaigate PUBLIC

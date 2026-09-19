@@ -308,3 +308,29 @@ def test_anthropic_streaming(gateway):
     assert any("Anthropic Claude!" in l for l in lines)
     assert any("[DONE]" in l for l in lines)
 
+
+def test_admin_ui_endpoints(gateway):
+    base_url = gateway["base_url"]
+
+    # 1. Root / redirects to /admin
+    resp = requests.get(f"{base_url}/", allow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers.get("Location") == "/admin"
+
+    # 2. Access /admin directly
+    resp = requests.get(f"{base_url}/admin")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("Content-Type", "")
+    assert "<!DOCTYPE html>" in resp.text
+    assert "aigate — AI Gateway Console" in resp.text
+    assert 'id="tab-overview"' in resp.text
+    assert 'id="tab-models"' in resp.text
+    assert 'id="tab-keys"' in resp.text
+    assert 'id="tab-playground"' in resp.text
+
+    # 3. Access /admin/ with trailing slash
+    resp = requests.get(f"{base_url}/admin/")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("Content-Type", "")
+
+

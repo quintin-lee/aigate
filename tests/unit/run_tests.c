@@ -139,6 +139,9 @@ main(void)
     test_register("anthropic_bridge_streaming", test_anthropic_bridge_streaming);
     test_register("anthropic_pipeline_end_to_end", test_anthropic_pipeline_end_to_end);
 
+    extern void admin_ui_content(void);
+    test_register("admin_ui_content", admin_ui_content);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
