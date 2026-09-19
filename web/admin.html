@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="zh-CN" class="dark">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>aigate — AI Gateway Console</title>
+  <title>aigate — AI 网关控制台</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -52,59 +52,59 @@
             <span class="font-extrabold text-xl tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">aigate</span>
             <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-300 border border-brand-500/30">v1.0 C17</span>
           </div>
-          <div class="text-[11px] text-slate-400">High-Performance LLM Gateway</div>
+          <div class="text-[11px] text-slate-400">高性能 LLM 网关</div>
         </div>
       </div>
 
-      <!-- Navigation Tabs -->
+      <!-- 导航标签页 -->
       <nav class="hidden md:flex items-center space-x-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
         <button id="nav-overview" onclick="switchTab('overview')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-white bg-slate-800 shadow-sm">
-          📊 Overview
+          📊 总览
         </button>
         <button id="nav-models" onclick="switchTab('models')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          🤖 Models
+          🤖 模型
         </button>
         <button id="nav-keys" onclick="switchTab('keys')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          🔑 API Keys
+          🔑 API 密钥
         </button>
         <button id="nav-usage" onclick="switchTab('usage')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          📈 Usage
+          📈 用量
         </button>
         <button id="nav-playground" onclick="switchTab('playground')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          ⚡ Playground
+          ⚡ 调试场
         </button>
         <button id="nav-metrics" onclick="switchTab('metrics')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          🛠️ Metrics
+          🛠️ 监控指标
         </button>
       </nav>
     </div>
 
-    <!-- Right Controls: Token, Refresh, Status -->
+    <!-- 右侧控制区：令牌、刷新、状态 -->
     <div class="flex items-center space-x-3">
       <div id="connectionStatusBadge" class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
         <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span>Gateway Ready</span>
+        <span>网关就绪</span>
       </div>
 
       <button id="tokenBtn" onclick="openTokenModal()" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 transition">
         <span id="tokenIcon">🔒</span>
-        <span id="tokenLabel">Set Admin Token</span>
+        <span id="tokenLabel">设置管理员令牌</span>
       </button>
 
-      <button onclick="refreshCurrentTab()" title="Refresh Data" class="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition">
+      <button onclick="refreshCurrentTab()" title="刷新数据" class="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition">
         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       </button>
     </div>
   </header>
 
-  <!-- MOBILE NAV -->
+  <!-- 移动端导航 -->
   <div class="md:hidden flex overflow-x-auto custom-scroll bg-slate-900 border-b border-slate-800 p-2 space-x-2">
-    <button onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-slate-800 font-medium whitespace-nowrap">📊 Overview</button>
-    <button onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🤖 Models</button>
-    <button onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🔑 API Keys</button>
-    <button onclick="switchTab('usage')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">📈 Usage</button>
-    <button onclick="switchTab('playground')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">⚡ Playground</button>
-    <button onclick="switchTab('metrics')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🛠️ Metrics</button>
+    <button onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-slate-800 font-medium whitespace-nowrap">📊 总览</button>
+    <button onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🤖 模型</button>
+    <button onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🔑 API 密钥</button>
+    <button onclick="switchTab('usage')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">📈 用量</button>
+    <button onclick="switchTab('playground')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">⚡ 调试场</button>
+    <button onclick="switchTab('metrics')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🛠️ 监控指标</button>
   </div>
 
   <!-- TOAST NOTIFICATIONS -->
@@ -113,94 +113,94 @@
   <!-- MAIN VIEWPORT CONTAINER -->
   <main class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
 
-    <!-- ==================== TAB 1: OVERVIEW ==================== -->
+    <!-- ==================== 标签页 1：总览 ==================== -->
     <div id="tab-overview" class="tab-content space-y-6">
-      <!-- 4 Stat Cards -->
+      <!-- 4 张统计卡 -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <!-- Card 1 -->
+        <!-- 卡片 1 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Active Models</div>
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">活跃模型</div>
           <div class="mt-2 flex items-baseline justify-between">
             <div id="statActiveModels" class="text-3xl font-extrabold text-white">0</div>
-            <div id="statTotalModelsBadge" class="text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">0 total</div>
+            <div id="statTotalModelsBadge" class="text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">共 0 个</div>
           </div>
           <div class="mt-3 text-xs text-slate-400 flex items-center space-x-1">
-            <span>OpenAI & Anthropic backends</span>
+            <span>OpenAI 与 Anthropic 后端</span>
           </div>
         </div>
 
-        <!-- Card 2 -->
+        <!-- 卡片 2 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">API Keys</div>
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">API 密钥</div>
           <div class="mt-2 flex items-baseline justify-between">
             <div id="statActiveKeys" class="text-3xl font-extrabold text-emerald-400">0</div>
-            <div id="statTotalKeysBadge" class="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">0 active</div>
+            <div id="statTotalKeysBadge" class="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">0 个活跃</div>
           </div>
           <div class="mt-3 text-xs text-slate-400 flex items-center space-x-1">
-            <span>Rate-limited client keys</span>
+            <span>限流客户端密钥</span>
           </div>
         </div>
 
-        <!-- Card 3 -->
+        <!-- 卡片 3 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Requests</div>
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">总请求数</div>
           <div class="mt-2 flex items-baseline justify-between">
             <div id="statTotalRequests" class="text-3xl font-extrabold text-cyan-400">0</div>
-            <div id="statErrorsBadge" class="text-xs px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20">0 errors</div>
+            <div id="statErrorsBadge" class="text-xs px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20">0 个错误</div>
           </div>
           <div class="mt-3 text-xs text-slate-400 flex items-center space-x-1">
-            <span>Historical aggregated volume</span>
+            <span>历史累计请求量</span>
           </div>
         </div>
 
-        <!-- Card 4 -->
+        <!-- 卡片 4 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tokens Consumed</div>
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Token 消耗</div>
           <div class="mt-2 flex items-baseline justify-between">
             <div id="statTotalTokens" class="text-3xl font-extrabold text-purple-400">0</div>
-            <div class="text-xs px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">Prompt + Output</div>
+            <div class="text-xs px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">提示 + 输出</div>
           </div>
           <div class="mt-3 text-xs text-slate-400 flex items-center space-x-1">
-            <span id="statTokensBreakdown">0 in / 0 out</span>
+            <span id="statTokensBreakdown">0 输入 / 0 输出</span>
           </div>
         </div>
       </div>
 
-      <!-- Main Chart & Quick Actions -->
+      <!-- 主图表与快捷操作 -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- Left: Usage Chart (2 cols) -->
+        <!-- 左侧：用量图表（占 2 列） -->
         <div class="lg:col-span-2 glass-panel p-6 rounded-2xl flex flex-col justify-between">
           <div class="flex items-center justify-between mb-4">
             <div>
-              <h3 class="font-bold text-lg text-white">Daily Token Usage</h3>
-              <p class="text-xs text-slate-400">Token consumption trends by day</p>
+              <h3 class="font-bold text-lg text-white">每日 Token 用量</h3>
+              <p class="text-xs text-slate-400">按天统计的 Token 消耗趋势</p>
             </div>
             <div class="flex items-center space-x-2">
-              <span class="inline-flex items-center text-xs text-slate-400"><span class="w-2.5 h-2.5 rounded-sm bg-indigo-500 mr-1.5"></span>Prompt</span>
-              <span class="inline-flex items-center text-xs text-slate-400"><span class="w-2.5 h-2.5 rounded-sm bg-cyan-400 mr-1.5"></span>Completion</span>
+              <span class="inline-flex items-center text-xs text-slate-400"><span class="w-2.5 h-2.5 rounded-sm bg-indigo-500 mr-1.5"></span>提示</span>
+              <span class="inline-flex items-center text-xs text-slate-400"><span class="w-2.5 h-2.5 rounded-sm bg-cyan-400 mr-1.5"></span>补全</span>
             </div>
           </div>
           <div class="relative h-64 w-full">
             <canvas id="overviewChart"></canvas>
             <div id="noChartDataMsg" class="hidden absolute inset-0 flex items-center justify-center text-sm text-slate-500">
-              No usage data recorded yet. Make requests to populate metrics.
+              暂无用量数据，发起请求后将生成统计。
             </div>
           </div>
         </div>
 
-        <!-- Right: Gateway Quick Actions & Status (1 col) -->
+        <!-- 右侧：网关快捷操作与状态（占 1 列） -->
         <div class="glass-panel p-6 rounded-2xl space-y-5 flex flex-col justify-between">
           <div>
-            <h3 class="font-bold text-lg text-white mb-1">Quick Shortcuts</h3>
-            <p class="text-xs text-slate-400 mb-4">Manage gateway configuration</p>
+            <h3 class="font-bold text-lg text-white mb-1">快捷操作</h3>
+            <p class="text-xs text-slate-400 mb-4">管理网关配置</p>
 
             <div class="space-y-2.5">
               <button onclick="openModelModal()" class="w-full text-left px-4 py-3 rounded-xl bg-slate-900/80 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 transition flex items-center justify-between group">
                 <div class="flex items-center space-x-3">
                   <span class="p-2 rounded-lg bg-indigo-500/10 text-indigo-400 group-hover:scale-110 transition">🤖</span>
                   <div>
-                    <div class="text-sm font-semibold text-slate-200">Register New Model</div>
-                    <div class="text-xs text-slate-400">Add OpenAI or Claude upstream</div>
+                    <div class="text-sm font-semibold text-slate-200">注册新模型</div>
+                    <div class="text-xs text-slate-400">添加 OpenAI 或 Claude 上游</div>
                   </div>
                 </div>
                 <span class="text-slate-500 group-hover:text-slate-300">→</span>
@@ -210,8 +210,8 @@
                 <div class="flex items-center space-x-3">
                   <span class="p-2 rounded-lg bg-emerald-500/10 text-emerald-400 group-hover:scale-110 transition">🔑</span>
                   <div>
-                    <div class="text-sm font-semibold text-slate-200">Issue Client API Key</div>
-                    <div class="text-xs text-slate-400">Generate rate-limited credential</div>
+                    <div class="text-sm font-semibold text-slate-200">签发客户端密钥</div>
+                    <div class="text-xs text-slate-400">生成限流凭证</div>
                   </div>
                 </div>
                 <span class="text-slate-500 group-hover:text-slate-300">→</span>
@@ -221,8 +221,8 @@
                 <div class="flex items-center space-x-3">
                   <span class="p-2 rounded-lg bg-cyan-500/10 text-cyan-400 group-hover:scale-110 transition">⚡</span>
                   <div>
-                    <div class="text-sm font-semibold text-slate-200">Open Live Playground</div>
-                    <div class="text-xs text-slate-400">Test streaming responses interactively</div>
+                    <div class="text-sm font-semibold text-slate-200">打开实时调试场</div>
+                    <div class="text-xs text-slate-400">交互式测试流式响应</div>
                   </div>
                 </div>
                 <span class="text-slate-500 group-hover:text-slate-300">→</span>
@@ -232,15 +232,15 @@
 
           <div class="p-4 rounded-xl bg-slate-950/60 border border-slate-800/80 text-xs space-y-2">
             <div class="flex justify-between text-slate-400">
-              <span>Database Engine</span>
+              <span>数据库引擎</span>
               <span class="font-mono text-slate-200">PostgreSQL 16</span>
             </div>
             <div class="flex justify-between text-slate-400">
-              <span>Server Runtime</span>
+              <span>服务运行时</span>
               <span class="font-mono text-slate-200">CivetWeb HTTP/1.1</span>
             </div>
             <div class="flex justify-between text-slate-400">
-              <span>Protocols</span>
+              <span>支持协议</span>
               <span class="font-mono text-slate-200">OpenAI & Anthropic</span>
             </div>
           </div>
@@ -248,249 +248,249 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 2: MODELS ==================== -->
+    <!-- ==================== 标签页 2：模型 ==================== -->
     <div id="tab-models" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 class="text-xl font-extrabold text-white">Upstream Models</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Configure routing and upstream model credentials</p>
+          <h2 class="text-xl font-extrabold text-white">上游模型</h2>
+          <p class="text-xs text-slate-400 mt-0.5">配置路由与上游模型凭证</p>
         </div>
         <div class="flex items-center space-x-3">
-          <input type="text" id="modelSearchInput" oninput="filterModelsTable()" placeholder="Search models..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
+          <input type="text" id="modelSearchInput" oninput="filterModelsTable()" placeholder="搜索模型..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
           <button onclick="openModelModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/20 transition flex items-center space-x-1.5">
             <span>+</span>
-            <span>Register Model</span>
+            <span>注册模型</span>
           </button>
         </div>
       </div>
 
-      <!-- Models Table -->
+      <!-- 模型表格 -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="overflow-x-auto custom-scroll">
           <table class="w-full text-left border-collapse text-xs">
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 uppercase tracking-wider font-semibold">
-                <th class="py-3 px-4">Model Name</th>
-                <th class="py-3 px-4">Provider</th>
-                <th class="py-3 px-4">Endpoint</th>
-                <th class="py-3 px-4">Key Reference</th>
-                <th class="py-3 px-4 text-center">Status</th>
-                <th class="py-3 px-4 text-right">Actions</th>
+                <th class="py-3 px-4">模型名称</th>
+                <th class="py-3 px-4">提供方</th>
+                <th class="py-3 px-4">接入地址</th>
+                <th class="py-3 px-4">密钥引用</th>
+                <th class="py-3 px-4 text-center">状态</th>
+                <th class="py-3 px-4 text-right">操作</th>
               </tr>
             </thead>
             <tbody id="modelsTableBody" class="divide-y divide-slate-800/60">
-              <!-- Rows inserted dynamically -->
+              <!-- 动态插入行 -->
             </tbody>
           </table>
         </div>
         <div id="modelsEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
-          No models registered yet. Click <span class="text-brand-400 font-semibold cursor-pointer" onclick="openModelModal()">+ Register Model</span> to add one.
+          尚未注册模型，点击 <span class="text-brand-400 font-semibold cursor-pointer" onclick="openModelModal()">+ 注册模型</span> 添加一个。
         </div>
       </div>
     </div>
 
-    <!-- ==================== TAB 3: API KEYS ==================== -->
+    <!-- ==================== 标签页 3：API 密钥 ==================== -->
     <div id="tab-keys" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 class="text-xl font-extrabold text-white">Client API Keys</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Manage tenant credentials, rate limits, and model access controls</p>
+          <h2 class="text-xl font-extrabold text-white">客户端密钥</h2>
+          <p class="text-xs text-slate-400 mt-0.5">管理租户凭证、限流与模型访问控制</p>
         </div>
         <div class="flex items-center space-x-3">
-          <input type="text" id="keySearchInput" oninput="filterKeysTable()" placeholder="Search keys..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
+          <input type="text" id="keySearchInput" oninput="filterKeysTable()" placeholder="搜索密钥..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
           <button onclick="openKeyModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 transition flex items-center space-x-1.5">
             <span>+</span>
-            <span>Create API Key</span>
+            <span>创建密钥</span>
           </button>
         </div>
       </div>
 
-      <!-- Keys Table -->
+      <!-- 密钥表格 -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="overflow-x-auto custom-scroll">
           <table class="w-full text-left border-collapse text-xs">
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 uppercase tracking-wider font-semibold">
-                <th class="py-3 px-4">ID / Name</th>
-                <th class="py-3 px-4">Allowed Models</th>
-                <th class="py-3 px-4">Rate Limit</th>
-                <th class="py-3 px-4">Daily Token Quota</th>
-                <th class="py-3 px-4">Expires</th>
-                <th class="py-3 px-4 text-center">Status</th>
-                <th class="py-3 px-4 text-right">Actions</th>
+                <th class="py-3 px-4">ID / 名称</th>
+                <th class="py-3 px-4">允许的模型</th>
+                <th class="py-3 px-4">限流</th>
+                <th class="py-3 px-4">每日 Token 配额</th>
+                <th class="py-3 px-4">过期时间</th>
+                <th class="py-3 px-4 text-center">状态</th>
+                <th class="py-3 px-4 text-right">操作</th>
               </tr>
             </thead>
             <tbody id="keysTableBody" class="divide-y divide-slate-800/60">
-              <!-- Rows inserted dynamically -->
+              <!-- 动态插入行 -->
             </tbody>
           </table>
         </div>
         <div id="keysEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
-          No API keys issued yet. Click <span class="text-emerald-400 font-semibold cursor-pointer" onclick="openKeyModal()">+ Create API Key</span> to generate one.
+          尚未签发密钥，点击 <span class="text-emerald-400 font-semibold cursor-pointer" onclick="openKeyModal()">+ 创建密钥</span> 生成一个。
         </div>
       </div>
     </div>
 
-    <!-- ==================== TAB 4: USAGE ==================== -->
+    <!-- ==================== 标签页 4：用量 ==================== -->
     <div id="tab-usage" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 class="text-xl font-extrabold text-white">Usage Analytics & Audit</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Historical token consumption by key and model</p>
+          <h2 class="text-xl font-extrabold text-white">用量统计与审计</h2>
+          <p class="text-xs text-slate-400 mt-0.5">按密钥与模型统计的历史 Token 消耗</p>
         </div>
       </div>
 
-      <!-- Filters Form -->
+      <!-- 筛选表单 -->
       <div class="glass-panel p-4 rounded-2xl border border-slate-800 flex flex-wrap items-end gap-3">
         <div>
-          <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Date Range</label>
+          <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">日期范围</label>
           <select id="usageDatePreset" onchange="handleDatePresetChange()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
-            <option value="7" selected>Last 7 Days</option>
-            <option value="1">Today</option>
-            <option value="30">Last 30 Days</option>
-            <option value="custom">Custom Range</option>
+            <option value="7" selected>近 7 天</option>
+            <option value="1">今天</option>
+            <option value="30">近 30 天</option>
+            <option value="custom">自定义范围</option>
           </select>
         </div>
 
         <div id="customDateRangeInputs" class="hidden flex items-center space-x-2">
           <div>
-            <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">From</label>
+            <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">开始</label>
             <input type="date" id="usageFromDate" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
           </div>
           <div>
-            <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">To</label>
+            <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">结束</label>
             <input type="date" id="usageToDate" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
           </div>
         </div>
 
         <div>
-          <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Filter Model</label>
+          <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">筛选模型</label>
           <select id="usageModelFilter" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-40">
-            <option value="">All Models</option>
+            <option value="">全部模型</option>
           </select>
         </div>
 
         <div>
-          <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">Filter Key ID</label>
-          <input type="number" id="usageKeyFilter" placeholder="All Key IDs" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-32">
+          <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">筛选密钥 ID</label>
+          <input type="number" id="usageKeyFilter" placeholder="全部密钥 ID" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-32">
         </div>
 
         <button onclick="fetchUsageData()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">
-          🔍 Apply Filter
+          🔍 应用筛选
         </button>
       </div>
 
-      <!-- Usage Records Table -->
+      <!-- 用量记录表格 -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="overflow-x-auto custom-scroll">
           <table class="w-full text-left border-collapse text-xs">
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 uppercase tracking-wider font-semibold">
-                <th class="py-3 px-4">Date (UTC)</th>
-                <th class="py-3 px-4">Model</th>
-                <th class="py-3 px-4">Key ID</th>
-                <th class="py-3 px-4 text-right">Requests</th>
-                <th class="py-3 px-4 text-right">Prompt Tokens</th>
-                <th class="py-3 px-4 text-right">Output Tokens</th>
-                <th class="py-3 px-4 text-right">Total Tokens</th>
-                <th class="py-3 px-4 text-right">Errors</th>
+                <th class="py-3 px-4">日期 (UTC)</th>
+                <th class="py-3 px-4">模型</th>
+                <th class="py-3 px-4">密钥 ID</th>
+                <th class="py-3 px-4 text-right">请求数</th>
+                <th class="py-3 px-4 text-right">提示 Token</th>
+                <th class="py-3 px-4 text-right">输出 Token</th>
+                <th class="py-3 px-4 text-right">总 Token</th>
+                <th class="py-3 px-4 text-right">错误数</th>
               </tr>
             </thead>
             <tbody id="usageTableBody" class="divide-y divide-slate-800/60 font-mono">
-              <!-- Usage rows -->
+              <!-- 用量行 -->
             </tbody>
           </table>
         </div>
         <div id="usageEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
-          No usage records found for the selected criteria.
+          所选条件下暂无用量记录。
         </div>
       </div>
     </div>
 
-    <!-- ==================== TAB 5: PLAYGROUND ==================== -->
+    <!-- ==================== 标签页 5：调试场 ==================== -->
     <div id="tab-playground" class="tab-content hidden space-y-6">
       <div class="flex items-center justify-between">
         <div>
-          <h2 class="text-xl font-extrabold text-white">Live Playground</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Test real-time chat completions and SSE streaming transparently</p>
+          <h2 class="text-xl font-extrabold text-white">实时调试场</h2>
+          <p class="text-xs text-slate-400 mt-0.5">透明地测试实时对话补全与 SSE 流式输出</p>
         </div>
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <!-- Request Config Column (5 cols) -->
+        <!-- 请求配置列（占 5 列） -->
         <div class="lg:col-span-5 glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">Select Model</label>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">选择模型</label>
             <select id="playModelSelect" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500 font-medium">
-              <!-- Filled from models list -->
+              <!-- 从模型列表填充 -->
             </select>
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">API Key (Bearer)</label>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">API 密钥 (Bearer)</label>
             <div class="flex space-x-2">
               <input type="password" id="playApiKeyInput" placeholder="aig_..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
-              <button onclick="autoFillPlaygroundKey()" class="px-2.5 py-1 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 whitespace-nowrap">Auto-fill</button>
+              <button onclick="autoFillPlaygroundKey()" class="px-2.5 py-1 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 whitespace-nowrap">自动填充</button>
             </div>
-            <p class="text-[10px] text-slate-500 mt-1">Uses client key to test ratelimiting and permissions</p>
+            <p class="text-[10px] text-slate-500 mt-1">使用客户端密钥，可测试限流与权限</p>
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">System Message</label>
-            <textarea id="playSystemPrompt" rows="2" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-sans" placeholder="System prompt...">You are a helpful AI assistant.</textarea>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">系统提示词</label>
+            <textarea id="playSystemPrompt" rows="2" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-sans" placeholder="系统提示词...">你是一个乐于助人的 AI 助手。</textarea>
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">User Message</label>
-            <textarea id="playUserPrompt" rows="4" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-sans" placeholder="Enter prompt here... (Ctrl+Enter to send)">Explain what an AI Gateway is in three concise bullet points.</textarea>
+            <label class="block text-xs font-semibold text-slate-300 mb-1">用户消息</label>
+            <textarea id="playUserPrompt" rows="4" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-sans" placeholder="在此输入提示词...（Ctrl+Enter 发送）">用三个简洁的要点解释什么是 AI 网关。</textarea>
           </div>
 
           <div class="grid grid-cols-2 gap-3 pt-1">
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 mb-1">Temperature: <span id="tempDisplay" class="text-brand-400 font-mono">0.7</span></label>
+              <label class="block text-[11px] font-semibold text-slate-400 mb-1">温度：<span id="tempDisplay" class="text-brand-400 font-mono">0.7</span></label>
               <input type="range" id="playTempInput" min="0" max="2" step="0.1" value="0.7" oninput="document.getElementById('tempDisplay').innerText=this.value" class="w-full accent-brand-500">
             </div>
             <div class="flex items-center space-x-2 pt-3">
               <input type="checkbox" id="playStreamToggle" checked class="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500 w-4 h-4">
-              <label for="playStreamToggle" class="text-xs text-slate-300 font-medium cursor-pointer">Stream (SSE)</label>
+              <label for="playStreamToggle" class="text-xs text-slate-300 font-medium cursor-pointer">流式输出 (SSE)</label>
             </div>
           </div>
 
           <div class="pt-2 flex space-x-3">
             <button id="playSendBtn" onclick="runPlaygroundRequest()" class="flex-1 py-2.5 rounded-xl font-semibold text-xs bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white shadow-lg shadow-brand-500/25 transition flex items-center justify-center space-x-2">
               <span id="playSendIcon">🚀</span>
-              <span id="playSendText">Send Request</span>
+              <span id="playSendText">发送请求</span>
             </button>
             <button id="playStopBtn" onclick="stopPlaygroundStream()" class="hidden px-4 py-2.5 rounded-xl font-semibold text-xs bg-rose-600 hover:bg-rose-500 text-white transition">
-              Stop
+              停止
             </button>
           </div>
         </div>
 
-        <!-- Response Output Column (7 cols) -->
+        <!-- 响应输出列（占 7 列） -->
         <div class="lg:col-span-7 space-y-4">
           <div class="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col h-[520px]">
             <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
               <div class="flex items-center space-x-2">
-                <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">Assistant Response</span>
+                <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">助手回复</span>
                 <span id="playStatusBadge" class="hidden text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">200 OK</span>
               </div>
               <div class="flex items-center space-x-3 text-[11px] font-mono text-slate-400">
-                <span id="playLatencyStat" class="hidden">Latency: <strong class="text-slate-200">0ms</strong></span>
-                <button onclick="clearPlaygroundResponse()" class="text-slate-500 hover:text-slate-300 transition">Clear</button>
+                <span id="playLatencyStat" class="hidden">延迟：<strong class="text-slate-200">0ms</strong></span>
+                <button onclick="clearPlaygroundResponse()" class="text-slate-500 hover:text-slate-300 transition">清空</button>
               </div>
             </div>
 
-            <!-- Output Message Body -->
+            <!-- 输出消息正文 -->
             <div id="playOutputArea" class="flex-1 overflow-y-auto custom-scroll p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 font-mono text-xs leading-relaxed text-slate-200 whitespace-pre-wrap">
-              <span class="text-slate-600 italic">Response will appear here in real time...</span>
+              <span class="text-slate-600 italic">响应将实时显示在这里...</span>
             </div>
 
-            <!-- Inspector Accordion -->
+            <!-- 检查器折叠面板 -->
             <div class="mt-3 pt-2 border-t border-slate-800 text-[11px]">
               <button onclick="toggleInspector()" class="text-slate-400 hover:text-slate-200 flex items-center space-x-1">
                 <span id="inspectorArrow">▶</span>
-                <span>Inspect Raw Stream Events</span>
+                <span>查看原始流事件</span>
               </button>
               <div id="inspectorPanel" class="hidden mt-2 p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 max-h-36 overflow-y-auto custom-scroll font-mono text-[10px] text-slate-400 whitespace-pre"></div>
             </div>
@@ -499,81 +499,81 @@
       </div>
     </div>
 
-    <!-- ==================== TAB 6: METRICS ==================== -->
+    <!-- ==================== 标签页 6：监控指标 ==================== -->
     <div id="tab-metrics" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 class="text-xl font-extrabold text-white">Prometheus Metrics</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Live text exposition from /metrics</p>
+          <h2 class="text-xl font-extrabold text-white">Prometheus 监控指标</h2>
+          <p class="text-xs text-slate-400 mt-0.5">来自 /metrics 的实时文本输出</p>
         </div>
         <div class="flex items-center space-x-3">
-          <input type="text" id="metricFilterInput" oninput="filterMetrics()" placeholder="Filter metric name..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-56">
+          <input type="text" id="metricFilterInput" oninput="filterMetrics()" placeholder="按指标名称筛选..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-56">
           <button onclick="fetchPrometheusMetrics()" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white transition flex items-center space-x-1">
             <span>🔄</span>
-            <span>Refresh</span>
+            <span>刷新</span>
           </button>
         </div>
       </div>
 
       <div class="glass-panel p-5 rounded-2xl border border-slate-800">
-        <pre id="metricsPre" class="overflow-x-auto custom-scroll font-mono text-xs text-emerald-400/90 max-h-[600px] leading-relaxed select-all">Loading metrics...</pre>
+        <pre id="metricsPre" class="overflow-x-auto custom-scroll font-mono text-xs text-emerald-400/90 max-h-[600px] leading-relaxed select-all">正在加载指标...</pre>
       </div>
     </div>
 
   </main>
 
-  <!-- ==================== MODALS ==================== -->
+  <!-- ==================== 弹窗 ==================== -->
 
-  <!-- 1. ADMIN TOKEN MODAL -->
+  <!-- 1. 管理员令牌弹窗 -->
   <div id="tokenModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <div class="flex items-center justify-between">
         <h3 class="text-lg font-bold text-white flex items-center space-x-2">
           <span>🔒</span>
-          <span>Admin Authentication</span>
+          <span>管理员认证</span>
         </h3>
         <button onclick="closeTokenModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
       </div>
       <p class="text-xs text-slate-400">
-        Enter the secret configured in <code class="text-brand-300 font-mono">AIGATE_ADMIN_TOKEN</code>. It will be stored securely in your browser session.
+        请输入 <code class="text-brand-300 font-mono">AIGATE_ADMIN_TOKEN</code> 中配置的密钥，它将安全地保存在浏览器会话中。
       </p>
       <div>
-        <label class="block text-xs font-semibold text-slate-300 mb-1">Admin Token</label>
-        <input type="password" id="adminTokenInput" placeholder="Enter admin token..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+        <label class="block text-xs font-semibold text-slate-300 mb-1">管理员令牌</label>
+        <input type="password" id="adminTokenInput" placeholder="输入管理员令牌..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
       </div>
       <div class="flex justify-end space-x-3 pt-2">
-        <button onclick="closeTokenModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition">Cancel</button>
-        <button onclick="saveAdminToken()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">Save & Connect</button>
+        <button onclick="closeTokenModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition">取消</button>
+        <button onclick="saveAdminToken()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">保存并连接</button>
       </div>
     </div>
   </div>
 
-  <!-- 2. REGISTER/EDIT MODEL MODAL -->
+  <!-- 2. 注册/编辑模型弹窗 -->
   <div id="modelModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-lg w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <div class="flex items-center justify-between">
-        <h3 id="modelModalTitle" class="text-lg font-bold text-white">Register New Model</h3>
+        <h3 id="modelModalTitle" class="text-lg font-bold text-white">注册新模型</h3>
         <button onclick="closeModelModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
       </div>
       <form id="modelForm" onsubmit="handleModelSubmit(event)" class="space-y-3.5 text-xs">
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">Model Name *</label>
-          <input type="text" id="mFormName" required placeholder="e.g. gpt-4o, claude-3-5-sonnet" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+          <label class="block font-semibold text-slate-300 mb-1">模型名称 *</label>
+          <input type="text" id="mFormName" required placeholder="例如 gpt-4o、claude-3-5-sonnet" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
         </div>
 
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">Provider *</label>
+          <label class="block font-semibold text-slate-300 mb-1">提供方 *</label>
           <select id="mFormProvider" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500">
-            <option value="openai">OpenAI / Compatible (vLLM, Ollama, DeepSeek)</option>
-            <option value="anthropic">Anthropic (Claude Messages API)</option>
+            <option value="openai">OpenAI / 兼容接口（vLLM、Ollama、DeepSeek）</option>
+            <option value="anthropic">Anthropic（Claude Messages API）</option>
           </select>
         </div>
 
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">Upstream Endpoint *</label>
+          <label class="block font-semibold text-slate-300 mb-1">上游地址 *</label>
           <input type="text" id="mFormEndpoint" required placeholder="https://api.openai.com" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
           <div class="flex items-center space-x-1.5 mt-1.5 text-[10px]">
-            <span class="text-slate-500">Presets:</span>
+            <span class="text-slate-500">预设：</span>
             <button type="button" onclick="setEndpointPreset('https://api.openai.com')" class="text-brand-400 hover:underline">OpenAI</button>
             <span class="text-slate-600">•</span>
             <button type="button" onclick="setEndpointPreset('https://api.anthropic.com')" class="text-purple-400 hover:underline">Anthropic</button>
@@ -585,96 +585,96 @@
         </div>
 
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">Upstream Key Ref</label>
-          <input type="text" id="mFormKeyRef" placeholder="env:OPENAI_API_KEY (optional)" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
-          <p class="text-[10px] text-slate-500 mt-0.5">Use <code class="text-slate-400">env:VAR_NAME</code> to reference server environment variables.</p>
+          <label class="block font-semibold text-slate-300 mb-1">上游密钥引用</label>
+          <input type="text" id="mFormKeyRef" placeholder="env:OPENAI_API_KEY（可选）" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+          <p class="text-[10px] text-slate-500 mt-0.5">使用 <code class="text-slate-400">env:变量名</code> 引用服务器环境变量。</p>
         </div>
 
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">Default Params (JSON)</label>
+          <label class="block font-semibold text-slate-300 mb-1">默认参数 (JSON)</label>
           <textarea id="mFormParams" rows="2" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono" placeholder="{&quot;temperature&quot;: 0.7}">{}</textarea>
         </div>
 
         <div class="flex items-center space-x-2 pt-1">
           <input type="checkbox" id="mFormEnabled" checked class="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500 w-4 h-4">
-          <label for="mFormEnabled" class="text-xs text-slate-300 font-medium">Model Enabled</label>
+          <label for="mFormEnabled" class="text-xs text-slate-300 font-medium">启用模型</label>
         </div>
 
         <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
-          <button type="button" onclick="closeModelModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition">Cancel</button>
-          <button type="submit" class="px-4 py-2 rounded-xl font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">Save Model</button>
+          <button type="button" onclick="closeModelModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition">取消</button>
+          <button type="submit" class="px-4 py-2 rounded-xl font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">保存模型</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- 3. CREATE/EDIT API KEY MODAL -->
+  <!-- 3. 创建/编辑 API 密钥弹窗 -->
   <div id="keyModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-lg w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <div class="flex items-center justify-between">
-        <h3 id="keyModalTitle" class="text-lg font-bold text-white">Create Client API Key</h3>
+        <h3 id="keyModalTitle" class="text-lg font-bold text-white">创建客户端密钥</h3>
         <button onclick="closeKeyModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
       </div>
       <form id="keyForm" onsubmit="handleKeySubmit(event)" class="space-y-3.5 text-xs">
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">Key Name *</label>
-          <input type="text" id="kFormName" required placeholder="e.g. backend-prod, mobile-app-dev" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+          <label class="block font-semibold text-slate-300 mb-1">密钥名称 *</label>
+          <input type="text" id="kFormName" required placeholder="例如 backend-prod、mobile-app-dev" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
         </div>
 
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">Allowed Models</label>
+          <label class="block font-semibold text-slate-300 mb-1">允许的模型</label>
           <div id="kFormAllowedModelsContainer" class="p-2.5 rounded-xl bg-slate-900 border border-slate-700 max-h-32 overflow-y-auto custom-scroll space-y-1.5">
-            <div class="text-[11px] text-slate-500">Loading models...</div>
+            <div class="text-[11px] text-slate-500">正在加载模型...</div>
           </div>
-          <p class="text-[10px] text-slate-500 mt-1">Leave all unchecked to grant access to all current and future models.</p>
+          <p class="text-[10px] text-slate-500 mt-1">全部不勾选则允许访问所有现有及未来模型。</p>
         </div>
 
         <div class="grid grid-cols-2 gap-3">
           <div>
-            <label class="block font-semibold text-slate-300 mb-1">Rate Limit (QPS)</label>
+            <label class="block font-semibold text-slate-300 mb-1">限流 (QPS)</label>
             <input type="number" id="kFormRateQps" min="0" value="10" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
-            <p class="text-[10px] text-slate-500 mt-0.5">0 = unlimited</p>
+            <p class="text-[10px] text-slate-500 mt-0.5">0 = 不限</p>
           </div>
           <div>
-            <label class="block font-semibold text-slate-300 mb-1">Daily Token Quota</label>
+            <label class="block font-semibold text-slate-300 mb-1">每日 Token 配额</label>
             <input type="number" id="kFormQuota" min="0" value="100000" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
-            <p class="text-[10px] text-slate-500 mt-0.5">0 = unlimited</p>
+            <p class="text-[10px] text-slate-500 mt-0.5">0 = 不限</p>
           </div>
         </div>
 
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">Expiration Date (Optional)</label>
+          <label class="block font-semibold text-slate-300 mb-1">过期时间（可选）</label>
           <input type="datetime-local" id="kFormExpiry" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
         </div>
 
         <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
-          <button type="button" onclick="closeKeyModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition">Cancel</button>
-          <button type="submit" class="px-4 py-2 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition">Create Key</button>
+          <button type="button" onclick="closeKeyModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition">取消</button>
+          <button type="submit" class="px-4 py-2 rounded-xl font-semibold bg-emerald-600 hover:bg-emerald-500 text-white transition">创建密钥</button>
         </div>
       </form>
     </div>
   </div>
 
-  <!-- 4. KEY CREATED SUCCESS POPUP MODAL -->
+  <!-- 4. 密钥创建成功提示弹窗 -->
   <div id="newKeySuccessModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-md w-full p-6 rounded-2xl border border-emerald-500/40 shadow-2xl space-y-4 text-center">
       <div class="w-12 h-12 mx-auto rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-2xl font-bold">
         ✓
       </div>
-      <h3 class="text-lg font-bold text-white">API Key Created!</h3>
+      <h3 class="text-lg font-bold text-white">API 密钥创建成功！</h3>
       <p class="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/20 p-2.5 rounded-xl text-left">
-        ⚠️ <strong>Important</strong>: This is the only time this secret key will ever be displayed. Copy it now and save it in a secure location.
+        ⚠️ <strong>重要提示</strong>：密钥明文仅显示一次，请立即复制并妥善保存。
       </p>
       <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 text-left">
-        <div class="text-[10px] text-slate-500 mb-1 uppercase font-semibold">Plaintext Key</div>
+        <div class="text-[10px] text-slate-500 mb-1 uppercase font-semibold">明文密钥</div>
         <div id="newKeyPlaintextDisplay" class="font-mono text-sm font-bold text-emerald-400 break-all select-all"></div>
       </div>
       <button onclick="copyPlaintextKey()" class="w-full py-2.5 rounded-xl font-semibold text-xs bg-emerald-600 hover:bg-emerald-500 text-white transition flex items-center justify-center space-x-1.5 shadow-lg shadow-emerald-500/20">
         <span id="copyKeyIcon">📋</span>
-        <span id="copyKeyText">Copy to Clipboard</span>
+        <span id="copyKeyText">复制到剪贴板</span>
       </button>
       <button onclick="closeNewKeySuccessModal()" class="w-full py-2 text-xs text-slate-400 hover:text-white transition">
-        Done / Dismiss
+        完成 / 关闭
       </button>
     </div>
   </div>
@@ -721,7 +721,7 @@
         badge.classList.remove("hidden");
       } else {
         icon.innerText = "🔒";
-        label.innerText = "Set Admin Token";
+        label.innerText = "设置管理员令牌";
         badge.classList.add("hidden");
       }
     }
@@ -738,14 +738,14 @@
     async function saveAdminToken() {
       const val = document.getElementById("adminTokenInput").value.trim();
       if (!val) {
-        showToast("Token cannot be empty", "error");
+        showToast("令牌不能为空", "error");
         return;
       }
       state.adminToken = val;
       localStorage.setItem("aigate_admin_token", val);
       updateTokenUI();
       closeTokenModal();
-      showToast("Admin token updated", "success");
+      showToast("管理员令牌已更新", "success");
       refreshCurrentTab();
     }
 
@@ -764,13 +764,13 @@
       try {
         const resp = await fetch(endpoint, options);
         if (resp.status === 401) {
-          showToast("Unauthorized: Invalid Admin Token", "error");
+          showToast("未授权：管理员令牌无效", "error");
           openTokenModal();
           return null;
         }
         return resp;
       } catch (err) {
-        showToast(`Network Error: ${err.message}`, "error");
+        showToast(`网络错误：${err.message}`, "error");
         return null;
       }
     }
@@ -819,11 +819,11 @@
     function renderOverviewStats() {
       const activeModels = state.models.filter(m => m.enabled).length;
       document.getElementById("statActiveModels").innerText = activeModels;
-      document.getElementById("statTotalModelsBadge").innerText = `${state.models.length} total`;
+      document.getElementById("statTotalModelsBadge").innerText = `共 ${state.models.length} 个`;
 
       const activeKeys = state.keys.filter(k => !k.revoked).length;
       document.getElementById("statActiveKeys").innerText = activeKeys;
-      document.getElementById("statTotalKeysBadge").innerText = `${activeKeys} active`;
+      document.getElementById("statTotalKeysBadge").innerText = `${activeKeys} 个活跃`;
 
       let totalReq = 0, totalPtok = 0, totalCtok = 0, totalErr = 0;
       state.usageRows.forEach(r => {
@@ -834,9 +834,9 @@
       });
 
       document.getElementById("statTotalRequests").innerText = totalReq.toLocaleString();
-      document.getElementById("statErrorsBadge").innerText = `${totalErr} errors`;
+      document.getElementById("statErrorsBadge").innerText = `${totalErr} 个错误`;
       document.getElementById("statTotalTokens").innerText = (totalPtok + totalCtok).toLocaleString();
-      document.getElementById("statTokensBreakdown").innerText = `${totalPtok.toLocaleString()} in / ${totalCtok.toLocaleString()} out`;
+      document.getElementById("statTokensBreakdown").innerText = `${totalPtok.toLocaleString()} 输入 / ${totalCtok.toLocaleString()} 输出`;
 
       renderOverviewChart();
     }
@@ -855,7 +855,7 @@
       // Group by day
       const dayMap = {};
       state.usageRows.forEach(r => {
-        const d = r.day || "Unknown";
+        const d = r.day || "未知";
         if (!dayMap[d]) dayMap[d] = { ptok: 0, ctok: 0 };
         dayMap[d].ptok += (r.prompt_tokens || 0);
         dayMap[d].ctok += (r.completion_tokens || 0);
@@ -875,8 +875,8 @@
           data: {
             labels: labels,
             datasets: [
-              { label: "Prompt Tokens", data: ptokData, backgroundColor: "rgba(99, 102, 241, 0.8)", borderRadius: 6 },
-              { label: "Completion Tokens", data: ctokData, backgroundColor: "rgba(34, 211, 238, 0.8)", borderRadius: 6 }
+              { label: "提示 Token", data: ptokData, backgroundColor: "rgba(99, 102, 241, 0.8)", borderRadius: 6 },
+              { label: "补全 Token", data: ctokData, backgroundColor: "rgba(34, 211, 238, 0.8)", borderRadius: 6 }
             ]
           },
           options: {
@@ -920,8 +920,8 @@
           : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">OpenAI</span>`;
 
         const statusBadge = m.enabled
-          ? `<button onclick="toggleModelEnabled('${m.name}', false)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition">● Enabled</button>`
-          : `<button onclick="toggleModelEnabled('${m.name}', true)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition">○ Disabled</button>`;
+          ? `<button onclick="toggleModelEnabled('${m.name}', false)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition">● 已启用</button>`
+          : `<button onclick="toggleModelEnabled('${m.name}', true)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition">○ 已停用</button>`;
 
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
@@ -931,12 +931,12 @@
           </td>
           <td class="py-3 px-4">${provBadge}</td>
           <td class="py-3 px-4 font-mono text-slate-300 max-w-xs truncate" title="${m.endpoint}">${m.endpoint}</td>
-          <td class="py-3 px-4 font-mono text-slate-400">${m.upstream_key_ref || "<span class='text-slate-600'>(none)</span>"}</td>
+          <td class="py-3 px-4 font-mono text-slate-400">${m.upstream_key_ref || "<span class='text-slate-600'>（无）</span>"}</td>
           <td class="py-3 px-4 text-center">${statusBadge}</td>
           <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
-            <button onclick="openPlaygroundForModel('${m.name}')" class="text-xs text-brand-400 hover:text-brand-300 transition" title="Test in Playground">⚡ Test</button>
-            <button onclick="editModel('${m.name}')" class="text-xs text-slate-400 hover:text-white transition">Edit</button>
-            <button onclick="deleteModel('${m.name}')" class="text-xs text-rose-400 hover:text-rose-300 transition">Delete</button>
+            <button onclick="openPlaygroundForModel('${m.name}')" class="text-xs text-brand-400 hover:text-brand-300 transition" title="在调试场中测试">⚡ 测试</button>
+            <button onclick="editModel('${m.name}')" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
+            <button onclick="deleteModel('${m.name}')" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
           </td>
         `;
         tbody.appendChild(tr);
@@ -965,7 +965,7 @@
 
       if (name) {
         const m = state.models.find(x => x.name === name);
-        title.innerText = `Edit Model: ${name}`;
+        title.innerText = `编辑模型：${name}`;
         fName.value = m.name;
         fName.disabled = true;
         fProv.value = m.provider || "openai";
@@ -974,7 +974,7 @@
         fParam.value = m.default_params ? JSON.stringify(m.default_params, null, 2) : "{}";
         fEnab.checked = m.enabled;
       } else {
-        title.innerText = "Register New Model";
+        title.innerText = "注册新模型";
         fName.value = "";
         fName.disabled = false;
         fProv.value = "openai";
@@ -1018,7 +1018,7 @@
       try {
         defaultParams = rawParams ? JSON.parse(rawParams) : {};
       } catch (err) {
-        showToast("Invalid JSON in Default Params", "error");
+        showToast("默认参数 JSON 格式无效", "error");
         return;
       }
 
@@ -1034,7 +1034,7 @@
           }
         });
         if (resp && resp.ok) {
-          showToast(`Model ${name} updated`, "success");
+          showToast(`模型 ${name} 已更新`, "success");
           closeModelModal();
           fetchModels();
         }
@@ -1052,7 +1052,7 @@
           }
         });
         if (resp && resp.ok) {
-          showToast(`Model ${name} registered`, "success");
+          showToast(`模型 ${name} 已注册`, "success");
           closeModelModal();
           fetchModels();
         }
@@ -1065,7 +1065,7 @@
         body: { enabled: newStatus }
       });
       if (resp && resp.ok) {
-        showToast(`Model ${name} ${newStatus ? "enabled" : "disabled"}`, "info");
+        showToast(`模型 ${name} 已${newStatus ? "启用" : "停用"}`, "info");
         fetchModels();
       }
     }
@@ -1075,12 +1075,12 @@
     }
 
     async function deleteModel(name) {
-      if (!confirm(`Are you sure you want to delete model "${name}"?`)) return;
+      if (!confirm(`确定要删除模型 "${name}" 吗？`)) return;
       const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(name)}`, {
         method: "DELETE"
       });
       if (resp && resp.ok) {
-        showToast(`Model ${name} deleted`, "success");
+        showToast(`模型 ${name} 已删除`, "success");
         fetchModels();
       }
     }
@@ -1107,14 +1107,14 @@
 
       list.forEach(k => {
         const allowed = (!k.allowed_models || k.allowed_models.length === 0)
-          ? `<span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">All Models</span>`
+          ? `<span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">全部模型</span>`
           : k.allowed_models.map(m => `<span class="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/10 text-indigo-300 mr-1">${m}</span>`).join("");
 
         const statusBadge = k.revoked
-          ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">Revoked</span>`
-          : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">Active</span>`;
+          ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20">已吊销</span>`
+          : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">活跃</span>`;
 
-        const expiryStr = k.expires_at ? new Date(k.expires_at * 1000).toLocaleDateString() : "Never";
+        const expiryStr = k.expires_at ? new Date(k.expires_at * 1000).toLocaleDateString() : "永不过期";
 
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
@@ -1124,12 +1124,12 @@
             <div class="font-mono text-[10px] text-slate-500">ID: #${k.key_id}</div>
           </td>
           <td class="py-3 px-4">${allowed}</td>
-          <td class="py-3 px-4 font-mono">${k.rate_qps > 0 ? `${k.rate_qps} QPS` : "<span class='text-slate-500'>Unlimited</span>"}</td>
-          <td class="py-3 px-4 font-mono">${k.daily_token_quota > 0 ? `${k.daily_token_quota.toLocaleString()} / day` : "<span class='text-slate-500'>Unlimited</span>"}</td>
+          <td class="py-3 px-4 font-mono">${k.rate_qps > 0 ? `${k.rate_qps} QPS` : "<span class='text-slate-500'>不限</span>"}</td>
+          <td class="py-3 px-4 font-mono">${k.daily_token_quota > 0 ? `${k.daily_token_quota.toLocaleString()} / 天` : "<span class='text-slate-500'>不限</span>"}</td>
           <td class="py-3 px-4 font-mono text-slate-400">${expiryStr}</td>
           <td class="py-3 px-4 text-center">${statusBadge}</td>
           <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
-            ${k.revoked ? "" : `<button onclick="revokeKey(${k.key_id})" class="text-xs text-rose-400 hover:text-rose-300 transition">Revoke</button>`}
+            ${k.revoked ? "" : `<button onclick="revokeKey(${k.key_id})" class="text-xs text-rose-400 hover:text-rose-300 transition">吊销</button>`}
           </td>
         `;
         tbody.appendChild(tr);
@@ -1155,7 +1155,7 @@
       const container = document.getElementById("kFormAllowedModelsContainer");
       container.innerHTML = "";
       if (state.models.length === 0) {
-        container.innerHTML = `<div class="text-[11px] text-slate-500">No models registered yet. Key will have universal access.</div>`;
+        container.innerHTML = `<div class="text-[11px] text-slate-500">尚未注册模型，该密钥将拥有全部访问权限。</div>`;
       } else {
         state.models.forEach(m => {
           const div = document.createElement("div");
@@ -1212,7 +1212,7 @@
     function showNewKeySuccessModal(plaintext) {
       document.getElementById("newKeyPlaintextDisplay").innerText = plaintext;
       document.getElementById("copyKeyIcon").innerText = "📋";
-      document.getElementById("copyKeyText").innerText = "Copy to Clipboard";
+      document.getElementById("copyKeyText").innerText = "复制到剪贴板";
       document.getElementById("newKeySuccessModal").classList.remove("hidden");
     }
 
@@ -1224,16 +1224,16 @@
       const key = document.getElementById("newKeyPlaintextDisplay").innerText;
       navigator.clipboard.writeText(key).then(() => {
         document.getElementById("copyKeyIcon").innerText = "✓";
-        document.getElementById("copyKeyText").innerText = "Copied!";
-        showToast("API Key copied to clipboard", "success");
+        document.getElementById("copyKeyText").innerText = "已复制！";
+        showToast("API 密钥已复制到剪贴板", "success");
       });
     }
 
     async function revokeKey(id) {
-      if (!confirm(`Are you sure you want to revoke API Key #${id}? This cannot be undone.`)) return;
+      if (!confirm(`确定要吊销 API 密钥 #${id} 吗？此操作不可撤销。`)) return;
       const resp = await apiCall(`/admin/v1/keys/${id}`, { method: "DELETE" });
       if (resp && resp.ok) {
-        showToast(`API Key #${id} revoked`, "success");
+        showToast(`API 密钥 #${id} 已吊销`, "success");
         fetchKeys();
       }
     }
@@ -1251,7 +1251,7 @@
 
     function populateModelFilters() {
       const sel = document.getElementById("usageModelFilter");
-      sel.innerHTML = `<option value="">All Models</option>`;
+      sel.innerHTML = `<option value="">全部模型</option>`;
       state.models.forEach(m => {
         const opt = document.createElement("option");
         opt.value = m.name;
@@ -1295,7 +1295,7 @@
       state.usageRows = data.data || [];
       renderUsageTable();
       if (!silent) {
-        showToast("Usage query updated", "info");
+        showToast("用量查询已更新", "info");
       }
     }
 
@@ -1334,7 +1334,7 @@
       const sel = document.getElementById("playModelSelect");
       sel.innerHTML = "";
       if (state.models.length === 0) {
-        sel.innerHTML = `<option value="">(No models available)</option>`;
+        sel.innerHTML = `<option value="">（暂无可用模型）</option>`;
       } else {
         state.models.forEach(m => {
           const opt = document.createElement("option");
@@ -1355,9 +1355,9 @@
     function autoFillPlaygroundKey() {
       const activeKey = state.keys.find(k => !k.revoked);
       if (activeKey) {
-        showToast("Auto-filled key from active list", "info");
+        showToast("已提示：请从密钥列表复制明文使用", "info");
       } else {
-        showToast("Create a key in API Keys tab first to copy plaintext", "warning");
+        showToast("请先在「API 密钥」页创建密钥并复制明文", "warning");
       }
     }
 
@@ -1370,11 +1370,11 @@
       const stream = document.getElementById("playStreamToggle").checked;
 
       if (!model) {
-        showToast("Please select a model", "warning");
+        showToast("请选择模型", "warning");
         return;
       }
       if (!usr) {
-        showToast("Please enter a user message", "warning");
+        showToast("请输入用户消息", "warning");
         return;
       }
 
@@ -1427,7 +1427,7 @@
 
         if (!resp.ok) {
           const errText = await resp.text();
-          outArea.innerText = `Error (${resp.status}):
+          outArea.innerText = `错误 (${resp.status})：
 ${errText}`;
           return;
         }
@@ -1435,7 +1435,7 @@ ${errText}`;
         if (!stream) {
           const json = await resp.json();
           const lat = Math.round(performance.now() - t0);
-          latencyStat.innerHTML = `Latency: <strong class="text-slate-200">${lat}ms</strong>`;
+          latencyStat.innerHTML = `延迟：<strong class="text-slate-200">${lat}ms</strong>`;
           latencyStat.classList.remove("hidden");
           const reply = json.choices && json.choices[0] && json.choices[0].message
             ? json.choices[0].message.content
@@ -1479,14 +1479,14 @@ ${errText}`;
           }
           outArea.classList.remove("typewriter-cursor");
           const lat = Math.round(performance.now() - t0);
-          latencyStat.innerHTML = `Stream completed in <strong class="text-slate-200">${lat}ms</strong>`;
+          latencyStat.innerHTML = `流式输出完成，共 <strong class="text-slate-200">${lat}ms</strong>`;
           latencyStat.classList.remove("hidden");
         }
       } catch (err) {
         if (err.name === "AbortError") {
-          outArea.innerText += "\n[Stream stopped by user]";
+          outArea.innerText += "\n[用户已停止流式输出]";
         } else {
-          outArea.innerText = `Network / Request Error: ${err.message}`;
+          outArea.innerText = `网络 / 请求错误：${err.message}`;
         }
       } finally {
         outArea.classList.remove("typewriter-cursor");
@@ -1523,17 +1523,17 @@ ${errText}`;
     // --- Prometheus Metrics ---
     async function fetchPrometheusMetrics() {
       const pre = document.getElementById("metricsPre");
-      pre.innerText = "Fetching metrics...";
+      pre.innerText = "正在获取指标...";
       try {
         const resp = await fetch("/metrics");
         if (!resp.ok) {
-          pre.innerText = `Failed to load metrics: ${resp.status} ${resp.statusText}`;
+          pre.innerText = `指标加载失败：${resp.status} ${resp.statusText}`;
           return;
         }
         state.metricsText = await resp.text();
         filterMetrics();
       } catch (err) {
-        pre.innerText = `Metrics fetch error: ${err.message}`;
+        pre.innerText = `指标获取错误：${err.message}`;
       }
     }
 
