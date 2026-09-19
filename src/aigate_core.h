@@ -14,6 +14,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include "auth_key.h"
+#include "circuit_breaker.h"
 #include "model_router.h"
 #include "ratelimit.h"
 #include "usage_meter.h"
@@ -36,12 +37,13 @@ typedef struct aigate_response_ctx {
 } aigate_response_ctx;
 
 typedef struct aigate_core {
-    auth_key_cache  keys;
-    ratelimit_t*    rl;
-    model_router_t* router;
-    usage_meter_t*  um;
-    pg_store_t*     ps;
-    int             default_timeout_ms;
+    auth_key_cache     keys;
+    ratelimit_t*       rl;
+    model_router_t*    router;
+    usage_meter_t*     um;
+    circuit_breaker_t* cb;
+    pg_store_t*        ps;
+    int                default_timeout_ms;
 } aigate_core;
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */

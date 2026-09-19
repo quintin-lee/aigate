@@ -113,9 +113,7 @@ server_thread(void* arg)
         pthread_mutex_unlock(&mu->mtx);
 
         int is_fail = 0;
-        if (strcmp(path, "/fail") == 0) {
-            is_fail = 1;
-        } else if (fail && (strcmp(path, "/chat") == 0 || strcmp(path, "/chat/completions") == 0)) {
+        if (strcmp(path, "/fail") == 0 || fail) {
             is_fail = 1;
         }
 
@@ -124,13 +122,17 @@ server_thread(void* arg)
         int is_slow = (strstr(mu->last_body, "stream-slow") != NULL);
 
         if (is_fail) {
-            const char* body = "{\"error\":{\"message\":\"boom\"}}";
+            int         status = (fail >= 400 && fail <= 599) ? fail : 500;
+            const char* status_text = (status == 429) ? "Too Many Requests" : "Internal Server Error";
+            const char* body = (status == 429) ? "{\"error\":{\"message\":\"rate limited\"}}" : "{\"error\":{\"message\":\"boom\"}}";
             char        resp[512];
             int         blen = snprintf(resp,
                                         sizeof resp,
-                                        "HTTP/1.1 500 Internal Server Error\r\n"
+                                        "HTTP/1.1 %d %s\r\n"
                                         "Content-Type: application/json\r\n"
                                         "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                        status,
+                                        status_text,
                                         (int)strlen(body),
                                         body);
             write(cfd, resp, (size_t)blen);

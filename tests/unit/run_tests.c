@@ -202,6 +202,13 @@ main(void)
     test_register("cb_probe_failure_trips_back", test_cb_probe_failure_trips_back_to_open);
     test_register("cb_concurrency_stress", test_cb_concurrency_stress);
 
+    extern void test_failover_on_500_to_backup(void);
+    extern void test_failover_on_429_to_backup(void);
+    extern void test_failover_circuit_breaker_tripping(void);
+    test_register("failover_on_500", test_failover_on_500_to_backup);
+    test_register("failover_on_429", test_failover_on_429_to_backup);
+    test_register("failover_cb_tripping", test_failover_circuit_breaker_tripping);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

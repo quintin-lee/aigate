@@ -33,9 +33,10 @@ aigate_core_init(aigate_core*   ac,
     ac->rl = ratelimit_new();
     ac->router = model_router_new(ps, master32);
     ac->um = usage_meter_new(ps, flush_interval_s);
+    ac->cb = cb_create();
     ac->ps = ps;
     ac->default_timeout_ms = default_timeout_ms;
-    if (ac->rl == NULL || ac->router == NULL || ac->um == NULL) {
+    if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
         return -1;
     }
     return 0;
@@ -44,6 +45,10 @@ aigate_core_init(aigate_core*   ac,
 void
 aigate_core_shutdown(aigate_core* ac)
 {
+    if (ac->cb != NULL) {
+        cb_destroy(ac->cb);
+        ac->cb = NULL;
+    }
     if (ac->um != NULL) {
         usage_meter_free(ac->um);
     }
@@ -199,11 +204,12 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return 0;
     }
 
-    /* --- provider check & build --- */
-    const provider_adapter_t* adapter = provider_find(route.provider);
-    if (adapter == NULL) {
-        aigate_write_error(
-            rc, PIPE_UNSUPPORTED, "unsupported_provider", "provider not supported by this build");
+    /* --- candidate targets selection --- */
+    upstream_target_t candidates[MAX_TARGETS_PER_MODEL];
+    int               n_candidates = 0;
+    if (model_router_select_candidates(ac->cb, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
+        n_candidates == 0) {
+        aigate_write_error(rc, PIPE_MODEL, "no_healthy_upstream", "no upstream targets available for model");
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
@@ -211,107 +217,137 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
 
     /* --- handle /v1/embeddings --- */
     if (rq->path != NULL && strcmp(rq->path, "/v1/embeddings") == 0) {
-        if (adapter->build_embeddings == NULL || adapter->parse_embeddings_response == NULL) {
-            aigate_write_error(
-                rc, 400, "unsupported_endpoint", "model or provider does not support embeddings");
-            json_decref(jbody);
-            key_rec_free(&krec);
-            return 0;
-        }
-
-        char        url[1024];
-        char*       merged = NULL;
-        size_t      mlen = 0;
-        const char* extra_hdrs[4][2] = {{0}};
-        int         n_extra_hdrs = 0;
-
-        if (adapter->build_embeddings(&route,
-                                      rq->body != NULL ? (const char*)rq->body : NULL,
-                                      url,
-                                      sizeof url,
-                                      extra_hdrs,
-                                      &n_extra_hdrs,
-                                      &merged,
-                                      &mlen) != 0) {
-            aigate_write_error(rc, 500, "internal", "failed to build embeddings request");
-            json_decref(jbody);
-            key_rec_free(&krec);
-            free(merged);
-            return 0;
-        }
-
-        int      status = 0;
-        char*    ubody = NULL;
-        size_t   ulen = 0;
-        uint64_t t0 = mono_ns();
-        int      urc = upstream_call_ext(
-            url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
-        if (urc == 0 && status >= 500) {
-            free(ubody);
-            ubody = NULL;
-            struct timespec sl = {0, 200 * 1000000}; /* 200ms */
-            nanosleep(&sl, NULL);
-            urc = upstream_call_ext(
-                url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
-        }
-        uint64_t lat = mono_ns() - t0;
-        free(merged);
-
-        if (urc != 0 || status >= 500) {
-            if (rc->set_header != NULL) {
-                rc->set_header(rc->impl, "X-Upstream-Provider", route.provider);
+        int n_supported = 0;
+        for (int ci = 0; ci < n_candidates; ci++) {
+            const provider_adapter_t* adapter = provider_find(candidates[ci].provider);
+            if (adapter != NULL && adapter->build_embeddings != NULL && adapter->parse_embeddings_response != NULL) {
+                n_supported++;
             }
-            aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream embeddings request failed");
-            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, lat, route.provider);
-            free(ubody);
+        }
+        if (n_supported == 0) {
+            aigate_write_error(rc, 400, "unsupported_endpoint", "model or provider does not support embeddings");
             json_decref(jbody);
             key_rec_free(&krec);
             return 0;
         }
 
-        char*  parsed_body = NULL;
-        size_t parsed_len = 0;
-        long   ptok = 0;
-        int    parsed_status = status;
-        if (adapter->parse_embeddings_response(ubody ? ubody : "", ulen, model, &parsed_status, &parsed_body, &parsed_len, &ptok) != 0) {
-            aigate_write_error(rc, 502, "upstream_error", "failed to parse upstream embeddings response");
+        uint64_t    total_lat = 0;
+        const char* last_provider = route.provider;
+
+        for (int ci = 0; ci < n_candidates; ci++) {
+            upstream_target_t* target = &candidates[ci];
+            const provider_adapter_t* adapter = provider_find(target->provider);
+            if (adapter == NULL || adapter->build_embeddings == NULL || adapter->parse_embeddings_response == NULL) {
+                continue;
+            }
+
+            model_rec_t cur_route = route;
+            snprintf(cur_route.provider, sizeof cur_route.provider, "%s", target->provider);
+            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%s", target->endpoint);
+            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%s", target->upstream_key);
+            last_provider = target->provider;
+
+            char        url[1024];
+            char*       merged = NULL;
+            size_t      mlen = 0;
+            const char* extra_hdrs[4][2] = {{0}};
+            int         n_extra_hdrs = 0;
+
+            if (adapter->build_embeddings(&cur_route,
+                                          rq->body != NULL ? (const char*)rq->body : NULL,
+                                          url,
+                                          sizeof url,
+                                          extra_hdrs,
+                                          &n_extra_hdrs,
+                                          &merged,
+                                          &mlen) != 0) {
+                free(merged);
+                continue;
+            }
+
+            int      status = 0;
+            char*    ubody = NULL;
+            size_t   ulen = 0;
+            uint64_t t0 = mono_ns();
+            int      urc = upstream_call_ext(
+                url, cur_route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
+
+            if (n_candidates == 1 && urc == 0 && status >= 500) {
+                free(ubody);
+                ubody = NULL;
+                struct timespec sl = {0, 200 * 1000000}; /* 200ms */
+                nanosleep(&sl, NULL);
+                urc = upstream_call_ext(
+                    url, cur_route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
+            }
+            uint64_t lat = mono_ns() - t0;
+            total_lat += lat;
+            free(merged);
+
+            bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
+            if (!is_failover && status < 400) {
+                cb_record_success(ac->cb, model, target->endpoint);
+                char*  parsed_body = NULL;
+                size_t parsed_len = 0;
+                long   ptok = 0;
+                int    parsed_status = status;
+                if (adapter->parse_embeddings_response(ubody ? ubody : "", ulen, model, &parsed_status, &parsed_body, &parsed_len, &ptok) != 0) {
+                    free(ubody);
+                    aigate_write_error(rc, 502, "upstream_error", "failed to parse upstream embeddings response");
+                    json_decref(jbody);
+                    key_rec_free(&krec);
+                    return 0;
+                }
+                free(ubody);
+
+                um_record(ac->um, krec.key_id, model, parsed_status, ptok, 0, 0, total_lat, target->provider);
+                if (ptok > 0) {
+                    rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok);
+                }
+
+                int rv = aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
+                free(parsed_body);
+                json_decref(jbody);
+                key_rec_free(&krec);
+                return rv;
+            }
+
+            cb_record_failure(ac->cb, model, target->endpoint, status);
             free(ubody);
-            json_decref(jbody);
-            key_rec_free(&krec);
-            return 0;
-        }
-        free(ubody);
 
-        um_record(ac->um, krec.key_id, model, parsed_status, ptok, 0, 0, lat, route.provider);
-        if (ptok > 0) {
-            rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok);
+            if (!is_failover && status >= 400) {
+                break;
+            }
+
+            if (ci + 1 < n_candidates) {
+                AIGATE_LOG_WARN("failover embeddings for model %s from %s (%s) to %s (%s) due to status %d (urc %d)",
+                                model, target->provider, target->endpoint,
+                                candidates[ci+1].provider, candidates[ci+1].endpoint, status, urc);
+                continue;
+            }
         }
 
-        int rv = aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
-        free(parsed_body);
+        if (rc->set_header != NULL) {
+            rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
+        }
+        aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream embeddings request failed");
+        um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, total_lat, last_provider);
         json_decref(jbody);
         key_rec_free(&krec);
-        return rv;
+        return 0;
     }
 
-    char        url[1024];
-    char*       merged = NULL;
-    size_t      mlen = 0;
-    const char* extra_hdrs[4][2] = {{0}};
-    int         n_extra_hdrs = 0;
-
-    if (adapter->build_chat(&route,
-                            rq->body != NULL ? (const char*)rq->body : NULL,
-                            url,
-                            sizeof url,
-                            extra_hdrs,
-                            &n_extra_hdrs,
-                            &merged,
-                            &mlen) != 0) {
-        aigate_write_error(rc, 500, "internal", "failed to build upstream request");
+    int n_chat_supported = 0;
+    for (int ci = 0; ci < n_candidates; ci++) {
+        const provider_adapter_t* adapter = provider_find(candidates[ci].provider);
+        if (adapter != NULL && adapter->build_chat != NULL) {
+            n_chat_supported++;
+        }
+    }
+    if (n_chat_supported == 0) {
+        aigate_write_error(rc, PIPE_UNSUPPORTED, "unsupported_provider", "provider not supported by this build");
         json_decref(jbody);
         key_rec_free(&krec);
-        free(merged);
         return 0;
     }
 
@@ -320,131 +356,232 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     bool is_streaming = (jstream != NULL && json_is_true(jstream));
 
     if (is_streaming) {
-        stream_bridge_t* bridge = adapter->stream_bridge_new(rc, model);
-        if (bridge == NULL) {
-            aigate_write_error(rc, 500, "internal", "failed to initialize stream bridge");
+        uint64_t    total_lat = 0;
+        const char* last_provider = route.provider;
+
+        for (int ci = 0; ci < n_candidates; ci++) {
+            upstream_target_t* target = &candidates[ci];
+            const provider_adapter_t* adapter = provider_find(target->provider);
+            if (adapter == NULL || adapter->build_chat == NULL || adapter->stream_bridge_new == NULL) {
+                continue;
+            }
+
+            model_rec_t cur_route = route;
+            snprintf(cur_route.provider, sizeof cur_route.provider, "%s", target->provider);
+            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%s", target->endpoint);
+            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%s", target->upstream_key);
+            last_provider = target->provider;
+
+            char        url[1024];
+            char*       merged = NULL;
+            size_t      mlen = 0;
+            const char* extra_hdrs[4][2] = {{0}};
+            int         n_extra_hdrs = 0;
+
+            if (adapter->build_chat(&cur_route,
+                                    rq->body != NULL ? (const char*)rq->body : NULL,
+                                    url,
+                                    sizeof url,
+                                    extra_hdrs,
+                                    &n_extra_hdrs,
+                                    &merged,
+                                    &mlen) != 0) {
+                free(merged);
+                continue;
+            }
+
+            stream_bridge_t* bridge = adapter->stream_bridge_new(rc, model);
+            if (bridge == NULL) {
+                free(merged);
+                continue;
+            }
+
+            int      status = 0;
+            uint64_t t0 = mono_ns();
+            long     silence_timeout_ms =
+                ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
+            int urc = upstream_stream_call(
+                url, cur_route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, silence_timeout_ms,
+                (upstream_chunk_fn)adapter->stream_bridge_feed, bridge, &status);
+            bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
+
+            if (n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {
+                struct timespec sl = {0, 200 * 1000000}; /* 200ms */
+                nanosleep(&sl, NULL);
+                urc = upstream_stream_call(
+                    url, cur_route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, silence_timeout_ms,
+                    (upstream_chunk_fn)adapter->stream_bridge_feed, bridge, &status);
+                headers_sent = adapter->stream_bridge_headers_sent(bridge);
+            }
+            uint64_t lat = mono_ns() - t0;
+            total_lat += lat;
+            free(merged);
+
+            bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
+
+            if (!headers_sent) {
+                cb_record_failure(ac->cb, model, target->endpoint, status);
+                adapter->stream_bridge_free(bridge);
+
+                if (!is_failover && status >= 400) {
+                    break;
+                }
+
+                if (ci + 1 < n_candidates) {
+                    AIGATE_LOG_WARN("streaming failover for model %s from %s (%s) to %s (%s) due to status %d (urc %d)",
+                                    model, target->provider, target->endpoint,
+                                    candidates[ci+1].provider, candidates[ci+1].endpoint, status, urc);
+                    continue;
+                }
+                break;
+            }
+
+            cb_record_success(ac->cb, model, target->endpoint);
+            long ptok = 0, ctok = 0, cached_tok = 0;
+            adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
+
+            if (urc != 0) {
+                const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
+                                                    : "stream interrupted: transport error";
+                char sse_err[256];
+                snprintf(sse_err, sizeof sse_err,
+                         "data: {\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
+                         "data: [DONE]\n\n",
+                         err_msg);
+                if (rc->write != NULL) {
+                    rc->write(rc->impl, sse_err, strlen(sse_err), true);
+                }
+                um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, total_lat, target->provider);
+                if (ptok + ctok > 0) {
+                    rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+                }
+                adapter->stream_bridge_free(bridge);
+                json_decref(jbody);
+                key_rec_free(&krec);
+                return 0;
+            }
+
+            adapter->stream_bridge_finish(bridge);
+            um_record(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, total_lat, target->provider);
+            rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+            adapter->stream_bridge_free(bridge);
+
             json_decref(jbody);
             key_rec_free(&krec);
-            free(merged);
             return 0;
+        }
+
+        if (rc->set_header != NULL) {
+            rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
+        }
+        aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
+        um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, total_lat, last_provider);
+        json_decref(jbody);
+        key_rec_free(&krec);
+        return 0;
+    }
+
+    /* --- upstream non-streaming call with failover loop --- */
+    uint64_t    total_lat = 0;
+    const char* last_provider = route.provider;
+
+    for (int ci = 0; ci < n_candidates; ci++) {
+        upstream_target_t* target = &candidates[ci];
+        const provider_adapter_t* adapter = provider_find(target->provider);
+        if (adapter == NULL || adapter->build_chat == NULL || adapter->parse_chat_response == NULL) {
+            continue;
+        }
+
+        model_rec_t cur_route = route;
+        snprintf(cur_route.provider, sizeof cur_route.provider, "%s", target->provider);
+        snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%s", target->endpoint);
+        snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%s", target->upstream_key);
+        last_provider = target->provider;
+
+        char        url[1024];
+        char*       merged = NULL;
+        size_t      mlen = 0;
+        const char* extra_hdrs[4][2] = {{0}};
+        int         n_extra_hdrs = 0;
+
+        if (adapter->build_chat(&cur_route,
+                                rq->body != NULL ? (const char*)rq->body : NULL,
+                                url,
+                                sizeof url,
+                                extra_hdrs,
+                                &n_extra_hdrs,
+                                &merged,
+                                &mlen) != 0) {
+            free(merged);
+            continue;
         }
 
         int      status = 0;
+        char*    ubody = NULL;
+        size_t   ulen = 0;
         uint64_t t0 = mono_ns();
-        long     silence_timeout_ms =
-            ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
-        int      urc = upstream_stream_call(
-            url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, silence_timeout_ms,
-            (upstream_chunk_fn)adapter->stream_bridge_feed, bridge, &status);
-        bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
+        int      urc = upstream_call_ext(
+            url, cur_route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
 
-        if (!headers_sent && (urc != 0 || status >= 500)) {
+        if (n_candidates == 1 && urc == 0 && status >= 500) {
+            free(ubody);
+            ubody = NULL;
             struct timespec sl = {0, 200 * 1000000}; /* 200ms */
             nanosleep(&sl, NULL);
-            urc = upstream_stream_call(
-                url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, silence_timeout_ms,
-                (upstream_chunk_fn)adapter->stream_bridge_feed, bridge, &status);
-            headers_sent = adapter->stream_bridge_headers_sent(bridge);
+            urc = upstream_call_ext(
+                url, cur_route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
         }
         uint64_t lat = mono_ns() - t0;
+        total_lat += lat;
         free(merged);
 
-        if (!headers_sent) {
-            if (rc->set_header != NULL) {
-                rc->set_header(rc->impl, "X-Upstream-Provider", route.provider);
+        bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
+        if (!is_failover && status < 400) {
+            cb_record_success(ac->cb, model, target->endpoint);
+            char*  parsed_body = NULL;
+            size_t parsed_len = 0;
+            long   ptok = 0, ctok = 0, cached_tok = 0;
+            int    parsed_status = status;
+            if (adapter->parse_chat_response(ubody ? ubody : "", ulen, model, &parsed_status, &parsed_body, &parsed_len, &ptok, &ctok, &cached_tok) != 0) {
+                free(ubody);
+                aigate_write_error(rc, 502, "upstream_error", "failed to parse upstream response");
+                json_decref(jbody);
+                key_rec_free(&krec);
+                return 0;
             }
-            aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, lat, route.provider);
-            adapter->stream_bridge_free(bridge);
+            free(ubody);
+
+            um_record(ac->um, krec.key_id, model, parsed_status, ptok, ctok, cached_tok, total_lat, target->provider);
+            rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+
+            int rv = aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
+            free(parsed_body);
             json_decref(jbody);
             key_rec_free(&krec);
-            return 0;
+            return rv;
         }
 
-        long ptok = 0, ctok = 0, cached_tok = 0;
-        adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
+        cb_record_failure(ac->cb, model, target->endpoint, status);
+        free(ubody);
 
-        if (urc != 0) {
-            const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
-                                                : "stream interrupted: transport error";
-            char sse_err[256];
-            snprintf(sse_err, sizeof sse_err,
-                     "data: {\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
-                     "data: [DONE]\n\n",
-                     err_msg);
-            if (rc->write != NULL) {
-                rc->write(rc->impl, sse_err, strlen(sse_err), true);
-            }
-            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, lat, route.provider);
-            if (ptok + ctok > 0) {
-                rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
-            }
-            adapter->stream_bridge_free(bridge);
-            json_decref(jbody);
-            key_rec_free(&krec);
-            return 0;
+        if (!is_failover && status >= 400) {
+            break;
         }
 
-        adapter->stream_bridge_finish(bridge);
-        um_record(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, lat, route.provider);
-        rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
-        adapter->stream_bridge_free(bridge);
-
-        json_decref(jbody);
-        key_rec_free(&krec);
-        return 0;
-    }
-
-    /* --- upstream non-streaming call with a single retry on 5xx --- */
-    int      status = 0;
-    char*    ubody = NULL;
-    size_t   ulen = 0;
-    uint64_t t0 = mono_ns();
-    int      urc = upstream_call_ext(
-        url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
-    if (urc == 0 && status >= 500) {
-        free(ubody);
-        ubody = NULL;
-        struct timespec sl = {0, 200 * 1000000}; /* 200ms */
-        nanosleep(&sl, NULL);
-        urc = upstream_call_ext(
-            url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
-    }
-    uint64_t lat = mono_ns() - t0;
-    free(merged);
-
-    if (urc != 0 || status >= 500) {
-        if (rc->set_header != NULL) {
-            rc->set_header(rc->impl, "X-Upstream-Provider", route.provider);
+        if (ci + 1 < n_candidates) {
+            AIGATE_LOG_WARN("failover for model %s from %s (%s) to %s (%s) due to status %d (urc %d)",
+                            model, target->provider, target->endpoint,
+                            candidates[ci+1].provider, candidates[ci+1].endpoint, status, urc);
+            continue;
         }
-        aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-        /* still meter the failure */
-        um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, lat, route.provider);
-        free(ubody);
-        json_decref(jbody);
-        key_rec_free(&krec);
-        return 0;
     }
 
-    char*  parsed_body = NULL;
-    size_t parsed_len = 0;
-    long   ptok = 0, ctok = 0, cached_tok = 0;
-    int    parsed_status = status;
-    if (adapter->parse_chat_response(ubody ? ubody : "", ulen, model, &parsed_status, &parsed_body, &parsed_len, &ptok, &ctok, &cached_tok) != 0) {
-        aigate_write_error(rc, 502, "upstream_error", "failed to parse upstream response");
-        free(ubody);
-        json_decref(jbody);
-        key_rec_free(&krec);
-        return 0;
+    if (rc->set_header != NULL) {
+        rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
-    free(ubody);
-
-    um_record(ac->um, krec.key_id, model, parsed_status, ptok, ctok, cached_tok, lat, route.provider);
-    rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
-
-    int rv = aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
-    free(parsed_body);
+    aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
+    um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, total_lat, last_provider);
     json_decref(jbody);
     key_rec_free(&krec);
-    return rv;
+    return 0;
 }
