@@ -848,7 +848,7 @@ pq_query_usage(void*        vctx,
     static const char q[] =
         "SELECT key_id, model_name, day, requests, prompt_tokens, "
         "completion_tokens, errors, cached_prompt_tokens FROM usage_daily "
-        "WHERE key_id = $1 AND ($2 = 'all' OR model_name = $2) "
+        "WHERE ($1 = '0' OR key_id = $1) AND ($2 = 'all' OR model_name = $2) "
         "AND day >= to_date($3, 'YYYY-MM-DD') AND day <= to_date($4, 'YYYY-MM-DD') "
         "ORDER BY day";
     char        key[32], dfrom[24], dto[24];

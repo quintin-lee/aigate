@@ -2,6 +2,7 @@
  *  @brief Pipeline implementation (see aigate_core.h). */
 #include "aigate_core.h"
 #include "aigate_log.h"
+#include "metrics.h"
 #include "model_router.h"
 #include "provider_adapter.h"
 #include "upstream_client.h"
@@ -323,6 +324,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 AIGATE_LOG_WARN("failover embeddings for model %s from %s (%s) to %s (%s) due to status %d (urc %d)",
                                 model, target->provider, target->endpoint,
                                 candidates[ci+1].provider, candidates[ci+1].endpoint, status, urc);
+                metrics_inc_failover(model, target->provider, candidates[ci+1].provider);
                 continue;
             }
         }
@@ -431,6 +433,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                     AIGATE_LOG_WARN("streaming failover for model %s from %s (%s) to %s (%s) due to status %d (urc %d)",
                                     model, target->provider, target->endpoint,
                                     candidates[ci+1].provider, candidates[ci+1].endpoint, status, urc);
+                    metrics_inc_failover(model, target->provider, candidates[ci+1].provider);
                     continue;
                 }
                 break;
@@ -572,6 +575,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             AIGATE_LOG_WARN("failover for model %s from %s (%s) to %s (%s) due to status %d (urc %d)",
                             model, target->provider, target->endpoint,
                             candidates[ci+1].provider, candidates[ci+1].endpoint, status, urc);
+            metrics_inc_failover(model, target->provider, candidates[ci+1].provider);
             continue;
         }
     }

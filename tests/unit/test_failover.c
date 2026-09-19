@@ -2,6 +2,7 @@
  *  @brief Unit tests for multi-upstream failover execution & circuit breaker integration.
  */
 #include "aigate_core.h"
+#include "metrics.h"
 #include "mock_upstream.h"
 #include "pg_store.h"
 #include "run_tests.h"
@@ -137,6 +138,7 @@ setup_failover_env(struct failover_db* db,
 
 TEST_CASE(test_failover_on_500_to_backup)
 {
+    metrics_reset_failovers();
     mock_upstream_t* u1 = mock_upstream_start();
     mock_upstream_t* u2 = mock_upstream_start();
     TEST_ASSERT(u1 != NULL && u2 != NULL, "upstreams started");
@@ -172,6 +174,7 @@ TEST_CASE(test_failover_on_500_to_backup)
     TEST_ASSERT(strstr(fr.body, "\"choices\"") != NULL, "valid response body");
     TEST_ASSERT(mock_upstream_request_count(u1) == 1, "target 1 was attempted once");
     TEST_ASSERT(mock_upstream_request_count(u2) == 1, "target 2 served the request");
+    TEST_ASSERT(metrics_get_failover("failover-chat", "openai", "openai") == 1, "metric recorded failover");
 
     aigate_core_shutdown(&ac);
     pg_store_close(ps);

@@ -388,9 +388,8 @@
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 uppercase tracking-wider font-semibold">
                 <th class="py-3 px-4">模型名称</th>
-                <th class="py-3 px-4">提供方</th>
-                <th class="py-3 px-4">接入地址</th>
-                <th class="py-3 px-4">密钥引用</th>
+                <th class="py-3 px-4">策略与目标数</th>
+                <th class="py-3 px-4">上游目标与熔断健康</th>
                 <th class="py-3 px-4 text-center">状态</th>
                 <th class="py-3 px-4 text-right">操作</th>
               </tr>
@@ -667,44 +666,41 @@
 
   <!-- 2. 注册/编辑模型弹窗 -->
   <div id="modelModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
-    <div class="glass-panel max-w-lg w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
+    <div class="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll">
       <div class="flex items-center justify-between">
         <h3 id="modelModalTitle" class="text-lg font-bold text-white">注册新模型</h3>
         <button onclick="closeModelModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
       </div>
-      <form id="modelForm" onsubmit="handleModelSubmit(event)" class="space-y-3.5 text-xs">
-        <div>
-          <label class="block font-semibold text-slate-300 mb-1">模型名称 *</label>
-          <input type="text" id="mFormName" required placeholder="例如 gpt-4o、claude-3-5-sonnet" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
-        </div>
-
-        <div>
-          <label class="block font-semibold text-slate-300 mb-1">提供方 *</label>
-          <select id="mFormProvider" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500">
-            <option value="openai">OpenAI / 兼容接口（vLLM、Ollama、DeepSeek）</option>
-            <option value="anthropic">Anthropic（Claude Messages API）</option>
-          </select>
-        </div>
-
-        <div>
-          <label class="block font-semibold text-slate-300 mb-1">上游地址 *</label>
-          <input type="text" id="mFormEndpoint" required placeholder="https://api.openai.com" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
-          <div class="flex items-center space-x-1.5 mt-1.5 text-[10px]">
-            <span class="text-slate-500">预设：</span>
-            <button type="button" onclick="setEndpointPreset('https://api.openai.com')" class="text-brand-400 hover:underline">OpenAI</button>
-            <span class="text-slate-600">•</span>
-            <button type="button" onclick="setEndpointPreset('https://api.anthropic.com')" class="text-purple-400 hover:underline">Anthropic</button>
-            <span class="text-slate-600">•</span>
-            <button type="button" onclick="setEndpointPreset('http://localhost:11434/v1')" class="text-cyan-400 hover:underline">Ollama</button>
-            <span class="text-slate-600">•</span>
-            <button type="button" onclick="setEndpointPreset('http://localhost:8000/v1')" class="text-emerald-400 hover:underline">vLLM</button>
+      <form id="modelForm" onsubmit="handleModelSubmit(event)" class="space-y-4 text-xs">
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">模型名称 *</label>
+            <input type="text" id="mFormName" required placeholder="例如 gpt-4o、claude-3-5-sonnet" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">负载均衡策略</label>
+            <select id="mFormLbPolicy" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-medium">
+              <option value="priority">主备故障切换 (Priority Failover)</option>
+              <option value="weighted_round_robin">加权轮询 (Weighted Round-Robin)</option>
+            </select>
           </div>
         </div>
 
-        <div>
-          <label class="block font-semibold text-slate-300 mb-1">上游密钥引用</label>
-          <input type="text" id="mFormKeyRef" placeholder="env:OPENAI_API_KEY（可选）" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
-          <p class="text-[10px] text-slate-500 mt-0.5">使用 <code class="text-slate-400">env:变量名</code> 引用服务器环境变量。</p>
+        <!-- 多上游目标配置 -->
+        <div class="border-t border-b border-slate-800/80 py-3">
+          <div class="flex items-center justify-between mb-2.5">
+            <div>
+              <span class="font-semibold text-slate-200">上游目标配置</span>
+              <span class="text-[11px] text-slate-500 ml-1.5">（支持最多 8 个上游端点及熔断器隔离）</span>
+            </div>
+            <button type="button" onclick="addTargetRow()" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-brand-600/20 text-brand-300 hover:bg-brand-600/30 border border-brand-500/30 transition flex items-center space-x-1">
+              <span>+</span>
+              <span>添加目标</span>
+            </button>
+          </div>
+          <div id="mFormTargetsContainer" class="space-y-3">
+            <!-- 动态生成目标行 -->
+          </div>
         </div>
 
         <div>
@@ -1067,12 +1063,12 @@
     // --- Models Management ---
     async function fetchModels() {
       const tbody = document.getElementById("modelsTableBody");
-      tbody.innerHTML = `<tr><td colspan="6" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载模型…</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="5" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载模型…</td></tr>`;
       document.getElementById("modelsEmptyState").classList.add("hidden");
       const resp = await apiCall("/admin/v1/models");
       if (!resp || !resp.ok) return;
       const data = await resp.json();
-      state.models = data.data || [];
+      state.models = data.models || data.data || [];
       renderModelsTable();
       populateModelFilters();
     }
@@ -1089,29 +1085,72 @@
       empty.classList.add("hidden");
 
       list.forEach(m => {
-        const isAnthropic = m.provider === "anthropic";
-        const provBadge = isAnthropic
-          ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">Anthropic</span>`
-          : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">OpenAI</span>`;
+        const name = m.name || m.model_name || "unknown";
+        const lbPolicy = m.lb_policy || "priority";
+        const isWrr = lbPolicy === "weighted_round_robin" || lbPolicy === "weighted";
+        const policyBadge = isWrr
+          ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">加权轮询</span>`
+          : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">主备优先级</span>`;
+
+        let tgts = (m.targets && m.targets.length > 0) ? m.targets : [];
+        if (tgts.length === 0 && m.endpoint) {
+          tgts = [{
+            provider: m.provider || "openai",
+            endpoint: m.endpoint,
+            upstream_key_ref: m.upstream_key_ref || "",
+            weight: 1,
+            priority: 0,
+            cb_state: "closed"
+          }];
+        }
+
+        const targetCountBadge = `<span class="ml-1.5 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">${tgts.length} 目标</span>`;
+
+        // Render targets preview & circuit breaker pills
+        const targetPills = tgts.map((t, idx) => {
+          let cbBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="熔断器正常 (Closed)">🟢 正常</span>`;
+          if (t.cb_state === "open") {
+            cbBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse" title="熔断器跳闸保护中 (Open)">🔴 熔断中</span>`;
+          } else if (t.cb_state === "half_open") {
+            cbBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30" title="半开探测尝试中 (Half-Open)">🟡 探测中</span>`;
+          }
+
+          const provColor = t.provider === "anthropic" ? "text-purple-400" : "text-emerald-400";
+          return `
+            <div class="flex items-center space-x-2 py-0.5 text-xs">
+              <span class="font-mono text-[10px] text-slate-500">#${idx + 1}</span>
+              <span class="font-semibold text-[11px] ${provColor}">[${t.provider || "openai"}]</span>
+              <span class="font-mono text-slate-300 truncate max-w-[220px]" title="${t.endpoint}">${t.endpoint}</span>
+              <span class="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 font-mono">P${t.priority ?? 0} W${t.weight ?? 1}</span>
+              ${cbBadge}
+            </div>
+          `;
+        }).join("");
 
         const statusBadge = m.enabled
-          ? `<button onclick="toggleModelEnabled('${m.name}', false)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition">● 已启用</button>`
-          : `<button onclick="toggleModelEnabled('${m.name}', true)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition">○ 已停用</button>`;
+          ? `<button onclick="toggleModelEnabled('${name}', false)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition">● 已启用</button>`
+          : `<button onclick="toggleModelEnabled('${name}', true)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition">○ 已停用</button>`;
 
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
         tr.innerHTML = `
-          <td class="py-3 px-4 font-mono font-bold text-slate-100 flex items-center space-x-2">
-            <span>${m.name}</span>
+          <td class="py-3 px-4 font-mono font-bold text-slate-100">
+            <span>${name}</span>
           </td>
-          <td class="py-3 px-4">${provBadge}</td>
-          <td class="py-3 px-4 font-mono text-slate-300 max-w-xs truncate" title="${m.endpoint}">${m.endpoint}</td>
-          <td class="py-3 px-4 font-mono text-slate-400">${m.upstream_key_ref || "<span class='text-slate-600'>（无）</span>"}</td>
-          <td class="py-3 px-4 text-center">${statusBadge}</td>
+          <td class="py-3 px-4 whitespace-nowrap">
+            ${policyBadge}
+            ${targetCountBadge}
+          </td>
+          <td class="py-3 px-4">
+            <div class="space-y-1">
+              ${targetPills || "<span class='text-slate-500'>（未配置上游目标）</span>"}
+            </div>
+          </td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">${statusBadge}</td>
           <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
-            <button onclick="openPlaygroundForModel('${m.name}')" class="text-xs text-brand-400 hover:text-brand-300 transition" title="在调试场中测试">⚡ 测试</button>
-            <button onclick="editModel('${m.name}')" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
-            <button onclick="deleteModel('${m.name}')" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
+            <button onclick="openPlaygroundForModel('${name}')" class="text-xs text-brand-400 hover:text-brand-300 transition" title="在调试场中测试">⚡ 测试</button>
+            <button onclick="editModel('${name}')" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
+            <button onclick="deleteModel('${name}')" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
           </td>
         `;
         tbody.appendChild(tr);
@@ -1120,43 +1159,170 @@
 
     function filterModelsTable() {
       const q = (document.getElementById("modelSearchInput").value || "").toLowerCase();
-      const filtered = state.models.filter(m =>
-        m.name.toLowerCase().includes(q) ||
-        m.provider.toLowerCase().includes(q) ||
-        m.endpoint.toLowerCase().includes(q)
-      );
+      const filtered = state.models.filter(m => {
+        const name = (m.name || m.model_name || "").toLowerCase();
+        const policy = (m.lb_policy || "").toLowerCase();
+        const matchTgt = (m.targets || []).some(t =>
+          (t.endpoint || "").toLowerCase().includes(q) ||
+          (t.provider || "").toLowerCase().includes(q)
+        );
+        return name.includes(q) || policy.includes(q) || matchTgt || (m.endpoint || "").toLowerCase().includes(q);
+      });
       renderModelsTable(filtered);
+    }
+
+    function createTargetRowElement(tgt = {}, index = 0) {
+      const row = document.createElement("div");
+      row.className = "target-row p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2 relative";
+      row.innerHTML = `
+        <div class="flex items-center justify-between">
+          <span class="text-[11px] font-bold text-slate-400 uppercase tracking-wider target-row-index">目标 #${index + 1}</span>
+          <button type="button" onclick="removeTargetRow(this)" class="text-xs text-rose-400 hover:text-rose-300 remove-target-btn transition">✕ 移除</button>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-12 gap-2 text-xs">
+          <div class="sm:col-span-3">
+            <label class="block text-[10px] text-slate-400 mb-0.5">提供方</label>
+            <select class="tgt-provider w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:border-brand-500">
+              <option value="openai" ${tgt.provider !== "anthropic" ? "selected" : ""}>OpenAI / 兼容</option>
+              <option value="anthropic" ${tgt.provider === "anthropic" ? "selected" : ""}>Anthropic</option>
+            </select>
+          </div>
+          <div class="sm:col-span-5">
+            <label class="block text-[10px] text-slate-400 mb-0.5">接入地址 *</label>
+            <input type="text" required value="${tgt.endpoint || ""}" placeholder="https://api.openai.com" class="tgt-endpoint w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono focus:outline-none focus:border-brand-500">
+          </div>
+          <div class="sm:col-span-4">
+            <label class="block text-[10px] text-slate-400 mb-0.5">密钥引用</label>
+            <input type="text" value="${tgt.upstream_key_ref || tgt.upstream_key || ""}" placeholder="env:OPENAI_API_KEY" class="tgt-keyref w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono focus:outline-none focus:border-brand-500">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 sm:grid-cols-12 gap-2 text-xs pt-1">
+          <div class="sm:col-span-3">
+            <label class="block text-[10px] text-slate-400 mb-0.5">优先级 (Priority)</label>
+            <input type="number" min="0" max="99" value="${tgt.priority ?? 0}" class="tgt-priority w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono focus:outline-none focus:border-brand-500" title="数值越小优先级越高 (0为首选)">
+          </div>
+          <div class="sm:col-span-3">
+            <label class="block text-[10px] text-slate-400 mb-0.5">权重 (Weight)</label>
+            <input type="number" min="1" max="1000" value="${tgt.weight ?? 1}" class="tgt-weight w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white font-mono focus:outline-none focus:border-brand-500" title="同优先级内权重比例">
+          </div>
+          <div class="col-span-2 sm:col-span-6 flex items-center space-x-1.5 pt-4 text-[10px]">
+            <span class="text-slate-500">预设:</span>
+            <button type="button" onclick="setRowPreset(this, 'openai', 'https://api.openai.com', 'env:OPENAI_API_KEY')" class="text-brand-400 hover:underline">OpenAI</button>
+            <span class="text-slate-600">•</span>
+            <button type="button" onclick="setRowPreset(this, 'anthropic', 'https://api.anthropic.com', 'env:ANTHROPIC_API_KEY')" class="text-purple-400 hover:underline">Anthropic</button>
+            <span class="text-slate-600">•</span>
+            <button type="button" onclick="setRowPreset(this, 'openai', 'http://localhost:11434/v1', '')" class="text-cyan-400 hover:underline">Ollama</button>
+            <span class="text-slate-600">•</span>
+            <button type="button" onclick="setRowPreset(this, 'openai', 'http://localhost:8000/v1', '')" class="text-emerald-400 hover:underline">vLLM</button>
+          </div>
+        </div>
+      `;
+      return row;
+    }
+
+    function addTargetRow(tgt = {}) {
+      const container = document.getElementById("mFormTargetsContainer");
+      const currentRows = container.querySelectorAll(".target-row");
+      if (currentRows.length >= 8) {
+        showToast("每个模型最多支持 8 个上游目标", "warning");
+        return;
+      }
+      const el = createTargetRowElement(tgt, currentRows.length);
+      container.appendChild(el);
+      updateTargetRowHeaders();
+    }
+
+    function removeTargetRow(btn) {
+      const container = document.getElementById("mFormTargetsContainer");
+      const currentRows = container.querySelectorAll(".target-row");
+      if (currentRows.length <= 1) {
+        showToast("模型必须包含至少 1 个上游目标", "warning");
+        return;
+      }
+      const row = btn.closest(".target-row");
+      if (row) {
+        row.remove();
+        updateTargetRowHeaders();
+      }
+    }
+
+    function updateTargetRowHeaders() {
+      const container = document.getElementById("mFormTargetsContainer");
+      const rows = container.querySelectorAll(".target-row");
+      rows.forEach((r, i) => {
+        const title = r.querySelector(".target-row-index");
+        if (title) title.innerText = `目标 #${i + 1}`;
+        const removeBtn = r.querySelector(".remove-target-btn");
+        if (removeBtn) {
+          removeBtn.style.display = (rows.length === 1) ? "none" : "inline-block";
+        }
+      });
+    }
+
+    function setRowPreset(btn, provider, endpoint, keyref) {
+      const row = btn.closest(".target-row");
+      if (!row) return;
+      row.querySelector(".tgt-provider").value = provider;
+      row.querySelector(".tgt-endpoint").value = endpoint;
+      row.querySelector(".tgt-keyref").value = keyref;
     }
 
     function openModelModal(name = null) {
       state.editingModelName = name;
       const title = document.getElementById("modelModalTitle");
       const fName = document.getElementById("mFormName");
-      const fProv = document.getElementById("mFormProvider");
-      const fEndp = document.getElementById("mFormEndpoint");
-      const fKref = document.getElementById("mFormKeyRef");
+      const fPolicy = document.getElementById("mFormLbPolicy");
       const fParam = document.getElementById("mFormParams");
       const fEnab = document.getElementById("mFormEnabled");
+      const container = document.getElementById("mFormTargetsContainer");
+      container.innerHTML = "";
 
       if (name) {
-        const m = state.models.find(x => x.name === name);
+        const m = state.models.find(x => (x.name === name || x.model_name === name));
         title.innerText = `编辑模型：${name}`;
-        fName.value = m.name;
+        fName.value = name;
         fName.disabled = true;
-        fProv.value = m.provider || "openai";
-        fEndp.value = m.endpoint || "";
-        fKref.value = m.upstream_key_ref || "";
-        fParam.value = m.default_params ? JSON.stringify(m.default_params, null, 2) : "{}";
-        fEnab.checked = m.enabled;
+        fPolicy.value = (m && m.lb_policy) ? m.lb_policy : "priority";
+        let defaultParamsObj = {};
+        if (m && m.default_params) {
+          if (typeof m.default_params === "string") {
+            try { defaultParamsObj = JSON.parse(m.default_params); } catch(e) { defaultParamsObj = {}; }
+          } else {
+            defaultParamsObj = m.default_params;
+          }
+        }
+        fParam.value = JSON.stringify(defaultParamsObj, null, 2);
+        fEnab.checked = m ? !!m.enabled : true;
+
+        let tgts = (m && m.targets && m.targets.length > 0) ? m.targets : [];
+        if (tgts.length === 0 && m && m.endpoint) {
+          tgts = [{
+            provider: m.provider || "openai",
+            endpoint: m.endpoint,
+            upstream_key_ref: m.upstream_key_ref || "",
+            priority: 0,
+            weight: 1
+          }];
+        }
+        if (tgts.length === 0) {
+          addTargetRow();
+        } else {
+          tgts.forEach(t => addTargetRow(t));
+        }
       } else {
         title.innerText = "注册新模型";
         fName.value = "";
         fName.disabled = false;
-        fProv.value = "openai";
-        fEndp.value = "https://api.openai.com";
-        fKref.value = "env:OPENAI_API_KEY";
+        fPolicy.value = "priority";
         fParam.value = "{}";
         fEnab.checked = true;
+        addTargetRow({
+          provider: "openai",
+          endpoint: "https://api.openai.com",
+          upstream_key_ref: "env:OPENAI_API_KEY",
+          priority: 0,
+          weight: 1
+        });
       }
       document.getElementById("modelModal").classList.remove("hidden");
     }
@@ -1166,26 +1332,10 @@
       state.editingModelName = null;
     }
 
-    function setEndpointPreset(url) {
-      document.getElementById("mFormEndpoint").value = url;
-      if (url.includes("anthropic")) {
-        document.getElementById("mFormProvider").value = "anthropic";
-        document.getElementById("mFormKeyRef").value = "env:ANTHROPIC_API_KEY";
-      } else if (url.includes("openai")) {
-        document.getElementById("mFormProvider").value = "openai";
-        document.getElementById("mFormKeyRef").value = "env:OPENAI_API_KEY";
-      } else {
-        document.getElementById("mFormProvider").value = "openai";
-        document.getElementById("mFormKeyRef").value = "";
-      }
-    }
-
     async function handleModelSubmit(e) {
       e.preventDefault();
       const name = document.getElementById("mFormName").value.trim();
-      const provider = document.getElementById("mFormProvider").value;
-      const endpoint = document.getElementById("mFormEndpoint").value.trim();
-      const keyRef = document.getElementById("mFormKeyRef").value.trim();
+      const lbPolicy = document.getElementById("mFormLbPolicy").value;
       const rawParams = document.getElementById("mFormParams").value.trim();
       const enabled = document.getElementById("mFormEnabled").checked;
 
@@ -1197,16 +1347,46 @@
         return;
       }
 
+      // Collect target rows
+      const targetRows = document.querySelectorAll("#mFormTargetsContainer .target-row");
+      const targets = [];
+      for (const r of targetRows) {
+        const ep = r.querySelector(".tgt-endpoint").value.trim();
+        if (!ep) {
+          showToast("上游目标接入地址不能为空", "error");
+          return;
+        }
+        targets.push({
+          provider: r.querySelector(".tgt-provider").value,
+          endpoint: ep,
+          upstream_key_ref: r.querySelector(".tgt-keyref").value.trim(),
+          priority: parseInt(r.querySelector(".tgt-priority").value, 10) || 0,
+          weight: Math.max(1, parseInt(r.querySelector(".tgt-weight").value, 10) || 1)
+        });
+      }
+
+      if (targets.length === 0) {
+        showToast("请至少添加一个上游目标", "error");
+        return;
+      }
+
+      const primary = targets[0];
+      const payload = {
+        name: name,
+        provider: primary.provider,
+        endpoint: primary.endpoint,
+        upstream_key_ref: primary.upstream_key_ref,
+        lb_policy: lbPolicy,
+        targets: targets,
+        default_params: defaultParams,
+        enabled: enabled
+      };
+
       if (state.editingModelName) {
-        // PUT update
+        // PATCH/PUT update
         const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(name)}`, {
-          method: "PUT",
-          body: {
-            endpoint: endpoint,
-            upstream_key_ref: keyRef,
-            default_params: defaultParams,
-            enabled: enabled
-          }
+          method: "PATCH",
+          body: payload
         });
         if (resp && resp.ok) {
           showToast(`模型 ${name} 已更新`, "success");
@@ -1217,14 +1397,7 @@
         // POST create
         const resp = await apiCall("/admin/v1/models", {
           method: "POST",
-          body: {
-            name: name,
-            provider: provider,
-            endpoint: endpoint,
-            upstream_key_ref: keyRef,
-            default_params: defaultParams,
-            enabled: enabled
-          }
+          body: payload
         });
         if (resp && resp.ok) {
           showToast(`模型 ${name} 已注册`, "success");
@@ -1236,7 +1409,7 @@
 
     async function toggleModelEnabled(name, newStatus) {
       const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(name)}`, {
-        method: "PUT",
+        method: "PATCH",
         body: { enabled: newStatus }
       });
       if (resp && resp.ok) {

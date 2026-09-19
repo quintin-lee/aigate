@@ -20,6 +20,18 @@
  */
 int metrics_render(usage_meter_t* um, char* out, size_t cap);
 
+/** @brief Increment failover counter for model from_prov -> to_prov. */
+void metrics_inc_failover(const char* model, const char* from_prov, const char* to_prov);
+
+/** @brief Sample count of failovers for (model, from_prov, to_prov). */
+long metrics_get_failover(const char* model, const char* from_prov, const char* to_prov);
+
+/** @brief Lifetime total of all failovers. */
+long metrics_total_failovers(void);
+
+/** @brief Reset failover metrics (for tests). */
+void metrics_reset_failovers(void);
+
 /** @brief 1 when @p ip (dotted-quad string) is contained in the comma-
  *  separated CIDR/IPv4 list @p acl ("127.0.0.1,10.0.0.0/8").
  *  @note ACL is IPv4-only by design (spec §5); empty @p acl → allow all. */

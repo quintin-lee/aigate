@@ -129,3 +129,28 @@ TEST_CASE(test_metrics_acl)
     TEST_ASSERT(metrics_acl_allows("10.1.2.3", "10.0.0.0/8") == 1, "/8 match");
     TEST_ASSERT(metrics_acl_allows("9.1.2.3", "10.0.0.0/8") == 0, "/8 miss");
 }
+
+TEST_CASE(test_metrics_failover)
+{
+    metrics_reset_failovers();
+    TEST_ASSERT(metrics_total_failovers() == 0, "initially 0 failovers");
+
+    metrics_inc_failover("gpt-4o", "openai", "azure");
+    metrics_inc_failover("gpt-4o", "openai", "azure");
+    metrics_inc_failover("claude-3-5", "anthropic", "aws-bedrock");
+
+    TEST_ASSERT(metrics_total_failovers() == 3, "total failovers == 3");
+    TEST_ASSERT(metrics_get_failover("gpt-4o", "openai", "azure") == 2, "gpt-4o openai->azure == 2");
+    TEST_ASSERT(metrics_get_failover("claude-3-5", "anthropic", "aws-bedrock") == 1, "claude-3-5 anthropic->aws == 1");
+    TEST_ASSERT(metrics_get_failover("gpt-4o", "azure", "openai") == 0, "reverse direction == 0");
+
+    char buf[4096];
+    TEST_ASSERT(metrics_render(NULL, buf, sizeof buf) == 0, "render ok without um");
+    TEST_ASSERT(strstr(buf, "aigate_failover_total{model=\"gpt-4o\",from_provider=\"openai\",to_provider=\"azure\"} 2") != NULL,
+                "contains gpt-4o failover metric");
+    TEST_ASSERT(strstr(buf, "aigate_failover_total{model=\"claude-3-5\",from_provider=\"anthropic\",to_provider=\"aws-bedrock\"} 1") != NULL,
+                "contains claude failover metric");
+
+    metrics_reset_failovers();
+    TEST_ASSERT(metrics_total_failovers() == 0, "reset ok");
+}

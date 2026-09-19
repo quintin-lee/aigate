@@ -280,7 +280,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
                 for (int k = 0; k < n_th && total_added < cap; k++) {
                     out_candidates[total_added++] = tier_healthy[(start + (unsigned long)k) % (unsigned long)n_th];
                 }
-            } else if (strcmp(model->lb_policy, "weighted") == 0 && n_th > 1) {
+            } else if ((strcmp(model->lb_policy, "weighted") == 0 || strcmp(model->lb_policy, "weighted_round_robin") == 0) && n_th > 1) {
                 int total_w = 0;
                 for (int k = 0; k < n_th; k++) {
                     total_w += tier_healthy[k].weight;

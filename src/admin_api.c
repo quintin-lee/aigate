@@ -12,6 +12,7 @@
 #include "admin_api.h"
 #include "aigate_log.h"
 #include "auth_key.h"
+#include "circuit_breaker.h"
 #include "model_router.h"
 #include "sha256.h"
 
@@ -398,6 +399,53 @@ key_revoke(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
 /* ------------------------------------------------------------ models */
 
 static int
+parse_targets_array(json_t* jtargets, upstream_target_t* targets, int max_targets, int* n_targets)
+{
+    if (!json_is_array(jtargets)) {
+        return -1;
+    }
+    size_t sz = json_array_size(jtargets);
+    if (sz > (size_t)max_targets) {
+        sz = max_targets;
+    }
+    *n_targets = (int)sz;
+    for (size_t i = 0; i < sz; i++) {
+        json_t* item = json_array_get(jtargets, i);
+        if (!json_is_object(item)) {
+            return -1;
+        }
+        upstream_target_t* tgt = &targets[i];
+        memset(tgt, 0, sizeof(*tgt));
+        json_t* p = json_object_get(item, "provider");
+        if (p && json_is_string(p)) {
+            snprintf(tgt->provider, sizeof tgt->provider, "%s", json_string_value(p));
+        } else {
+            snprintf(tgt->provider, sizeof tgt->provider, "openai");
+        }
+        json_t* ep = json_object_get(item, "endpoint");
+        if (ep && json_is_string(ep)) {
+            snprintf(tgt->endpoint, sizeof tgt->endpoint, "%s", json_string_value(ep));
+        }
+        json_t* key = json_object_get(item, "upstream_key_ref");
+        if (!key) {
+            key = json_object_get(item, "upstream_key");
+        }
+        if (key && json_is_string(key)) {
+            snprintf(tgt->upstream_key, sizeof tgt->upstream_key, "%s", json_string_value(key));
+        }
+        json_t* w = json_object_get(item, "weight");
+        tgt->weight = (w && json_is_integer(w)) ? (int)json_integer_value(w) : 1;
+        if (tgt->weight <= 0) {
+            tgt->weight = 1;
+        }
+
+        json_t* pr = json_object_get(item, "priority");
+        tgt->priority = (pr && json_is_integer(pr)) ? (int)json_integer_value(pr) : 0;
+    }
+    return 0;
+}
+
+static int
 model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
 {
     json_t* jbody = parse_body(req_body, 0);
@@ -412,10 +460,24 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
         json_decref(jbody);
         return finish_error(status, body, len, 400, "bad_request", "name is required");
     }
-    memcpy(m.name, name, sizeof m.name);
-    memcpy(m.provider, jstring(jbody, "provider", "openai"), sizeof m.provider);
-    memcpy(m.endpoint, jstring(jbody, "endpoint", ""), sizeof m.endpoint);
-    memcpy(m.upstream_key_ref, jstring(jbody, "upstream_key_ref", ""), sizeof m.upstream_key_ref);
+    snprintf(m.name, sizeof m.name, "%s", name);
+
+    json_t* jtargets = json_object_get(jbody, "targets");
+    if (jtargets != NULL) {
+        if (parse_targets_array(jtargets, m.targets, 8, &m.n_targets) != 0) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 400, "bad_request", "invalid targets array");
+        }
+    }
+
+    const char* def_prov = (m.n_targets > 0 && m.targets[0].provider[0]) ? m.targets[0].provider : "openai";
+    const char* def_endp = (m.n_targets > 0 && m.targets[0].endpoint[0]) ? m.targets[0].endpoint : "";
+    const char* def_kref = (m.n_targets > 0 && m.targets[0].upstream_key[0]) ? m.targets[0].upstream_key : "";
+
+    snprintf(m.provider, sizeof m.provider, "%s", jstring(jbody, "provider", def_prov));
+    snprintf(m.endpoint, sizeof m.endpoint, "%s", jstring(jbody, "endpoint", def_endp));
+    snprintf(m.upstream_key_ref, sizeof m.upstream_key_ref, "%s", jstring(jbody, "upstream_key_ref", def_kref));
+    snprintf(m.lb_policy, sizeof m.lb_policy, "%s", jstring(jbody, "lb_policy", "priority"));
 
     json_t* jparams = json_object_get(jbody, "default_params");
     char    params[1024] = "{}";
@@ -461,11 +523,38 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
     for (int i = 0; i < n; i++) {
         json_t* o = json_object();
         json_object_set_new(o, "model_name", json_string(recs[i].name));
+        json_object_set_new(o, "name", json_string(recs[i].name));
         json_object_set_new(o, "provider", json_string(recs[i].provider));
         json_object_set_new(o, "endpoint", json_string(recs[i].endpoint));
         json_object_set_new(o, "upstream_key_ref", json_string(recs[i].upstream_key_ref));
         json_object_set_new(o, "enabled", json_integer(recs[i].enabled));
         json_object_set_new(o, "default_params", json_string(recs[i].default_params_json));
+        json_object_set_new(o, "lb_policy", json_string(recs[i].lb_policy[0] != '\0' ? recs[i].lb_policy : "priority"));
+
+        json_t* tgts_arr = json_array();
+        for (int t = 0; t < recs[i].n_targets; t++) {
+            upstream_target_t* tgt = &recs[i].targets[t];
+            json_t* to = json_object();
+            json_object_set_new(to, "provider", json_string(tgt->provider));
+            json_object_set_new(to, "endpoint", json_string(tgt->endpoint));
+            json_object_set_new(to, "upstream_key_ref", json_string(tgt->upstream_key));
+            json_object_set_new(to, "weight", json_integer(tgt->weight));
+            json_object_set_new(to, "priority", json_integer(tgt->priority));
+
+            const char* cb_state_str = "closed";
+            if (adm->ac != NULL && adm->ac->cb != NULL) {
+                cb_state_t st = cb_get_state(adm->ac->cb, recs[i].name, tgt->endpoint);
+                if (st == CB_OPEN) {
+                    cb_state_str = "open";
+                } else if (st == CB_HALF_OPEN) {
+                    cb_state_str = "half_open";
+                }
+            }
+            json_object_set_new(to, "cb_state", json_string(cb_state_str));
+            json_array_append_new(tgts_arr, to);
+        }
+        json_object_set_new(o, "targets", tgts_arr);
+
         json_array_append_new(arr, o);
         model_rec_free(&recs[i]);
     }
@@ -519,6 +608,20 @@ model_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
     if (v != NULL && json_is_boolean(v)) {
         m.enabled = json_is_true(v);
         mask |= MMASK_ENABLED;
+    }
+    v = json_object_get(jbody, "lb_policy");
+    if (v != NULL && json_is_string(v)) {
+        snprintf(m.lb_policy, sizeof m.lb_policy, "%s", json_string_value(v));
+        mask |= MMASK_LB_POLICY;
+    }
+    v = json_object_get(jbody, "targets");
+    if (v != NULL) {
+        if (parse_targets_array(v, m.targets, 8, &m.n_targets) != 0) {
+            model_rec_free(&existing);
+            json_decref(jbody);
+            return finish_error(status, body, len, 400, "bad_request", "invalid targets array");
+        }
+        mask |= MMASK_TARGETS;
     }
     json_decref(jbody);
 
@@ -613,12 +716,21 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
 
     char* kend = NULL;
     long  key_id = strtol(key, &kend, 10);
-    if (key[0] == '\0' || kend == key || key_id <= 0) {
-        return finish_error(status, body, len, 400, "bad_request", "?key=<id> is required");
+    if (key[0] != '\0' && (kend == key || key_id <= 0)) {
+        return finish_error(status, body, len, 400, "bad_request", "bad ?key=<id>");
     }
     time_t t_from, t_to;
-    if (parse_day(from, &t_from) != 0 || parse_day(to, &t_to) != 0) {
-        return finish_error(status, body, len, 400, "bad_request", "bad from/to date (use YYYY-MM-DD)");
+    if (from[0] == '\0') {
+        time_t now = time(NULL);
+        t_from = now - (now % 86400) - 6 * 86400;
+    } else if (parse_day(from, &t_from) != 0) {
+        return finish_error(status, body, len, 400, "bad_request", "bad from date (use YYYY-MM-DD)");
+    }
+    if (to[0] == '\0') {
+        time_t now = time(NULL);
+        t_to = now - (now % 86400);
+    } else if (parse_day(to, &t_to) != 0) {
+        return finish_error(status, body, len, 400, "bad_request", "bad to date (use YYYY-MM-DD)");
     }
 
     usage_row_t* rows = calloc(USAGE_LIST_CAP, sizeof *rows);
@@ -702,7 +814,7 @@ admin_dispatch(admin_ctx_t* adm, const char* uri, const char* method, const char
             }
         }
         if (rest[4] == '/') {
-            if (strcmp(method, "PATCH") == 0) {
+            if (strcmp(method, "PATCH") == 0 || strcmp(method, "PUT") == 0) {
                 return key_patch(adm, out_status, out_body, out_len, rest + 5, body);
             }
             if (strcmp(method, "DELETE") == 0) {
@@ -719,7 +831,7 @@ admin_dispatch(admin_ctx_t* adm, const char* uri, const char* method, const char
             }
         }
         if (rest[6] == '/') {
-            if (strcmp(method, "PATCH") == 0) {
+            if (strcmp(method, "PATCH") == 0 || strcmp(method, "PUT") == 0) {
                 return model_patch(adm, out_status, out_body, out_len, rest + 7, body);
             }
             if (strcmp(method, "DELETE") == 0) {

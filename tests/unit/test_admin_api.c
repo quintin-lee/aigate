@@ -239,6 +239,13 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
             if (mask & MMASK_ENABLED) {
                 db->models[i].enabled = m->enabled;
             }
+            if (mask & MMASK_TARGETS) {
+                memcpy(db->models[i].targets, m->targets, sizeof m->targets);
+                db->models[i].n_targets = m->n_targets;
+            }
+            if (mask & MMASK_LB_POLICY) {
+                snprintf(db->models[i].lb_policy, sizeof db->models[i].lb_policy, "%s", m->lb_policy);
+            }
             return 0;
         }
     }
@@ -276,7 +283,7 @@ fake_query_usage(void* ctx, long key_id, const char* model, time_t from, time_t 
     *n = 0;
     for (int i = 0; i < db->n_usage && *n < cap; i++) {
         usage_row_t* r = &db->usage[i];
-        if (r->key_id != key_id) {
+        if (key_id != 0 && r->key_id != key_id) {
             continue;
         }
         if (model != NULL && model[0] != '\0' && strcmp(model, "all") != 0 &&
@@ -509,6 +516,83 @@ TEST_CASE(test_admin_models_lifecycle)
     teardown_admin(ps, &core, &db);
 }
 
+TEST_CASE(test_admin_models_multi_target)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int status = 0;
+    char* body = NULL;
+    size_t len = 0;
+
+    /* 1. Create model with targets array & lb_policy */
+    const char* req =
+        "{\"name\":\"hybrid-model\","
+        "\"lb_policy\":\"weighted_round_robin\","
+        "\"targets\":["
+        "  {\"provider\":\"openai\",\"endpoint\":\"http://ep1\",\"upstream_key_ref\":\"k1\",\"weight\":2,\"priority\":0},"
+        "  {\"provider\":\"azure\",\"endpoint\":\"http://ep2\",\"upstream_key_ref\":\"k2\",\"weight\":1,\"priority\":1}"
+        "]}";
+    int rc = admin_dispatch(&adm, "/admin/v1/models", "POST", "admin-secret-token", req, strlen(req), &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 201, "create multi-target model -> 201");
+    free(body);
+
+    /* 2. Trip circuit breaker for target 0 (http://ep1) */
+    cb_record_failure(core.cb, "hybrid-model", "http://ep1", 500);
+    cb_record_failure(core.cb, "hybrid-model", "http://ep1", 500);
+    cb_record_failure(core.cb, "hybrid-model", "http://ep1", 500);
+    TEST_ASSERT(cb_get_state(core.cb, "hybrid-model", "http://ep1") == CB_OPEN, "ep1 tripped to open");
+
+    /* 3. List models and inspect targets & cb_state */
+    body = NULL;
+    rc = admin_dispatch(&adm, "/admin/v1/models", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "list models -> 200");
+    json_t* j = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(j != NULL, "parsed models json");
+    json_t* arr = json_object_get(j, "models");
+    TEST_ASSERT(arr != NULL && json_array_size(arr) == 1, "1 model in list");
+    json_t* m0 = json_array_get(arr, 0);
+
+    json_t* jpol = json_object_get(m0, "lb_policy");
+    TEST_ASSERT(jpol != NULL && strcmp(json_string_value(jpol), "weighted_round_robin") == 0,
+                "lb_policy is weighted_round_robin");
+
+    json_t* jtargets = json_object_get(m0, "targets");
+    TEST_ASSERT(jtargets != NULL && json_array_size(jtargets) == 2, "2 targets in response");
+
+    json_t* t0 = json_array_get(jtargets, 0);
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(t0, "endpoint")), "http://ep1") == 0, "target 0 endpoint ep1");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(t0, "cb_state")), "open") == 0, "target 0 cb_state is open");
+    TEST_ASSERT(json_integer_value(json_object_get(t0, "weight")) == 2, "target 0 weight 2");
+
+    json_t* t1 = json_array_get(jtargets, 1);
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(t1, "endpoint")), "http://ep2") == 0, "target 1 endpoint ep2");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(t1, "cb_state")), "closed") == 0, "target 1 cb_state is closed");
+    TEST_ASSERT(json_integer_value(json_object_get(t1, "priority")) == 1, "target 1 priority 1");
+
+    json_decref(j);
+
+    /* 4. Patch model: update lb_policy to priority via PUT */
+    const char* preq = "{\"lb_policy\":\"priority\"}";
+    body = NULL;
+    rc = admin_dispatch(&adm, "/admin/v1/models/hybrid-model", "PUT", "admin-secret-token", preq, strlen(preq), &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "put model -> 200");
+    free(body);
+
+    model_rec_t updated;
+    TEST_ASSERT(fake_get_model(&db, "hybrid-model", &updated) == 0, "get model ok");
+    TEST_ASSERT(strcmp(updated.lb_policy, "priority") == 0, "lb_policy updated to priority");
+
+    teardown_admin(ps, &core, &db);
+}
+
 TEST_CASE(test_admin_usage_query)
 {
     struct fake_db db;
@@ -535,10 +619,13 @@ TEST_CASE(test_admin_usage_query)
     char* body = NULL;
     size_t len = 0;
 
-    /* 1. Missing key param -> 400 */
+    /* 1. Missing key/from/to -> 200 with defaults (all keys, last 7 days) */
     int rc = admin_dispatch(&adm, "/admin/v1/usage", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
-    TEST_ASSERT(rc == 0 && status == 400, "missing key param -> 400");
+    TEST_ASSERT(rc == 0 && status == 200, "missing params -> 200 with defaults");
+    json_t* jd = json_loads(body, 0, NULL);
     free(body);
+    TEST_ASSERT(jd != NULL && json_object_get(jd, "usage") != NULL, "default query returns usage array");
+    json_decref(jd);
 
     /* 2. Valid usage query */
     body = NULL;
