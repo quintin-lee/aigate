@@ -89,9 +89,21 @@
     /* 数据表格：宽松行高 + 粘性表头 */
     .data-tbl thead th { position: sticky; top: 0; background: #0f172a; z-index: 1; }
     .data-tbl tbody td { padding-top: 1.125rem; padding-bottom: 1.125rem; }
+    /* 调试场聊天气泡 */
+    .msg-user {
+      max-width: 85%; margin: 0 0 .75rem auto; padding: .6rem .9rem;
+      border-radius: 1rem 1rem .25rem 1rem; background: var(--brand); color: #fff;
+      font-size: .75rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    }
+    .msg-assistant {
+      margin: 0 0 .75rem 0; padding: .6rem .9rem;
+      border-radius: 1rem 1rem 1rem .25rem; background: rgba(148,163,184,.1);
+      border: 1px solid var(--line); color: var(--txt);
+      font-size: .75rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
+    }
     /* 胶囊形筛选控件 */
     #modelSearchInput, #keySearchInput, #usageDatePreset, #usageFromDate,
-    #usageToDate, #usageModelFilter, #usageKeyFilter { border-radius: 9999px !important; }
+    #usageToDate, #usageModelFilter, #usageKeyFilter, #metricFilterInput { border-radius: 9999px !important; }
     /* 汉堡按钮：仅移动端可见 */
     #navToggle {
       display: inline-block; background: none; border: none; cursor: pointer;
@@ -573,7 +585,7 @@
             <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
               <div class="flex items-center space-x-2">
                 <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">助手回复</span>
-                <span id="playStatusBadge" class="hidden text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">200 OK</span>
+                <span id="playStatusBadge" class="hidden text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">200 OK</span>
               </div>
               <div class="flex items-center space-x-3 text-[11px] font-mono text-slate-400">
                 <span id="playLatencyStat" class="hidden">延迟：<strong class="text-slate-200">0ms</strong></span>
@@ -1556,8 +1568,17 @@
       const stopBtn = document.getElementById("playStopBtn");
       const inspector = document.getElementById("inspectorPanel");
 
-      outArea.innerText = "";
+      outArea.innerHTML = "";
       inspector.innerText = "";
+      // 用户消息气泡 + 助手回复气泡（流式内容追加进助手气泡）
+      const userBubble = document.createElement("div");
+      userBubble.className = "msg-user";
+      userBubble.textContent = usr;
+      outArea.appendChild(userBubble);
+      const assistantBubble = document.createElement("div");
+      assistantBubble.className = "msg-assistant";
+      assistantBubble.textContent = "思考中…";
+      outArea.appendChild(assistantBubble);
       statusBadge.classList.add("hidden");
       latencyStat.classList.add("hidden");
       sendBtn.classList.add("hidden");
@@ -1592,13 +1613,13 @@
 
         statusBadge.innerText = `${resp.status} ${resp.statusText}`;
         statusBadge.className = resp.ok
-          ? "text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-          : "text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30";
+          ? "text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+          : "text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30";
         statusBadge.classList.remove("hidden");
 
         if (!resp.ok) {
           const errText = await resp.text();
-          outArea.innerText = `错误 (${resp.status})：
+          assistantBubble.textContent = `错误 (${resp.status})：
 ${errText}`;
           return;
         }
@@ -1611,11 +1632,11 @@ ${errText}`;
           const reply = json.choices && json.choices[0] && json.choices[0].message
             ? json.choices[0].message.content
             : JSON.stringify(json, null, 2);
-          outArea.innerText = reply;
+          assistantBubble.textContent = reply;
           inspector.innerText = JSON.stringify(json, null, 2);
         } else {
           // SSE Stream processing
-          outArea.classList.add("typewriter-cursor");
+          assistantBubble.classList.add("typewriter-cursor");
           const reader = resp.body.getReader();
           const decoder = new TextDecoder("utf-8");
           let fullText = "";
@@ -1642,25 +1663,25 @@ ${errText}`;
                   if (chunkJson.choices && chunkJson.choices[0] && chunkJson.choices[0].delta) {
                     const delta = chunkJson.choices[0].delta.content || "";
                     fullText += delta;
-                    outArea.innerText = fullText;
+                    assistantBubble.textContent = fullText;
                   }
                 } catch (_) {}
               }
             }
           }
-          outArea.classList.remove("typewriter-cursor");
+          assistantBubble.classList.remove("typewriter-cursor");
           const lat = Math.round(performance.now() - t0);
           latencyStat.innerHTML = `流式输出完成，共 <strong class="text-slate-200">${lat}ms</strong>`;
           latencyStat.classList.remove("hidden");
         }
       } catch (err) {
         if (err.name === "AbortError") {
-          outArea.innerText += "\n[用户已停止流式输出]";
+          assistantBubble.textContent += "\n[用户已停止流式输出]";
         } else {
-          outArea.innerText = `网络 / 请求错误：${err.message}`;
+          assistantBubble.textContent = `网络 / 请求错误：${err.message}`;
         }
       } finally {
-        outArea.classList.remove("typewriter-cursor");
+        assistantBubble.classList.remove("typewriter-cursor");
         sendBtn.classList.remove("hidden");
         stopBtn.classList.add("hidden");
       }
@@ -1673,7 +1694,7 @@ ${errText}`;
     }
 
     function clearPlaygroundResponse() {
-      document.getElementById("playOutputArea").innerText = "";
+      document.getElementById("playOutputArea").innerHTML = '<span class="text-slate-600 italic">响应将实时显示在这里...</span>';
       document.getElementById("inspectorPanel").innerText = "";
       document.getElementById("playStatusBadge").classList.add("hidden");
       document.getElementById("playLatencyStat").classList.add("hidden");
