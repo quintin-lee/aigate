@@ -10,19 +10,25 @@ from typing import Generator, Dict, Any
 from mock_upstream import start_mock_upstream
 
 DEFAULT_PG_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/aigate_test"
+DOCKER_PG_DSN = "postgresql://aigate:changeme@172.39.4.2:5432/aigate"
 ADMIN_TOKEN = "admin_integration_test_secret"
+
+@pytest.fixture(scope="session", autouse=True)
+def ensure_no_proxy():
+    os.environ["no_proxy"] = "127.0.0.1,localhost," + os.environ.get("no_proxy", "")
 
 @pytest.fixture(scope="session")
 def pg_dsn() -> str:
-    dsn = os.environ.get("TEST_PG_DSN", DEFAULT_PG_DSN)
-    # Check connectivity via pg_isready or psycopg2 if available
-    try:
-        res = subprocess.run(["pg_isready", "-d", dsn, "-t", "2"], capture_output=True)
-        if res.returncode != 0:
-            pytest.skip(f"PostgreSQL at {dsn} not reachable")
-    except FileNotFoundError:
-        pass
-    return dsn
+    dsn = os.environ.get("TEST_PG_DSN")
+    candidates = [dsn] if dsn else [DEFAULT_PG_DSN, DOCKER_PG_DSN]
+    for candidate in candidates:
+        try:
+            res = subprocess.run(["pg_isready", "-d", candidate, "-t", "2"], capture_output=True)
+            if res.returncode == 0:
+                return candidate
+        except FileNotFoundError:
+            return candidate
+    pytest.skip(f"PostgreSQL not reachable")
 
 @pytest.fixture(scope="session")
 def mock_upstream():

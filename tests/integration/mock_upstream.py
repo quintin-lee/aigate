@@ -27,14 +27,23 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             "body": body_json,
         })
 
-        if self.path == "/fail":
-            self.send_response(500)
+        if "/fail" in self.path:
+            status_code = 500
+            if "429" in self.path:
+                status_code = 429
+            elif "502" in self.path:
+                status_code = 502
+            elif "503" in self.path:
+                status_code = 503
+            elif "504" in self.path:
+                status_code = 504
+            self.send_response(status_code)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
-            self.wfile.write(b'{"error":"simulated internal failure"}')
+            self.wfile.write(f'{{"error":"simulated failure {status_code}"}}'.encode("utf-8"))
             return
 
-        if self.path in ("/messages", "/v1/messages"):
+        if "/messages" in self.path:
             if body_json and body_json.get("stream") is True:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
@@ -211,7 +220,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(resp_bytes)
             return
 
-        if self.path in ("/embeddings", "/v1/embeddings"):
+        if "/embeddings" in self.path:
             response = {
                 "object": "list",
                 "data": [{
@@ -233,7 +242,7 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(resp_bytes)
             return
 
-        if self.path in ("/chat/completions", "/v1/chat/completions"):
+        if "/chat/completions" in self.path:
             req_model = body_json.get("model", "mock-model") if body_json else "mock-model"
             is_deepseek = "deepseek" in req_model.lower()
 

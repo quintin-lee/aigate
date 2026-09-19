@@ -243,9 +243,9 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             }
 
             model_rec_t cur_route = route;
-            snprintf(cur_route.provider, sizeof cur_route.provider, "%s", target->provider);
-            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%s", target->endpoint);
-            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%s", target->upstream_key);
+            snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s", (int)sizeof cur_route.provider - 1, target->provider);
+            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s", (int)sizeof cur_route.endpoint - 1, target->endpoint);
+            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s", (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
             last_provider = target->provider;
 
             char        url[1024];
@@ -369,9 +369,9 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             }
 
             model_rec_t cur_route = route;
-            snprintf(cur_route.provider, sizeof cur_route.provider, "%s", target->provider);
-            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%s", target->endpoint);
-            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%s", target->upstream_key);
+            snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s", (int)sizeof cur_route.provider - 1, target->provider);
+            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s", (int)sizeof cur_route.endpoint - 1, target->endpoint);
+            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s", (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
             last_provider = target->provider;
 
             char        url[1024];
@@ -496,9 +496,9 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         }
 
         model_rec_t cur_route = route;
-        snprintf(cur_route.provider, sizeof cur_route.provider, "%s", target->provider);
-        snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%s", target->endpoint);
-        snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%s", target->upstream_key);
+        snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s", (int)sizeof cur_route.provider - 1, target->provider);
+        snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s", (int)sizeof cur_route.endpoint - 1, target->endpoint);
+        snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s", (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
         last_provider = target->provider;
 
         char        url[1024];

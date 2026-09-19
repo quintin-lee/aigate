@@ -322,7 +322,7 @@ def test_admin_ui_endpoints(gateway):
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("Content-Type", "")
     assert "<!DOCTYPE html>" in resp.text
-    assert "aigate — AI Gateway Console" in resp.text
+    assert "aigate — AI Gateway Console" in resp.text or "aigate — AI 网关控制台" in resp.text
     assert 'id="tab-overview"' in resp.text
     assert 'id="tab-models"' in resp.text
     assert 'id="tab-keys"' in resp.text
@@ -585,5 +585,224 @@ def test_embeddings_dual_mode(gateway):
     assert data["data"][0]["index"] == 0
     assert data["data"][1]["index"] == 1
     assert data["usage"]["prompt_tokens"] == 12
+
+
+def test_multi_upstream_failover_and_circuit_breaker(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Register multi-target model with priority failover:
+    # Target 1 (priority 0) returns 500
+    # Target 2 (priority 1) returns 200
+    model_name = "failover-e2e-model"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "lb_policy": "priority",
+            "targets": [
+                {
+                    "provider": "openai",
+                    "endpoint": f"{mock_url}/fail500",
+                    "priority": 0,
+                    "weight": 1,
+                },
+                {
+                    "provider": "openai",
+                    "endpoint": f"{mock_url}/backup200",
+                    "priority": 1,
+                    "weight": 1,
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    # 2. Create client key
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "failover-key",
+            "allowed_models": [model_name],
+            "rate_qps": 50,
+            "daily_token_quota": 50000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    # 3. Transparent non-streaming failover test:
+    # First attempt: Target 1 fails (500), gateway automatically fails over to Target 2 (200)
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "messages": [{"role": "user", "content": "hello failover"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "choices" in data
+    assert data["choices"][0]["message"]["content"] == "Hello from mock upstream!"
+
+    # 4. Verify Prometheus metrics recorded failover
+    resp = requests.get(f"{base_url}/metrics")
+    assert resp.status_code == 200
+    assert "aigate_failover_total" in resp.text
+    assert f'model="{model_name}"' in resp.text
+
+    # 5. Fire 2 more requests to reach 3 consecutive failures for Target 1 -> trip Circuit Breaker to OPEN
+    for _ in range(2):
+        r = requests.post(
+            f"{base_url}/v1/chat/completions",
+            headers=client_headers,
+            json={"model": model_name, "messages": [{"role": "user", "content": "ping"}]},
+        )
+        assert r.status_code == 200
+
+    # Verify model list shows cb_state="open" for target 1 and "closed" for target 2
+    resp = requests.get(f"{base_url}/admin/v1/models", headers=admin_headers)
+    assert resp.status_code == 200
+    models_data = resp.json()
+    models_list = models_data.get("models") or models_data.get("data") or []
+    m_info = next((m for m in models_list if (m.get("name") == model_name or m.get("model_name") == model_name)), None)
+    assert m_info is not None
+    assert len(m_info["targets"]) == 2
+    assert m_info["targets"][0]["cb_state"] == "open"
+    assert m_info["targets"][1]["cb_state"] == "closed"
+
+    # 6. Streaming failover test
+    stream_model = "failover-stream-model"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": stream_model,
+            "lb_policy": "priority",
+            "targets": [
+                {
+                    "provider": "openai",
+                    "endpoint": f"{mock_url}/fail429",
+                    "priority": 0,
+                    "weight": 1,
+                },
+                {
+                    "provider": "openai",
+                    "endpoint": f"{mock_url}/backup_stream",
+                    "priority": 1,
+                    "weight": 1,
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 201
+
+    # Update key to allow streaming model
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "stream-key",
+            "allowed_models": [stream_model],
+            "rate_qps": 50,
+            "daily_token_quota": 50000,
+        },
+    )
+    assert resp.status_code == 201
+    stream_api_key = resp.json()["plaintext"]
+
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {stream_api_key}", "Content-Type": "application/json"},
+        json={
+            "model": stream_model,
+            "messages": [{"role": "user", "content": "stream failover"}],
+            "stream": True,
+        },
+        stream=True,
+    )
+    assert resp.status_code == 200
+    assert "text/event-stream" in resp.headers.get("Content-Type", "")
+    chunks = [line.decode("utf-8") for line in resp.iter_lines() if line]
+    assert any("data: " in c for c in chunks)
+    assert any("[DONE]" in c for c in chunks)
+
+
+def test_multi_upstream_load_balancing(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # Register model with weighted_round_robin policy
+    wrr_model = "wrr-e2e-model"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": wrr_model,
+            "lb_policy": "weighted_round_robin",
+            "targets": [
+                {
+                    "provider": "openai",
+                    "endpoint": f"{mock_url}/wrr_target_1",
+                    "priority": 0,
+                    "weight": 3,
+                },
+                {
+                    "provider": "openai",
+                    "endpoint": f"{mock_url}/wrr_target_2",
+                    "priority": 0,
+                    "weight": 1,
+                },
+            ],
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "wrr-key",
+            "allowed_models": [wrr_model],
+            "rate_qps": 100,
+            "daily_token_quota": 50000,
+        },
+    )
+    assert resp.status_code == 201
+    api_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    # Send 10 requests, verify all succeed
+    for _ in range(10):
+        r = requests.post(
+            f"{base_url}/v1/chat/completions",
+            headers=client_headers,
+            json={"model": wrr_model, "messages": [{"role": "user", "content": "wrr test"}]},
+        )
+        assert r.status_code == 200, r.text
 
 

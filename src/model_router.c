@@ -261,12 +261,12 @@ model_router_select_candidates(circuit_breaker_t* cb,
         /* Iterate through priority tiers ascending */
         for (int pi = 0; pi < n_prios && total_added < cap; pi++) {
             int p = prios[pi];
-            upstream_target_t tier_healthy[MAX_TARGETS_PER_MODEL];
+            int tier_healthy_idx[MAX_TARGETS_PER_MODEL];
             int n_th = 0;
             for (int i = 0; i < n_tgts; i++) {
                 if (src_targets[i].priority == p) {
                     if (cb == NULL || cb_allow_request(cb, model->name, src_targets[i].endpoint)) {
-                        tier_healthy[n_th++] = src_targets[i];
+                        tier_healthy_idx[n_th++] = i;
                     }
                 }
             }
@@ -278,62 +278,63 @@ model_router_select_candidates(circuit_breaker_t* cb,
             if (strcmp(model->lb_policy, "round_robin") == 0 && n_th > 1) {
                 unsigned long start = atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) % (unsigned long)n_th;
                 for (int k = 0; k < n_th && total_added < cap; k++) {
-                    out_candidates[total_added++] = tier_healthy[(start + (unsigned long)k) % (unsigned long)n_th];
+                    int src_idx = tier_healthy_idx[(start + (unsigned long)k) % (unsigned long)n_th];
+                    out_candidates[total_added++] = src_targets[src_idx];
                 }
             } else if ((strcmp(model->lb_policy, "weighted") == 0 || strcmp(model->lb_policy, "weighted_round_robin") == 0) && n_th > 1) {
                 int total_w = 0;
                 for (int k = 0; k < n_th; k++) {
-                    total_w += tier_healthy[k].weight;
+                    total_w += src_targets[tier_healthy_idx[k]].weight;
                 }
                 if (total_w <= 0) total_w = n_th;
                 unsigned long pick = atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) % (unsigned long)total_w;
-                int chosen_idx = 0;
+                int chosen_k = 0;
                 int acc = 0;
                 for (int k = 0; k < n_th; k++) {
-                    acc += tier_healthy[k].weight;
+                    acc += src_targets[tier_healthy_idx[k]].weight;
                     if ((unsigned long)acc > pick) {
-                        chosen_idx = k;
+                        chosen_k = k;
                         break;
                     }
                 }
                 /* Add chosen target first */
-                out_candidates[total_added++] = tier_healthy[chosen_idx];
+                out_candidates[total_added++] = src_targets[tier_healthy_idx[chosen_k]];
                 /* Add remaining targets sorted by weight descending */
-                upstream_target_t rem[MAX_TARGETS_PER_MODEL];
+                int rem_k[MAX_TARGETS_PER_MODEL];
                 int n_rem = 0;
                 for (int k = 0; k < n_th; k++) {
-                    if (k != chosen_idx) {
-                        rem[n_rem++] = tier_healthy[k];
+                    if (k != chosen_k) {
+                        rem_k[n_rem++] = tier_healthy_idx[k];
                     }
                 }
                 for (int a = 0; a < n_rem - 1; a++) {
                     for (int b = a + 1; b < n_rem; b++) {
-                        if (rem[b].weight > rem[a].weight) {
-                            upstream_target_t tmp = rem[a];
-                            rem[a] = rem[b];
-                            rem[b] = tmp;
+                        if (src_targets[rem_k[b]].weight > src_targets[rem_k[a]].weight) {
+                            int tmp = rem_k[a];
+                            rem_k[a] = rem_k[b];
+                            rem_k[b] = tmp;
                         }
                     }
                 }
                 for (int k = 0; k < n_rem && total_added < cap; k++) {
-                    out_candidates[total_added++] = rem[k];
+                    out_candidates[total_added++] = src_targets[rem_k[k]];
                 }
             } else {
                 /* Default "priority": retain original definition order */
                 for (int k = 0; k < n_th && total_added < cap; k++) {
-                    out_candidates[total_added++] = tier_healthy[k];
+                    out_candidates[total_added++] = src_targets[tier_healthy_idx[k]];
                 }
             }
         }
     } else {
         /* ALL targets are tripped: fallback to target with earliest open_until */
         struct tripped_tgt {
-            upstream_target_t tgt;
-            time_t            open_until;
+            int    src_idx;
+            time_t open_until;
         } tripped[MAX_TARGETS_PER_MODEL];
 
         for (int i = 0; i < n_tgts; i++) {
-            tripped[i].tgt = src_targets[i];
+            tripped[i].src_idx = i;
             tripped[i].open_until = cb_get_open_until(cb, model->name, src_targets[i].endpoint);
         }
         /* Sort tripped targets by open_until ascending, then by priority ascending */
@@ -341,7 +342,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
             for (int j = i + 1; j < n_tgts; j++) {
                 if (tripped[j].open_until < tripped[i].open_until ||
                     (tripped[j].open_until == tripped[i].open_until &&
-                     tripped[j].tgt.priority < tripped[i].tgt.priority)) {
+                     src_targets[tripped[j].src_idx].priority < src_targets[tripped[i].src_idx].priority)) {
                     struct tripped_tgt tmp = tripped[i];
                     tripped[i] = tripped[j];
                     tripped[j] = tmp;
@@ -349,7 +350,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
             }
         }
         for (int i = 0; i < n_tgts && total_added < cap; i++) {
-            out_candidates[total_added++] = tripped[i].tgt;
+            out_candidates[total_added++] = src_targets[tripped[i].src_idx];
         }
     }
 

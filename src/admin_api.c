@@ -474,9 +474,9 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     const char* def_endp = (m.n_targets > 0 && m.targets[0].endpoint[0]) ? m.targets[0].endpoint : "";
     const char* def_kref = (m.n_targets > 0 && m.targets[0].upstream_key[0]) ? m.targets[0].upstream_key : "";
 
-    snprintf(m.provider, sizeof m.provider, "%s", jstring(jbody, "provider", def_prov));
+    snprintf(m.provider, sizeof m.provider, "%.*s", (int)sizeof m.provider - 1, jstring(jbody, "provider", def_prov));
     snprintf(m.endpoint, sizeof m.endpoint, "%s", jstring(jbody, "endpoint", def_endp));
-    snprintf(m.upstream_key_ref, sizeof m.upstream_key_ref, "%s", jstring(jbody, "upstream_key_ref", def_kref));
+    snprintf(m.upstream_key_ref, sizeof m.upstream_key_ref, "%.*s", (int)sizeof m.upstream_key_ref - 1, jstring(jbody, "upstream_key_ref", def_kref));
     snprintf(m.lb_policy, sizeof m.lb_policy, "%s", jstring(jbody, "lb_policy", "priority"));
 
     json_t* jparams = json_object_get(jbody, "default_params");

@@ -1441,7 +1441,7 @@
       const resp = await apiCall("/admin/v1/keys");
       if (!resp || !resp.ok) return;
       const data = await resp.json();
-      state.keys = data.data || [];
+      state.keys = data.keys || data.data || [];
       renderKeysTable();
     }
 
@@ -1643,7 +1643,7 @@
       if (mod) queryParams.push(`model=${encodeURIComponent(mod)}`);
 
       const kid = document.getElementById("usageKeyFilter").value;
-      if (kid) queryParams.push(`key_id=${encodeURIComponent(kid)}`);
+      if (kid) queryParams.push(`key=${encodeURIComponent(kid)}`);
 
       const qs = queryParams.length > 0 ? "?" + queryParams.join("&") : "";
       const usageTbody = document.getElementById("usageTableBody");
@@ -1653,7 +1653,7 @@
       if (!resp || !resp.ok) return;
 
       const data = await resp.json();
-      state.usageRows = data.data || [];
+      state.usageRows = data.usage || data.data || [];
       renderUsageTable();
       if (!silent) {
         showToast("用量查询已更新", "info");
@@ -1676,8 +1676,8 @@
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
         tr.innerHTML = `
-          <td class="py-3 px-4 text-slate-300">${r.day}</td>
-          <td class="py-3 px-4 font-bold text-white">${r.model}</td>
+          <td class="py-3 px-4 text-slate-300">${r.day ? new Date(r.day * 1000).toLocaleDateString() : ""}</td>
+          <td class="py-3 px-4 font-bold text-white">${r.model_name || r.model}</td>
           <td class="py-3 px-4 text-slate-400">#${r.key_id}</td>
           <td class="py-3 px-4 text-right">${(r.requests || 0).toLocaleString()}</td>
           <td class="py-3 px-4 text-right text-indigo-400">${(r.prompt_tokens || 0).toLocaleString()}</td>

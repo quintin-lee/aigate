@@ -22,6 +22,7 @@ FetchContent_MakeAvailable(hdr_hist_dep)
 
 set(CIVETWEB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(CIVETWEB_ENABLE_SERVER_EXECUTABLE OFF CACHE BOOL "" FORCE)
+set(CIVETWEB_THREAD_STACK_SIZE 1048576 CACHE STRING "Stack size for threads" FORCE)
 if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/civetweb-1.16.tar.gz")
     FetchContent_Declare(civetweb_dep URL "${CMAKE_SOURCE_DIR}/third_party/civetweb-1.16.tar.gz")
 else()
