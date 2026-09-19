@@ -2,6 +2,7 @@ build/
 .build/
 .asan/
 .cache/
+.superpowers/
 docs/.superpowers/
 __pycache__/
 *.o
