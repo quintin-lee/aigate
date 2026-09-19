@@ -104,6 +104,11 @@
     /* 胶囊形筛选控件 */
     #modelSearchInput, #keySearchInput, #usageDatePreset, #usageFromDate,
     #usageToDate, #usageModelFilter, #usageKeyFilter, #metricFilterInput { border-radius: 9999px !important; }
+    /* 连接徽标响应式：与 hidden sm:flex 同语义，不受 JS 类名重写影响 */
+    #connectionStatusBadge { display: none; }
+    @media (min-width: 640px) {
+      #connectionStatusBadge { display: flex !important; }
+    }
     /* 汉堡按钮：仅移动端可见 */
     #navToggle {
       display: inline-block; background: none; border: none; cursor: pointer;
