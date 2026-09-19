@@ -88,9 +88,9 @@
 
     <!-- 右侧控制区：令牌、刷新、状态 -->
     <div class="flex items-center space-x-3">
-      <div id="connectionStatusBadge" class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-        <span>网关就绪</span>
+      <div id="connectionStatusBadge" class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
+        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+        <span>连接检测中</span>
       </div>
 
       <button id="tokenBtn" onclick="openTokenModal()" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 transition">
@@ -362,24 +362,24 @@
         <div id="customDateRangeInputs" class="hidden flex items-center space-x-2">
           <div>
             <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">开始</label>
-            <input type="date" id="usageFromDate" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+            <input type="date" id="usageFromDate" onchange="fetchUsageData()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
           </div>
           <div>
             <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">结束</label>
-            <input type="date" id="usageToDate" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+            <input type="date" id="usageToDate" onchange="fetchUsageData()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
           </div>
         </div>
 
         <div>
           <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">筛选模型</label>
-          <select id="usageModelFilter" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-40">
+          <select id="usageModelFilter" onchange="fetchUsageData()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-40">
             <option value="">全部模型</option>
           </select>
         </div>
 
         <div>
           <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">筛选密钥 ID</label>
-          <input type="number" id="usageKeyFilter" placeholder="全部密钥 ID" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-32">
+          <input type="number" id="usageKeyFilter" oninput="debouncedUsageFetch()" placeholder="全部密钥 ID" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-32">
         </div>
 
         <button onclick="fetchUsageData()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">
@@ -686,6 +686,18 @@
     </div>
   </div>
 
+  <!-- 5. 通用确认弹窗 -->
+  <div id="confirmModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden" onclick="if(event.target===this)closeConfirmModal()">
+    <div class="glass-panel max-w-sm w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
+      <h3 id="confirmModalTitle" class="text-base font-bold text-white">请确认</h3>
+      <p id="confirmModalMessage" class="text-xs text-slate-400 leading-relaxed"></p>
+      <div class="flex justify-end space-x-3 pt-1">
+        <button onclick="closeConfirmModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition">取消</button>
+        <button onclick="resolveConfirmModal(true)" class="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600 hover:bg-rose-500 text-white transition">确认</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ==================== CORE JAVASCRIPT ==================== -->
   <script>
     const state = {
@@ -719,18 +731,32 @@
     });
 
     function updateTokenUI() {
-      const badge = document.getElementById("connectionStatusBadge");
       const icon = document.getElementById("tokenIcon");
       const label = document.getElementById("tokenLabel");
+      const badge = document.getElementById("connectionStatusBadge");
       if (state.adminToken) {
         icon.innerText = "🔑";
         label.innerText = state.adminToken.slice(0, 8) + "…";
         badge.classList.remove("hidden");
+        setConnectionStatus("checking");
       } else {
         icon.innerText = "🔒";
         label.innerText = "设置管理员令牌";
         badge.classList.add("hidden");
       }
+    }
+
+    function setConnectionStatus(status) {
+      const badge = document.getElementById("connectionStatusBadge");
+      const styles = {
+        checking: ["bg-slate-500/10 text-slate-400 border-slate-500/20", "bg-slate-400", "连接检测中"],
+        ok: ["bg-emerald-500/10 text-emerald-400 border-emerald-500/20", "bg-emerald-400 animate-pulse", "网关就绪"],
+        failed: ["bg-rose-500/10 text-rose-400 border-rose-500/20", "bg-rose-400", "连接失败"]
+      };
+      const entry = styles[status] || styles.checking;
+      const hidden = badge.classList.contains("hidden") ? "hidden " : "";
+      badge.className = `${hidden}sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${entry[0]}`;
+      badge.innerHTML = `<span class="w-2 h-2 rounded-full ${entry[1]}"></span><span>${entry[2]}</span>`;
     }
 
     function openTokenModal() {
@@ -775,8 +801,10 @@
           openTokenModal();
           return null;
         }
+        if (resp.ok) setConnectionStatus("ok");
         return resp;
       } catch (err) {
+        setConnectionStatus("failed");
         showToast(`网络错误：${err.message}`, "error");
         return null;
       }
@@ -901,6 +929,9 @@
 
     // --- Models Management ---
     async function fetchModels() {
+      const tbody = document.getElementById("modelsTableBody");
+      tbody.innerHTML = `<tr><td colspan="6" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载模型…</td></tr>`;
+      document.getElementById("modelsEmptyState").classList.add("hidden");
       const resp = await apiCall("/admin/v1/models");
       if (!resp || !resp.ok) return;
       const data = await resp.json();
@@ -1082,7 +1113,7 @@
     }
 
     async function deleteModel(name) {
-      if (!confirm(`确定要删除模型 "${name}" 吗？`)) return;
+      if (!await openConfirmModal(`确定要删除模型 "${name}" 吗？`, "删除模型")) return;
       const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(name)}`, {
         method: "DELETE"
       });
@@ -1094,6 +1125,9 @@
 
     // --- Keys Management ---
     async function fetchKeys() {
+      const tbody = document.getElementById("keysTableBody");
+      tbody.innerHTML = `<tr><td colspan="7" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载密钥…</td></tr>`;
+      document.getElementById("keysEmptyState").classList.add("hidden");
       const resp = await apiCall("/admin/v1/keys");
       if (!resp || !resp.ok) return;
       const data = await resp.json();
@@ -1237,7 +1271,7 @@
     }
 
     async function revokeKey(id) {
-      if (!confirm(`确定要吊销 API 密钥 #${id} 吗？此操作不可撤销。`)) return;
+      if (!await openConfirmModal(`确定要吊销 API 密钥 #${id} 吗？此操作不可撤销。`, "吊销密钥")) return;
       const resp = await apiCall(`/admin/v1/keys/${id}`, { method: "DELETE" });
       if (resp && resp.ok) {
         showToast(`API 密钥 #${id} 已吊销`, "success");
@@ -1253,7 +1287,14 @@
         customDiv.classList.remove("hidden");
       } else {
         customDiv.classList.add("hidden");
+        fetchUsageData();
       }
+    }
+
+    let usageFetchTimer = null;
+    function debouncedUsageFetch() {
+      clearTimeout(usageFetchTimer);
+      usageFetchTimer = setTimeout(() => fetchUsageData(), 400);
     }
 
     function populateModelFilters() {
@@ -1295,6 +1336,9 @@
       if (kid) queryParams.push(`key_id=${encodeURIComponent(kid)}`);
 
       const qs = queryParams.length > 0 ? "?" + queryParams.join("&") : "";
+      const usageTbody = document.getElementById("usageTableBody");
+      usageTbody.innerHTML = `<tr><td colspan="8" class="py-8 px-4 text-center text-slate-500 text-xs">正在查询用量…</td></tr>`;
+      document.getElementById("usageEmptyState").classList.add("hidden");
       const resp = await apiCall(`/admin/v1/usage${qs}`);
       if (!resp || !resp.ok) return;
 
@@ -1554,6 +1598,22 @@ ${errText}`;
       const lines = state.metricsText.split("\n");
       const filtered = lines.filter(l => l.toLowerCase().includes(q));
       pre.innerText = filtered.join("\n");
+    }
+
+    // --- Confirm Modal ---
+    let confirmModalResolve = null;
+    function openConfirmModal(message, title = "请确认") {
+      document.getElementById("confirmModalTitle").innerText = title;
+      document.getElementById("confirmModalMessage").innerText = message;
+      document.getElementById("confirmModal").classList.remove("hidden");
+      return new Promise(resolve => { confirmModalResolve = resolve; });
+    }
+    function resolveConfirmModal(val) {
+      document.getElementById("confirmModal").classList.add("hidden");
+      if (confirmModalResolve) { confirmModalResolve(val); confirmModalResolve = null; }
+    }
+    function closeConfirmModal() {
+      resolveConfirmModal(false);
     }
 
     // --- Toast Notifications ---

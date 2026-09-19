@@ -149,6 +149,19 @@ main(void)
     test_register("openai_cached_tokens_details", test_openai_cached_tokens_details);
     test_register("deepseek_streaming_reasoning_and_cache", test_deepseek_streaming_reasoning_and_cache);
 
+    extern void test_gemini_build_system_and_contents(void);
+    extern void test_gemini_build_generation_config(void);
+    extern void test_gemini_resp_translation(void);
+    extern void test_gemini_resp_error_unwrapping(void);
+    extern void test_gemini_streaming_bridge_chunks(void);
+    extern void test_gemini_streaming_fragmented_tcp(void);
+    test_register("gemini_build_system_and_contents", test_gemini_build_system_and_contents);
+    test_register("gemini_build_generation_config", test_gemini_build_generation_config);
+    test_register("gemini_resp_translation", test_gemini_resp_translation);
+    test_register("gemini_resp_error_unwrapping", test_gemini_resp_error_unwrapping);
+    test_register("gemini_streaming_bridge_chunks", test_gemini_streaming_bridge_chunks);
+    test_register("gemini_streaming_fragmented_tcp", test_gemini_streaming_fragmented_tcp);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
