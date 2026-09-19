@@ -33,6 +33,7 @@ aigate_core_init(aigate_core*   ac,
     ac->rl = ratelimit_new();
     ac->router = model_router_new(ps, master32);
     ac->um = usage_meter_new(ps, flush_interval_s);
+    ac->ps = ps;
     ac->default_timeout_ms = default_timeout_ms;
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL) {
         return -1;
@@ -109,6 +110,43 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         aigate_write_error(rc, PIPE_AUTH, "auth_error", "invalid api key");
         key_rec_free(&krec);
         return 0;
+    }
+
+    /* --- handle GET /v1/models (data plane: list allowed enabled models) --- */
+    if (rq->path != NULL && strcmp(rq->path, "/v1/models") == 0) {
+        if (rq->method != NULL && strcmp(rq->method, "GET") == 0) {
+            model_rec_t     recs[256];
+            int             n = 0;
+            const pg_ops_t* ops = ac->ps != NULL ? pg_store_ops(ac->ps) : NULL;
+            if (ops != NULL && ops->list_models != NULL) {
+                ops->list_models(ops->ctx, recs, 256, &n);
+            }
+            json_t* arr = json_array();
+            for (int i = 0; i < n; i++) {
+                if (recs[i].enabled && key_allows_model(&krec, recs[i].name)) {
+                    json_t* obj = json_object();
+                    json_object_set_new(obj, "id", json_string(recs[i].name));
+                    json_object_set_new(obj, "object", json_string("model"));
+                    json_object_set_new(obj, "created", json_integer(0));
+                    json_object_set_new(
+                        obj, "owned_by", json_string(recs[i].provider[0] ? recs[i].provider : "system"));
+                    json_array_append_new(arr, obj);
+                }
+                model_rec_free(&recs[i]);
+            }
+            json_t* root = json_object();
+            json_object_set_new(root, "object", json_string("list"));
+            json_object_set_new(root, "data", arr);
+            char* packed = json_dumps(root, JSON_COMPACT);
+            json_decref(root);
+            key_rec_free(&krec);
+            if (packed == NULL) {
+                return aigate_write_error(rc, 500, "internal_error", "json encode failed");
+            }
+            int rv = aigate_write_json(rc, 200, packed, strlen(packed));
+            free(packed);
+            return rv;
+        }
     }
 
     /* --- model + allowlist (parsed from request body) --- */

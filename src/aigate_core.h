@@ -40,6 +40,7 @@ typedef struct aigate_core {
     ratelimit_t*    rl;
     model_router_t* router;
     usage_meter_t*  um;
+    pg_store_t*     ps;
     int             default_timeout_ms;
 } aigate_core;
 
@@ -65,5 +66,6 @@ int aigate_write_json(aigate_response_ctx* rc, int status, const char* body, siz
  *  {"error":{"message":...,"type":...,"code":<http_status>}}. */
 int
 aigate_write_error(aigate_response_ctx* rc, int http_status, const char* type, const char* message);
+
 
 #endif /* AIGATE_CORE_H */

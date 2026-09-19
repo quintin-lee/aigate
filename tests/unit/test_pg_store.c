@@ -97,6 +97,47 @@ fake_get_model(void* ctx, const char* name, model_rec_t* out)
 }
 
 static int
+fake_list_keys(void* ctx, key_rec_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        struct fake_key* fk = &db->keys[i];
+        if (!fk->in_use) {
+            continue;
+        }
+        out[*n] = fk->k;
+        /* Mirror the libpq contract: out owns a heap allowlist copy. */
+        out[*n].allowed_models = NULL;
+        out[*n].n_allowed = 0;
+        if (deep_copy_allowlist(&out[*n], &fk->k) != 0) {
+            return -1;
+        }
+        (*n)++;
+    }
+    return 0;
+}
+
+static int
+fake_get_key_by_id(void* ctx, long key_id, key_rec_t* out)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_key* fk = &db->keys[i];
+        if (fk->in_use && fk->k.key_id == key_id) {
+            *out = fk->k;
+            out->allowed_models = NULL;
+            out->n_allowed = 0;
+            if (deep_copy_allowlist(out, &fk->k) != 0) {
+                return -1;
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
 fake_create_key(void* ctx, const key_rec_t* k, long* out_key_id)
 {
     struct fake_db* db = ctx;
@@ -281,6 +322,8 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     memset(ops, 0, sizeof *ops);
     ops->ctx = db;
     ops->get_key_by_hash = fake_get_key_by_hash;
+    ops->list_keys = fake_list_keys;
+    ops->get_key_by_id = fake_get_key_by_id;
     ops->list_models = fake_list_models;
     ops->get_model = fake_get_model;
     ops->create_key = fake_create_key;

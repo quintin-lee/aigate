@@ -64,6 +64,8 @@ typedef struct pg_ops {
     void* ctx;
 
     int (*get_key_by_hash)(void* ctx, const char* key_hash, key_rec_t* out);
+    int (*list_keys)(void* ctx, key_rec_t* out, int cap, int* n);
+    int (*get_key_by_id)(void* ctx, long key_id, key_rec_t* out);
     int (*list_models)(void* ctx, model_rec_t* out, int cap, int* n);
     int (*get_model)(void* ctx, const char* name, model_rec_t* out);
 

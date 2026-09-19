@@ -107,6 +107,15 @@ main(void)
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
 
+    extern void test_admin_auth(void);
+    extern void test_admin_keys_lifecycle(void);
+    extern void test_admin_models_lifecycle(void);
+    extern void test_admin_usage_query(void);
+    test_register("admin_auth", test_admin_auth);
+    test_register("admin_keys_lifecycle", test_admin_keys_lifecycle);
+    test_register("admin_models_lifecycle", test_admin_models_lifecycle);
+    test_register("admin_usage_query", test_admin_usage_query);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

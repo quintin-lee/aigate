@@ -217,6 +217,94 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
     return rc; /* 0 found, -1 unknown/error */
 }
 
+/** @brief Fill one api_keys row into @p out (allowlist deep-copied). */
+static void
+fill_key_row(PGresult* res, int row, key_rec_t* out)
+{
+    memset(out, 0, sizeof *out);
+    out->key_id = atol(PQgetvalue(res, row, 0));
+    copy_field(out->key_hash, sizeof out->key_hash, PQgetvalue(res, row, 1));
+    copy_field(out->name, sizeof out->name, PQgetvalue(res, row, 2));
+    if (parse_model_list(PQgetvalue(res, row, 3), &out->allowed_models, &out->n_allowed) != 0) {
+        key_rec_free(out);
+        return;
+    }
+    out->rate_qps = atoi(PQgetvalue(res, row, 4));
+    out->daily_token_quota = atol(PQgetvalue(res, row, 5));
+    const char* exp = PQgetvalue(res, row, 6);
+    const char* rev = PQgetvalue(res, row, 7);
+    if (exp[0] != '\0') {
+        out->expires_at = (time_t)atol(exp);
+        out->has_expiry = 1;
+    }
+    out->revoked = rev[0] != '\0';
+}
+
+static int
+pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
+{
+    struct pq_ctx* px = vctx;
+    static const char q[] =
+        "SELECT key_id, key_hash, name, "
+        "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
+        "expires_at, revoked_at FROM api_keys ORDER BY key_id";
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_keys: %s",
+                          res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        fill_key_row(res, i, &out[i]);
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
+static int
+pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT key_id, key_hash, name, "
+        "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
+        "expires_at, revoked_at FROM api_keys WHERE key_id = $1";
+    char         id[32];
+    const char*  val[1] = {0};
+    int          plen[1] = {0};
+    int          rc = -1;
+
+    snprintf(id, sizeof id, "%ld", key_id);
+    val[0] = id;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, val, plen, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        if (res != NULL) {
+            AIGATE_LOG_ERROR("pg get_key_by_id: %s", PQerrorMessage(px->db));
+        }
+        PQclear(res);
+        return -1;
+    }
+    if (PQntuples(res) > 0) {
+        fill_key_row(res, 0, out);
+        rc = 0;
+    }
+    PQclear(res);
+    return rc; /* 0 found, -1 unknown/error */
+}
+
 static int
 fill_model_row(PGresult* res, int row, model_rec_t* out)
 {
@@ -704,6 +792,8 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     pthread_mutex_init(&px->mtx, NULL);
 
     ps->ops.get_key_by_hash = pq_get_key_by_hash;
+    ps->ops.list_keys = pq_list_keys;
+    ps->ops.get_key_by_id = pq_get_key_by_id;
     ps->ops.list_models = pq_list_models;
     ps->ops.get_model = pq_get_model;
     ps->ops.create_key = pq_create_key;

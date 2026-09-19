@@ -29,6 +29,7 @@ target_include_directories(libaigate PUBLIC ${JANSSON_INCLUDE_DIRS} ${LIBPQ_INCL
 target_link_libraries(libaigate PUBLIC
   ${JANSSON_LIBRARIES}
   hdr_histogram_static
+  civetweb-c-library
   CURL::libcurl ${LIBPQ_LIBRARIES} OpenSSL::Crypto ${CMAKE_THREAD_LIBS_INIT})
 
 add_executable(aigate src/main.c)
