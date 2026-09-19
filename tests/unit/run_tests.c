@@ -181,6 +181,17 @@ main(void)
     test_register("gemini_embeddings_parse_error", test_gemini_embeddings_parse_error);
     test_register("embeddings_pipeline_e2e", test_embeddings_pipeline_e2e);
 
+    extern void test_cb_normal_traffic(void);
+    extern void test_cb_tripping_on_consecutive_failures(void);
+    extern void test_cb_cooloff_and_half_open_probe_success(void);
+    extern void test_cb_probe_failure_trips_back_to_open(void);
+    extern void test_cb_concurrency_stress(void);
+    test_register("cb_normal_traffic", test_cb_normal_traffic);
+    test_register("cb_tripping", test_cb_tripping_on_consecutive_failures);
+    test_register("cb_cooloff_and_probe_success", test_cb_cooloff_and_half_open_probe_success);
+    test_register("cb_probe_failure_trips_back", test_cb_probe_failure_trips_back_to_open);
+    test_register("cb_concurrency_stress", test_cb_concurrency_stress);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
