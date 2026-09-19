@@ -15,7 +15,9 @@ services:
       retries: 10
 
   aigate:
-    build: .
+    build:
+      context: .
+      network: host
     restart: unless-stopped
     ports:
       - "${AIGATE_LISTEN_PORT:-8080}:8080"

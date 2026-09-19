@@ -12,11 +12,20 @@ pkg_check_modules(LIBPQ REQUIRED libpq)
 pkg_check_modules(JANSSON REQUIRED jansson)
 
 include(FetchContent)
-FetchContent_Declare(hdr_hist_dep URL https://github.com/HdrHistogram/HdrHistogram_c/archive/refs/tags/0.11.6.tar.gz)
+if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/hdr_histogram-0.11.6.tar.gz")
+    FetchContent_Declare(hdr_hist_dep URL "${CMAKE_SOURCE_DIR}/third_party/hdr_histogram-0.11.6.tar.gz")
+else()
+    FetchContent_Declare(hdr_hist_dep URL https://github.com/HdrHistogram/HdrHistogram_c/archive/refs/tags/0.11.6.tar.gz)
+endif()
 FetchContent_MakeAvailable(hdr_hist_dep)
+
 set(CIVETWEB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(CIVETWEB_ENABLE_SERVER_EXECUTABLE OFF CACHE BOOL "" FORCE)
-FetchContent_Declare(civetweb_dep URL https://github.com/civetweb/civetweb/archive/refs/tags/v1.16.tar.gz)
+if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/civetweb-1.16.tar.gz")
+    FetchContent_Declare(civetweb_dep URL "${CMAKE_SOURCE_DIR}/third_party/civetweb-1.16.tar.gz")
+else()
+    FetchContent_Declare(civetweb_dep URL https://github.com/civetweb/civetweb/archive/refs/tags/v1.16.tar.gz)
+endif()
 FetchContent_MakeAvailable(civetweb_dep)
 
 # Generate embedded admin UI header

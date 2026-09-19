@@ -3,11 +3,14 @@ FROM debian:bookworm-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake pkg-config ca-certificates \
-        libcurl4-openssl-dev libssl-dev libpq-dev libjansson-dev zlib1g-dev \
+        libcurl4-openssl-dev libssl-dev libpq-dev libjansson-dev zlib1g-dev python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
 COPY CMakeLists.txt ./
+COPY third_party/ third_party/
+COPY scripts/ scripts/
+COPY web/ web/
 COPY src/ src/
 COPY tests/ tests/
 
