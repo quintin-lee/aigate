@@ -8,19 +8,21 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script>
-    tailwind.config = {
-      darkMode: "class",
-      theme: {
-        extend: {
-          colors: {
-            brand: {
-              50: "#eef2ff", 100: "#e0e7ff", 200: "#c7d2fe", 300: "#a5b4fc",
-              400: "#818cf8", 500: "#6366f1", 600: "#4f46e5", 700: "#4338ca",
-              800: "#3730a3", 900: "#312e81", 950: "#1e1b4b"
+    if (typeof tailwind !== "undefined") {
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            colors: {
+              brand: {
+                50: "#eef2ff", 100: "#e0e7ff", 200: "#c7d2fe", 300: "#a5b4fc",
+                400: "#818cf8", 500: "#6366f1", 600: "#4f46e5", 700: "#4338ca",
+                800: "#3730a3", 900: "#312e81", 950: "#1e1b4b"
+              }
             }
           }
         }
-      }
+      };
     }
   </script>
   <style>
@@ -33,6 +35,7 @@
     .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.4); }
     .typewriter-cursor::after { content: "▋"; animation: blink 1s infinite; color: #6366f1; }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+    .hidden { display: none !important; }
   </style>
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-brand-500 selection:text-white">
@@ -589,7 +592,7 @@
 
         <div>
           <label class="block font-semibold text-slate-300 mb-1">Default Params (JSON)</label>
-          <textarea id="mFormParams" rows="2" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono" placeholder="{"temperature": 0.7}">{}</textarea>
+          <textarea id="mFormParams" rows="2" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono" placeholder="{&quot;temperature&quot;: 0.7}">{}</textarea>
         </div>
 
         <div class="flex items-center space-x-2 pt-1">
@@ -1455,8 +1458,7 @@ ${errText}`;
             inspector.innerText += chunkStr;
             buffer += chunkStr;
 
-            const lines = buffer.split("
-");
+            const lines = buffer.split("\n");
             buffer = lines.pop(); // keep last incomplete line
 
             for (const line of lines) {
@@ -1482,8 +1484,7 @@ ${errText}`;
         }
       } catch (err) {
         if (err.name === "AbortError") {
-          outArea.innerText += "
-[Stream stopped by user]";
+          outArea.innerText += "\n[Stream stopped by user]";
         } else {
           outArea.innerText = `Network / Request Error: ${err.message}`;
         }
@@ -1543,11 +1544,9 @@ ${errText}`;
         pre.innerText = state.metricsText;
         return;
       }
-      const lines = state.metricsText.split("
-");
+      const lines = state.metricsText.split("\n");
       const filtered = lines.filter(l => l.toLowerCase().includes(q));
-      pre.innerText = filtered.join("
-");
+      pre.innerText = filtered.join("\n");
     }
 
     // --- Toast Notifications ---
