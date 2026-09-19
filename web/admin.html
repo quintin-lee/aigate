@@ -77,6 +77,15 @@
       color: #fff !important; background: var(--brand) !important;
       box-shadow: 0 4px 14px rgba(99,102,241,.4);
     }
+    /* 统计卡图标 */
+    .stat-ico {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 2.25rem; height: 2.25rem; border-radius: .75rem; font-size: 1.15rem;
+      background: rgba(99,102,241,.12); border: 1px solid rgba(99,102,241,.25);
+    }
+    .stat-ico.em { background: rgba(16,185,129,.12); border-color: rgba(16,185,129,.25); }
+    .stat-ico.cy { background: rgba(34,211,238,.12); border-color: rgba(34,211,238,.25); }
+    .stat-ico.pu { background: rgba(168,85,247,.12); border-color: rgba(168,85,247,.25); }
     /* 汉堡按钮：仅移动端可见 */
     #navToggle {
       display: inline-block; background: none; border: none; cursor: pointer;
@@ -192,7 +201,10 @@
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <!-- 卡片 1 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">活跃模型</div>
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">活跃模型</div>
+            <span class="stat-ico">🤖</span>
+          </div>
           <div class="mt-2 flex items-baseline justify-between">
             <div id="statActiveModels" class="text-3xl font-extrabold text-white">0</div>
             <div id="statTotalModelsBadge" class="text-xs px-2 py-0.5 rounded-md bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">共 0 个</div>
@@ -204,7 +216,10 @@
 
         <!-- 卡片 2 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">API 密钥</div>
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">API 密钥</div>
+            <span class="stat-ico em">🔑</span>
+          </div>
           <div class="mt-2 flex items-baseline justify-between">
             <div id="statActiveKeys" class="text-3xl font-extrabold text-emerald-400">0</div>
             <div id="statTotalKeysBadge" class="text-xs px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">0 个活跃</div>
@@ -216,7 +231,10 @@
 
         <!-- 卡片 3 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">总请求数</div>
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">总请求数</div>
+            <span class="stat-ico cy">📈</span>
+          </div>
           <div class="mt-2 flex items-baseline justify-between">
             <div id="statTotalRequests" class="text-3xl font-extrabold text-cyan-400">0</div>
             <div id="statErrorsBadge" class="text-xs px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20">0 个错误</div>
@@ -228,7 +246,10 @@
 
         <!-- 卡片 4 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
-          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Token 消耗</div>
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Token 消耗</div>
+            <span class="stat-ico pu">🪙</span>
+          </div>
           <div class="mt-2 flex items-baseline justify-between">
             <div id="statTotalTokens" class="text-3xl font-extrabold text-purple-400">0</div>
             <div class="text-xs px-2 py-0.5 rounded-md bg-purple-500/10 text-purple-400 border border-purple-500/20">提示 + 输出</div>
@@ -991,13 +1012,20 @@
       }
 
       if (typeof Chart !== "undefined") {
+        const g2d = ctx.getContext("2d");
+        const gradPrompt = g2d.createLinearGradient(0, 0, 0, 256);
+        gradPrompt.addColorStop(0, "rgba(99,102,241,0.95)");
+        gradPrompt.addColorStop(1, "rgba(99,102,241,0.25)");
+        const gradComp = g2d.createLinearGradient(0, 0, 0, 256);
+        gradComp.addColorStop(0, "rgba(34,211,238,0.9)");
+        gradComp.addColorStop(1, "rgba(34,211,238,0.2)");
         state.overviewChart = new Chart(ctx, {
           type: "bar",
           data: {
             labels: labels,
             datasets: [
-              { label: "提示 Token", data: ptokData, backgroundColor: "rgba(99, 102, 241, 0.8)", borderRadius: 6 },
-              { label: "补全 Token", data: ctokData, backgroundColor: "rgba(34, 211, 238, 0.8)", borderRadius: 6 }
+              { label: "提示 Token", data: ptokData, backgroundColor: gradPrompt, borderRadius: 6 },
+              { label: "补全 Token", data: ctokData, backgroundColor: gradComp, borderRadius: 6 }
             ]
           },
           options: {
