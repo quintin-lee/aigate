@@ -14,6 +14,7 @@
 #include "aigate_log.h"
 #include "schema_sql.h"
 
+#include <jansson.h>
 #include <libpq-fe.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -315,6 +316,58 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
     copy_field(out->upstream_key_ref, sizeof out->upstream_key_ref, PQgetvalue(res, row, 3));
     copy_field(out->default_params_json, sizeof out->default_params_json, PQgetvalue(res, row, 4));
     out->enabled = strcmp(PQgetvalue(res, row, 5), "t") == 0;
+
+    int nfields = PQnfields(res);
+    if (nfields > 6) {
+        const char* t_raw = PQgetvalue(res, row, 6);
+        if (t_raw != NULL && t_raw[0] != '\0' && strcmp(t_raw, "[]") != 0) {
+            json_t* jarr = json_loads(t_raw, 0, NULL);
+            if (jarr != NULL && json_is_array(jarr)) {
+                size_t idx;
+                json_t* item;
+                json_array_foreach(jarr, idx, item) {
+                    if (out->n_targets >= MAX_TARGETS_PER_MODEL) break;
+                    if (!json_is_object(item)) continue;
+                    upstream_target_t* tgt = &out->targets[out->n_targets++];
+                    memset(tgt, 0, sizeof *tgt);
+                    json_t* jp = json_object_get(item, "provider");
+                    json_t* je = json_object_get(item, "endpoint");
+                    json_t* jk = json_object_get(item, "upstream_key_ref");
+                    json_t* jw = json_object_get(item, "weight");
+                    json_t* jpr = json_object_get(item, "priority");
+
+                    copy_field(tgt->provider, sizeof tgt->provider,
+                               (jp && json_is_string(jp)) ? json_string_value(jp) : out->provider);
+                    copy_field(tgt->endpoint, sizeof tgt->endpoint,
+                               (je && json_is_string(je)) ? json_string_value(je) : out->endpoint);
+                    copy_field(tgt->upstream_key_ref, sizeof tgt->upstream_key_ref,
+                               (jk && json_is_string(jk)) ? json_string_value(jk) : "");
+                    tgt->weight = (jw && json_is_integer(jw) && json_integer_value(jw) > 0)
+                                      ? (int)json_integer_value(jw)
+                                      : 1;
+                    tgt->priority = (jpr && json_is_integer(jpr)) ? (int)json_integer_value(jpr) : 0;
+                }
+                json_decref(jarr);
+            }
+        }
+    }
+    if (nfields > 7) {
+        copy_field(out->lb_policy, sizeof out->lb_policy, PQgetvalue(res, row, 7));
+    }
+    if (out->lb_policy[0] == '\0') {
+        snprintf(out->lb_policy, sizeof out->lb_policy, "priority");
+    }
+
+    /* Fallback: if no targets configured, synthesize targets[0] from primary fields */
+    if (out->n_targets == 0) {
+        out->n_targets = 1;
+        snprintf(out->targets[0].provider, sizeof out->targets[0].provider, "%s", out->provider);
+        snprintf(out->targets[0].endpoint, sizeof out->targets[0].endpoint, "%s", out->endpoint);
+        snprintf(out->targets[0].upstream_key_ref, sizeof out->targets[0].upstream_key_ref, "%s", out->upstream_key_ref);
+        out->targets[0].weight = 1;
+        out->targets[0].priority = 0;
+    }
+
     return 0;
 }
 
@@ -324,7 +377,7 @@ pq_get_model(void* vctx, const char* name, model_rec_t* out)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
-        "default_params::text, enabled "
+        "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, 'priority') "
         "FROM models WHERE model_name = $1 AND enabled = true";
     const char* val[1] = {name};
     int         plen[1] = {0};
@@ -354,7 +407,8 @@ pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
-        "default_params::text, enabled FROM models ORDER BY model_name";
+        "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, 'priority') "
+        "FROM models ORDER BY model_name";
     *n = 0;
 
     pq_lock(px);
@@ -533,26 +587,74 @@ pq_revoke_key(void* vctx, long key_id)
     return n > 0 ? 0 : -1;
 }
 
+static char*
+serialize_targets_json(const model_rec_t* m)
+{
+    json_t* jarr = json_array();
+    if (jarr == NULL) {
+        return NULL;
+    }
+    if (m->n_targets == 0 && m->endpoint[0] != '\0') {
+        json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i}",
+                                 "provider", m->provider[0] != '\0' ? m->provider : "openai",
+                                 "endpoint", m->endpoint,
+                                 "upstream_key_ref", m->upstream_key_ref,
+                                 "weight", 1,
+                                 "priority", 0);
+        if (item != NULL) {
+            json_array_append_new(jarr, item);
+        }
+    } else {
+        for (int i = 0; i < m->n_targets && i < MAX_TARGETS_PER_MODEL; i++) {
+            const upstream_target_t* tgt = &m->targets[i];
+            json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i}",
+                                     "provider", tgt->provider[0] != '\0' ? tgt->provider : "openai",
+                                     "endpoint", tgt->endpoint,
+                                     "upstream_key_ref", tgt->upstream_key_ref,
+                                     "weight", tgt->weight > 0 ? tgt->weight : 1,
+                                     "priority", tgt->priority >= 0 ? tgt->priority : 0);
+            if (item != NULL) {
+                json_array_append_new(jarr, item);
+            }
+        }
+    }
+    char* s = json_dumps(jarr, JSON_COMPACT);
+    json_decref(jarr);
+    return s;
+}
+
 static int
 pq_create_model(void* vctx, const model_rec_t* m)
 {
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "INSERT INTO models(model_name, provider, endpoint, upstream_key_ref, "
-        "default_params) "
-        "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb)";
-    const char* vals[5];
-    int         plens[5] = {0};
+        "default_params, targets, lb_policy) "
+        "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb, $6::jsonb, $7)";
+    const char* vals[7];
+    int         plens[7] = {0};
+
+    char*       targets_json = serialize_targets_json(m);
+    const char* t_str = targets_json ? targets_json : "[]";
+    const char* lb = (m->lb_policy[0] != '\0') ? m->lb_policy : "priority";
+    const char* prov = (m->provider[0] != '\0') ? m->provider : (m->n_targets > 0 ? m->targets[0].provider : "openai");
+    const char* ep = (m->endpoint[0] != '\0') ? m->endpoint : (m->n_targets > 0 ? m->targets[0].endpoint : "");
+    const char* kr = (m->upstream_key_ref[0] != '\0') ? m->upstream_key_ref : (m->n_targets > 0 ? m->targets[0].upstream_key_ref : "");
 
     vals[0] = m->name;
-    vals[1] = m->provider;
-    vals[2] = m->endpoint;
-    vals[3] = m->upstream_key_ref;
-    vals[4] = m->default_params_json;
+    vals[1] = prov;
+    vals[2] = ep;
+    vals[3] = kr;
+    vals[4] = m->default_params_json[0] != '\0' ? m->default_params_json : "{}";
+    vals[5] = t_str;
+    vals[6] = lb;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 5, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 7, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
+    if (targets_json != NULL) {
+        free(targets_json);
+    }
     if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
         AIGATE_LOG_ERROR("pg create_model: %s",
                          res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
@@ -568,9 +670,10 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
 {
     struct pq_ctx* px = vctx;
     char           sql[2048];
-    const char*    vals[5];
-    int            plens[5] = {0};
+    const char*    vals[8];
+    int            plens[8] = {0};
     int            nv = 0, off;
+    char*          targets_json = NULL;
 
     if (mask == 0) {
         return 0;
@@ -604,8 +707,31 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
     }
     if (mask & MMASK_ENABLED) {
         nv++;
-        off += snprintf(sql + off, sizeof sql - (size_t)off, "enabled = $%d", nv);
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%senabled = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
         vals[nv - 1] = m->enabled ? "true" : "false";
+    }
+    if (mask & MMASK_TARGETS) {
+        targets_json = serialize_targets_json(m);
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%stargets = $%d::jsonb",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = targets_json ? targets_json : "[]";
+    }
+    if (mask & MMASK_LB_POLICY) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%slb_policy = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = m->lb_policy[0] != '\0' ? m->lb_policy : "priority";
     }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE model_name = $%d", nv);
@@ -615,6 +741,9 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
     pq_lock(px);
     PGresult* res = PQexecParams(px->db, sql, nv, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
+    if (targets_json != NULL) {
+        free(targets_json);
+    }
     if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
         ok = 1;
     } else {

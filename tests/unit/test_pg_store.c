@@ -72,6 +72,22 @@ fake_get_key_by_hash(void* ctx, const char* key_hash, key_rec_t* out)
     return -1;
 }
 
+static void
+fake_sanitize_model(model_rec_t* out)
+{
+    if (out->lb_policy[0] == '\0') {
+        snprintf(out->lb_policy, sizeof out->lb_policy, "priority");
+    }
+    if (out->n_targets == 0) {
+        out->n_targets = 1;
+        snprintf(out->targets[0].provider, sizeof out->targets[0].provider, "%s", out->provider[0] != '\0' ? out->provider : "openai");
+        snprintf(out->targets[0].endpoint, sizeof out->targets[0].endpoint, "%s", out->endpoint);
+        snprintf(out->targets[0].upstream_key_ref, sizeof out->targets[0].upstream_key_ref, "%s", out->upstream_key_ref);
+        out->targets[0].weight = 1;
+        out->targets[0].priority = 0;
+    }
+}
+
 static int
 fake_list_models(void* ctx, model_rec_t* out, int cap, int* n)
 {
@@ -79,6 +95,7 @@ fake_list_models(void* ctx, model_rec_t* out, int cap, int* n)
     *n = db->n_models < cap ? db->n_models : cap;
     for (int i = 0; i < *n; i++) {
         out[i] = db->models[i];
+        fake_sanitize_model(&out[i]);
     }
     return 0;
 }
@@ -90,6 +107,7 @@ fake_get_model(void* ctx, const char* name, model_rec_t* out)
     for (int i = 0; i < db->n_models; i++) {
         if (strcmp(db->models[i].name, name) == 0) {
             *out = db->models[i];
+            fake_sanitize_model(out);
             return 0;
         }
     }
@@ -211,7 +229,9 @@ fake_create_model(void* ctx, const model_rec_t* m)
     if (db->n_models >= FAKE_CAP) {
         return -1;
     }
-    db->models[db->n_models++] = *m;
+    db->models[db->n_models] = *m;
+    fake_sanitize_model(&db->models[db->n_models]);
+    db->n_models++;
     return 0;
 }
 
@@ -240,6 +260,13 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
         }
         if (mask & MMASK_ENABLED) {
             db->models[i].enabled = m->enabled;
+        }
+        if (mask & MMASK_TARGETS) {
+            db->models[i].n_targets = m->n_targets;
+            memcpy(db->models[i].targets, m->targets, sizeof(m->targets));
+        }
+        if (mask & MMASK_LB_POLICY) {
+            snprintf(db->models[i].lb_policy, sizeof db->models[i].lb_policy, "%s", m->lb_policy);
         }
         return 0;
     }
@@ -432,6 +459,79 @@ TEST_CASE(test_pg_fake_model_lifecycle)
     TEST_ASSERT(pg_store_ops(ps)->update_model(&db, &m, MMASK_ENABLED) == 0, "disable model");
     TEST_ASSERT(pg_store_ops(ps)->delete_model(&db, "mock-model") == 0, "delete model");
     TEST_ASSERT(pg_store_ops(ps)->get_model(&db, "mock-model", &out) == -1, "gone after delete");
+
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_pg_fake_multi_target_model)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    model_rec_t    m, out;
+
+    memset(&db, 0, sizeof db);
+    build_fake_ops(&db, &ops);
+    ps = pg_store_open("unused", &ops);
+    TEST_ASSERT(ps != NULL, "fake store open");
+
+    /* 1. Legacy single-target model auto-synthesizes targets[0] and lb_policy */
+    memset(&m, 0, sizeof m);
+    strcpy(m.name, "single-target");
+    strcpy(m.provider, "openai");
+    strcpy(m.endpoint, "http://127.0.0.1:9000");
+    strcpy(m.upstream_key_ref, "env:SINGLE_KEY");
+    m.enabled = 1;
+    TEST_ASSERT(pg_store_ops(ps)->create_model(&db, &m) == 0, "create single model");
+
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(pg_store_ops(ps)->get_model(&db, "single-target", &out) == 0, "get single model");
+    TEST_ASSERT(out.n_targets == 1, "synthesized 1 target");
+    TEST_ASSERT(strcmp(out.targets[0].provider, "openai") == 0, "tgt0 provider");
+    TEST_ASSERT(strcmp(out.targets[0].endpoint, "http://127.0.0.1:9000") == 0, "tgt0 endpoint");
+    TEST_ASSERT(strcmp(out.targets[0].upstream_key_ref, "env:SINGLE_KEY") == 0, "tgt0 key_ref");
+    TEST_ASSERT(out.targets[0].weight == 1, "tgt0 weight default 1");
+    TEST_ASSERT(out.targets[0].priority == 0, "tgt0 priority default 0");
+    TEST_ASSERT(strcmp(out.lb_policy, "priority") == 0, "default lb_policy priority");
+
+    /* 2. Multi-target model */
+    memset(&m, 0, sizeof m);
+    strcpy(m.name, "multi-target");
+    strcpy(m.lb_policy, "round_robin");
+    m.n_targets = 2;
+    strcpy(m.targets[0].provider, "openai");
+    strcpy(m.targets[0].endpoint, "http://primary:8000");
+    strcpy(m.targets[0].upstream_key_ref, "env:PRI_KEY");
+    m.targets[0].weight = 3;
+    m.targets[0].priority = 0;
+
+    strcpy(m.targets[1].provider, "azure");
+    strcpy(m.targets[1].endpoint, "http://backup:8000");
+    strcpy(m.targets[1].upstream_key_ref, "env:BAK_KEY");
+    m.targets[1].weight = 1;
+    m.targets[1].priority = 1;
+    m.enabled = 1;
+
+    TEST_ASSERT(pg_store_ops(ps)->create_model(&db, &m) == 0, "create multi model");
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(pg_store_ops(ps)->get_model(&db, "multi-target", &out) == 0, "get multi model");
+    TEST_ASSERT(out.n_targets == 2, "2 targets returned");
+    TEST_ASSERT(strcmp(out.lb_policy, "round_robin") == 0, "policy round_robin");
+    TEST_ASSERT(strcmp(out.targets[0].endpoint, "http://primary:8000") == 0, "tgt 0 ep");
+    TEST_ASSERT(out.targets[0].weight == 3, "tgt 0 weight");
+    TEST_ASSERT(out.targets[0].priority == 0, "tgt 0 prio");
+    TEST_ASSERT(strcmp(out.targets[1].endpoint, "http://backup:8000") == 0, "tgt 1 ep");
+    TEST_ASSERT(out.targets[1].weight == 1, "tgt 1 weight");
+    TEST_ASSERT(out.targets[1].priority == 1, "tgt 1 prio");
+
+    /* 3. Update targets & lb_policy */
+    strcpy(m.lb_policy, "weighted");
+    m.targets[0].weight = 5;
+    TEST_ASSERT(pg_store_ops(ps)->update_model(&db, &m, MMASK_TARGETS | MMASK_LB_POLICY) == 0, "update targets & lb");
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(pg_store_ops(ps)->get_model(&db, "multi-target", &out) == 0, "get updated model");
+    TEST_ASSERT(strcmp(out.lb_policy, "weighted") == 0, "updated policy weighted");
+    TEST_ASSERT(out.targets[0].weight == 5, "updated tgt 0 weight");
 
     pg_store_close(ps);
 }

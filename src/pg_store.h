@@ -24,15 +24,31 @@ typedef struct key_rec {
     int    revoked;
 } key_rec_t;
 
+#define MAX_TARGETS_PER_MODEL 8
+
+typedef struct upstream_target {
+    char provider[32];
+    char endpoint[512];
+    char upstream_key_ref[256];
+    char upstream_key[1024]; /* resolved in-memory */
+    int  weight;             /* weight > 0, default 1 */
+    int  priority;           /* 0 = primary tier, 1 = fallback tier, etc. */
+} upstream_target_t;
+
 /** @brief Model route record (models row + resolved upstream key). */
 typedef struct model_rec {
     char name[128];
-    char provider[32];
-    char endpoint[512];
+    char provider[32];              /* primary / fallback default */
+    char endpoint[512];             /* primary / fallback default */
     char upstream_key_ref[256];     /* "env:NAME" | "pg:<blob>" | "" */
     char default_params_json[1024]; /* jansson object; default_params win < request */
     int  enabled;
     char upstream_key[1024];        /* filled by model_router, not stored */
+
+    /* Multi-target additions */
+    int               n_targets;
+    upstream_target_t targets[MAX_TARGETS_PER_MODEL];
+    char              lb_policy[16]; /* "priority", "round_robin", "weighted" */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
@@ -54,6 +70,8 @@ typedef struct usage_row {
 #define MMASK_PARAMS (1 << 1)
 #define MMASK_ENABLED (1 << 2)
 #define MMASK_KEYREF (1 << 3)
+#define MMASK_TARGETS (1 << 4)
+#define MMASK_LB_POLICY (1 << 5)
 
 /** @brief Uniform persistence operations; real libpq or in-memory fakes.
  *

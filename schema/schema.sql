@@ -56,3 +56,8 @@ INSERT INTO schema_migrations(version) VALUES (1) ON CONFLICT (version) DO NOTHI
 ALTER TABLE usage_daily ADD COLUMN IF NOT EXISTS cached_prompt_tokens BIGINT NOT NULL DEFAULT 0;
 INSERT INTO schema_migrations(version) VALUES (2) ON CONFLICT (version) DO NOTHING;
 
+-- Migration v3: multi-upstream targets & load balancing policy
+ALTER TABLE models ADD COLUMN IF NOT EXISTS targets JSONB NOT NULL DEFAULT '[]';
+ALTER TABLE models ADD COLUMN IF NOT EXISTS lb_policy TEXT NOT NULL DEFAULT 'priority';
+INSERT INTO schema_migrations(version) VALUES (3) ON CONFLICT (version) DO NOTHING;
+
