@@ -47,14 +47,16 @@ append_body(char* buf, size_t size, size_t nmemb, void* ud)
 }
 
 int
-upstream_call(const char* url,
-              const char* upstream_key,
-              const char* body_json,
-              size_t      body_len,
-              long        timeout_ms,
-              int*        out_status,
-              char**      out_body,
-              size_t*     out_body_len)
+upstream_call_ext(const char* url,
+                  const char* upstream_key,
+                  const char* extra_headers_kv[][2],
+                  int         n_extra_headers,
+                  const char* body_json,
+                  size_t      body_len,
+                  long        timeout_ms,
+                  int*        out_status,
+                  char**      out_body,
+                  size_t*     out_body_len)
 {
     struct resp_buf    rb = {0};
     struct curl_slist* hdrs = NULL;
@@ -67,7 +69,22 @@ upstream_call(const char* url,
         goto done;
     }
 
-    if (upstream_key != NULL && upstream_key[0] != '\0') {
+    int has_custom_auth = 0;
+    if (extra_headers_kv != NULL && n_extra_headers > 0) {
+        for (int i = 0; i < n_extra_headers; i++) {
+            if (extra_headers_kv[i][0] != NULL && extra_headers_kv[i][1] != NULL) {
+                if (strcasecmp(extra_headers_kv[i][0], "x-api-key") == 0 ||
+                    strcasecmp(extra_headers_kv[i][0], "Authorization") == 0) {
+                    has_custom_auth = 1;
+                }
+                char hdr[1024];
+                snprintf(hdr, sizeof hdr, "%s: %s", extra_headers_kv[i][0], extra_headers_kv[i][1]);
+                hdrs = curl_slist_append(hdrs, hdr);
+            }
+        }
+    }
+
+    if (!has_custom_auth && upstream_key != NULL && upstream_key[0] != '\0') {
         char auth[1080];
         snprintf(auth, sizeof auth, "Authorization: Bearer %s", upstream_key);
         hdrs = curl_slist_append(hdrs, auth);
@@ -108,11 +125,32 @@ done:
     curl_easy_cleanup(c);
     if (rc != 0 && out_body != NULL) {
         *out_body = NULL;
-    }
-    if (rc != 0 && out_body_len != NULL) {
         *out_body_len = 0;
+        free(rb.data);
     }
     return rc;
+}
+
+int
+upstream_call(const char* url,
+              const char* upstream_key,
+              const char* body_json,
+              size_t      body_len,
+              long        timeout_ms,
+              int*        out_status,
+              char**      out_body,
+              size_t*     out_body_len)
+{
+    return upstream_call_ext(url,
+                             upstream_key,
+                             NULL,
+                             0,
+                             body_json,
+                             body_len,
+                             timeout_ms,
+                             out_status,
+                             out_body,
+                             out_body_len);
 }
 
 static uint64_t

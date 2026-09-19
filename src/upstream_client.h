@@ -34,6 +34,18 @@ int upstream_call(const char* url,
                   char**      out_body,
                   size_t*     out_body_len);
 
+/** @brief Issue one upstream HTTP POST with custom headers (e.g. Anthropic x-api-key). */
+int upstream_call_ext(const char* url,
+                      const char* upstream_key,
+                      const char* extra_headers_kv[][2],
+                      int         n_extra_headers,
+                      const char* body_json,
+                      size_t      body_len,
+                      long        timeout_ms,
+                      int*        out_status,
+                      char**      out_body,
+                      size_t*     out_body_len);
+
 /** @brief Streaming chunk callback. Return 0 on success; non-zero aborts transfer. */
 typedef int (*upstream_chunk_fn)(void* user_data, const void* chunk, size_t len);
 

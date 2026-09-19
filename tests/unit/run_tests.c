@@ -128,6 +128,17 @@ main(void)
     test_register("stream_pipeline_early_error", test_stream_pipeline_early_error);
     test_register("stream_pipeline_silence_timeout", test_stream_pipeline_silence_timeout);
 
+    extern void test_anthropic_build_system_and_defaults(void);
+    extern void test_anthropic_build_params(void);
+    extern void test_anthropic_resp_translation(void);
+    extern void test_anthropic_bridge_streaming(void);
+    extern void test_anthropic_pipeline_end_to_end(void);
+    test_register("anthropic_build_system", test_anthropic_build_system_and_defaults);
+    test_register("anthropic_build_params", test_anthropic_build_params);
+    test_register("anthropic_resp_translation", test_anthropic_resp_translation);
+    test_register("anthropic_bridge_streaming", test_anthropic_bridge_streaming);
+    test_register("anthropic_pipeline_end_to_end", test_anthropic_pipeline_end_to_end);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

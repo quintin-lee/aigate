@@ -146,6 +146,39 @@ server_thread(void* arg)
                                         (int)strlen(body),
                                         body);
             write(cfd, resp, (size_t)blen);
+        } else if (strcmp(path, "/v1/messages") == 0 || strcmp(path, "/messages") == 0) {
+            if (is_streaming_req) {
+                const char* hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
+                write(cfd, hdr, strlen(hdr));
+                const char* c1 = "event: message_start\r\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_mock_stream\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-sonnet-20241022\",\"usage\":{\"input_tokens\":12,\"output_tokens\":1}}}\r\n\r\n";
+                write(cfd, c1, strlen(c1));
+                struct timespec sl = {0, 10 * 1000000};
+                nanosleep(&sl, NULL);
+                const char* c2 = "event: content_block_delta\r\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}\r\n\r\n";
+                write(cfd, c2, strlen(c2));
+                nanosleep(&sl, NULL);
+                const char* c3 = "event: content_block_delta\r\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"from Claude\"}}\r\n\r\n";
+                write(cfd, c3, strlen(c3));
+                nanosleep(&sl, NULL);
+                const char* c4 = "event: message_delta\r\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":18}}\r\n\r\n";
+                write(cfd, c4, strlen(c4));
+                nanosleep(&sl, NULL);
+                const char* c5 = "event: message_stop\r\ndata: {\"type\":\"message_stop\"}\r\n\r\n";
+                write(cfd, c5, strlen(c5));
+            } else {
+                const char* body = "{\"id\":\"msg_mock_123\",\"type\":\"message\",\"role\":\"assistant\","
+                                   "\"model\":\"claude-3-5-sonnet-20241022\",\"content\":[{\"type\":\"text\","
+                                   "\"text\":\"Hello from Claude non-stream\"}],\"stop_reason\":\"end_turn\","
+                                   "\"usage\":{\"input_tokens\":12,\"output_tokens\":18}}";
+                char        resp[2048];
+                int         blen = snprintf(resp,
+                                            sizeof resp,
+                                            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                            "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                            (int)strlen(body),
+                                            body);
+                write(cfd, resp, (size_t)blen);
+            }
         } else if (strcmp(path, "/mock/stream-slow") == 0 || (is_streaming_req && is_slow)) {
             const char* hdr = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
             write(cfd, hdr, strlen(hdr));

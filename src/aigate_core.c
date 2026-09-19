@@ -3,6 +3,7 @@
 #include "aigate_core.h"
 #include "aigate_log.h"
 #include "model_router.h"
+#include "provider_anthropic.h"
 #include "provider_openai.h"
 #include "upstream_client.h"
 
@@ -112,6 +113,13 @@ stream_chunk_handler(void* user_data, const void* chunk, size_t len)
         }
     }
     return 0;
+}
+
+static int
+anthropic_stream_chunk_handler(void* user_data, const void* chunk, size_t len)
+{
+    anthropic_bridge_t* b = user_data;
+    return anthropic_bridge_feed(b, chunk, len);
 }
 
 int
@@ -289,37 +297,58 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return 0;
     }
 
-    /* --- provider build --- */
-    if (!provider_openai_supports(route.provider)) {
+    /* --- provider check & build --- */
+    int is_openai = provider_openai_supports(route.provider);
+    int is_anthropic = provider_anthropic_supports(route.provider);
+    if (!is_openai && !is_anthropic) {
         aigate_write_error(
             rc, PIPE_UNSUPPORTED, "unsupported_provider", "provider not supported by this build");
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
     }
-    /* upstream path mirrors the gateway path (spec §4.1 non-streaming set) */
-    const char* up_path = "/chat/completions";
-    if (strcmp(rq->path, "/v1/embeddings") == 0) {
-        up_path = "/embeddings";
-    } else if (strcmp(rq->path, "/v1/completions") == 0) {
-        up_path = "/completions";
-    }
 
-    char   url[1024];
-    char*  merged = NULL;
-    size_t mlen = 0;
-    if (provider_openai_build(&route,
-                              up_path,
-                              rq->body != NULL ? (const char*)rq->body : NULL,
-                              url,
-                              sizeof url,
-                              &merged,
-                              &mlen) != 0) {
-        aigate_write_error(rc, 500, "internal", "failed to build upstream request");
-        json_decref(jbody);
-        key_rec_free(&krec);
-        free(merged);
-        return 0;
+    char        url[1024];
+    char*       merged = NULL;
+    size_t      mlen = 0;
+    const char* extra_hdrs[4][2] = {{0}};
+    int         n_extra_hdrs = 0;
+
+    if (is_openai) {
+        const char* up_path = "/chat/completions";
+        if (strcmp(rq->path, "/v1/embeddings") == 0) {
+            up_path = "/embeddings";
+        } else if (strcmp(rq->path, "/v1/completions") == 0) {
+            up_path = "/completions";
+        }
+        if (provider_openai_build(&route,
+                                  up_path,
+                                  rq->body != NULL ? (const char*)rq->body : NULL,
+                                  url,
+                                  sizeof url,
+                                  &merged,
+                                  &mlen) != 0) {
+            aigate_write_error(rc, 500, "internal", "failed to build upstream request");
+            json_decref(jbody);
+            key_rec_free(&krec);
+            free(merged);
+            return 0;
+        }
+    } else if (is_anthropic) {
+        if (provider_anthropic_build(&route,
+                                     rq->body != NULL ? (const char*)rq->body : NULL,
+                                     url,
+                                     sizeof url,
+                                     extra_hdrs,
+                                     &n_extra_hdrs,
+                                     &merged,
+                                     &mlen) != 0) {
+            aigate_write_error(rc, 500, "internal", "failed to build upstream request");
+            json_decref(jbody);
+            key_rec_free(&krec);
+            free(merged);
+            return 0;
+        }
     }
 
     /* Check if streaming */
@@ -327,28 +356,40 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     bool is_streaming = (jstream != NULL && json_is_true(jstream));
 
     if (is_streaming) {
-        stream_accum_t s_acc;
+        stream_accum_t     s_acc;
         memset(&s_acc, 0, sizeof s_acc);
+        anthropic_bridge_t bridge;
+        upstream_chunk_fn  chunk_fn = stream_chunk_handler;
+        void*              chunk_ctx = &s_acc;
         s_acc.rc = rc;
+
+        if (is_anthropic) {
+            anthropic_bridge_init(&bridge, rc);
+            chunk_fn = anthropic_stream_chunk_handler;
+            chunk_ctx = &bridge;
+        }
 
         int      status = 0;
         uint64_t t0 = mono_ns();
         long     silence_timeout_ms =
             ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
         int      urc = upstream_stream_call(
-            url, route.upstream_key, NULL, 0, merged, mlen, silence_timeout_ms,
-            stream_chunk_handler, &s_acc, &status);
-        if (!s_acc.headers_sent && (urc != 0 || status >= 500)) {
+            url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, silence_timeout_ms,
+            chunk_fn, chunk_ctx, &status);
+        bool headers_sent = is_anthropic ? bridge.headers_sent : s_acc.headers_sent;
+
+        if (!headers_sent && (urc != 0 || status >= 500)) {
             struct timespec sl = {0, 200 * 1000000}; /* 200ms */
             nanosleep(&sl, NULL);
             urc = upstream_stream_call(
-                url, route.upstream_key, NULL, 0, merged, mlen, silence_timeout_ms,
-                stream_chunk_handler, &s_acc, &status);
+                url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, silence_timeout_ms,
+                chunk_fn, chunk_ctx, &status);
+            headers_sent = is_anthropic ? bridge.headers_sent : s_acc.headers_sent;
         }
         uint64_t lat = mono_ns() - t0;
         free(merged);
 
-        if (!s_acc.headers_sent) {
+        if (!headers_sent) {
             if (rc->set_header != NULL) {
                 rc->set_header(rc->impl, "X-Upstream-Provider", route.provider);
             }
@@ -358,6 +399,9 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             key_rec_free(&krec);
             return 0;
         }
+
+        long ptok = is_anthropic ? bridge.input_tokens : s_acc.prompt_tokens;
+        long ctok = is_anthropic ? bridge.output_tokens : s_acc.completion_tokens;
 
         if (urc != 0) {
             const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
@@ -370,44 +414,43 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             if (rc->write != NULL) {
                 rc->write(rc->impl, sse_err, strlen(sse_err), true);
             }
-            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, s_acc.prompt_tokens,
-                      s_acc.completion_tokens, lat, route.provider);
-            if (s_acc.prompt_tokens + s_acc.completion_tokens > 0) {
-                rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota,
-                                  s_acc.prompt_tokens + s_acc.completion_tokens);
+            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, lat, route.provider);
+            if (ptok + ctok > 0) {
+                rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
             }
             json_decref(jbody);
             key_rec_free(&krec);
             return 0;
         }
 
-        if (rc->write != NULL) {
+        if (is_anthropic) {
+            anthropic_bridge_finish(&bridge);
+        } else if (rc->write != NULL) {
             rc->write(rc->impl, "", 0, true);
         }
-        um_record(ac->um, krec.key_id, model, status > 0 ? status : 200, s_acc.prompt_tokens,
-                  s_acc.completion_tokens, lat, route.provider);
-        rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota,
-                          s_acc.prompt_tokens + s_acc.completion_tokens);
+
+        um_record(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, lat, route.provider);
+        rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
     }
 
-    /* --- upstream call with a single retry on 5xx --- */
+    /* --- upstream non-streaming call with a single retry on 5xx --- */
     int      status = 0;
     char*    ubody = NULL;
     size_t   ulen = 0;
     uint64_t t0 = mono_ns();
-    int      urc = upstream_call(
-        url, route.upstream_key, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
+    int      urc = upstream_call_ext(
+        url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
     if (urc == 0 && status >= 500) {
         free(ubody);
         ubody = NULL;
         struct timespec sl = {0, 200 * 1000000}; /* 200ms */
         nanosleep(&sl, NULL);
-        urc = upstream_call(
-            url, route.upstream_key, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
+        urc = upstream_call_ext(
+            url, route.upstream_key, extra_hdrs, n_extra_hdrs, merged, mlen, ac->default_timeout_ms, &status, &ubody, &ulen);
     }
     uint64_t lat = mono_ns() - t0;
     free(merged);
@@ -425,7 +468,28 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return 0;
     }
 
-    /* --- parse usage (missing → 0/0) --- */
+    if (is_anthropic) {
+        char*  oai_resp = NULL;
+        size_t oai_len = 0;
+        long   ptok = 0, ctok = 0;
+        if (provider_anthropic_resp_to_openai(ubody ? ubody : "", model, &oai_resp, &oai_len, &ptok, &ctok) != 0) {
+            aigate_write_error(rc, 502, "upstream_error", "failed to parse anthropic response");
+            free(ubody);
+            json_decref(jbody);
+            key_rec_free(&krec);
+            return 0;
+        }
+        um_record(ac->um, krec.key_id, model, status, ptok, ctok, lat, route.provider);
+        rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+        int rv = aigate_write_json(rc, status, oai_resp, oai_len);
+        free(oai_resp);
+        free(ubody);
+        json_decref(jbody);
+        key_rec_free(&krec);
+        return rv;
+    }
+
+    /* --- OpenAI parse usage (missing → 0/0) --- */
     long ptok = 0, ctok = 0;
     if (ubody != NULL) {
         json_t* jup = json_loads(ubody, 0, NULL);
