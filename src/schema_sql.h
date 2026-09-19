@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 
 INSERT INTO schema_migrations(version) VALUES (1) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v2: prompt cache token metering
+ALTER TABLE usage_daily ADD COLUMN IF NOT EXISTS cached_prompt_tokens BIGINT NOT NULL DEFAULT 0;
+INSERT INTO schema_migrations(version) VALUES (2) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

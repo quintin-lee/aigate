@@ -653,22 +653,23 @@ pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "INSERT INTO usage_daily(key_id, model_name, day, requests, prompt_tokens, "
-        "completion_tokens, errors) "
-        "VALUES($1, $2, to_date($3, 'YYYY-MM-DD'), $4, $5, $6, $7) "
+        "completion_tokens, errors, cached_prompt_tokens) "
+        "VALUES($1, $2, to_date($3, 'YYYY-MM-DD'), $4, $5, $6, $7, $8) "
         "ON CONFLICT (key_id, model_name, day) DO UPDATE SET "
         "requests = usage_daily.requests + EXCLUDED.requests, "
         "prompt_tokens = usage_daily.prompt_tokens + EXCLUDED.prompt_tokens, "
         "completion_tokens = usage_daily.completion_tokens + EXCLUDED.completion_tokens, "
-        "errors = usage_daily.errors + EXCLUDED.errors";
+        "errors = usage_daily.errors + EXCLUDED.errors, "
+        "cached_prompt_tokens = usage_daily.cached_prompt_tokens + EXCLUDED.cached_prompt_tokens";
     int rc = 0;
 
     if (n <= 0) {
         return 0;
     }
 
-    char        day[24], num[32];
-    const char* vals[7];
-    int         plens[7] = {0};
+    char        day[24], num[32], n_req[32], n_ptok[32], n_ctok[32], n_err[32], n_cptok[32];
+    const char* vals[8];
+    int         plens[8] = {0};
 
     pq_lock(px);
     PQclear(PQexec(px->db, "BEGIN"));
@@ -678,15 +679,17 @@ pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
         vals[0] = num;
         vals[1] = rows[i].model_name;
         vals[2] = day;
-        snprintf(num, sizeof num, "%ld", rows[i].requests);
-        vals[3] = num;
-        snprintf(num, sizeof num, "%ld", rows[i].prompt_tokens);
-        vals[4] = num;
-        snprintf(num, sizeof num, "%ld", rows[i].completion_tokens);
-        vals[5] = num;
-        snprintf(num, sizeof num, "%ld", rows[i].errors);
-        vals[6] = num;
-        PGresult* res = PQexecParams(px->db, q, 7, NULL, vals, plens, NULL, 0);
+        snprintf(n_req, sizeof n_req, "%ld", rows[i].requests);
+        vals[3] = n_req;
+        snprintf(n_ptok, sizeof n_ptok, "%ld", rows[i].prompt_tokens);
+        vals[4] = n_ptok;
+        snprintf(n_ctok, sizeof n_ctok, "%ld", rows[i].completion_tokens);
+        vals[5] = n_ctok;
+        snprintf(n_err, sizeof n_err, "%ld", rows[i].errors);
+        vals[6] = n_err;
+        snprintf(n_cptok, sizeof n_cptok, "%ld", rows[i].cached_prompt_tokens);
+        vals[7] = n_cptok;
+        PGresult* res = PQexecParams(px->db, q, 8, NULL, vals, plens, NULL, 0);
         if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
             AIGATE_LOG_ERROR("pg flush_usage: %s",
                              res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
@@ -715,7 +718,7 @@ pq_query_usage(void*        vctx,
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "SELECT key_id, model_name, day, requests, prompt_tokens, "
-        "completion_tokens, errors FROM usage_daily "
+        "completion_tokens, errors, cached_prompt_tokens FROM usage_daily "
         "WHERE key_id = $1 AND ($2 = 'all' OR model_name = $2) "
         "AND day >= to_date($3, 'YYYY-MM-DD') AND day <= to_date($4, 'YYYY-MM-DD') "
         "ORDER BY day";
@@ -753,6 +756,7 @@ pq_query_usage(void*        vctx,
         out[i].prompt_tokens = atol(PQgetvalue(res, i, 4));
         out[i].completion_tokens = atol(PQgetvalue(res, i, 5));
         out[i].errors = atol(PQgetvalue(res, i, 6));
+        out[i].cached_prompt_tokens = PQnfields(res) > 7 ? atol(PQgetvalue(res, i, 7)) : 0;
     }
     *n = nt;
     PQclear(res);

@@ -61,13 +61,14 @@ TEST_CASE(test_um_counters_and_drain)
     usage_meter_t* um = usage_meter_new(ps, 0); /* no worker: manual drain */
     TEST_ASSERT(um != NULL, "meter new");
 
-    um_record(um, 1, "gpt-4o", 200, 7, 11, 50000000, "openai");
-    um_record(um, 1, "gpt-4o", 500, 0, 0, 120000000, "openai");
-    um_record(um, 2, "claude-3", 200, 3, 4, 90000000, "openai");
+    um_record(um, 1, "gpt-4o", 200, 7, 11, 5, 50000000, "openai");
+    um_record(um, 1, "gpt-4o", 500, 0, 0, 0, 120000000, "openai");
+    um_record(um, 2, "claude-3", 200, 3, 4, 2, 90000000, "openai");
 
     TEST_ASSERT(um_total_requests(um) == 3, "3 requests");
     TEST_ASSERT(um_total_errors(um) == 1, "1 error");
     TEST_ASSERT(um_total_tokens(um) == 25, "25 tokens");
+    TEST_ASSERT(um_total_cached_tokens(um) == 7, "7 cached tokens");
 
     usage_row_t rows[16];
     int         n = 0;
@@ -82,11 +83,13 @@ TEST_CASE(test_um_counters_and_drain)
             TEST_ASSERT(db.rows[i].requests == 2, "k1 reqs 2");
             TEST_ASSERT(db.rows[i].prompt_tokens == 7, "k1 prompt 7");
             TEST_ASSERT(db.rows[i].completion_tokens == 11, "k1 compl 11");
+            TEST_ASSERT(db.rows[i].cached_prompt_tokens == 5, "k1 cached 5");
             TEST_ASSERT(db.rows[i].errors == 1, "k1 errors 1");
             found1 = 1;
         }
         if (db.rows[i].key_id == 2 && strcmp(db.rows[i].model_name, "claude-3") == 0) {
             TEST_ASSERT(db.rows[i].requests == 1, "k2 reqs 1");
+            TEST_ASSERT(db.rows[i].cached_prompt_tokens == 2, "k2 cached 2");
             found2 = 1;
         }
     }
@@ -104,6 +107,7 @@ TEST_CASE(test_um_counters_and_drain)
     TEST_ASSERT(strstr(buf, "aigate_requests_total 3") != NULL, "requests line");
     TEST_ASSERT(strstr(buf, "aigate_errors_total 1") != NULL, "errors line");
     TEST_ASSERT(strstr(buf, "aigate_tokens_total 25") != NULL, "tokens line");
+    TEST_ASSERT(strstr(buf, "aigate_tokens_cached_total 7") != NULL, "cached tokens line");
     TEST_ASSERT(strstr(buf, "aigate_upstream_requests_total{provider=\"openai\"} 3") != NULL,
                 "per-provider counter");
     TEST_ASSERT(

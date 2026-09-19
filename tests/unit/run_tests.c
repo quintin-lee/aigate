@@ -142,6 +142,13 @@ main(void)
     extern void admin_ui_content(void);
     test_register("admin_ui_content", admin_ui_content);
 
+    extern void test_deepseek_reasoning_non_streaming(void);
+    extern void test_openai_cached_tokens_details(void);
+    extern void test_deepseek_streaming_reasoning_and_cache(void);
+    test_register("deepseek_reasoning_non_streaming", test_deepseek_reasoning_non_streaming);
+    test_register("openai_cached_tokens_details", test_openai_cached_tokens_details);
+    test_register("deepseek_streaming_reasoning_and_cache", test_deepseek_streaming_reasoning_and_cache);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

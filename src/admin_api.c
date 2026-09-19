@@ -643,6 +643,7 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
         json_object_set_new(o, "requests", json_integer(rows[i].requests));
         json_object_set_new(o, "prompt_tokens", json_integer(rows[i].prompt_tokens));
         json_object_set_new(o, "completion_tokens", json_integer(rows[i].completion_tokens));
+        json_object_set_new(o, "cached_prompt_tokens", json_integer(rows[i].cached_prompt_tokens));
         json_object_set_new(o, "errors", json_integer(rows[i].errors));
         json_array_append_new(arr, o);
     }

@@ -12,7 +12,7 @@
 #include <time.h>
 
 #define UM_ACC_CAP 4096
-#define UM_MAX_PROVS 4
+#define UM_MAX_PROVS 8
 
 typedef struct {
     int    in_use;
@@ -20,6 +20,7 @@ typedef struct {
     char   model[128];
     time_t day;
     long   requests, prompt, completion, errors;
+    long   cached_prompt;
 } um_acc_t;
 
 typedef struct {
@@ -33,7 +34,7 @@ struct usage_meter {
     pthread_mutex_t mtx;
     um_acc_t        accs[UM_ACC_CAP];
     um_prov_t       provs[UM_MAX_PROVS];
-    atomic_long     reqs, errs, toks;
+    atomic_long     reqs, errs, toks, cached_toks;
     pthread_t       worker;
     int             have_worker;
     int             flush_interval_s;
@@ -66,7 +67,13 @@ acc_hash(long key_id, const char* model)
 static int
 is_known_provider(const char* p)
 {
-    return p && (strcmp(p, "openai") == 0 || strcmp(p, "ollama") == 0 || strcmp(p, "azure") == 0);
+    return p && (strcmp(p, "openai") == 0 ||
+                 strcmp(p, "ollama") == 0 ||
+                 strcmp(p, "azure") == 0 ||
+                 strcmp(p, "anthropic") == 0 ||
+                 strcmp(p, "gemini") == 0 ||
+                 strcmp(p, "deepseek") == 0 ||
+                 strcmp(p, "siliconflow") == 0);
 }
 
 static um_prov_t*
@@ -170,6 +177,7 @@ um_record(usage_meter_t* um,
           int            http_status,
           long           prompt_tokens,
           long           completion_tokens,
+          long           cached_prompt_tokens,
           uint64_t       latency_ns,
           const char*    provider)
 {
@@ -179,6 +187,7 @@ um_record(usage_meter_t* um,
         atomic_fetch_add(&um->errs, 1);
     }
     atomic_fetch_add(&um->toks, toks);
+    atomic_fetch_add(&um->cached_toks, cached_prompt_tokens);
 
     pthread_mutex_lock(&um->mtx);
     um_prov_t* pv = prov_slot(um, provider);
@@ -199,6 +208,7 @@ um_record(usage_meter_t* um,
             a->requests++;
             a->prompt += prompt_tokens;
             a->completion += completion_tokens;
+            a->cached_prompt += cached_prompt_tokens;
             if (http_status >= 500) {
                 a->errors++;
             }
@@ -213,6 +223,7 @@ um_record(usage_meter_t* um,
             a->requests = 1;
             a->prompt = prompt_tokens;
             a->completion = completion_tokens;
+            a->cached_prompt = cached_prompt_tokens;
             a->errors = http_status >= 500 ? 1 : 0;
             pthread_mutex_unlock(&um->mtx);
             return;
@@ -240,9 +251,10 @@ um_drain(usage_meter_t* um, usage_row_t* out, int cap, int* n_out)
             out[flushed].requests = a->requests;
             out[flushed].prompt_tokens = a->prompt;
             out[flushed].completion_tokens = a->completion;
+            out[flushed].cached_prompt_tokens = a->cached_prompt;
             out[flushed].errors = a->errors;
             a->in_use = 0;
-            a->requests = a->prompt = a->completion = a->errors = 0;
+            a->requests = a->prompt = a->completion = a->cached_prompt = a->errors = 0;
             flushed++;
         }
     }
@@ -275,6 +287,12 @@ long
 um_total_tokens(usage_meter_t* um)
 {
     return atomic_load(&um->toks);
+}
+
+long
+um_total_cached_tokens(usage_meter_t* um)
+{
+    return atomic_load(&um->cached_toks);
 }
 
 int

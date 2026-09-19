@@ -29,20 +29,24 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
                  "aigate_errors_total %ld\n"
                  "# HELP aigate_tokens_total Total prompt+completion tokens.\n"
                  "# TYPE aigate_tokens_total counter\n"
-                 "aigate_tokens_total %ld\n",
+                 "aigate_tokens_total %ld\n"
+                 "# HELP aigate_tokens_cached_total Total cached prompt tokens.\n"
+                 "# TYPE aigate_tokens_cached_total counter\n"
+                 "aigate_tokens_cached_total %ld\n",
                  um_total_requests(um),
                  um_total_errors(um),
-                 um_total_tokens(um));
+                 um_total_tokens(um),
+                 um_total_cached_tokens(um));
     if (n < 0 || (size_t)n >= rem) {
         return -1;
     }
     w += n;
     rem -= (size_t)n;
 
-    char provs[4][32];
+    char provs[8][32];
     int  nprov = 0;
-    /* re-derive provider names through the meter accessor; cap 4 */
-    nprov = um_provider_names(um, (char (*)[32])provs, 4);
+    /* re-derive provider names through the meter accessor; cap 8 */
+    nprov = um_provider_names(um, (char (*)[32])provs, 8);
 
     for (int i = 0; i < nprov; i++) {
         const char* p = provs[i];

@@ -32,6 +32,7 @@ void um_record(usage_meter_t* um,
                int            http_status,
                long           prompt_tokens,
                long           completion_tokens,
+               long           cached_prompt_tokens,
                uint64_t       latency_ns,
                const char*    provider);
 
@@ -39,6 +40,7 @@ void um_record(usage_meter_t* um,
 long um_total_requests(usage_meter_t* um);
 long um_total_errors(usage_meter_t* um);
 long um_total_tokens(usage_meter_t* um);
+long um_total_cached_tokens(usage_meter_t* um);
 
 /** @brief Drain the daily accumulator map into @p out (up to @p cap rows),
  *  then flush via pg_ops->flush_usage. Empty map → *n_out = 0, ok.

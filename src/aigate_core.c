@@ -269,7 +269,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 rc->set_header(rc->impl, "X-Upstream-Provider", route.provider);
             }
             aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, lat, route.provider);
+            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, lat, route.provider);
             adapter->stream_bridge_free(bridge);
             json_decref(jbody);
             key_rec_free(&krec);
@@ -290,7 +290,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             if (rc->write != NULL) {
                 rc->write(rc->impl, sse_err, strlen(sse_err), true);
             }
-            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, lat, route.provider);
+            um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, lat, route.provider);
             if (ptok + ctok > 0) {
                 rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
             }
@@ -301,7 +301,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         }
 
         adapter->stream_bridge_finish(bridge);
-        um_record(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, lat, route.provider);
+        um_record(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, lat, route.provider);
         rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
         adapter->stream_bridge_free(bridge);
 
@@ -334,7 +334,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         }
         aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
         /* still meter the failure */
-        um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, lat, route.provider);
+        um_record(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, lat, route.provider);
         free(ubody);
         json_decref(jbody);
         key_rec_free(&krec);
@@ -354,7 +354,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     }
     free(ubody);
 
-    um_record(ac->um, krec.key_id, model, parsed_status, ptok, ctok, lat, route.provider);
+    um_record(ac->um, krec.key_id, model, parsed_status, ptok, ctok, cached_tok, lat, route.provider);
     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
     int rv = aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);

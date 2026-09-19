@@ -41,6 +41,7 @@ typedef struct usage_row {
     char   model_name[128];
     time_t day; /* midnight UTC */
     long   requests, prompt_tokens, completion_tokens, errors;
+    long   cached_prompt_tokens;
 } usage_row_t;
 
 /* update_key / update_model field masks (bit flags). */
