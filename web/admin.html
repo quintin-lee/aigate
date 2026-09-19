@@ -728,6 +728,19 @@
           runPlaygroundRequest();
         }
       });
+
+      // ESC closes any open modal
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          ["tokenModal", "modelModal", "keyModal", "newKeySuccessModal"].forEach(id => {
+            document.getElementById(id).classList.add("hidden");
+          });
+          if (!document.getElementById("confirmModal").classList.contains("hidden")) {
+            closeConfirmModal();
+          }
+          state.editingModelName = null;
+        }
+      });
     });
 
     function updateTokenUI() {
