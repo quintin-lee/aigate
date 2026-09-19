@@ -1,0 +1,34 @@
+services:
+  postgres:
+    image: postgres:16-bookworm
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: aigate
+      POSTGRES_USER: aigate
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aigate"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  aigate:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "${AIGATE_LISTEN_PORT:-8080}:8080"
+    environment:
+      AIGATE_LISTEN: ":8080"
+      AIGATE_PG_DSN: "host=postgres dbname=aigate user=aigate password=${POSTGRES_PASSWORD:-changeme}"
+      AIGATE_ADMIN_TOKEN: "${AIGATE_ADMIN_TOKEN}"
+      AIGATE_MASTER_KEY: "${AIGATE_MASTER_KEY:-}"
+      AIGATE_UPSTREAM_TIMEOUT_MS: "${AIGATE_UPSTREAM_TIMEOUT_MS:-60000}"
+      AIGATE_METRICS_ACL: "${AIGATE_METRICS_ACL:-0.0.0.0/0}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

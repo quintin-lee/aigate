@@ -1,0 +1,14 @@
+.build/
+.asan/
+build/
+.git/
+docs/
+__pycache__/
+*.o
+.clang-format
+.gitignore
+docker-compose.yml
+Dockerfile
+.dockerignore
+.env
+.env.*
