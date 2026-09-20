@@ -724,8 +724,11 @@ process_api_key_for_storage(admin_ctx_t* adm, const char* input_key, char* out_k
     if (adm->ac != NULL && adm->ac->router != NULL && adm->ac->router->have_master) {
         char enc[1024];
         if (secret_encrypt(adm->ac->router->master, input_key, strlen(input_key), enc, sizeof enc) == 0) {
-            snprintf(out_key, out_sz, "pg:%s", enc);
-            return;
+            /* "pg:" + enc + NUL: enc must fit out_sz-4 or the value is unusable; fall through to plaintext copy. Width caps -Werror=format-truncation. */
+            if (strlen(enc) + 4 <= out_sz) {
+                snprintf(out_key, out_sz, "pg:%.*s", (int)(out_sz - 4), enc);
+                return;
+            }
         }
     }
     snprintf(out_key, out_sz, "%s", input_key);
