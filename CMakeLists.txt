@@ -18,10 +18,19 @@ if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/hdr_histogram-0.11.6.tar.gz")
 else()
     FetchContent_Declare(hdr_hist_dep URL https://github.com/HdrHistogram/HdrHistogram_c/archive/refs/tags/0.11.6.tar.gz)
 endif()
+set(HDR_HISTOGRAM_BUILD_PROGRAMS OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(hdr_hist_dep)
 
 set(CIVETWEB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(CIVETWEB_ENABLE_SERVER_EXECUTABLE OFF CACHE BOOL "" FORCE)
+# CivetWeb ships sanitizers baked into its Debug builds; that would leak
+# -fsanitize=undefined into the parent link line for the main executable.
+# The main executable links against the civetweb library, so any -fsanitize
+# flags must be present in the parent link line as well, or link fails with
+# undefined __ubsan_* / __asan_* symbols.
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+  set(CIVETWEB_ENABLE_ASAN OFF CACHE BOOL "" FORCE)
+endif()
 set(CIVETWEB_THREAD_STACK_SIZE 1048576 CACHE STRING "Stack size for threads" FORCE)
 if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/civetweb-1.16.tar.gz")
     FetchContent_Declare(civetweb_dep URL "${CMAKE_SOURCE_DIR}/third_party/civetweb-1.16.tar.gz")
