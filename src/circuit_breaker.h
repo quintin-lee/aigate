@@ -51,7 +51,8 @@ void cb_record_success(circuit_breaker_t* cb, const char* model, const char* end
 /** @brief Record failed request (429, 5xx, or transport error).
  *  Increments consecutive failures; trips to OPEN when threshold reached.
  */
-void cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint, int http_status);
+void
+cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint, int http_status);
 
 /** @brief Return timestamp until which the endpoint is OPEN, or 0 if not OPEN. */
 time_t cb_get_open_until(circuit_breaker_t* cb, const char* model, const char* endpoint);

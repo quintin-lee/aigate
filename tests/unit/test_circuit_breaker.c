@@ -62,9 +62,11 @@ TEST_CASE(test_cb_tripping_on_consecutive_failures)
 
     cb_record_failure(cb, "claude", "http://ep1", 0);
     /* Circuit should now be tripped to OPEN */
-    TEST_ASSERT(cb_get_state(cb, "claude", "http://ep1") == CB_OPEN, "tripped to open after 3 failures");
+    TEST_ASSERT(cb_get_state(cb, "claude", "http://ep1") == CB_OPEN,
+                "tripped to open after 3 failures");
     TEST_ASSERT(cb_allow_request(cb, "claude", "http://ep1") == false, "traffic blocked when open");
-    TEST_ASSERT(cb_get_open_until(cb, "claude", "http://ep1") == 1000 + 30, "open_until set to now + 30");
+    TEST_ASSERT(cb_get_open_until(cb, "claude", "http://ep1") == 1000 + 30,
+                "open_until set to now + 30");
     TEST_ASSERT(strcmp(cb_state_to_str(CB_OPEN), "open") == 0, "state_to_str open");
 
     cb_destroy(cb);
@@ -90,13 +92,15 @@ TEST_CASE(test_cb_cooloff_and_half_open_probe_success)
 
     /* At t = 1030: cool-off elapsed -> transitions to HALF_OPEN */
     g_fake_time = 1030;
-    TEST_ASSERT(cb_get_state(cb, "model1", "http://ep1") == CB_HALF_OPEN, "transitions to half_open");
+    TEST_ASSERT(cb_get_state(cb, "model1", "http://ep1") == CB_HALF_OPEN,
+                "transitions to half_open");
     TEST_ASSERT(strcmp(cb_state_to_str(CB_HALF_OPEN), "half_open") == 0, "state_to_str half_open");
 
     /* First probe is allowed */
     TEST_ASSERT(cb_allow_request(cb, "model1", "http://ep1") == true, "probe allowed");
     /* Concurrent request during probe is rejected */
-    TEST_ASSERT(cb_allow_request(cb, "model1", "http://ep1") == false, "concurrent request blocked");
+    TEST_ASSERT(cb_allow_request(cb, "model1", "http://ep1") == false,
+                "concurrent request blocked");
 
     /* Probe succeeds */
     cb_record_success(cb, "model1", "http://ep1");

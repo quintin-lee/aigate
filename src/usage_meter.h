@@ -11,12 +11,13 @@
 
 #include <stdint.h>
 #include "pg_store.h"
+#include "ratelimit.h"
 
 typedef struct usage_meter usage_meter_t;
 
 /** @brief Create a meter. flush_interval_s <= 0 disables the background
  *  worker (test mode: call um_drain manually). @return NULL on failure. */
-usage_meter_t* usage_meter_new(pg_store_t* ps, int flush_interval_s);
+usage_meter_t* usage_meter_new(pg_store_t* ps, ratelimit_t* rl, int flush_interval_s);
 
 /** @brief Stop the worker, perform a final drain + flush, and free. */
 void usage_meter_free(usage_meter_t* um);
@@ -47,6 +48,12 @@ long um_total_cached_tokens(usage_meter_t* um);
  *  @return 0 ok; -1 when out would overflow cap or the flush call failed.
  *  @note Rows are value-copied; the caller owns @p out. */
 int um_drain(usage_meter_t* um, usage_row_t* out, int cap, int* n_out);
+
+/** @brief Re-merge rows into the daily accumulator after a failed flush.
+ *  Same-key+model rows are combined; a row with a different day keeps the
+ *  slot's day (cross-day error is bounded by one flush interval).
+ *  @return 0 ok; -1 when the accumulator table is full. */
+int um_unflush(usage_meter_t* um, const usage_row_t* rows, int n);
 
 /* Provider histogram accessors for metrics_render. */
 /** @brief Fills @p names (char[32] each) with providers that recorded

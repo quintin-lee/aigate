@@ -100,8 +100,8 @@ update_state_on_time_locked(cb_entry_t* e, time_t now)
     if (e->state == CB_OPEN && now >= e->open_until) {
         e->state = CB_HALF_OPEN;
         e->half_open_probe_active = 0;
-        AIGATE_LOG_INFO("circuit breaker for %s:%s transitioned to HALF_OPEN",
-                        e->model, e->endpoint);
+        AIGATE_LOG_INFO(
+            "circuit breaker for %s:%s transitioned to HALF_OPEN", e->model, e->endpoint);
     }
 }
 
@@ -258,7 +258,8 @@ cb_record_success(circuit_breaker_t* cb, const char* model, const char* endpoint
     if (e != NULL) {
         if (e->state == CB_HALF_OPEN) {
             AIGATE_LOG_INFO("circuit breaker for %s:%s probe succeeded, transitioned to CLOSED",
-                            e->model, e->endpoint);
+                            e->model,
+                            e->endpoint);
         }
         e->state = CB_CLOSED;
         e->consecutive_failures = 0;
@@ -293,16 +294,25 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
         e->state = CB_OPEN;
         e->open_until = now + cb->cooloff_sec;
         e->half_open_probe_active = 0;
-        AIGATE_LOG_WARN("circuit breaker for %s:%s probe failed (status %d), tripped back to OPEN until %ld",
-                        e->model, e->endpoint, http_status, (long)e->open_until);
+        AIGATE_LOG_WARN(
+            "circuit breaker for %s:%s probe failed (status %d), tripped back to OPEN until %ld",
+            e->model,
+            e->endpoint,
+            http_status,
+            (long)e->open_until);
     } else if (e->state == CB_CLOSED) {
         e->consecutive_failures++;
         if (e->consecutive_failures >= cb->failure_threshold) {
             e->state = CB_OPEN;
             e->open_until = now + cb->cooloff_sec;
             e->half_open_probe_active = 0;
-            AIGATE_LOG_WARN("circuit breaker for %s:%s reached %d failures (status %d), tripped to OPEN until %ld",
-                            e->model, e->endpoint, e->consecutive_failures, http_status, (long)e->open_until);
+            AIGATE_LOG_WARN("circuit breaker for %s:%s reached %d failures (status %d), tripped to "
+                            "OPEN until %ld",
+                            e->model,
+                            e->endpoint,
+                            e->consecutive_failures,
+                            http_status,
+                            (long)e->open_until);
         }
     } else {
         /* Already OPEN: refresh cooloff */

@@ -31,6 +31,8 @@ typedef struct {
 
 struct usage_meter {
     pg_store_t*     ps;
+    ratelimit_t*    rl;
+    time_t          last_rollover_day;
     pthread_mutex_t mtx;
     um_acc_t        accs[UM_ACC_CAP];
     um_prov_t       provs[UM_MAX_PROVS];
@@ -67,13 +69,9 @@ acc_hash(long key_id, const char* model)
 static int
 is_known_provider(const char* p)
 {
-    return p && (strcmp(p, "openai") == 0 ||
-                 strcmp(p, "ollama") == 0 ||
-                 strcmp(p, "azure") == 0 ||
-                 strcmp(p, "anthropic") == 0 ||
-                 strcmp(p, "gemini") == 0 ||
-                 strcmp(p, "deepseek") == 0 ||
-                 strcmp(p, "siliconflow") == 0);
+    return p && (strcmp(p, "openai") == 0 || strcmp(p, "ollama") == 0 || strcmp(p, "azure") == 0 ||
+                 strcmp(p, "anthropic") == 0 || strcmp(p, "gemini") == 0 ||
+                 strcmp(p, "deepseek") == 0 || strcmp(p, "siliconflow") == 0);
 }
 
 static um_prov_t*
@@ -101,6 +99,16 @@ static void*
 worker_main(void* arg)
 {
     usage_meter_t* um = arg;
+    usage_row_t*   rows = malloc((size_t)UM_ACC_CAP * sizeof *rows);
+    if (rows == NULL) {
+        AIGATE_LOG_WARN("usage worker row buffer alloc failed; flushing disabled");
+        /* stay alive so usage_meter_free's join cannot deadlock; the
+         * stop flag is checked every second. */
+        while (!um->stop) {
+            sleep(1);
+        }
+        return 0;
+    }
     while (!um->stop) {
         /* sleep in 1s increments so stop is honored promptly */
         for (int i = 0; i < um->flush_interval_s && !um->stop; i++) {
@@ -109,23 +117,35 @@ worker_main(void* arg)
         if (um->stop) {
             break;
         }
-        usage_row_t rows[256];
-        int         n = 0;
-        if (um_drain(um, rows, (int)(sizeof rows / sizeof rows[0]), &n) != 0) {
-            AIGATE_LOG_WARN("usage flush drain error");
+        /* rollover daily quotas when the UTC day changed */
+        time_t day = utc_midnight_now();
+        if (um->rl != NULL && day != um->last_rollover_day) {
+            rl_reset_day(um->rl, day);
+            um->last_rollover_day = day;
+        }
+        int n = 0;
+        if (um_drain(um, rows, UM_ACC_CAP, &n) != 0) {
+            if (n > 0) {
+                /* flush failed: re-queue drained rows so nothing is lost */
+                um_unflush(um, rows, n);
+            }
+            AIGATE_LOG_WARN("usage flush failed, %d rows re-queued", n);
         }
     }
+    free(rows);
     return 0;
 }
 
 usage_meter_t*
-usage_meter_new(pg_store_t* ps, int flush_interval_s)
+usage_meter_new(pg_store_t* ps, ratelimit_t* rl, int flush_interval_s)
 {
     usage_meter_t* um = calloc(1, sizeof *um);
     if (um == NULL) {
         return NULL;
     }
     um->ps = ps;
+    um->rl = rl;
+    um->last_rollover_day = utc_midnight_now();
     um->flush_interval_s = flush_interval_s;
     pthread_mutex_init(&um->mtx, NULL);
     atomic_init(&um->reqs, 0);
@@ -159,10 +179,18 @@ usage_meter_free(usage_meter_t* um)
         um->stop = 1;
         pthread_join(um->worker, 0);
     }
-    /* final drain */
-    usage_row_t rows[UM_ACC_CAP];
+    /* final drain in bounded chunks; a failed flush breaks (tail batch lost) */
+    usage_row_t rows[256];
     int         n = 0;
-    um_drain(um, rows, UM_ACC_CAP, &n);
+    do {
+        int rc = um_drain(um, rows, (int)(sizeof rows / sizeof rows[0]), &n);
+        if (rc != 0) {
+            if (n > 0) {
+                AIGATE_LOG_WARN("usage_meter shutdown: final drain lost %d rows", n);
+            }
+            break;
+        }
+    } while (n > 0);
     pthread_mutex_destroy(&um->mtx);
     for (int i = 0; i < UM_MAX_PROVS; i++) {
         hdr_close(um->provs[i].h);
@@ -260,6 +288,7 @@ um_drain(usage_meter_t* um, usage_row_t* out, int cap, int* n_out)
     }
     int n = flushed;
     pthread_mutex_unlock(&um->mtx);
+    *n_out = n;
 
     if (n > 0 && um->ps != NULL) {
         const pg_ops_t* ops = pg_store_ops(um->ps);
@@ -267,8 +296,56 @@ um_drain(usage_meter_t* um, usage_row_t* out, int cap, int* n_out)
             return -1;
         }
     }
-    *n_out = n;
     return 0;
+}
+
+int
+um_unflush(usage_meter_t* um, const usage_row_t* rows, int n)
+{
+    if (n <= 0) {
+        return 0;
+    }
+    int failed = 0;
+    pthread_mutex_lock(&um->mtx);
+    for (int i = 0; i < n; i++) {
+        const usage_row_t* r = &rows[i];
+        /* find-or-create the slot; an existing slot's day wins over the row's */
+        int found = 0;
+        for (int s = 0; s < UM_ACC_CAP; s++) {
+            um_acc_t* a = &um->accs[s];
+            if (a->in_use && a->key_id == r->key_id && strcmp(a->model, r->model_name) == 0) {
+                a->requests += r->requests;
+                a->prompt += r->prompt_tokens;
+                a->completion += r->completion_tokens;
+                a->cached_prompt += r->cached_prompt_tokens;
+                a->errors += r->errors;
+                found = 1;
+                break;
+            }
+            if (!found && !a->in_use) {
+                a->in_use = 1;
+                a->key_id = r->key_id;
+                snprintf(a->model, sizeof a->model, "%s", r->model_name);
+                a->day = r->day;
+                a->requests = r->requests;
+                a->prompt = r->prompt_tokens;
+                a->completion = r->completion_tokens;
+                a->cached_prompt = r->cached_prompt_tokens;
+                a->errors = r->errors;
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            failed = 1;
+            break; /* table full: cannot re-queue */
+        }
+    }
+    pthread_mutex_unlock(&um->mtx);
+    if (failed) {
+        AIGATE_LOG_WARN("um_unflush: accumulator table full, %d rows dropped", n);
+    }
+    return failed ? -1 : 0;
 }
 
 long

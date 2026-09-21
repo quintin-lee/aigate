@@ -9,6 +9,7 @@
 
 struct um_db {
     int         flush_calls;
+    int         fail_flush;
     usage_row_t rows[64];
     int         n_rows;
 };
@@ -18,6 +19,9 @@ um_flush(void* ctx, const usage_row_t* rows, int n)
 {
     struct um_db* db = ctx;
     db->flush_calls++;
+    if (db->fail_flush) {
+        return -1;
+    }
     for (int i = 0; i < n && db->n_rows < (int)(sizeof db->rows / sizeof db->rows[0]); i++) {
         db->rows[db->n_rows++] = rows[i];
     }
@@ -58,7 +62,7 @@ TEST_CASE(test_um_counters_and_drain)
     memset(&db, 0, sizeof db);
     pg_store_t* ps = open_um_store(&db);
     TEST_ASSERT(ps != NULL, "store open");
-    usage_meter_t* um = usage_meter_new(ps, 0); /* no worker: manual drain */
+    usage_meter_t* um = usage_meter_new(ps, NULL, 0); /* no worker: manual drain */
     TEST_ASSERT(um != NULL, "meter new");
 
     um_record(um, 1, "gpt-4o", 200, 7, 11, 5, 50000000, "openai");
@@ -120,6 +124,53 @@ TEST_CASE(test_um_counters_and_drain)
     pg_store_close(ps);
 }
 
+TEST_CASE(test_um_drain_fail_requeue)
+{
+    struct um_db db;
+    memset(&db, 0, sizeof db);
+    pg_store_t* ps = open_um_store(&db);
+    TEST_ASSERT(ps != NULL, "store open");
+    usage_meter_t* um = usage_meter_new(ps, NULL, 0);
+    TEST_ASSERT(um != NULL, "meter new");
+
+    um_record(um, 1, "gpt-4o", 200, 7, 11, 5, 50000000, "openai");
+    um_record(um, 2, "claude-3", 200, 3, 4, 2, 90000000, "anthropic");
+
+    /* failed flush: rows must be re-queued, counters preserved */
+    db.fail_flush = 1;
+    usage_row_t rows[16];
+    int         n = 0;
+    TEST_ASSERT(um_drain(um, rows, 16, &n) == -1, "drain flush fails");
+    TEST_ASSERT(n == 2, "2 rows drained before failure");
+    TEST_ASSERT(um_total_requests(um) == 2, "requests still 2");
+    TEST_ASSERT(um_total_tokens(um) == 25, "tokens still 25");
+
+    /* unflush and drain again with flush restored: values must re-appear */
+    TEST_ASSERT(um_unflush(um, rows, n) == 0, "unflush ok");
+    db.fail_flush = 0;
+    TEST_ASSERT(um_drain(um, rows, 16, &n) == 0, "second drain ok");
+    TEST_ASSERT(n == 2, "2 rows flushed on retry");
+    int found1 = 0, found2 = 0;
+    for (int i = db.n_rows - 2; i < db.n_rows; i++) {
+        if (db.rows[i].key_id == 1 && strcmp(db.rows[i].model_name, "gpt-4o") == 0) {
+            TEST_ASSERT(db.rows[i].requests == 1, "k1 reqs 1");
+            TEST_ASSERT(db.rows[i].prompt_tokens == 7, "k1 prompt 7");
+            found1 = 1;
+        }
+        if (db.rows[i].key_id == 2 && strcmp(db.rows[i].model_name, "claude-3") == 0) {
+            found2 = 1;
+        }
+    }
+    TEST_ASSERT(found1 && found2, "both rows re-flushed");
+
+    /* no accumulation left */
+    TEST_ASSERT(um_drain(um, rows, 16, &n) == 0, "final drain ok");
+    TEST_ASSERT(n == 0, "accumulator empty");
+
+    usage_meter_free(um);
+    pg_store_close(ps);
+}
+
 TEST_CASE(test_metrics_acl)
 {
     TEST_ASSERT(metrics_acl_allows("127.0.0.1", "") == 1, "empty acl allows");
@@ -140,15 +191,21 @@ TEST_CASE(test_metrics_failover)
     metrics_inc_failover("claude-3-5", "anthropic", "aws-bedrock");
 
     TEST_ASSERT(metrics_total_failovers() == 3, "total failovers == 3");
-    TEST_ASSERT(metrics_get_failover("gpt-4o", "openai", "azure") == 2, "gpt-4o openai->azure == 2");
-    TEST_ASSERT(metrics_get_failover("claude-3-5", "anthropic", "aws-bedrock") == 1, "claude-3-5 anthropic->aws == 1");
+    TEST_ASSERT(metrics_get_failover("gpt-4o", "openai", "azure") == 2,
+                "gpt-4o openai->azure == 2");
+    TEST_ASSERT(metrics_get_failover("claude-3-5", "anthropic", "aws-bedrock") == 1,
+                "claude-3-5 anthropic->aws == 1");
     TEST_ASSERT(metrics_get_failover("gpt-4o", "azure", "openai") == 0, "reverse direction == 0");
 
     char buf[4096];
     TEST_ASSERT(metrics_render(NULL, buf, sizeof buf) == 0, "render ok without um");
-    TEST_ASSERT(strstr(buf, "aigate_failover_total{model=\"gpt-4o\",from_provider=\"openai\",to_provider=\"azure\"} 2") != NULL,
+    TEST_ASSERT(strstr(buf,
+                       "aigate_failover_total{model=\"gpt-4o\",from_provider=\"openai\",to_"
+                       "provider=\"azure\"} 2") != NULL,
                 "contains gpt-4o failover metric");
-    TEST_ASSERT(strstr(buf, "aigate_failover_total{model=\"claude-3-5\",from_provider=\"anthropic\",to_provider=\"aws-bedrock\"} 1") != NULL,
+    TEST_ASSERT(strstr(buf,
+                       "aigate_failover_total{model=\"claude-3-5\",from_provider=\"anthropic\",to_"
+                       "provider=\"aws-bedrock\"} 1") != NULL,
                 "contains claude failover metric");
 
     metrics_reset_failovers();
