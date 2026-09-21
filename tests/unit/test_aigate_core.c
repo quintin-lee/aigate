@@ -116,6 +116,19 @@ f_flush_rows(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
+
+static int
+f_list_models(void* ctx, model_rec_t* out, int cap, int* n)
+{
+    struct fdb* db = ctx;
+    int         cnt = 0;
+    for (int i = 0; i < db->n_models && cnt < cap; i++) {
+        out[cnt++] = db->models[i];
+    }
+    *n = cnt;
+    return 0;
+}
+
 static void
 fbuild_ops(struct fdb* db, pg_ops_t* ops)
 {
@@ -123,6 +136,7 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
     ops->ctx = db;
     ops->get_key_by_hash = fget_key;
     ops->get_model = fget_model;
+    ops->list_models = f_list_models;
     ops->flush_usage = f_flush_rows;
 }
 
@@ -150,6 +164,21 @@ fkey_add(struct fdb* db,
         fk->k.allowed_models[0] = strdup(allowlist);
         fk->k.allowed_models[1] = NULL;
         fk->k.n_allowed = 1;
+    }
+}
+/** @brief Free allowlists allocated by fkey_add (called at test teardown). */
+static void
+freed_db(struct fdb* db)
+{
+    for (int i = 0; i < FKEYS; i++) {
+        struct fkey* fk = &db->keys[i];
+        if (fk->in_use && fk->k.allowed_models != NULL) {
+            for (int j = 0; j < fk->k.n_allowed; j++) {
+                free(fk->k.allowed_models[j]);
+            }
+            free(fk->k.allowed_models);
+            fk->k.allowed_models = NULL;
+        }
     }
 }
 
@@ -348,6 +377,109 @@ TEST_CASE(test_core_pipeline)
 
     aigate_core_shutdown(&ac);
     pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+/** @brief Run a GET /v1/models request through the pipeline. */
+static void
+run_models(aigate_core* ac, const char* bearer, struct cap* out)
+{
+    aigate_request_ctx rq;
+    memset(&rq, 0, sizeof rq);
+    rq.method = "GET";
+    rq.path = "/v1/models";
+    rq.bearer = bearer;
+    rq.client_ip = "127.0.0.1";
+
+    aigate_response_ctx rcc = cap_rc(out);
+    aigate_handle_request(ac, &rq, &rcc);
+    out->status = rcc.status;
+}
+
+TEST_CASE(test_core_models_rate_limited)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 9, "models-rate-key", 1, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    /* qps=1 key: first GET /v1/models admitted, second rate-limited */
+    struct cap m1, m2;
+    memset(&m1, 0, sizeof m1);
+    memset(&m2, 0, sizeof m2);
+    run_models(&ac, "models-rate-key", &m1);
+    TEST_ASSERT(m1.status == 200, "first models GET admitted, got %d", m1.status);
+    TEST_ASSERT(strstr(m1.body, "gpt-4o") != NULL, "model listed");
+    run_models(&ac, "models-rate-key", &m2);
+    TEST_ASSERT(m2.status == 429, "second models GET rate-limited, got %d", m2.status);
+    TEST_ASSERT(cap_has_header(&m2, "Retry-After:"), "Retry-After on 429");
+    TEST_ASSERT(strstr(m2.body, "rate limit exceeded") != NULL, "429 body");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_core_upstream_400_passthrough)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "good-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    /* non-failover upstream 400 with a body → client sees the real 400 + body */
+    mock_upstream_fail_all(mu, 400);
+    struct cap c4;
+    memset(&c4, 0, sizeof c4);
+    const char* b4 = run(&ac, "good-key", "gpt-4o", &c4);
+    TEST_ASSERT(c4.status == 400, "client sees upstream 400, got %d", c4.status);
+    TEST_ASSERT(strstr(b4, "boom") != NULL, "upstream error body passed through: %.80s", b4);
+
+    /* upstream 500 stays a failover-status → generic 502 (single candidate retried) */
+    mock_upstream_fail_all(mu, 500);
+    struct cap c5;
+    memset(&c5, 0, sizeof c5);
+    run(&ac, "good-key", "gpt-4o", &c5);
+    TEST_ASSERT(c5.status == 502, "500 still maps to 502, got %d", c5.status);
+    TEST_ASSERT(strstr(c5.body, "upstream request failed") != NULL, "generic 502 body");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
     mock_upstream_stop(mu);
 }
 

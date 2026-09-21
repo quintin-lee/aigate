@@ -48,7 +48,7 @@ typedef struct model_rec {
     /* Multi-target additions */
     int               n_targets;
     upstream_target_t targets[MAX_TARGETS_PER_MODEL];
-    char              lb_policy[32]; /* "priority", "round_robin", "weighted", "weighted_round_robin" */
+    char lb_policy[32]; /* "priority", "round_robin", "weighted", "weighted_round_robin" */
 } model_rec_t;
 
 /** @brief One usage_daily row. */

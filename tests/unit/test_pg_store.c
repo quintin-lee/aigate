@@ -108,9 +108,15 @@ fake_sanitize_model(model_rec_t* out)
     }
     if (out->n_targets == 0) {
         out->n_targets = 1;
-        snprintf(out->targets[0].provider, sizeof out->targets[0].provider, "%s", out->provider[0] != '\0' ? out->provider : "openai");
+        snprintf(out->targets[0].provider,
+                 sizeof out->targets[0].provider,
+                 "%s",
+                 out->provider[0] != '\0' ? out->provider : "openai");
         snprintf(out->targets[0].endpoint, sizeof out->targets[0].endpoint, "%s", out->endpoint);
-        snprintf(out->targets[0].upstream_key_ref, sizeof out->targets[0].upstream_key_ref, "%s", out->upstream_key_ref);
+        snprintf(out->targets[0].upstream_key_ref,
+                 sizeof out->targets[0].upstream_key_ref,
+                 "%s",
+                 out->upstream_key_ref);
         out->targets[0].weight = 1;
         out->targets[0].priority = 0;
     }
@@ -378,7 +384,9 @@ fake_list_providers(void* ctx, provider_rec_t* out, int cap, int* n)
     *n = 0;
     for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
         struct fake_provider* fp = &db->providers[i];
-        if (!fp->in_use) continue;
+        if (!fp->in_use) {
+            continue;
+        }
         out[*n] = fp->p;
         out[*n].models = NULL;
         out[*n].n_models = 0;
@@ -439,16 +447,28 @@ fake_update_provider(void* ctx, const provider_rec_t* p, int mask)
     for (int i = 0; i < FAKE_CAP; i++) {
         struct fake_provider* fp = &db->providers[i];
         if (fp->in_use && fp->p.id == p->id) {
-            if (mask & PMASK_TYPE) snprintf(fp->p.provider_type, sizeof fp->p.provider_type, "%s", p->provider_type);
-            if (mask & PMASK_ENDPOINT) snprintf(fp->p.endpoint, sizeof fp->p.endpoint, "%s", p->endpoint);
-            if (mask & PMASK_API_KEY) snprintf(fp->p.api_key, sizeof fp->p.api_key, "%s", p->api_key);
-            if (mask & PMASK_ENABLED) fp->p.enabled = p->enabled;
+            if (mask & PMASK_TYPE) {
+                snprintf(fp->p.provider_type, sizeof fp->p.provider_type, "%s", p->provider_type);
+            }
+            if (mask & PMASK_ENDPOINT) {
+                snprintf(fp->p.endpoint, sizeof fp->p.endpoint, "%s", p->endpoint);
+            }
+            if (mask & PMASK_API_KEY) {
+                snprintf(fp->p.api_key, sizeof fp->p.api_key, "%s", p->api_key);
+            }
+            if (mask & PMASK_ENABLED) {
+                fp->p.enabled = p->enabled;
+            }
             if (mask & PMASK_MODELS) {
-                for (int m = 0; m < fp->p.n_models; m++) free(fp->p.models[m]);
+                for (int m = 0; m < fp->p.n_models; m++) {
+                    free(fp->p.models[m]);
+                }
                 free(fp->p.models);
                 fp->p.models = NULL;
                 fp->p.n_models = 0;
-                if (deep_copy_provider_models(&fp->p, p) != 0) return -1;
+                if (deep_copy_provider_models(&fp->p, p) != 0) {
+                    return -1;
+                }
             }
             return 0;
         }
@@ -463,7 +483,9 @@ fake_delete_provider(void* ctx, long id)
     for (int i = 0; i < FAKE_CAP; i++) {
         struct fake_provider* fp = &db->providers[i];
         if (fp->in_use && fp->p.id == id) {
-            for (int m = 0; m < fp->p.n_models; m++) free(fp->p.models[m]);
+            for (int m = 0; m < fp->p.n_models; m++) {
+                free(fp->p.models[m]);
+            }
             free(fp->p.models);
             fp->p.models = NULL;
             fp->p.n_models = 0;
@@ -663,7 +685,8 @@ TEST_CASE(test_pg_fake_multi_target_model)
     /* 3. Update targets & lb_policy */
     strcpy(m.lb_policy, "weighted");
     m.targets[0].weight = 5;
-    TEST_ASSERT(pg_store_ops(ps)->update_model(&db, &m, MMASK_TARGETS | MMASK_LB_POLICY) == 0, "update targets & lb");
+    TEST_ASSERT(pg_store_ops(ps)->update_model(&db, &m, MMASK_TARGETS | MMASK_LB_POLICY) == 0,
+                "update targets & lb");
     memset(&out, 0, sizeof out);
     TEST_ASSERT(pg_store_ops(ps)->get_model(&db, "multi-target", &out) == 0, "get updated model");
     TEST_ASSERT(strcmp(out.lb_policy, "weighted") == 0, "updated policy weighted");
@@ -794,7 +817,7 @@ TEST_CASE(test_pg_fake_provider_crud)
     provider_rec_free(&out);
 
     provider_rec_t plist[4];
-    int n_prov = 0;
+    int            n_prov = 0;
     TEST_ASSERT(pg_store_ops(ps)->list_providers(&db, plist, 4, &n_prov) == 0, "list providers");
     TEST_ASSERT(n_prov == 1, "1 provider listed");
     provider_rec_free(&plist[0]);
@@ -802,7 +825,8 @@ TEST_CASE(test_pg_fake_provider_crud)
     p.id = p_id;
     snprintf(p.endpoint, sizeof p.endpoint, "https://new.deepseek.com/v1");
     p.enabled = 0;
-    TEST_ASSERT(pg_store_ops(ps)->update_provider(&db, &p, PMASK_ENDPOINT | PMASK_ENABLED) == 0, "update provider");
+    TEST_ASSERT(pg_store_ops(ps)->update_provider(&db, &p, PMASK_ENDPOINT | PMASK_ENABLED) == 0,
+                "update provider");
 
     memset(&out, 0, sizeof out);
     TEST_ASSERT(pg_store_ops(ps)->get_provider(&db, p_id, &out) == 0, "get updated provider");
@@ -858,11 +882,13 @@ TEST_CASE(test_pg_real_provider_crud)
     p.id = p_id;
     snprintf(p.endpoint, sizeof p.endpoint, "https://updated.endpoint.com/v1");
     p.enabled = 0;
-    TEST_ASSERT(ops->update_provider(ops->ctx, &p, PMASK_ENDPOINT | PMASK_ENABLED) == 0, "real update_provider");
+    TEST_ASSERT(ops->update_provider(ops->ctx, &p, PMASK_ENDPOINT | PMASK_ENABLED) == 0,
+                "real update_provider");
 
     memset(&out, 0, sizeof out);
     TEST_ASSERT(ops->get_provider(ops->ctx, p_id, &out) == 0, "real get updated");
-    TEST_ASSERT(strcmp(out.endpoint, "https://updated.endpoint.com/v1") == 0, "real endpoint updated");
+    TEST_ASSERT(strcmp(out.endpoint, "https://updated.endpoint.com/v1") == 0,
+                "real endpoint updated");
     TEST_ASSERT(out.enabled == 0, "real disabled");
     provider_rec_free(&out);
 

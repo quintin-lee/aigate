@@ -138,6 +138,41 @@ TEST_CASE(test_auth_key_unknown_revoked_expired)
     pg_store_close(ps);
 }
 
+TEST_CASE(test_auth_key_unknown_neg_cache)
+{
+    struct akg_db db;
+    memset(&db, 0, sizeof db);
+    db.n = 0; /* no keys: every hash is unknown */
+
+    pg_store_t* ps = open_akg_store(&db);
+    TEST_ASSERT(ps != NULL, "store open");
+    auth_key_cache akc;
+    TEST_ASSERT(auth_key_init(&akc, ps) == 0, "auth init");
+    key_rec_t out;
+
+    /* First unknown resolve must query PG exactly once */
+    TEST_ASSERT(auth_key_resolve(&akc, "ghost-key", &out) == -1, "unknown -> -1");
+    key_rec_free(&out);
+    int calls_after_first = db.get_calls;
+    TEST_ASSERT(calls_after_first == 1, "first unknown resolve hit the store");
+
+    /* Second resolve of the same unknown key: served by the neg cache */
+    TEST_ASSERT(auth_key_resolve(&akc, "ghost-key", &out) == -1, "unknown again -> -1");
+    key_rec_free(&out);
+    TEST_ASSERT(db.get_calls == calls_after_first, "neg cache: no extra lookup");
+
+    /* invalidate clears the neg entry (e.g. a new key was created) */
+    char hash[65];
+    TEST_ASSERT(sha256_hex("ghost-key", strlen("ghost-key"), hash) == 0, "hash ok");
+    auth_key_invalidate(&akc, hash);
+    TEST_ASSERT(auth_key_resolve(&akc, "ghost-key", &out) == -1, "re-lookup after invalidate");
+    key_rec_free(&out);
+    TEST_ASSERT(db.get_calls == calls_after_first + 1, "invalidate cleared neg entry");
+
+    auth_key_shutdown(&akc);
+    pg_store_close(ps);
+}
+
 TEST_CASE(test_key_allows_model)
 {
     key_rec_t k;

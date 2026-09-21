@@ -52,6 +52,7 @@ main(void)
     extern void test_secret_hex_to_bytes(void);
     extern void test_auth_key_resolve_normal(void);
     extern void test_auth_key_unknown_revoked_expired(void);
+    extern void test_auth_key_unknown_neg_cache(void);
     extern void test_key_allows_model(void);
     extern void test_rl_qps_boundary(void);
     extern void test_rl_unlimited(void);
@@ -70,9 +71,12 @@ main(void)
     extern void test_upstream_timeout(void);
     extern void test_upstream_fail_all_toggle(void);
     extern void test_um_counters_and_drain(void);
+    extern void test_um_drain_fail_requeue(void);
     extern void test_metrics_acl(void);
     extern void test_metrics_failover(void);
     extern void test_core_pipeline(void);
+    extern void test_core_models_rate_limited(void);
+    extern void test_core_upstream_400_passthrough(void);
     extern void test_provider_azure_build(void);
     extern void test_provider_default_params_merge(void);
     test_register("log_smoke", test_log_smoke);
@@ -97,6 +101,7 @@ main(void)
     test_register("secret_hex", test_secret_hex_to_bytes);
     test_register("auth_key_resolve", test_auth_key_resolve_normal);
     test_register("auth_key_flags", test_auth_key_unknown_revoked_expired);
+    test_register("auth_key_neg_cache", test_auth_key_unknown_neg_cache);
     test_register("key_allows_model", test_key_allows_model);
     test_register("rl_qps_boundary", test_rl_qps_boundary);
     test_register("rl_unlimited", test_rl_unlimited);
@@ -115,9 +120,12 @@ main(void)
     test_register("upstream_timeout", test_upstream_timeout);
     test_register("upstream_fail_all", test_upstream_fail_all_toggle);
     test_register("um_counters", test_um_counters_and_drain);
+    test_register("um_drain_fail_requeue", test_um_drain_fail_requeue);
     test_register("metrics_acl", test_metrics_acl);
     test_register("metrics_failover", test_metrics_failover);
     test_register("core_pipeline", test_core_pipeline);
+    test_register("core_models_rate_limited", test_core_models_rate_limited);
+    test_register("core_upstream_400_passthrough", test_core_upstream_400_passthrough);
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
 
@@ -126,11 +134,19 @@ main(void)
     extern void test_admin_models_lifecycle(void);
     extern void test_admin_models_multi_target(void);
     extern void test_admin_usage_query(void);
+    extern void test_admin_provider_create_and_list(void);
+    extern void test_admin_provider_patch_and_delete(void);
+    extern void test_admin_provider_plaintext_gate(void);
+    extern void test_admin_lockout(void);
     test_register("admin_auth", test_admin_auth);
     test_register("admin_keys_lifecycle", test_admin_keys_lifecycle);
     test_register("admin_models_lifecycle", test_admin_models_lifecycle);
     test_register("admin_models_multi_target", test_admin_models_multi_target);
     test_register("admin_usage_query", test_admin_usage_query);
+    test_register("admin_provider_create", test_admin_provider_create_and_list);
+    test_register("admin_provider_patch_delete", test_admin_provider_patch_and_delete);
+    test_register("admin_provider_plaintext_gate", test_admin_provider_plaintext_gate);
+    test_register("admin_lockout", test_admin_lockout);
 
     extern void test_upstream_stream_normal(void);
     extern void test_upstream_stream_silence_timeout(void);
@@ -148,11 +164,13 @@ main(void)
     extern void test_anthropic_build_params(void);
     extern void test_anthropic_resp_translation(void);
     extern void test_anthropic_bridge_streaming(void);
+    extern void test_anthropic_bridge_client_abort(void);
     extern void test_anthropic_pipeline_end_to_end(void);
     test_register("anthropic_build_system", test_anthropic_build_system_and_defaults);
     test_register("anthropic_build_params", test_anthropic_build_params);
     test_register("anthropic_resp_translation", test_anthropic_resp_translation);
     test_register("anthropic_bridge_streaming", test_anthropic_bridge_streaming);
+    test_register("anthropic_bridge_client_abort", test_anthropic_bridge_client_abort);
     test_register("anthropic_pipeline_end_to_end", test_anthropic_pipeline_end_to_end);
 
     extern void admin_ui_content(void);
@@ -163,7 +181,8 @@ main(void)
     extern void test_deepseek_streaming_reasoning_and_cache(void);
     test_register("deepseek_reasoning_non_streaming", test_deepseek_reasoning_non_streaming);
     test_register("openai_cached_tokens_details", test_openai_cached_tokens_details);
-    test_register("deepseek_streaming_reasoning_and_cache", test_deepseek_streaming_reasoning_and_cache);
+    test_register("deepseek_streaming_reasoning_and_cache",
+                  test_deepseek_streaming_reasoning_and_cache);
 
     extern void test_gemini_build_system_and_contents(void);
     extern void test_gemini_build_generation_config(void);
@@ -171,12 +190,14 @@ main(void)
     extern void test_gemini_resp_error_unwrapping(void);
     extern void test_gemini_streaming_bridge_chunks(void);
     extern void test_gemini_streaming_fragmented_tcp(void);
+    extern void test_gemini_streaming_client_abort(void);
     test_register("gemini_build_system_and_contents", test_gemini_build_system_and_contents);
     test_register("gemini_build_generation_config", test_gemini_build_generation_config);
     test_register("gemini_resp_translation", test_gemini_resp_translation);
     test_register("gemini_resp_error_unwrapping", test_gemini_resp_error_unwrapping);
     test_register("gemini_streaming_bridge_chunks", test_gemini_streaming_bridge_chunks);
     test_register("gemini_streaming_fragmented_tcp", test_gemini_streaming_fragmented_tcp);
+    test_register("gemini_streaming_client_abort", test_gemini_streaming_client_abort);
 
     extern void test_openai_embeddings_build(void);
     extern void test_openai_embeddings_parse(void);

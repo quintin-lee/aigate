@@ -69,5 +69,4 @@ int aigate_write_json(aigate_response_ctx* rc, int status, const char* body, siz
 int
 aigate_write_error(aigate_response_ctx* rc, int http_status, const char* type, const char* message);
 
-
 #endif /* AIGATE_CORE_H */

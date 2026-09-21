@@ -192,10 +192,6 @@ void
 lru_put(lru_t* lr, const char* key, void* val)
 {
     struct lru_node *n, *old = NULL;
-    char*            kcopy = strdup(key);
-    if (kcopy == NULL) {
-        return;
-    }
 
     pthread_mutex_lock(&lr->mtx);
     old = find_node(lr, key);
@@ -210,6 +206,12 @@ lru_put(lru_t* lr, const char* key, void* val)
         }
         return;
     }
+    char* kcopy = strdup(key);
+    if (kcopy == NULL) {
+        pthread_mutex_unlock(&lr->mtx);
+        return;
+    }
+
     n = malloc(sizeof *n);
     if (n == NULL) {
         pthread_mutex_unlock(&lr->mtx);

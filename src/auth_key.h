@@ -15,6 +15,7 @@
 /** @brief Auth cache state (owned by the core; one instance per process). */
 typedef struct auth_key_cache {
     lru_t*   recs;    /* key_hash(hex) → key_rec_t* (heap values, evict frees) */
+    lru_t*   neg;     /* key_hash(hex) → sentinel: unknown keys (no PG re-query) */
     pg_ops_t ops;     /* backing ops table (borrowed, not owned) */
     void*    ops_ctx; /* ops->ctx */
 } auth_key_cache;

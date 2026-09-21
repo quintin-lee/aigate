@@ -28,7 +28,13 @@ auth_key_init(auth_key_cache* akc, pg_store_t* ps)
     akc->ops = *ops;
     akc->ops_ctx = ops->ctx;
     akc->recs = lru_new(4096, free_rec_cb);
-    return akc->recs != NULL ? 0 : -1;
+    if (akc->recs == NULL) {
+        return -1;
+    }
+    /* Negative cache: unknown key hashes. A non-fatal OOM here just means
+     * every unknown key still hits PG (old behavior). */
+    akc->neg = lru_new(256, NULL);
+    return 0;
 }
 
 void
@@ -39,6 +45,8 @@ auth_key_shutdown(auth_key_cache* akc)
     }
     lru_free(akc->recs);
     akc->recs = NULL;
+    lru_free(akc->neg);
+    akc->neg = NULL;
 }
 
 /** @brief Deep-copy a record; @p dst's allowlist becomes heap-owned.
@@ -96,7 +104,17 @@ auth_key_resolve(auth_key_cache* akc, const char* bearer, key_rec_t* out)
 
     key_rec_t fresh;
     memset(&fresh, 0, sizeof fresh);
+
+    /* Unknown-key negative cache: skip the PG round-trip for hashes we
+     * already proved are absent (a DoS mitigation). */
+    if (akc->neg != NULL && lru_get(akc->neg, hash) != NULL) {
+        return -1;
+    }
+
     if (akc->ops.get_key_by_hash(akc->ops_ctx, hash, &fresh) != 0) {
+        if (akc->neg != NULL) {
+            lru_put(akc->neg, hash, (void*)0x1);
+        }
         return -1;
     }
 
@@ -139,8 +157,13 @@ void
 auth_key_invalidate(auth_key_cache* akc, const char* key_hash)
 {
     /* lru_invalidate invokes the evict callback (free_rec_cb) for the
-   * removed record, which frees the allowlist and the record itself. */
+     * removed record, which frees the allowlist and the record itself. */
     lru_invalidate(akc->recs, key_hash);
+    /* A key created under this hash would be masked by a stale negative;
+     * clear it so the next resolve re-queries the store. */
+    if (akc->neg != NULL) {
+        lru_invalidate(akc->neg, key_hash);
+    }
 }
 
 int

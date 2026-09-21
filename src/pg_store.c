@@ -30,6 +30,7 @@ struct pg_store {
 
 struct pq_ctx {
     PGconn*         db;
+    char            dsn[1024];
     pthread_mutex_t mtx;
 };
 
@@ -195,9 +196,24 @@ join_model_list(const key_rec_t* k, char* buf, size_t cap)
 /* ------------------------------------------------------------ libpq ops */
 
 static void
+pq_ensure_conn(struct pq_ctx* px)
+{
+    if (PQstatus(px->db) == CONNECTION_OK) {
+        return;
+    }
+    AIGATE_LOG_WARN("pg: connection lost, reconnecting");
+    PQfinish(px->db);
+    px->db = PQconnectdb(px->dsn);
+    if (PQstatus(px->db) != CONNECTION_OK) {
+        AIGATE_LOG_ERROR("pg: reconnect failed: %s", PQerrorMessage(px->db));
+    }
+}
+
+static void
 pq_lock(struct pq_ctx* px)
 {
     pthread_mutex_lock(&px->mtx);
+    pq_ensure_conn(px);
 }
 
 static void
@@ -277,11 +293,10 @@ fill_key_row(PGresult* res, int row, key_rec_t* out)
 static int
 pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
 {
-    struct pq_ctx* px = vctx;
-    static const char q[] =
-        "SELECT key_id, key_hash, name, "
-        "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
-        "expires_at, revoked_at FROM api_keys ORDER BY key_id";
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "SELECT key_id, key_hash, name, "
+                            "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
+                            "expires_at, revoked_at FROM api_keys ORDER BY key_id";
     *n = 0;
 
     pq_lock(px);
@@ -289,7 +304,7 @@ pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
     pq_unlock(px);
     if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
         AIGATE_LOG_ERROR("pg list_keys: %s",
-                          res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
         PQclear(res);
         return -1;
     }
@@ -309,14 +324,13 @@ static int
 pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] =
-        "SELECT key_id, key_hash, name, "
-        "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
-        "expires_at, revoked_at FROM api_keys WHERE key_id = $1";
-    char         id[32];
-    const char*  val[1] = {0};
-    int          plen[1] = {0};
-    int          rc = -1;
+    static const char q[] = "SELECT key_id, key_hash, name, "
+                            "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
+                            "expires_at, revoked_at FROM api_keys WHERE key_id = $1";
+    char              id[32];
+    const char*       val[1] = {0};
+    int               plen[1] = {0};
+    int               rc = -1;
 
     snprintf(id, sizeof id, "%ld", key_id);
     val[0] = id;
@@ -356,11 +370,16 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
         if (t_raw != NULL && t_raw[0] != '\0' && strcmp(t_raw, "[]") != 0) {
             json_t* jarr = json_loads(t_raw, 0, NULL);
             if (jarr != NULL && json_is_array(jarr)) {
-                size_t idx;
+                size_t  idx;
                 json_t* item;
-                json_array_foreach(jarr, idx, item) {
-                    if (out->n_targets >= MAX_TARGETS_PER_MODEL) break;
-                    if (!json_is_object(item)) continue;
+                json_array_foreach(jarr, idx, item)
+                {
+                    if (out->n_targets >= MAX_TARGETS_PER_MODEL) {
+                        break;
+                    }
+                    if (!json_is_object(item)) {
+                        continue;
+                    }
                     upstream_target_t* tgt = &out->targets[out->n_targets++];
                     memset(tgt, 0, sizeof *tgt);
                     json_t* jp = json_object_get(item, "provider");
@@ -369,16 +388,20 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
                     json_t* jw = json_object_get(item, "weight");
                     json_t* jpr = json_object_get(item, "priority");
 
-                    copy_field(tgt->provider, sizeof tgt->provider,
+                    copy_field(tgt->provider,
+                               sizeof tgt->provider,
                                (jp && json_is_string(jp)) ? json_string_value(jp) : out->provider);
-                    copy_field(tgt->endpoint, sizeof tgt->endpoint,
+                    copy_field(tgt->endpoint,
+                               sizeof tgt->endpoint,
                                (je && json_is_string(je)) ? json_string_value(je) : out->endpoint);
-                    copy_field(tgt->upstream_key_ref, sizeof tgt->upstream_key_ref,
+                    copy_field(tgt->upstream_key_ref,
+                               sizeof tgt->upstream_key_ref,
                                (jk && json_is_string(jk)) ? json_string_value(jk) : "");
                     tgt->weight = (jw && json_is_integer(jw) && json_integer_value(jw) > 0)
                                       ? (int)json_integer_value(jw)
                                       : 1;
-                    tgt->priority = (jpr && json_is_integer(jpr)) ? (int)json_integer_value(jpr) : 0;
+                    tgt->priority =
+                        (jpr && json_is_integer(jpr)) ? (int)json_integer_value(jpr) : 0;
                 }
                 json_decref(jarr);
             }
@@ -396,7 +419,10 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
         out->n_targets = 1;
         snprintf(out->targets[0].provider, sizeof out->targets[0].provider, "%s", out->provider);
         snprintf(out->targets[0].endpoint, sizeof out->targets[0].endpoint, "%s", out->endpoint);
-        snprintf(out->targets[0].upstream_key_ref, sizeof out->targets[0].upstream_key_ref, "%s", out->upstream_key_ref);
+        snprintf(out->targets[0].upstream_key_ref,
+                 sizeof out->targets[0].upstream_key_ref,
+                 "%s",
+                 out->upstream_key_ref);
         out->targets[0].weight = 1;
         out->targets[0].priority = 0;
     }
@@ -410,7 +436,8 @@ pq_get_model(void* vctx, const char* name, model_rec_t* out)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
-        "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, 'priority') "
+        "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, "
+        "'priority') "
         "FROM models WHERE model_name = $1 AND enabled = true";
     const char* val[1] = {name};
     int         plen[1] = {0};
@@ -440,7 +467,8 @@ pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
-        "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, 'priority') "
+        "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, "
+        "'priority') "
         "FROM models ORDER BY model_name";
     *n = 0;
 
@@ -469,16 +497,17 @@ static int
 pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] = "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
-                            "daily_token_quota, expires_at) "
-                            "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
-                            "ELSE string_to_array($3, '|') END, $4, $5, "
-                            "CASE WHEN $6 = 'null' THEN NULL "
-                            "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END) RETURNING key_id";
-    char              joined[512], rate[16], quota[32], exp[32];
-    const char*       vals[6];
-    int               plens[6] = {0};
-    long              id = -1;
+    static const char q[] =
+        "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
+        "daily_token_quota, expires_at) "
+        "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
+        "ELSE string_to_array($3, '|') END, $4, $5, "
+        "CASE WHEN $6 = 'null' THEN NULL "
+        "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END) RETURNING key_id";
+    char        joined[512], rate[16], quota[32], exp[32];
+    const char* vals[6];
+    int         plens[6] = {0};
+    long        id = -1;
 
     if (join_model_list(k, joined, sizeof joined) != 0) {
         return -1;
@@ -629,11 +658,16 @@ serialize_targets_json(const model_rec_t* m)
     }
     if (m->n_targets == 0 && m->endpoint[0] != '\0') {
         json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i}",
-                                 "provider", m->provider[0] != '\0' ? m->provider : "openai",
-                                 "endpoint", m->endpoint,
-                                 "upstream_key_ref", m->upstream_key_ref,
-                                 "weight", 1,
-                                 "priority", 0);
+                                 "provider",
+                                 m->provider[0] != '\0' ? m->provider : "openai",
+                                 "endpoint",
+                                 m->endpoint,
+                                 "upstream_key_ref",
+                                 m->upstream_key_ref,
+                                 "weight",
+                                 1,
+                                 "priority",
+                                 0);
         if (item != NULL) {
             json_array_append_new(jarr, item);
         }
@@ -641,11 +675,16 @@ serialize_targets_json(const model_rec_t* m)
         for (int i = 0; i < m->n_targets && i < MAX_TARGETS_PER_MODEL; i++) {
             const upstream_target_t* tgt = &m->targets[i];
             json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i}",
-                                     "provider", tgt->provider[0] != '\0' ? tgt->provider : "openai",
-                                     "endpoint", tgt->endpoint,
-                                     "upstream_key_ref", tgt->upstream_key_ref,
-                                     "weight", tgt->weight > 0 ? tgt->weight : 1,
-                                     "priority", tgt->priority >= 0 ? tgt->priority : 0);
+                                     "provider",
+                                     tgt->provider[0] != '\0' ? tgt->provider : "openai",
+                                     "endpoint",
+                                     tgt->endpoint,
+                                     "upstream_key_ref",
+                                     tgt->upstream_key_ref,
+                                     "weight",
+                                     tgt->weight > 0 ? tgt->weight : 1,
+                                     "priority",
+                                     tgt->priority >= 0 ? tgt->priority : 0);
             if (item != NULL) {
                 json_array_append_new(jarr, item);
             }
@@ -670,9 +709,14 @@ pq_create_model(void* vctx, const model_rec_t* m)
     char*       targets_json = serialize_targets_json(m);
     const char* t_str = targets_json ? targets_json : "[]";
     const char* lb = (m->lb_policy[0] != '\0') ? m->lb_policy : "priority";
-    const char* prov = (m->provider[0] != '\0') ? m->provider : (m->n_targets > 0 ? m->targets[0].provider : "openai");
-    const char* ep = (m->endpoint[0] != '\0') ? m->endpoint : (m->n_targets > 0 ? m->targets[0].endpoint : "");
-    const char* kr = (m->upstream_key_ref[0] != '\0') ? m->upstream_key_ref : (m->n_targets > 0 ? m->targets[0].upstream_key_ref : "");
+    const char* prov = (m->provider[0] != '\0')
+                           ? m->provider
+                           : (m->n_targets > 0 ? m->targets[0].provider : "openai");
+    const char* ep =
+        (m->endpoint[0] != '\0') ? m->endpoint : (m->n_targets > 0 ? m->targets[0].endpoint : "");
+    const char* kr = (m->upstream_key_ref[0] != '\0')
+                         ? m->upstream_key_ref
+                         : (m->n_targets > 0 ? m->targets[0].upstream_key_ref : "");
 
     vals[0] = m->name;
     vals[1] = prov;
@@ -740,30 +784,21 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
     }
     if (mask & MMASK_ENABLED) {
         nv++;
-        off += snprintf(sql + off,
-                        sizeof sql - (size_t)off,
-                        "%senabled = $%d",
-                        nv > 1 ? ", " : "",
-                        nv);
+        off += snprintf(
+            sql + off, sizeof sql - (size_t)off, "%senabled = $%d", nv > 1 ? ", " : "", nv);
         vals[nv - 1] = m->enabled ? "true" : "false";
     }
     if (mask & MMASK_TARGETS) {
         targets_json = serialize_targets_json(m);
         nv++;
-        off += snprintf(sql + off,
-                        sizeof sql - (size_t)off,
-                        "%stargets = $%d::jsonb",
-                        nv > 1 ? ", " : "",
-                        nv);
+        off += snprintf(
+            sql + off, sizeof sql - (size_t)off, "%stargets = $%d::jsonb", nv > 1 ? ", " : "", nv);
         vals[nv - 1] = targets_json ? targets_json : "[]";
     }
     if (mask & MMASK_LB_POLICY) {
         nv++;
-        off += snprintf(sql + off,
-                        sizeof sql - (size_t)off,
-                        "%slb_policy = $%d",
-                        nv > 1 ? ", " : "",
-                        nv);
+        off += snprintf(
+            sql + off, sizeof sql - (size_t)off, "%slb_policy = $%d", nv > 1 ? ", " : "", nv);
         vals[nv - 1] = m->lb_policy[0] != '\0' ? m->lb_policy : "priority";
     }
     nv++;
@@ -977,7 +1012,8 @@ pq_update_provider(void* vctx, const provider_rec_t* p, int mask)
                         sizeof sql - (size_t)off,
                         ", models = CASE WHEN $%d = '' THEN '{}'::text[] "
                         "ELSE string_to_array($%d, '|') END",
-                        nv, nv);
+                        nv,
+                        nv);
         vals[nv - 1] = joined;
     }
     if (mask & PMASK_ENABLED) {
@@ -1165,6 +1201,7 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
         free(ps);
         return NULL;
     }
+    snprintf(px->dsn, sizeof px->dsn, "%s", dsn);
     px->db = PQconnectdb(dsn);
     if (PQstatus(px->db) != CONNECTION_OK) {
         AIGATE_LOG_ERROR("pg_store_open: %s", PQerrorMessage(px->db));
