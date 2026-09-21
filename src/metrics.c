@@ -69,68 +69,69 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
         /* re-derive provider names through the meter accessor; cap 8 */
         nprov = um_provider_names(um, (char (*)[32])provs, 8);
 
-    for (int i = 0; i < nprov; i++) {
-        const char* p = provs[i];
-        long        count = um_provider_sampled(um, p);
-        if (count == 0) {
-            continue; /* no samples yet for this provider */
-        }
+        for (int i = 0; i < nprov; i++) {
+            const char* p = provs[i];
+            long        count = um_provider_sampled(um, p);
+            if (count == 0) {
+                continue; /* no samples yet for this provider */
+            }
 
-        n = snprintf(w,
-                     rem,
-                     "# HELP aigate_upstream_requests_total Upstream calls by provider.\n"
-                     "# TYPE aigate_upstream_requests_total counter\n"
-                     "aigate_upstream_requests_total{provider=\"%s\"} %ld\n",
-                     p,
-                     count);
-        if (n < 0 || (size_t)n >= rem) {
-            return -1;
-        }
-        w += n;
-        rem -= (size_t)n;
-
-        double mean = um_provider_mean_ns(um, p);
-        long   sum_ns = (long)(mean * count);
-
-        n = snprintf(w,
-                     rem,
-                     "# HELP aigate_upstream_latency_ns_ns Upstream latency histogram (ns).\n"
-                     "# TYPE aigate_upstream_latency_ns_ns histogram\n");
-        if (n < 0 || (size_t)n >= rem) {
-            return -1;
-        }
-        w += n;
-        rem -= (size_t)n;
-
-        for (int b = 0; b < NUM_BUCKETS; b++) {
-            long le_ns = atol(BUCKET_LE[b]);
             n = snprintf(w,
                          rem,
-                         "aigate_upstream_latency_ns_ns_bucket{provider=\"%s\",le=\"%s\"} %ld\n",
+                         "# HELP aigate_upstream_requests_total Upstream calls by provider.\n"
+                         "# TYPE aigate_upstream_requests_total counter\n"
+                         "aigate_upstream_requests_total{provider=\"%s\"} %ld\n",
                          p,
-                         BUCKET_LE[b],
-                         um_provider_count_below_ns(um, p, le_ns));
+                         count);
             if (n < 0 || (size_t)n >= rem) {
                 return -1;
             }
             w += n;
             rem -= (size_t)n;
+
+            double mean = um_provider_mean_ns(um, p);
+            long   sum_ns = (long)(mean * count);
+
+            n = snprintf(w,
+                         rem,
+                         "# HELP aigate_upstream_latency_ns_ns Upstream latency histogram (ns).\n"
+                         "# TYPE aigate_upstream_latency_ns_ns histogram\n");
+            if (n < 0 || (size_t)n >= rem) {
+                return -1;
+            }
+            w += n;
+            rem -= (size_t)n;
+
+            for (int b = 0; b < NUM_BUCKETS; b++) {
+                long le_ns = atol(BUCKET_LE[b]);
+                n = snprintf(
+                    w,
+                    rem,
+                    "aigate_upstream_latency_ns_ns_bucket{provider=\"%s\",le=\"%s\"} %ld\n",
+                    p,
+                    BUCKET_LE[b],
+                    um_provider_count_below_ns(um, p, le_ns));
+                if (n < 0 || (size_t)n >= rem) {
+                    return -1;
+                }
+                w += n;
+                rem -= (size_t)n;
+            }
+            n = snprintf(w,
+                         rem,
+                         "aigate_upstream_latency_ns_ns_bucket{provider=\"%s\",le=\"+Inf\"} %ld\n"
+                         "aigate_upstream_latency_ns_ns_sum{provider=\"%s\"} %ld\n"
+                         "aigate_upstream_latency_ns_ns_count{provider=\"%s\"} %ld\n",
+                         p,
+                         (long)sum_ns,
+                         p,
+                         (long)sum_ns,
+                         p,
+                         count);
+            if (n < 0 || (size_t)n >= rem) {
+                return -1;
+            }
         }
-        n = snprintf(w,
-                     rem,
-                     "aigate_upstream_latency_ns_ns_bucket{provider=\"%s\",le=\"+Inf\"} %ld\n"
-                     "aigate_upstream_latency_ns_ns_sum{provider=\"%s\"} %ld\n"
-                     "aigate_upstream_latency_ns_ns_count{provider=\"%s\"} %ld\n",
-                     p,
-                     (long)sum_ns,
-                     p,
-                     (long)sum_ns,
-                     p,
-                     count);
-        if (n < 0 || (size_t)n >= rem) {
-            return -1;
-        }
-    }
     }
 
     /* Failover counters */
@@ -162,13 +163,14 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
             if (c <= 0) {
                 continue;
             }
-            n = snprintf(w,
-                         rem,
-                         "aigate_failover_total{model=\"%s\",from_provider=\"%s\",to_provider=\"%s\"} %ld\n",
-                         g_failovers[i].model,
-                         g_failovers[i].from_prov,
-                         g_failovers[i].to_prov,
-                         c);
+            n = snprintf(
+                w,
+                rem,
+                "aigate_failover_total{model=\"%s\",from_provider=\"%s\",to_provider=\"%s\"} %ld\n",
+                g_failovers[i].model,
+                g_failovers[i].from_prov,
+                g_failovers[i].to_prov,
+                c);
             if (n < 0 || (size_t)n >= rem) {
                 pthread_mutex_unlock(&g_failover_mtx);
                 return -1;
@@ -192,10 +194,8 @@ metrics_inc_failover(const char* model, const char* from_prov, const char* to_pr
 
     pthread_mutex_lock(&g_failover_mtx);
     for (int i = 0; i < METRICS_MAX_FAILOVERS; i++) {
-        if (g_failovers[i].in_use &&
-            strcmp(g_failovers[i].model, m) == 0 &&
-            strcmp(g_failovers[i].from_prov, f) == 0 &&
-            strcmp(g_failovers[i].to_prov, t) == 0) {
+        if (g_failovers[i].in_use && strcmp(g_failovers[i].model, m) == 0 &&
+            strcmp(g_failovers[i].from_prov, f) == 0 && strcmp(g_failovers[i].to_prov, t) == 0) {
             atomic_fetch_add(&g_failovers[i].count, 1);
             pthread_mutex_unlock(&g_failover_mtx);
             return;
@@ -225,10 +225,8 @@ metrics_get_failover(const char* model, const char* from_prov, const char* to_pr
     pthread_mutex_lock(&g_failover_mtx);
     long val = 0;
     for (int i = 0; i < METRICS_MAX_FAILOVERS; i++) {
-        if (g_failovers[i].in_use &&
-            strcmp(g_failovers[i].model, m) == 0 &&
-            strcmp(g_failovers[i].from_prov, f) == 0 &&
-            strcmp(g_failovers[i].to_prov, t) == 0) {
+        if (g_failovers[i].in_use && strcmp(g_failovers[i].model, m) == 0 &&
+            strcmp(g_failovers[i].from_prov, f) == 0 && strcmp(g_failovers[i].to_prov, t) == 0) {
             val = atomic_load(&g_failovers[i].count);
             break;
         }
