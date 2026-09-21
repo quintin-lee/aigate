@@ -23,6 +23,7 @@ struct transport_civetweb {
     char               admin_token_hash[65];
     char               metrics_acl[256];
     admin_ctx_t        adm;
+    long             max_body_bytes;
 };
 
 struct cw_response_state {
@@ -38,19 +39,32 @@ static const char*
 http_reason(int status)
 {
     switch (status) {
-        case 200: return "OK";
-        case 201: return "Created";
-        case 204: return "No Content";
-        case 400: return "Bad Request";
-        case 401: return "Unauthorized";
-        case 403: return "Forbidden";
-        case 404: return "Not Found";
-        case 429: return "Too Many Requests";
-        case 500: return "Internal Server Error";
-        case 501: return "Not Implemented";
-        case 502: return "Bad Gateway";
-        case 503: return "Service Unavailable";
-        default:  return "Response";
+    case 200:
+        return "OK";
+    case 201:
+        return "Created";
+    case 204:
+        return "No Content";
+    case 400:
+        return "Bad Request";
+    case 401:
+        return "Unauthorized";
+    case 403:
+        return "Forbidden";
+    case 404:
+        return "Not Found";
+    case 429:
+        return "Too Many Requests";
+    case 500:
+        return "Internal Server Error";
+    case 501:
+        return "Not Implemented";
+    case 502:
+        return "Bad Gateway";
+    case 503:
+        return "Service Unavailable";
+    default:
+        return "Response";
     }
 }
 
@@ -62,7 +76,7 @@ cw_set_header(void* impl, const char* name, const char* value)
         return 0;
     }
     size_t rem = sizeof st->header_buf - st->header_len;
-    int n = snprintf(st->header_buf + st->header_len, rem, "%s: %s\r\n", name, value);
+    int    n = snprintf(st->header_buf + st->header_len, rem, "%s: %s\r\n", name, value);
     if (n > 0 && (size_t)n < rem) {
         st->header_len += (size_t)n;
     }
@@ -76,11 +90,8 @@ cw_write(void* impl, const void* buf, size_t len, bool fin)
     struct cw_response_state* st = impl;
     if (!st->headers_sent) {
         int status = (st->rc != NULL && st->rc->status != 0) ? st->rc->status : st->status;
-        mg_printf(st->conn,
-                  "HTTP/1.1 %d %s\r\n%s\r\n",
-                  status,
-                  http_reason(status),
-                  st->header_buf);
+        mg_printf(
+            st->conn, "HTTP/1.1 %d %s\r\n%s\r\n", status, http_reason(status), st->header_buf);
         st->headers_sent = true;
     }
     if (len > 0 && buf != NULL) {
@@ -130,6 +141,23 @@ read_body(struct mg_connection* conn, long long cl, size_t* out_len)
 }
 
 static int
+send_http_error_json(struct mg_connection* conn, int status, const char* body, size_t len)
+{
+    mg_printf(conn,
+              "HTTP/1.1 %d %s\r\n"
+              "Content-Type: application/json; charset=utf-8\r\n"
+              "Content-Length: %zu\r\n"
+              "Connection: close\r\n\r\n",
+              status,
+              http_reason(status),
+              len);
+    if (len > 0) {
+        mg_write(conn, body, len);
+    }
+    return 1;
+}
+
+static int
 handle_v1(struct mg_connection* conn, void* cbdata)
 {
     transport_civetweb_t*         cw = cbdata;
@@ -138,6 +166,14 @@ handle_v1(struct mg_connection* conn, void* cbdata)
         return 0;
     }
 
+    /* Enforce body size cap */
+    if (ri->content_length > cw->max_body_bytes) {
+        AIGATE_LOG_WARN("request body too large (%lld bytes, cap %ld) from %s",
+                        (long long)ri->content_length, cw->max_body_bytes, ri->remote_addr);
+        const char* err413 = "{\"error\":{\"message\":\"request body too large\",\"type\":\"payload_too_large\",\"code\":413}}";
+        send_http_error_json(conn, 413, err413, (size_t)strlen(err413));
+        return 1;
+    }
     size_t body_len = 0;
     char*  body = read_body(conn, ri->content_length, &body_len);
 
@@ -179,6 +215,14 @@ handle_admin(struct mg_connection* conn, void* cbdata)
         return 0;
     }
 
+    /* Enforce body size cap */
+    if (ri->content_length > cw->max_body_bytes) {
+        AIGATE_LOG_WARN("request body too large (%lld bytes, cap %ld) from %s",
+                        (long long)ri->content_length, cw->max_body_bytes, ri->remote_addr);
+        const char* err413 = "{\"error\":{\"message\":\"request body too large\",\"type\":\"payload_too_large\",\"code\":413}}";
+        send_http_error_json(conn, 413, err413, (size_t)strlen(err413));
+        return 1;
+    }
     size_t body_len = 0;
     char*  body = read_body(conn, ri->content_length, &body_len);
 
@@ -197,6 +241,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
     admin_dispatch(&cw->adm,
                    full_uri,
                    ri->request_method,
+                   ri->remote_addr,
                    bearer,
                    body,
                    body_len,
@@ -296,7 +341,8 @@ transport_civetweb_start(aigate_core* ac,
                          pg_store_t*  ps,
                          const char*  admin_token_hash,
                          const char*  listen_addr,
-                         const char*  metrics_acl)
+                         const char*  metrics_acl,
+                         long         max_body_bytes)
 {
     transport_civetweb_t* cw = calloc(1, sizeof *cw);
     if (cw == NULL) {
@@ -304,6 +350,7 @@ transport_civetweb_start(aigate_core* ac,
     }
     cw->ac = ac;
     cw->ps = ps;
+    cw->max_body_bytes = max_body_bytes;
     if (admin_token_hash != NULL) {
         snprintf(cw->admin_token_hash, sizeof cw->admin_token_hash, "%s", admin_token_hash);
     }
@@ -314,6 +361,8 @@ transport_civetweb_start(aigate_core* ac,
     cw->adm.ac = ac;
     cw->adm.ps = ps;
     cw->adm.admin_token_hash = cw->admin_token_hash;
+    const char* apk = getenv("AIGATE_ALLOW_PLAINTEXT_KEYS");
+    cw->adm.allow_plaintext_keys = (apk != NULL && atoi(apk) == 1);
 
     const char* port_spec = listen_addr;
     if (port_spec == NULL || port_spec[0] == '\0') {

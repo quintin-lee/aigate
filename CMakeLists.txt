@@ -53,10 +53,21 @@ add_custom_target(generate_admin_ui_html DEPENDS ${ADMIN_UI_HTML_HDR})
 
 file(GLOB AIGATE_SRC src/*.c)
 list(REMOVE_ITEM AIGATE_SRC ${CMAKE_SOURCE_DIR}/src/main.c)
+# Optional ASan/UBSan build: -DAIGATE_SANITIZERS=ON adds
+# -fsanitize=address,undefined + -O1 -g to aigate + libaigate.
+option(AIGATE_SANITIZERS "Build aigate with AddressSanitizer/UBSan" OFF)
+if(AIGATE_SANITIZERS)
+    set(AIGATE_SAN_FLAGS -fsanitize=address,undefined -fno-omit-frame-pointer -O1 -g)
+endif()
+
 add_library(libaigate STATIC ${AIGATE_SRC})
 add_dependencies(libaigate generate_admin_ui_html civetweb-c-library hdr_histogram_static)
 target_include_directories(libaigate PUBLIC src ${CMAKE_BINARY_DIR}/generated)
 target_compile_options(libaigate PRIVATE -Wall -Wextra -Werror)
+if(AIGATE_SANITIZERS)
+    target_compile_options(libaigate PRIVATE ${AIGATE_SAN_FLAGS})
+    target_link_libraries(libaigate PUBLIC ${AIGATE_SAN_FLAGS})
+endif()
 target_include_directories(libaigate PUBLIC ${JANSSON_INCLUDE_DIRS} ${LIBPQ_INCLUDE_DIRS})
 target_link_libraries(libaigate PUBLIC
   ${JANSSON_LIBRARIES}
@@ -66,6 +77,10 @@ target_link_libraries(libaigate PUBLIC
 
 add_executable(aigate src/main.c)
 target_compile_options(aigate PRIVATE -Wall -Wextra -Werror)
+if(AIGATE_SANITIZERS)
+    target_compile_options(aigate PRIVATE ${AIGATE_SAN_FLAGS})
+    target_link_libraries(aigate PRIVATE ${AIGATE_SAN_FLAGS})
+endif()
 target_link_libraries(aigate PRIVATE libaigate civetweb-c-library)
 
 

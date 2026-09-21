@@ -917,5 +917,58 @@ def test_provider_management_and_multi_model_routing(gateway):
     providers = resp.json().get("providers", [])
     assert not any(p["id"] == provider_id for p in providers)
 
+def test_body_size_cap_413(gateway):
+    """Bodies above AIGATE_MAX_BODY_BYTES are rejected with 413 before processing."""
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "test-413-model"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={"name": model_name, "provider": "openai", "endpoint": mock_url},
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={"name": "cap-client", "allowed_models": [model_name]},
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    # Under the 2048-byte fixture cap: accepted (200 from mock upstream)
+    small = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={"model": model_name, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert small.status_code == 200, small.text
+
+    # 4 KiB of content far exceeds the cap -> 413, JSON error, body untouched
+    big = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "messages": [{"role": "user", "content": "x" * 4096}],
+        },
+    )
+    assert big.status_code == 413, big.text
+    err = big.json()["error"]
+    assert err["type"] == "payload_too_large"
+    assert err["code"] == 413
+
 
 

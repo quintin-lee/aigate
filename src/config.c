@@ -75,5 +75,19 @@ aigate_config_load(aigate_config* out)
 
     env_str("AIGATE_METRICS_ACL", "127.0.0.1", out->metrics_acl, sizeof out->metrics_acl);
 
+    env_str("AIGATE_USAGE_FLUSH_S", "5", raw_key, sizeof raw_key);
+    out->usage_flush_s = atoi(raw_key);
+    if (out->usage_flush_s < 1 || out->usage_flush_s > 3600) {
+        AIGATE_LOG_ERROR("AIGATE_USAGE_FLUSH_S must be in [1,3600], got %d", out->usage_flush_s);
+        return -1;
+    }
+
+    env_str("AIGATE_MAX_BODY_BYTES", "10485760", raw_key, sizeof raw_key);
+    out->max_body_bytes = atol(raw_key);
+    if (out->max_body_bytes <= 0 || out->max_body_bytes > 1073741824L) {
+        AIGATE_LOG_ERROR("AIGATE_MAX_BODY_BYTES must be in (0,1GiB], got %ld", out->max_body_bytes);
+        return -1;
+    }
+
     return 0;
 }

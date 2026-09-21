@@ -16,7 +16,7 @@
 #include "aigate_core.h"
 #include "aigate_log.h"
 #include "config.h"
-#include "pg_store.h"
+#include <openssl/evp.h>
 #include "secrets.h"
 #include "transport_civetweb.h"
 
@@ -72,15 +72,20 @@ main(void)
 
     /* 4. Core pipeline initialization */
     aigate_core core;
-    if (aigate_core_init(&core, ps, master_ptr, cfg.upstream_timeout_ms, 5) != 0) {
+    if (aigate_core_init(&core, ps, master_ptr, cfg.upstream_timeout_ms, cfg.usage_flush_s) != 0) {
         AIGATE_LOG_ERROR("main: failed to initialize aigate core pipeline");
         pg_store_close(ps);
         return 1;
     }
 
     /* 5. Start CivetWeb transport */
-    transport_civetweb_t* cw = transport_civetweb_start(
-        &core, ps, cfg.admin_token_hash, cfg.listen, cfg.metrics_acl);
+    transport_civetweb_t* cw =
+        transport_civetweb_start(&core,
+                                  ps,
+                                  cfg.admin_token_hash,
+                                  cfg.listen,
+                                  cfg.metrics_acl,
+                                  cfg.max_body_bytes);
     if (cw == NULL) {
         AIGATE_LOG_ERROR("main: failed to start HTTP transport on %s", cfg.listen);
         aigate_core_shutdown(&core);
@@ -110,6 +115,7 @@ main(void)
     aigate_core_shutdown(&core);
     pg_store_close(ps);
     AIGATE_LOG_INFO("aigate shutdown complete");
+    OPENSSL_cleanse(master, sizeof master);
 
     return 0;
 }

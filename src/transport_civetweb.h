@@ -23,12 +23,12 @@ typedef struct transport_civetweb transport_civetweb_t;
  * @param metrics_acl      comma-separated IPv4 list / CIDRs (e.g. "127.0.0.1")
  * @return opaque transport handle, or NULL on bind/init failure
  */
-transport_civetweb_t* transport_civetweb_start(
-    aigate_core* ac,
-    pg_store_t* ps,
-    const char* admin_token_hash,
-    const char* listen_addr,
-    const char* metrics_acl);
+transport_civetweb_t* transport_civetweb_start(aigate_core* ac,
+                                               pg_store_t*  ps,
+                                               const char*  admin_token_hash,
+                                               const char*  listen_addr,
+                                               const char*  metrics_acl,
+                                               long         max_body_bytes);
 
 /**
  * @brief Stop CivetWeb HTTP server and free resources.

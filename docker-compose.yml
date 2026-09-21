@@ -27,7 +27,7 @@ services:
       AIGATE_ADMIN_TOKEN: "${AIGATE_ADMIN_TOKEN}"
       AIGATE_MASTER_KEY: "${AIGATE_MASTER_KEY:-}"
       AIGATE_UPSTREAM_TIMEOUT_MS: "${AIGATE_UPSTREAM_TIMEOUT_MS:-60000}"
-      AIGATE_METRICS_ACL: "${AIGATE_METRICS_ACL:-0.0.0.0/0}"
+      AIGATE_METRICS_ACL: "${AIGATE_METRICS_ACL:-127.0.0.1}"
     depends_on:
       postgres:
         condition: service_healthy

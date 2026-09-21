@@ -5,6 +5,8 @@ build/
 .superpowers/
 .codegraph/
 .cursor/
+.omp/
+Testing/
 docs/.superpowers/
 __pycache__/
 *.o
