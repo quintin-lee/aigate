@@ -5,6 +5,7 @@
 #include "lru.h"
 #include "secrets.h"
 
+#include <openssl/crypto.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -46,6 +47,9 @@ model_router_free(model_router_t* mr)
     if (mr == NULL) {
         return;
     }
+    if (mr->have_master) {
+        OPENSSL_cleanse(mr->master, 32);
+    }
     lru_free(mr->routes);
     free(mr);
 }
@@ -56,11 +60,8 @@ model_router_free(model_router_t* mr)
 static _Atomic unsigned long g_rr_counter = 0;
 
 static int
-resolve_single_key(model_router_t* mr,
-                   const char*     key_ref,
-                   char*           out_key,
-                   size_t          out_sz,
-                   const char*     model_name)
+resolve_single_key(
+    model_router_t* mr, const char* key_ref, char* out_key, size_t out_sz, const char* model_name)
 {
     if (key_ref == NULL || key_ref[0] == '\0') {
         out_key[0] = '\0';
@@ -69,8 +70,7 @@ resolve_single_key(model_router_t* mr,
     if (strncmp(key_ref, "env:", 4) == 0) {
         const char* env = getenv(key_ref + 4);
         if (env == NULL || env[0] == '\0') {
-            AIGATE_LOG_ERROR(
-                "env key %s missing for model %s", key_ref + 4, model_name);
+            AIGATE_LOG_ERROR("env key %s missing for model %s", key_ref + 4, model_name);
             return -1;
         }
         snprintf(out_key, out_sz, "%s", env);
@@ -81,11 +81,7 @@ resolve_single_key(model_router_t* mr,
             AIGATE_LOG_ERROR("pg secret ref but no AIGATE_MASTER_KEY");
             return -1;
         }
-        if (secret_decrypt(mr->master,
-                           key_ref + 3,
-                           out_key,
-                           out_sz,
-                           NULL) != 0) {
+        if (secret_decrypt(mr->master, key_ref + 3, out_key, out_sz, NULL) != 0) {
             AIGATE_LOG_ERROR("secret_decrypt failed for model %s", model_name);
             return -1;
         }
@@ -102,7 +98,11 @@ resolve_key(model_router_t* mr, const model_rec_t* rec, model_rec_t* out)
     int rc = 0;
     /* Primary key ref */
     if (rec->upstream_key_ref[0] != '\0') {
-        if (resolve_single_key(mr, rec->upstream_key_ref, out->upstream_key, sizeof out->upstream_key, rec->name) != 0) {
+        if (resolve_single_key(mr,
+                               rec->upstream_key_ref,
+                               out->upstream_key,
+                               sizeof out->upstream_key,
+                               rec->name) != 0) {
             rc = -1;
         }
     } else {
@@ -112,9 +112,11 @@ resolve_key(model_router_t* mr, const model_rec_t* rec, model_rec_t* out)
     /* Target key refs */
     for (int i = 0; i < out->n_targets && i < MAX_TARGETS_PER_MODEL; i++) {
         upstream_target_t* tgt = &out->targets[i];
-        const char* ref = tgt->upstream_key_ref[0] != '\0' ? tgt->upstream_key_ref : rec->upstream_key_ref;
+        const char*        ref =
+            tgt->upstream_key_ref[0] != '\0' ? tgt->upstream_key_ref : rec->upstream_key_ref;
         if (ref[0] != '\0') {
-            if (resolve_single_key(mr, ref, tgt->upstream_key, sizeof tgt->upstream_key, rec->name) != 0) {
+            if (resolve_single_key(
+                    mr, ref, tgt->upstream_key, sizeof tgt->upstream_key, rec->name) != 0) {
                 tgt->upstream_key[0] = '\0';
             }
         } else {
@@ -125,9 +127,13 @@ resolve_key(model_router_t* mr, const model_rec_t* rec, model_rec_t* out)
     /* Harmonize primary and target 0 keys if one is set and the other is empty */
     if (out->n_targets > 0) {
         if (out->targets[0].upstream_key[0] != '\0' && out->upstream_key[0] == '\0') {
-            snprintf(out->upstream_key, sizeof out->upstream_key, "%s", out->targets[0].upstream_key);
+            snprintf(
+                out->upstream_key, sizeof out->upstream_key, "%s", out->targets[0].upstream_key);
         } else if (out->upstream_key[0] != '\0' && out->targets[0].upstream_key[0] == '\0') {
-            snprintf(out->targets[0].upstream_key, sizeof out->targets[0].upstream_key, "%s", out->upstream_key);
+            snprintf(out->targets[0].upstream_key,
+                     sizeof out->targets[0].upstream_key,
+                     "%s",
+                     out->upstream_key);
         }
     }
 
@@ -153,14 +159,17 @@ model_router_resolve(model_router_t* mr, const char* model, model_rec_t* out)
         rc = -1;
     }
 
-    model_rec_t* copy = malloc(sizeof *copy);
-    if (copy == NULL) {
-        rc = -1;
-    } else {
+    if (rc == 0) {
+        model_rec_t* copy = malloc(sizeof *copy);
+        if (copy == NULL) {
+            return -1;
+        }
         *copy = fresh;
         lru_put(mr->routes, model, copy);
-        *out = fresh;
+        *out = *copy;
     }
+    /* On failure nothing is cached: the next request re-resolves from the
+     * store instead of perpetuating a broken key record. */
     return rc;
 }
 
@@ -184,7 +193,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
     }
     *out_count = 0;
 
-    int n_tgts = model->n_targets;
+    int               n_tgts = model->n_targets;
     upstream_target_t src_targets[MAX_TARGETS_PER_MODEL];
     if (n_tgts <= 0) {
         if (model->endpoint[0] == '\0') {
@@ -192,12 +201,18 @@ model_router_select_candidates(circuit_breaker_t* cb,
         }
         n_tgts = 1;
         memset(&src_targets[0], 0, sizeof(src_targets[0]));
-        snprintf(src_targets[0].provider, sizeof(src_targets[0].provider), "%s",
+        snprintf(src_targets[0].provider,
+                 sizeof(src_targets[0].provider),
+                 "%s",
                  model->provider[0] != '\0' ? model->provider : "openai");
         snprintf(src_targets[0].endpoint, sizeof(src_targets[0].endpoint), "%s", model->endpoint);
-        snprintf(src_targets[0].upstream_key_ref, sizeof(src_targets[0].upstream_key_ref), "%s",
+        snprintf(src_targets[0].upstream_key_ref,
+                 sizeof(src_targets[0].upstream_key_ref),
+                 "%s",
                  model->upstream_key_ref);
-        snprintf(src_targets[0].upstream_key, sizeof(src_targets[0].upstream_key), "%s",
+        snprintf(src_targets[0].upstream_key,
+                 sizeof(src_targets[0].upstream_key),
+                 "%s",
                  model->upstream_key);
         src_targets[0].weight = 1;
         src_targets[0].priority = 0;
@@ -208,14 +223,18 @@ model_router_select_candidates(circuit_breaker_t* cb,
         for (int i = 0; i < n_tgts; i++) {
             src_targets[i] = model->targets[i];
             if (src_targets[i].provider[0] == '\0') {
-                snprintf(src_targets[i].provider, sizeof(src_targets[i].provider), "%s",
+                snprintf(src_targets[i].provider,
+                         sizeof(src_targets[i].provider),
+                         "%s",
                          model->provider[0] != '\0' ? model->provider : "openai");
             }
             if (src_targets[i].weight <= 0) {
                 src_targets[i].weight = 1;
             }
             if (src_targets[i].upstream_key[0] == '\0' && model->upstream_key[0] != '\0') {
-                snprintf(src_targets[i].upstream_key, sizeof(src_targets[i].upstream_key), "%s",
+                snprintf(src_targets[i].upstream_key,
+                         sizeof(src_targets[i].upstream_key),
+                         "%s",
                          model->upstream_key);
             }
         }
@@ -225,7 +244,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
     int prios[MAX_TARGETS_PER_MODEL];
     int n_prios = 0;
     for (int i = 0; i < n_tgts; i++) {
-        int p = src_targets[i].priority;
+        int  p = src_targets[i].priority;
         bool found = false;
         for (int j = 0; j < n_prios; j++) {
             if (prios[j] == p) {
@@ -277,18 +296,27 @@ model_router_select_candidates(circuit_breaker_t* cb,
 
             /* Apply LB policy within this tier */
             if (strcmp(model->lb_policy, "round_robin") == 0 && n_th > 1) {
-                unsigned long start = atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) % (unsigned long)n_th;
+                unsigned long start =
+                    atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) %
+                    (unsigned long)n_th;
                 for (int k = 0; k < n_th && total_added < cap; k++) {
-                    int src_idx = tier_healthy_idx[(start + (unsigned long)k) % (unsigned long)n_th];
+                    int src_idx =
+                        tier_healthy_idx[(start + (unsigned long)k) % (unsigned long)n_th];
                     out_candidates[total_added++] = src_targets[src_idx];
                 }
-            } else if ((strcmp(model->lb_policy, "weighted") == 0 || strcmp(model->lb_policy, "weighted_round_robin") == 0) && n_th > 1) {
+            } else if ((strcmp(model->lb_policy, "weighted") == 0 ||
+                        strcmp(model->lb_policy, "weighted_round_robin") == 0) &&
+                       n_th > 1) {
                 int total_w = 0;
                 for (int k = 0; k < n_th; k++) {
                     total_w += src_targets[tier_healthy_idx[k]].weight;
                 }
-                if (total_w <= 0) total_w = n_th;
-                unsigned long pick = atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) % (unsigned long)total_w;
+                if (total_w <= 0) {
+                    total_w = n_th;
+                }
+                unsigned long pick =
+                    atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) %
+                    (unsigned long)total_w;
                 int chosen_k = 0;
                 int acc = 0;
                 for (int k = 0; k < n_th; k++) {
@@ -343,7 +371,8 @@ model_router_select_candidates(circuit_breaker_t* cb,
             for (int j = i + 1; j < n_tgts; j++) {
                 if (tripped[j].open_until < tripped[i].open_until ||
                     (tripped[j].open_until == tripped[i].open_until &&
-                     src_targets[tripped[j].src_idx].priority < src_targets[tripped[i].src_idx].priority)) {
+                     src_targets[tripped[j].src_idx].priority <
+                         src_targets[tripped[i].src_idx].priority)) {
                     struct tripped_tgt tmp = tripped[i];
                     tripped[i] = tripped[j];
                     tripped[j] = tmp;

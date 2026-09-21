@@ -14,9 +14,10 @@
 /** @brief Admin plane state: pipeline caches (for invalidation after
  *  mutations), the store, and the SHA-256 hex of the admin token. */
 typedef struct admin_ctx {
-  aigate_core *ac;
-  pg_store_t *ps;
-  const char *admin_token_hash; /* 64 lowercase hex chars + NUL */
+    aigate_core* ac;
+    pg_store_t*  ps;
+    const char*  admin_token_hash;     /* 64 lowercase hex chars + NUL */
+    int          allow_plaintext_keys; /* 1 when direct plaintext provider keys are accepted */
 } admin_ctx_t;
 
 /** @brief Dispatch one /admin/v1 request.
@@ -30,8 +31,18 @@ typedef struct admin_ctx {
  * @param out_len    body length (bytes, no NUL)
  * @return 0 when a response body was produced; -1 on internal failure
  *  (out_status set to 500, out_body NULL). */
-int admin_dispatch(admin_ctx_t *adm, const char *uri, const char *method,
-                  const char *bearer, const void *body, size_t body_len,
-                  int *out_status, char **out_body, size_t *out_len);
+int admin_dispatch(admin_ctx_t* adm,
+                   const char*  uri,
+                   const char*  method,
+                   const char*  client_ip, /* may be NULL: lockout disabled */
+                   const char*  bearer,
+                   const void*  body,
+                   size_t       body_len,
+                   int*         out_status,
+                   char**       out_body,
+                   size_t*      out_len);
+
+/** @brief Clear the failed-admin-token lockout table (tests). */
+void admin_lockout_reset(void);
 
 #endif /* AIGATE_ADMIN_API_H */

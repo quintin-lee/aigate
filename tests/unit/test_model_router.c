@@ -150,7 +150,7 @@ TEST_CASE(test_model_router_multi_target_keys)
     setenv("KEY_T1", "secret-key-1", 1);
     setenv("KEY_T2", "secret-key-2", 1);
 
-    pg_store_t* ps = open_mro_store(&db);
+    pg_store_t*     ps = open_mro_store(&db);
     model_router_t* mr = model_router_new(ps, NULL);
 
     model_rec_t out;
@@ -183,7 +183,7 @@ TEST_CASE(test_model_router_priority_selection)
     m.targets[2].priority = 1;
 
     upstream_target_t cands[8];
-    int count = 0;
+    int               count = 0;
     TEST_ASSERT(model_router_select_candidates(NULL, &m, cands, 8, &count) == 0, "select");
     TEST_ASSERT(count == 3, "3 candidates");
     TEST_ASSERT(strcmp(cands[0].endpoint, "http://p0-a") == 0, "first is p0-a");
@@ -208,7 +208,7 @@ TEST_CASE(test_model_router_round_robin)
     m.targets[1].weight = 1;
 
     upstream_target_t cands1[4], cands2[4];
-    int count1 = 0, count2 = 0;
+    int               count1 = 0, count2 = 0;
     TEST_ASSERT(model_router_select_candidates(NULL, &m, cands1, 4, &count1) == 0, "sel 1");
     TEST_ASSERT(model_router_select_candidates(NULL, &m, cands2, 4, &count2) == 0, "sel 2");
     TEST_ASSERT(count1 == 2 && count2 == 2, "counts match");
@@ -235,7 +235,7 @@ TEST_CASE(test_model_router_weighted)
     int heavy_first = 0;
     for (int i = 0; i < 11; i++) {
         upstream_target_t cands[4];
-        int count = 0;
+        int               count = 0;
         model_router_select_candidates(NULL, &m, cands, 4, &count);
         if (strcmp(cands[0].endpoint, "http://heavy") == 0) {
             heavy_first++;
@@ -271,7 +271,7 @@ TEST_CASE(test_model_router_cb_exclusion_and_fallback)
     TEST_ASSERT(cb_get_state(cb, "cb-model", "http://p0-bad") == CB_OPEN, "p0-bad tripped");
 
     upstream_target_t cands[8];
-    int count = 0;
+    int               count = 0;
     TEST_ASSERT(model_router_select_candidates(cb, &m, cands, 8, &count) == 0, "select with cb");
     TEST_ASSERT(count == 2, "2 healthy candidates");
     TEST_ASSERT(strcmp(cands[0].endpoint, "http://p0-good") == 0, "p0-good chosen first");
@@ -287,7 +287,8 @@ TEST_CASE(test_model_router_cb_exclusion_and_fallback)
     cb_record_failure(cb, "cb-model", "http://p1-backup", 500);
 
     /* When all are tripped, fallback to earliest expiry (or lowest priority) */
-    TEST_ASSERT(model_router_select_candidates(cb, &m, cands, 8, &count) == 0, "select all tripped");
+    TEST_ASSERT(model_router_select_candidates(cb, &m, cands, 8, &count) == 0,
+                "select all tripped");
     TEST_ASSERT(count == 3, "returns all tripped targets in recovery order");
 
     cb_destroy(cb);

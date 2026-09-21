@@ -211,7 +211,7 @@ static int
 fake_list_models(void* ctx, model_rec_t* out, int cap, int* n)
 {
     struct fake_db* db = ctx;
-    int count = db->n_models < cap ? db->n_models : cap;
+    int             count = db->n_models < cap ? db->n_models : cap;
     for (int i = 0; i < count; i++) {
         out[i] = db->models[i];
     }
@@ -259,10 +259,16 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
                 snprintf(db->models[i].endpoint, sizeof db->models[i].endpoint, "%s", m->endpoint);
             }
             if (mask & MMASK_PARAMS) {
-                snprintf(db->models[i].default_params_json, sizeof db->models[i].default_params_json, "%s", m->default_params_json);
+                snprintf(db->models[i].default_params_json,
+                         sizeof db->models[i].default_params_json,
+                         "%s",
+                         m->default_params_json);
             }
             if (mask & MMASK_KEYREF) {
-                snprintf(db->models[i].upstream_key_ref, sizeof db->models[i].upstream_key_ref, "%s", m->upstream_key_ref);
+                snprintf(db->models[i].upstream_key_ref,
+                         sizeof db->models[i].upstream_key_ref,
+                         "%s",
+                         m->upstream_key_ref);
             }
             if (mask & MMASK_ENABLED) {
                 db->models[i].enabled = m->enabled;
@@ -272,7 +278,8 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
                 db->models[i].n_targets = m->n_targets;
             }
             if (mask & MMASK_LB_POLICY) {
-                snprintf(db->models[i].lb_policy, sizeof db->models[i].lb_policy, "%s", m->lb_policy);
+                snprintf(
+                    db->models[i].lb_policy, sizeof db->models[i].lb_policy, "%s", m->lb_policy);
             }
             return 0;
         }
@@ -304,8 +311,14 @@ fake_flush_usage(void* ctx, const usage_row_t* rows, int n)
 }
 
 static int
-fake_query_usage(void* ctx, long key_id, const char* model, time_t from, time_t to,
-                 usage_row_t* out, int cap, int* n)
+fake_query_usage(void*        ctx,
+                 long         key_id,
+                 const char*  model,
+                 time_t       from,
+                 time_t       to,
+                 usage_row_t* out,
+                 int          cap,
+                 int*         n)
 {
     struct fake_db* db = ctx;
     *n = 0;
@@ -333,7 +346,9 @@ fake_list_providers(void* ctx, provider_rec_t* out, int cap, int* n)
     *n = 0;
     for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
         struct fake_provider* fp = &db->providers[i];
-        if (!fp->in_use) continue;
+        if (!fp->in_use) {
+            continue;
+        }
         out[*n] = fp->p;
         out[*n].models = NULL;
         out[*n].n_models = 0;
@@ -394,16 +409,28 @@ fake_update_provider(void* ctx, const provider_rec_t* p, int mask)
     for (int i = 0; i < FAKE_CAP; i++) {
         struct fake_provider* fp = &db->providers[i];
         if (fp->in_use && fp->p.id == p->id) {
-            if (mask & PMASK_TYPE) snprintf(fp->p.provider_type, sizeof fp->p.provider_type, "%s", p->provider_type);
-            if (mask & PMASK_ENDPOINT) snprintf(fp->p.endpoint, sizeof fp->p.endpoint, "%s", p->endpoint);
-            if (mask & PMASK_API_KEY) snprintf(fp->p.api_key, sizeof fp->p.api_key, "%s", p->api_key);
-            if (mask & PMASK_ENABLED) fp->p.enabled = p->enabled;
+            if (mask & PMASK_TYPE) {
+                snprintf(fp->p.provider_type, sizeof fp->p.provider_type, "%s", p->provider_type);
+            }
+            if (mask & PMASK_ENDPOINT) {
+                snprintf(fp->p.endpoint, sizeof fp->p.endpoint, "%s", p->endpoint);
+            }
+            if (mask & PMASK_API_KEY) {
+                snprintf(fp->p.api_key, sizeof fp->p.api_key, "%s", p->api_key);
+            }
+            if (mask & PMASK_ENABLED) {
+                fp->p.enabled = p->enabled;
+            }
             if (mask & PMASK_MODELS) {
-                for (int m = 0; m < fp->p.n_models; m++) free(fp->p.models[m]);
+                for (int m = 0; m < fp->p.n_models; m++) {
+                    free(fp->p.models[m]);
+                }
                 free(fp->p.models);
                 fp->p.models = NULL;
                 fp->p.n_models = 0;
-                if (deep_copy_provider_models(&fp->p, p) != 0) return -1;
+                if (deep_copy_provider_models(&fp->p, p) != 0) {
+                    return -1;
+                }
             }
             return 0;
         }
@@ -418,7 +445,9 @@ fake_delete_provider(void* ctx, long id)
     for (int i = 0; i < FAKE_CAP; i++) {
         struct fake_provider* fp = &db->providers[i];
         if (fp->in_use && fp->p.id == id) {
-            for (int m = 0; m < fp->p.n_models; m++) free(fp->p.models[m]);
+            for (int m = 0; m < fp->p.n_models; m++) {
+                free(fp->p.models[m]);
+            }
             free(fp->p.models);
             fp->in_use = 0;
             return 0;
@@ -453,12 +482,16 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
 }
 
 static void
-setup_admin(struct fake_db* db, pg_ops_t* ops, pg_store_t** out_ps,
-            aigate_core* out_core, admin_ctx_t* out_adm, char admin_hash[65])
+setup_admin(struct fake_db* db,
+            pg_ops_t*       ops,
+            pg_store_t**    out_ps,
+            aigate_core*    out_core,
+            admin_ctx_t*    out_adm,
+            char            admin_hash[65])
 {
     memset(db, 0, sizeof *db);
     db->next_key_id = 1;
-    db->next_provider_id = 1;
+    db->next_provider_id = 0; /* first created provider gets id 1 */
     build_fake_ops(db, ops);
     *out_ps = pg_store_open("unused", ops);
 
@@ -469,6 +502,7 @@ setup_admin(struct fake_db* db, pg_ops_t* ops, pg_store_t** out_ps,
     out_adm->ac = out_core;
     out_adm->ps = *out_ps;
     out_adm->admin_token_hash = admin_hash;
+    out_adm->allow_plaintext_keys = 1;
 }
 
 static void
@@ -497,24 +531,27 @@ TEST_CASE(test_admin_auth)
 
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
-    int status = 0;
-    char* body = NULL;
+    int    status = 0;
+    char*  body = NULL;
     size_t len = 0;
 
     /* 1. Missing bearer */
-    int rc = admin_dispatch(&adm, "/admin/v1/keys", "GET", NULL, NULL, 0, &status, &body, &len);
+    int rc =
+        admin_dispatch(&adm, "/admin/v1/keys", "GET", NULL, NULL, NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 401, "missing bearer -> 401");
     free(body);
 
     /* 2. Wrong bearer */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/keys", "GET", "wrong-secret", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "wrong-secret", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 401, "wrong bearer -> 401");
     free(body);
 
     /* 3. Correct bearer */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/keys", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "correct bearer -> 200");
     free(body);
 
@@ -532,13 +569,23 @@ TEST_CASE(test_admin_keys_lifecycle)
 
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
-    int status = 0;
-    char* body = NULL;
+    int    status = 0;
+    char*  body = NULL;
     size_t len = 0;
 
     /* 1. Create key */
-    const char* req = "{\"name\":\"alice\",\"allowed_models\":[\"gpt-4o\"],\"rate_qps\":5,\"daily_token_quota\":1000}";
-    int rc = admin_dispatch(&adm, "/admin/v1/keys", "POST", "admin-secret-token", req, strlen(req), &status, &body, &len);
+    const char* req = "{\"name\":\"alice\",\"allowed_models\":[\"gpt-4o\"],\"rate_qps\":5,\"daily_"
+                      "token_quota\":1000}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/keys",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create key -> 201");
     TEST_ASSERT(body != NULL, "create key body present");
 
@@ -558,7 +605,8 @@ TEST_CASE(test_admin_keys_lifecycle)
 
     /* 2. List keys - must not leak plaintext */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/keys", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "list keys -> 200");
     j = json_loads(body, 0, NULL);
     free(body);
@@ -571,7 +619,7 @@ TEST_CASE(test_admin_keys_lifecycle)
 
     /* 3. Resolve key via core auth cache (populate cache) */
     key_rec_t krec;
-    int arc = auth_key_resolve(&core.keys, plain, &krec);
+    int       arc = auth_key_resolve(&core.keys, plain, &krec);
     TEST_ASSERT(arc == 0 && krec.rate_qps == 5, "auth_key_resolve ok");
     key_rec_free(&krec);
 
@@ -580,7 +628,16 @@ TEST_CASE(test_admin_keys_lifecycle)
     snprintf(patch_uri, sizeof patch_uri, "/admin/v1/keys/%ld", key_id);
     const char* preq = "{\"rate_qps\":20}";
     body = NULL;
-    rc = admin_dispatch(&adm, patch_uri, "PATCH", "admin-secret-token", preq, strlen(preq), &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        patch_uri,
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        preq,
+                        strlen(preq),
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "patch key -> 200");
     free(body);
 
@@ -591,7 +648,8 @@ TEST_CASE(test_admin_keys_lifecycle)
 
     /* 6. Revoke key -> should invalidate cache and return -2 on resolve */
     body = NULL;
-    rc = admin_dispatch(&adm, patch_uri, "DELETE", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(
+        &adm, patch_uri, "DELETE", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "revoke key -> 200");
     free(body);
 
@@ -613,19 +671,30 @@ TEST_CASE(test_admin_models_lifecycle)
 
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
-    int status = 0;
-    char* body = NULL;
+    int    status = 0;
+    char*  body = NULL;
     size_t len = 0;
 
     /* 1. Create model */
-    const char* req = "{\"name\":\"gpt-4o\",\"provider\":\"openai\",\"endpoint\":\"https://api.openai.com/v1\",\"default_params\":{\"temperature\":0.7}}";
-    int rc = admin_dispatch(&adm, "/admin/v1/models", "POST", "admin-secret-token", req, strlen(req), &status, &body, &len);
+    const char* req = "{\"name\":\"gpt-4o\",\"provider\":\"openai\",\"endpoint\":\"https://"
+                      "api.openai.com/v1\",\"default_params\":{\"temperature\":0.7}}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/models",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create model -> 201");
     free(body);
 
     /* 2. List models */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/models", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/models", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "list models -> 200");
     json_t* j = json_loads(body, 0, NULL);
     free(body);
@@ -636,7 +705,16 @@ TEST_CASE(test_admin_models_lifecycle)
     /* 3. Patch model */
     const char* preq = "{\"endpoint\":\"https://proxy.openai.com/v1\"}";
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/models/gpt-4o", "PATCH", "admin-secret-token", preq, strlen(preq), &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models/gpt-4o",
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        preq,
+                        strlen(preq),
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "patch model -> 200");
     free(body);
 
@@ -646,7 +724,16 @@ TEST_CASE(test_admin_models_lifecycle)
 
     /* 4. Delete model */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/models/gpt-4o", "DELETE", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models/gpt-4o",
+                        "DELETE",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "delete model -> 200");
     free(body);
     TEST_ASSERT(fake_get_model(&db, "gpt-4o", &m) != 0, "model deleted");
@@ -665,19 +752,31 @@ TEST_CASE(test_admin_models_multi_target)
 
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
-    int status = 0;
-    char* body = NULL;
+    int    status = 0;
+    char*  body = NULL;
     size_t len = 0;
 
     /* 1. Create model with targets array & lb_policy */
-    const char* req =
-        "{\"name\":\"hybrid-model\","
-        "\"lb_policy\":\"weighted_round_robin\","
-        "\"targets\":["
-        "  {\"provider\":\"openai\",\"endpoint\":\"http://ep1\",\"upstream_key_ref\":\"k1\",\"weight\":2,\"priority\":0},"
-        "  {\"provider\":\"azure\",\"endpoint\":\"http://ep2\",\"upstream_key_ref\":\"k2\",\"weight\":1,\"priority\":1}"
-        "]}";
-    int rc = admin_dispatch(&adm, "/admin/v1/models", "POST", "admin-secret-token", req, strlen(req), &status, &body, &len);
+    const char* req = "{\"name\":\"hybrid-model\","
+                      "\"lb_policy\":\"weighted_round_robin\","
+                      "\"targets\":["
+                      "  "
+                      "{\"provider\":\"openai\",\"endpoint\":\"http://"
+                      "ep1\",\"upstream_key_ref\":\"k1\",\"weight\":2,\"priority\":0},"
+                      "  "
+                      "{\"provider\":\"azure\",\"endpoint\":\"http://"
+                      "ep2\",\"upstream_key_ref\":\"k2\",\"weight\":1,\"priority\":1}"
+                      "]}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/models",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create multi-target model -> 201");
     free(body);
 
@@ -685,11 +784,13 @@ TEST_CASE(test_admin_models_multi_target)
     cb_record_failure(core.cb, "hybrid-model", "http://ep1", 500);
     cb_record_failure(core.cb, "hybrid-model", "http://ep1", 500);
     cb_record_failure(core.cb, "hybrid-model", "http://ep1", 500);
-    TEST_ASSERT(cb_get_state(core.cb, "hybrid-model", "http://ep1") == CB_OPEN, "ep1 tripped to open");
+    TEST_ASSERT(cb_get_state(core.cb, "hybrid-model", "http://ep1") == CB_OPEN,
+                "ep1 tripped to open");
 
     /* 3. List models and inspect targets & cb_state */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/models", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/models", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "list models -> 200");
     json_t* j = json_loads(body, 0, NULL);
     free(body);
@@ -706,13 +807,17 @@ TEST_CASE(test_admin_models_multi_target)
     TEST_ASSERT(jtargets != NULL && json_array_size(jtargets) == 2, "2 targets in response");
 
     json_t* t0 = json_array_get(jtargets, 0);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(t0, "endpoint")), "http://ep1") == 0, "target 0 endpoint ep1");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(t0, "cb_state")), "open") == 0, "target 0 cb_state is open");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(t0, "endpoint")), "http://ep1") == 0,
+                "target 0 endpoint ep1");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(t0, "cb_state")), "open") == 0,
+                "target 0 cb_state is open");
     TEST_ASSERT(json_integer_value(json_object_get(t0, "weight")) == 2, "target 0 weight 2");
 
     json_t* t1 = json_array_get(jtargets, 1);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(t1, "endpoint")), "http://ep2") == 0, "target 1 endpoint ep2");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(t1, "cb_state")), "closed") == 0, "target 1 cb_state is closed");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(t1, "endpoint")), "http://ep2") == 0,
+                "target 1 endpoint ep2");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(t1, "cb_state")), "closed") == 0,
+                "target 1 cb_state is closed");
     TEST_ASSERT(json_integer_value(json_object_get(t1, "priority")) == 1, "target 1 priority 1");
 
     json_decref(j);
@@ -720,7 +825,16 @@ TEST_CASE(test_admin_models_multi_target)
     /* 4. Patch model: update lb_policy to priority via PUT */
     const char* preq = "{\"lb_policy\":\"priority\"}";
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/models/hybrid-model", "PUT", "admin-secret-token", preq, strlen(preq), &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models/hybrid-model",
+                        "PUT",
+                        NULL,
+                        "admin-secret-token",
+                        preq,
+                        strlen(preq),
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "put model -> 200");
     free(body);
 
@@ -753,21 +867,32 @@ TEST_CASE(test_admin_usage_query)
     ur.completion_tokens = 2000;
     fake_flush_usage(&db, &ur, 1);
 
-    int status = 0;
-    char* body = NULL;
+    int    status = 0;
+    char*  body = NULL;
     size_t len = 0;
 
     /* 1. Missing key/from/to -> 200 with defaults (all keys, last 7 days) */
-    int rc = admin_dispatch(&adm, "/admin/v1/usage", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    int rc = admin_dispatch(
+        &adm, "/admin/v1/usage", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "missing params -> 200 with defaults");
     json_t* jd = json_loads(body, 0, NULL);
     free(body);
-    TEST_ASSERT(jd != NULL && json_object_get(jd, "usage") != NULL, "default query returns usage array");
+    TEST_ASSERT(jd != NULL && json_object_get(jd, "usage") != NULL,
+                "default query returns usage array");
     json_decref(jd);
 
     /* 2. Valid usage query */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/usage?key=42&from=2024-09-01&to=2024-09-30", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/usage?key=42&from=2024-09-01&to=2024-09-30",
+                        "GET",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "usage query -> 200");
     json_t* j = json_loads(body, 0, NULL);
     free(body);
@@ -776,7 +901,8 @@ TEST_CASE(test_admin_usage_query)
     TEST_ASSERT(uarr != NULL && json_array_size(uarr) == 1, "1 usage row returned");
     json_t* r0 = json_array_get(uarr, 0);
     TEST_ASSERT(json_integer_value(json_object_get(r0, "requests")) == 100, "requests == 100");
-    TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 5000, "prompt_tokens == 5000");
+    TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 5000,
+                "prompt_tokens == 5000");
     json_decref(j);
 
     teardown_admin(ps, &core, &db);
@@ -793,15 +919,25 @@ TEST_CASE(test_admin_provider_create_and_list)
 
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
-    int status = 0;
-    char* body = NULL;
+    int    status = 0;
+    char*  body = NULL;
     size_t len = 0;
 
-    const char* req =
-        "{\"name\":\"deepseek\",\"provider_type\":\"deepseek\",\"endpoint\":\"https://api.deepseek.com/v1\","
-        "\"api_key\":\"sk-0123456789abcdef\",\"models\":[\"deepseek-chat\",\"deepseek-reasoner\"],\"enabled\":true}";
+    const char* req = "{\"name\":\"deepseek\",\"provider_type\":\"deepseek\",\"endpoint\":\"https:/"
+                      "/api.deepseek.com/v1\","
+                      "\"api_key\":\"sk-0123456789abcdef\",\"models\":[\"deepseek-chat\","
+                      "\"deepseek-reasoner\"],\"enabled\":true}";
 
-    int rc = admin_dispatch(&adm, "/admin/v1/providers", "POST", "admin-secret-token", req, strlen(req), &status, &body, &len);
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/providers",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "provider create 201");
     json_t* res = json_loads(body, 0, NULL);
     free(body);
@@ -814,13 +950,24 @@ TEST_CASE(test_admin_provider_create_and_list)
     /* Verify auto-synced models in models table */
     model_rec_t m_chat, m_reasoner;
     TEST_ASSERT(fake_get_model(&db, "deepseek-chat", &m_chat) == 0, "deepseek-chat created");
-    TEST_ASSERT(strcmp(m_chat.endpoint, "https://api.deepseek.com/v1") == 0, "m_chat endpoint matches");
+    TEST_ASSERT(strcmp(m_chat.endpoint, "https://api.deepseek.com/v1") == 0,
+                "m_chat endpoint matches");
     TEST_ASSERT(strcmp(m_chat.upstream_key_ref, "sk-0123456789abcdef") == 0, "m_chat key matches");
-    TEST_ASSERT(fake_get_model(&db, "deepseek-reasoner", &m_reasoner) == 0, "deepseek-reasoner created");
+    TEST_ASSERT(fake_get_model(&db, "deepseek-reasoner", &m_reasoner) == 0,
+                "deepseek-reasoner created");
 
     /* List providers */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/providers", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/providers",
+                        "GET",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "provider list 200");
     res = json_loads(body, 0, NULL);
     free(body);
@@ -828,8 +975,11 @@ TEST_CASE(test_admin_provider_create_and_list)
     json_t* parr = json_object_get(res, "providers");
     TEST_ASSERT(parr != NULL && json_array_size(parr) == 1, "1 provider in list");
     json_t* p0 = json_array_get(parr, 0);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(p0, "name")), "deepseek") == 0, "name deepseek");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(p0, "endpoint")), "https://api.deepseek.com/v1") == 0, "endpoint deepseek");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(p0, "name")), "deepseek") == 0,
+                "name deepseek");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(p0, "endpoint")),
+                       "https://api.deepseek.com/v1") == 0,
+                "endpoint deepseek");
     /* Masked API key */
     const char* masked = json_string_value(json_object_get(p0, "api_key"));
     TEST_ASSERT(masked != NULL && strstr(masked, "••••") != NULL, "masked api key contains dots");
@@ -851,23 +1001,43 @@ TEST_CASE(test_admin_provider_patch_and_delete)
 
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
-    int status = 0;
-    char* body = NULL;
+    int    status = 0;
+    char*  body = NULL;
     size_t len = 0;
 
     const char* req =
-        "{\"name\":\"anthropic\",\"provider_type\":\"anthropic\",\"endpoint\":\"https://api.anthropic.com\","
+        "{\"name\":\"anthropic\",\"provider_type\":\"anthropic\",\"endpoint\":\"https://"
+        "api.anthropic.com\","
         "\"api_key\":\"sk-ant-testkey123\",\"models\":[\"claude-3-7-sonnet\"],\"enabled\":true}";
 
-    int rc = admin_dispatch(&adm, "/admin/v1/providers", "POST", "admin-secret-token", req, strlen(req), &status, &body, &len);
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/providers",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "anthropic created");
     free(body);
 
     /* PATCH provider 1 */
     const char* patch_req =
-        "{\"endpoint\":\"https://api.anthropic.com/v2\",\"models\":[\"claude-3-7-sonnet\",\"claude-3-5-haiku\"],\"enabled\":false}";
+        "{\"endpoint\":\"https://api.anthropic.com/"
+        "v2\",\"models\":[\"claude-3-7-sonnet\",\"claude-3-5-haiku\"],\"enabled\":false}";
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/providers/1", "PATCH", "admin-secret-token", patch_req, strlen(patch_req), &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/providers/1",
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        patch_req,
+                        strlen(patch_req),
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "provider patched");
     free(body);
 
@@ -880,13 +1050,31 @@ TEST_CASE(test_admin_provider_patch_and_delete)
 
     /* DELETE provider 1 */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/providers/1", "DELETE", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/providers/1",
+                        "DELETE",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "provider deleted");
     free(body);
 
     /* List should be empty */
     body = NULL;
-    rc = admin_dispatch(&adm, "/admin/v1/providers", "GET", "admin-secret-token", NULL, 0, &status, &body, &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/providers",
+                        "GET",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "provider list after delete");
     json_t* res = json_loads(body, 0, NULL);
     free(body);
@@ -894,4 +1082,181 @@ TEST_CASE(test_admin_provider_patch_and_delete)
     json_decref(res);
 
     teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_plaintext_gate)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+    /* setup_admin enables the gate; prove both directions */
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* plaintext key rejected when gate is off */
+    adm.allow_plaintext_keys = 0;
+    const char* req =
+        "{\"name\":\"deepseek\",\"provider_type\":\"deepseek\",\"endpoint\":\"https://"
+        "api.deepseek.com/v1\","
+        "\"api_key\":\"sk-0123456789abcdef\",\"models\":[\"deepseek-chat\"],\"enabled\":true}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/providers",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
+    TEST_ASSERT(rc == 0 && status == 400, "plaintext key rejected -> 400");
+    json_t* res = json_loads(body, 0, NULL);
+    free(body);
+    json_t* err = json_object_get(res, "error");
+    TEST_ASSERT(err != NULL && strcmp(json_string_value(json_object_get(err, "type")),
+                                      "provider_key_required") == 0,
+                "provider_key_required error");
+    json_decref(res);
+
+    /* env: ref always accepted */
+    const char* env_req =
+        "{\"name\":\"envprov\",\"provider_type\":\"openai\",\"endpoint\":\"https://api.openai.com/"
+        "v1\","
+        "\"api_key\":\"env:OPENAI_API_KEY\",\"models\":[\"gpt-4o\"],\"enabled\":true}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/providers",
+                        "POST",
+                        NULL,
+                        "admin-secret-token",
+                        env_req,
+                        strlen(env_req),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 201, "env: ref accepted -> 201");
+    free(body);
+
+    /* plaintext key accepted when gate is on */
+    adm.allow_plaintext_keys = 1;
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/providers",
+                        "POST",
+                        NULL,
+                        "admin-secret-token",
+                        req,
+                        strlen(req),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 201, "plaintext key accepted -> 201");
+    free(body);
+
+    /* update path: rejected when gate is off */
+    adm.allow_plaintext_keys = 0;
+    const char* patch_req = "{\"api_key\":\"sk-new-plaintext\"}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/providers/1",
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        patch_req,
+                        strlen(patch_req),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 400, "patch plaintext key rejected -> 400");
+    free(body);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_lockout)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+    admin_lockout_reset();
+
+    int         status = 0;
+    char*       body = NULL;
+    size_t      len = 0;
+    const char* ip = "10.1.2.3";
+
+    /* 10 failed attempts with a real client_ip → lockout engages */
+    for (int i = 0; i < 10; i++) {
+        body = NULL;
+        int rc = admin_dispatch(
+            &adm, "/admin/v1/keys", "GET", ip, "wrong", NULL, 0, &status, &body, &len);
+        TEST_ASSERT(rc == 0 && status == 401, "attempt %d -> 401", i);
+        free(body);
+    }
+
+    /* even the correct token is locked out now */
+    body = NULL;
+    int rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", ip, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 429, "locked out -> 429");
+    json_t* res = json_loads(body, 0, NULL);
+    free(body);
+    json_t* err = json_object_get(res, "error");
+    TEST_ASSERT(err != NULL &&
+                    strcmp(json_string_value(json_object_get(err, "type")), "locked_out") == 0,
+                "locked_out error type");
+    json_decref(res);
+
+    /* a different IP is not affected */
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/keys",
+                        "GET",
+                        "10.1.2.4",
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "other ip -> 200");
+    free(body);
+
+    /* reset restores access */
+    admin_lockout_reset();
+    body = NULL;
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", ip, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "after reset -> 200");
+    free(body);
+
+    /* NULL client_ip disables lockout entirely */
+    admin_lockout_reset();
+    for (int i = 0; i < 20; i++) {
+        body = NULL;
+        rc = admin_dispatch(
+            &adm, "/admin/v1/keys", "GET", NULL, "wrong", NULL, 0, &status, &body, &len);
+        TEST_ASSERT(rc == 0 && status == 401, "null ip attempt %d -> 401", i);
+        free(body);
+    }
+    body = NULL;
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "null ip never locked -> 200");
+    free(body);
+
+    teardown_admin(ps, &core, &db);
+    admin_lockout_reset();
 }

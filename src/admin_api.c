@@ -19,6 +19,8 @@
 
 #include <jansson.h>
 #include <limits.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -60,6 +62,101 @@ admin_auth_ok(admin_ctx_t* adm, const char* bearer)
         return 0;
     }
     return sha256_hex_equal(digest, (const char*)adm->admin_token_hash) == 1;
+}
+
+/* ------------------------------------------------------------ brute-force lockout */
+
+#define LOCKOUT_SLOTS 128
+#define LOCKOUT_FAILS 10
+#define LOCKOUT_WINDOW_S 300
+
+typedef struct {
+    char           ip[32];
+    _Atomic long   fails;
+    _Atomic time_t first_fail;
+    int            in_use;
+} lockout_slot_t;
+
+static lockout_slot_t  g_lockout[LOCKOUT_SLOTS];
+static pthread_mutex_t g_lockout_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+static unsigned
+lockout_slot_for(const char* ip)
+{
+    /* FNV-1a */
+    unsigned h = 2166136261u;
+    for (const char* p = ip; *p; p++) {
+        h = (h ^ (unsigned char)*p) * 16777619u;
+    }
+    return h % LOCKOUT_SLOTS;
+}
+
+/** @brief 1 when @p ip is inside an active lockout window. */
+static int
+lockout_hit(const char* ip)
+{
+    if (ip == NULL) {
+        return 0;
+    }
+    lockout_slot_t* s = &g_lockout[lockout_slot_for(ip)];
+    pthread_mutex_lock(&g_lockout_mtx);
+    int hit = s->in_use && atomic_load(&s->fails) >= LOCKOUT_FAILS &&
+              time(NULL) - atomic_load(&s->first_fail) < LOCKOUT_WINDOW_S;
+    pthread_mutex_unlock(&g_lockout_mtx);
+    return hit;
+}
+
+static void
+lockout_fail(const char* ip)
+{
+    if (ip == NULL) {
+        return;
+    }
+    lockout_slot_t* s = &g_lockout[lockout_slot_for(ip)];
+    time_t          now = time(NULL);
+    pthread_mutex_lock(&g_lockout_mtx);
+    if (!s->in_use || strcmp(s->ip, ip) != 0) {
+        s->in_use = 1;
+        snprintf(s->ip, sizeof s->ip, "%s", ip);
+        atomic_store(&s->fails, 1);
+        atomic_store(&s->first_fail, now);
+    } else {
+        if (now - atomic_load(&s->first_fail) >= LOCKOUT_WINDOW_S) {
+            /* window elapsed: restart the counter */
+            atomic_store(&s->fails, 0);
+            atomic_store(&s->first_fail, now);
+        }
+        atomic_fetch_add(&s->fails, 1);
+    }
+    pthread_mutex_unlock(&g_lockout_mtx);
+}
+
+static void
+lockout_clear(const char* ip)
+{
+    if (ip == NULL) {
+        return;
+    }
+    lockout_slot_t* s = &g_lockout[lockout_slot_for(ip)];
+    pthread_mutex_lock(&g_lockout_mtx);
+    if (s->in_use && strcmp(s->ip, ip) == 0) {
+        s->in_use = 0;
+        atomic_store(&s->fails, 0);
+        atomic_store(&s->first_fail, 0);
+    }
+    pthread_mutex_unlock(&g_lockout_mtx);
+}
+
+void
+admin_lockout_reset(void)
+{
+    pthread_mutex_lock(&g_lockout_mtx);
+    for (int i = 0; i < LOCKOUT_SLOTS; i++) {
+        g_lockout[i].in_use = 0;
+        atomic_store(&g_lockout[i].fails, 0);
+        atomic_store(&g_lockout[i].first_fail, 0);
+    }
+    pthread_mutex_unlock(&g_lockout_mtx);
 }
 
 /** @brief Dump @p j as compact JSON into the out params; decref j.
@@ -151,8 +248,8 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
 
     key_rec_t k;
     memset(&k, 0, sizeof k);
-    char            name[128] = "unnamed";
-    const char*     n = jstring(jbody, "name", NULL);
+    char        name[128] = "unnamed";
+    const char* n = jstring(jbody, "name", NULL);
     if (n != NULL && n[0] != '\0') {
         snprintf(name, sizeof name, "%s", n);
     }
@@ -179,7 +276,12 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
                 }
                 free(k.allowed_models);
                 json_decref(jbody);
-                return finish_error(status, body, len, 400, "bad_request", "allowed_models entries must be strings");
+                return finish_error(status,
+                                    body,
+                                    len,
+                                    400,
+                                    "bad_request",
+                                    "allowed_models entries must be strings");
             }
             k.allowed_models[i] = strdup(json_string_value(item));
             if (k.allowed_models[i] == NULL) {
@@ -216,9 +318,9 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     }
     memcpy(k.key_hash, hash, sizeof k.key_hash);
 
-    long id = 0;
+    long            id = 0;
     const pg_ops_t* ops = pg_store_ops(adm->ps);
-    int rc = ops->create_key(ops->ctx, &k, &id);
+    int             rc = ops->create_key(ops->ctx, &k, &id);
     /* allowlist ownership stays with us; the op stored a copy/joined string */
     for (int i = 0; i < k.n_allowed; i++) {
         free(k.allowed_models[i]);
@@ -244,7 +346,7 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
         return -1;
     }
     const pg_ops_t* ops = pg_store_ops(adm->ps);
-    int n = 0;
+    int             n = 0;
     if (ops->list_keys(ops->ctx, recs, KEY_LIST_CAP, &n) != 0) {
         free(recs);
         return finish_error(status, body, len, 500, "internal_error", "key list failed");
@@ -252,8 +354,8 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
 
     json_t* arr = json_array();
     for (int i = 0; i < n; i++) {
-        json_t*  o = json_object();
-        json_t*  al = json_array();
+        json_t* o = json_object();
+        json_t* al = json_array();
         for (int j = 0; j < recs[i].n_allowed; j++) {
             json_array_append_new(al, json_string(recs[i].allowed_models[j]));
         }
@@ -291,8 +393,8 @@ path_key_id(const char* rest, long* key_id)
 }
 
 static int
-key_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest,
-          const void* req_body)
+key_patch(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
 {
     long id;
     if (path_key_id(rest, &id) != 0) {
@@ -309,7 +411,7 @@ key_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* r
         key_rec_free(&existing);
         return finish_error(status, body, len, 400, "bad_request", "invalid json body");
     }
-    int mask = 0;
+    int       mask = 0;
     key_rec_t k = existing; /* start from the stored record */
 
     json_t* v;
@@ -328,7 +430,8 @@ key_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* r
         if (!json_is_array(v)) {
             key_rec_free(&k);
             json_decref(jbody);
-            return finish_error(status, body, len, 400, "bad_request", "allowed_models must be an array");
+            return finish_error(
+                status, body, len, 400, "bad_request", "allowed_models must be an array");
         }
         size_t cnt = json_array_size(v);
         if (cnt > 64) {
@@ -341,7 +444,12 @@ key_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* r
             if (!json_is_string(item)) {
                 key_rec_free(&k);
                 json_decref(jbody);
-                return finish_error(status, body, len, 400, "bad_request", "allowed_models entries must be strings");
+                return finish_error(status,
+                                    body,
+                                    len,
+                                    400,
+                                    "bad_request",
+                                    "allowed_models entries must be strings");
             }
         }
         /* replace the allowlist */
@@ -371,7 +479,8 @@ key_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* r
         } else {
             key_rec_free(&k);
             json_decref(jbody);
-            return finish_error(status, body, len, 400, "bad_request", "expires_at must be integer or null");
+            return finish_error(
+                status, body, len, 400, "bad_request", "expires_at must be integer or null");
         }
         mask |= KMASK_EXPIRY;
     }
@@ -480,6 +589,11 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
         json_decref(jbody);
         return finish_error(status, body, len, 400, "bad_request", "name is required");
     }
+    if (strlen(name) >= 128) {
+        json_decref(jbody);
+        return finish_error(
+            status, body, len, 400, "bad_request", "model name too long (max 127 chars)");
+    }
     snprintf(m.name, sizeof m.name, "%s", name);
 
     json_t* jtargets = json_object_get(jbody, "targets");
@@ -490,13 +604,24 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
         }
     }
 
-    const char* def_prov = (m.n_targets > 0 && m.targets[0].provider[0]) ? m.targets[0].provider : "openai";
-    const char* def_endp = (m.n_targets > 0 && m.targets[0].endpoint[0]) ? m.targets[0].endpoint : "";
-    const char* def_kref = (m.n_targets > 0 && m.targets[0].upstream_key[0]) ? m.targets[0].upstream_key : "";
+    const char* def_prov =
+        (m.n_targets > 0 && m.targets[0].provider[0]) ? m.targets[0].provider : "openai";
+    const char* def_endp =
+        (m.n_targets > 0 && m.targets[0].endpoint[0]) ? m.targets[0].endpoint : "";
+    const char* def_kref =
+        (m.n_targets > 0 && m.targets[0].upstream_key[0]) ? m.targets[0].upstream_key : "";
 
-    snprintf(m.provider, sizeof m.provider, "%.*s", (int)sizeof m.provider - 1, jstring(jbody, "provider", def_prov));
+    snprintf(m.provider,
+             sizeof m.provider,
+             "%.*s",
+             (int)sizeof m.provider - 1,
+             jstring(jbody, "provider", def_prov));
     snprintf(m.endpoint, sizeof m.endpoint, "%s", jstring(jbody, "endpoint", def_endp));
-    snprintf(m.upstream_key_ref, sizeof m.upstream_key_ref, "%.*s", (int)sizeof m.upstream_key_ref - 1, jstring(jbody, "upstream_key_ref", def_kref));
+    snprintf(m.upstream_key_ref,
+             sizeof m.upstream_key_ref,
+             "%.*s",
+             (int)sizeof m.upstream_key_ref - 1,
+             jstring(jbody, "upstream_key_ref", def_kref));
     snprintf(m.lb_policy, sizeof m.lb_policy, "%s", jstring(jbody, "lb_policy", "priority"));
 
     json_t* jparams = json_object_get(jbody, "default_params");
@@ -534,7 +659,7 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
         return -1;
     }
     const pg_ops_t* ops = pg_store_ops(adm->ps);
-    int n = 0;
+    int             n = 0;
     if (ops->list_models(ops->ctx, recs, MODEL_LIST_CAP, &n) != 0) {
         free(recs);
         return finish_error(status, body, len, 500, "internal_error", "model list failed");
@@ -549,12 +674,15 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
         json_object_set_new(o, "upstream_key_ref", json_string(recs[i].upstream_key_ref));
         json_object_set_new(o, "enabled", json_integer(recs[i].enabled));
         json_object_set_new(o, "default_params", json_string(recs[i].default_params_json));
-        json_object_set_new(o, "lb_policy", json_string(recs[i].lb_policy[0] != '\0' ? recs[i].lb_policy : "priority"));
+        json_object_set_new(
+            o,
+            "lb_policy",
+            json_string(recs[i].lb_policy[0] != '\0' ? recs[i].lb_policy : "priority"));
 
         json_t* tgts_arr = json_array();
         for (int t = 0; t < recs[i].n_targets; t++) {
             upstream_target_t* tgt = &recs[i].targets[t];
-            json_t* to = json_object();
+            json_t*            to = json_object();
             json_object_set_new(to, "provider", json_string(tgt->provider));
             json_object_set_new(to, "endpoint", json_string(tgt->endpoint));
             json_object_set_new(to, "upstream_key_ref", json_string(tgt->upstream_key));
@@ -585,8 +713,8 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
 }
 
 static int
-model_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest,
-            const void* req_body)
+model_patch(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
 {
     if (rest[0] == '\0') {
         return finish_error(status, body, len, 404, "not_found", "model name not found");
@@ -678,7 +806,8 @@ model_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char
 /* ------------------------------------------------------------ providers */
 
 static void
-mask_api_key(const char* raw_or_ref, char* out, size_t out_cap, const uint8_t* master, int have_master)
+mask_api_key(
+    const char* raw_or_ref, char* out, size_t out_cap, const uint8_t* master, int have_master)
 {
     char plain[1024];
     plain[0] = '\0';
@@ -702,7 +831,7 @@ mask_api_key(const char* raw_or_ref, char* out, size_t out_cap, const uint8_t* m
         snprintf(out, out_cap, "••••••••");
         return;
     }
-    char prefix[8];
+    char   prefix[8];
     size_t pre_len = (len > 7 && strncmp(plain, "sk-", 3) == 0) ? 3 : 2;
     memcpy(prefix, plain, pre_len);
     prefix[pre_len] = '\0';
@@ -710,28 +839,35 @@ mask_api_key(const char* raw_or_ref, char* out, size_t out_cap, const uint8_t* m
     snprintf(out, out_cap, "%s••••%s", prefix, suffix);
 }
 
-static void
+static int
 process_api_key_for_storage(admin_ctx_t* adm, const char* input_key, char* out_key, size_t out_sz)
 {
     if (input_key == NULL || input_key[0] == '\0') {
         out_key[0] = '\0';
-        return;
+        return 0;
     }
     if (strncmp(input_key, "env:", 4) == 0 || strncmp(input_key, "pg:", 3) == 0) {
         snprintf(out_key, out_sz, "%s", input_key);
-        return;
+        return 0;
     }
     if (adm->ac != NULL && adm->ac->router != NULL && adm->ac->router->have_master) {
         char enc[1024];
-        if (secret_encrypt(adm->ac->router->master, input_key, strlen(input_key), enc, sizeof enc) == 0) {
+        if (secret_encrypt(
+                adm->ac->router->master, input_key, strlen(input_key), enc, sizeof enc) == 0) {
             /* "pg:" + enc + NUL: enc must fit out_sz-4 or the value is unusable; fall through to plaintext copy. Width caps -Werror=format-truncation. */
             if (strlen(enc) + 4 <= out_sz) {
                 snprintf(out_key, out_sz, "pg:%.*s", (int)(out_sz - 4), enc);
-                return;
+                return 0;
             }
         }
     }
+    /* Direct plaintext key: only accepted when explicitly allowed */
+    if (!adm->allow_plaintext_keys) {
+        out_key[0] = '\0';
+        return -1;
+    }
     snprintf(out_key, out_sz, "%s", input_key);
+    return 0;
 }
 
 static int
@@ -753,10 +889,11 @@ parse_provider_models_json(const json_t* jarr, char*** out_models, int* out_n)
     if (arr == NULL) {
         return -1;
     }
-    size_t idx;
+    size_t  idx;
     json_t* item;
-    int count = 0;
-    json_array_foreach(jarr, idx, item) {
+    int     count = 0;
+    json_array_foreach(jarr, idx, item)
+    {
         if (json_is_string(item)) {
             const char* s = json_string_value(item);
             if (s != NULL && s[0] != '\0') {
@@ -796,21 +933,31 @@ sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
                 copy_field(existing.provider, sizeof existing.provider, p->provider_type);
             }
             if (existing.n_targets > 0) {
-                copy_field(existing.targets[0].endpoint, sizeof existing.targets[0].endpoint, p->endpoint);
-                copy_field(existing.targets[0].upstream_key_ref, sizeof existing.targets[0].upstream_key_ref, p->api_key);
+                copy_field(
+                    existing.targets[0].endpoint, sizeof existing.targets[0].endpoint, p->endpoint);
+                copy_field(existing.targets[0].upstream_key_ref,
+                           sizeof existing.targets[0].upstream_key_ref,
+                           p->api_key);
                 if (p->provider_type[0] != '\0') {
-                    copy_field(existing.targets[0].provider, sizeof existing.targets[0].provider, p->provider_type);
+                    copy_field(existing.targets[0].provider,
+                               sizeof existing.targets[0].provider,
+                               p->provider_type);
                 }
-                ops->update_model(ops->ctx, &existing, MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED | MMASK_TARGETS);
+                ops->update_model(ops->ctx,
+                                  &existing,
+                                  MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED | MMASK_TARGETS);
             } else {
-                ops->update_model(ops->ctx, &existing, MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED);
+                ops->update_model(
+                    ops->ctx, &existing, MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED);
             }
             model_rec_free(&existing);
         } else {
             model_rec_t m;
             memset(&m, 0, sizeof m);
             copy_field(m.name, sizeof m.name, m_name);
-            copy_field(m.provider, sizeof m.provider, p->provider_type[0] != '\0' ? p->provider_type : "openai");
+            copy_field(m.provider,
+                       sizeof m.provider,
+                       p->provider_type[0] != '\0' ? p->provider_type : "openai");
             copy_field(m.endpoint, sizeof m.endpoint, p->endpoint);
             copy_field(m.upstream_key_ref, sizeof m.upstream_key_ref, p->api_key);
             copy_field(m.lb_policy, sizeof m.lb_policy, "priority");
@@ -849,7 +996,16 @@ provider_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const v
     snprintf(p.provider_type, sizeof p.provider_type, "%s", ptype);
 
     const char* key = jstring(jbody, "api_key", "");
-    process_api_key_for_storage(adm, key, p.api_key, sizeof p.api_key);
+    if (process_api_key_for_storage(adm, key, p.api_key, sizeof p.api_key) != 0) {
+        json_decref(jbody);
+        return finish_error(status,
+                            body,
+                            len,
+                            400,
+                            "provider_key_required",
+                            "set AIGATE_MASTER_KEY to encrypt provider keys, or enable "
+                            "AIGATE_ALLOW_PLAINTEXT_KEYS=1");
+    }
 
     json_t* jenabled = json_object_get(jbody, "enabled");
     p.enabled = (jenabled == NULL || json_is_true(jenabled));
@@ -862,10 +1018,11 @@ provider_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const v
     json_decref(jbody);
 
     const pg_ops_t* ops = pg_store_ops(adm->ps);
-    long new_id = 0;
+    long            new_id = 0;
     if (ops->create_provider(ops->ctx, &p, &new_id) != 0) {
         provider_rec_free(&p);
-        return finish_error(status, body, len, 400, "bad_request", "provider create failed (duplicate name?)");
+        return finish_error(
+            status, body, len, 400, "bad_request", "provider create failed (duplicate name?)");
     }
     p.id = new_id;
 
@@ -888,14 +1045,14 @@ provider_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
         return -1;
     }
     const pg_ops_t* ops = pg_store_ops(adm->ps);
-    int n = 0;
+    int             n = 0;
     if (ops->list_providers(ops->ctx, recs, PROVIDER_LIST_CAP, &n) != 0) {
         free(recs);
         return finish_error(status, body, len, 500, "internal_error", "provider list failed");
     }
 
     const uint8_t* master = NULL;
-    int have_master = 0;
+    int            have_master = 0;
     if (adm->ac != NULL && adm->ac->router != NULL && adm->ac->router->have_master) {
         master = adm->ac->router->master;
         have_master = 1;
@@ -933,7 +1090,8 @@ provider_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
 }
 
 static int
-provider_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
+provider_patch(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
 {
     if (rest[0] == '\0') {
         return finish_error(status, body, len, 404, "not_found", "provider id not found");
@@ -943,7 +1101,7 @@ provider_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const ch
         return finish_error(status, body, len, 400, "bad_request", "invalid provider id");
     }
     const pg_ops_t* ops = pg_store_ops(adm->ps);
-    provider_rec_t existing;
+    provider_rec_t  existing;
     if (ops->get_provider(ops->ctx, id, &existing) != 0) {
         return finish_error(status, body, len, 404, "not_found", "provider not found");
     }
@@ -953,7 +1111,7 @@ provider_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const ch
         provider_rec_free(&existing);
         return finish_error(status, body, len, 400, "bad_request", "invalid json body");
     }
-    int mask = 0;
+    int            mask = 0;
     provider_rec_t p = existing;
 
     json_t* v = json_object_get(jbody, "provider_type");
@@ -971,7 +1129,17 @@ provider_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const ch
         const char* raw_key = json_string_value(v);
         /* If user provided a new key and didn't just submit masked dots */
         if (strstr(raw_key, "••••") == NULL && raw_key[0] != '\0') {
-            process_api_key_for_storage(adm, raw_key, p.api_key, sizeof p.api_key);
+            if (process_api_key_for_storage(adm, raw_key, p.api_key, sizeof p.api_key) != 0) {
+                provider_rec_free(&p);
+                json_decref(jbody);
+                return finish_error(status,
+                                    body,
+                                    len,
+                                    400,
+                                    "provider_key_required",
+                                    "set AIGATE_MASTER_KEY to encrypt provider keys, or enable "
+                                    "AIGATE_ALLOW_PLAINTEXT_KEYS=1");
+            }
             mask |= PMASK_API_KEY;
         }
     }
@@ -983,7 +1151,7 @@ provider_patch(admin_ctx_t* adm, int* status, char** body, size_t* len, const ch
     v = json_object_get(jbody, "models");
     if (v != NULL && json_is_array(v)) {
         char** new_models = NULL;
-        int n_new = 0;
+        int    n_new = 0;
         if (parse_provider_models_json(v, &new_models, &n_new) == 0) {
             for (int i = 0; i < p.n_models; i++) {
                 free(p.models[i]);
@@ -1062,7 +1230,7 @@ query_param(const char* query, const char* field, char* out, size_t cap)
     if (query == NULL || field == NULL || field[0] == '\0') {
         return 0;
     }
-    size_t flen = strlen(field);
+    size_t      flen = strlen(field);
     const char* p = query;
     while (p != NULL && *p != '\0') {
         size_t seglen = strcspn(p, "&");
@@ -1102,7 +1270,8 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
         time_t now = time(NULL);
         t_from = now - (now % 86400) - 6 * 86400;
     } else if (parse_day(from, &t_from) != 0) {
-        return finish_error(status, body, len, 400, "bad_request", "bad from date (use YYYY-MM-DD)");
+        return finish_error(
+            status, body, len, 400, "bad_request", "bad from date (use YYYY-MM-DD)");
     }
     if (to[0] == '\0') {
         time_t now = time(NULL);
@@ -1116,9 +1285,14 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
         return -1;
     }
     int n = 0;
-    int rc = pg_store_ops(adm->ps)->query_usage(
-        pg_store_ops(adm->ps)->ctx, key_id, model[0] != '\0' ? model : NULL, t_from, t_to,
-        rows, USAGE_LIST_CAP, &n);
+    int rc = pg_store_ops(adm->ps)->query_usage(pg_store_ops(adm->ps)->ctx,
+                                                key_id,
+                                                model[0] != '\0' ? model : NULL,
+                                                t_from,
+                                                t_to,
+                                                rows,
+                                                USAGE_LIST_CAP,
+                                                &n);
     if (rc != 0) {
         free(rows);
         return finish_error(status, body, len, 500, "internal_error", "usage query failed");
@@ -1148,17 +1322,38 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
 /* ------------------------------------------------------------ dispatch */
 
 int
-admin_dispatch(admin_ctx_t* adm, const char* uri, const char* method, const char* bearer,
-               const void* body, size_t body_len, int* out_status, char** out_body, size_t* out_len)
+admin_dispatch(admin_ctx_t* adm,
+               const char*  uri,
+               const char*  method,
+               const char*  client_ip,
+               const char*  bearer,
+               const void*  body,
+               size_t       body_len,
+               int*         out_status,
+               char**       out_body,
+               size_t*      out_len)
 {
     (void)body_len;
     *out_status = 401;
     *out_body = NULL;
     *out_len = 0;
 
-    if (!admin_auth_ok(adm, bearer)) {
-        return finish_error(out_status, out_body, out_len, 401, "auth_error", "invalid admin token");
+    /* lockout pre-check: skip the token work when the peer is inside a window */
+    if (lockout_hit(client_ip)) {
+        return finish_error(out_status,
+                            out_body,
+                            out_len,
+                            429,
+                            "locked_out",
+                            "too many failed admin attempts; retry later");
     }
+
+    if (!admin_auth_ok(adm, bearer)) {
+        lockout_fail(client_ip);
+        return finish_error(
+            out_status, out_body, out_len, 401, "auth_error", "invalid admin token");
+    }
+    lockout_clear(client_ip);
 
     const char* qmark = strchr(uri, '?');
     char        path[256];

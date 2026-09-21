@@ -79,7 +79,10 @@ CREATE TABLE IF NOT EXISTS providers (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO schema_migrations(version) VALUES (4) ON CONFLICT (version) DO NOTHING;
+-- Migration v5: BIGINT quota + model name length guard (matches C 128 cap)
+ALTER TABLE api_keys ALTER COLUMN daily_token_quota TYPE BIGINT;
+ALTER TABLE models ADD CONSTRAINT ck_models_name_len CHECK (char_length(model_name) <= 127);
+INSERT INTO schema_migrations(version) VALUES (5) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */
