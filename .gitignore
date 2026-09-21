@@ -13,3 +13,4 @@ __pycache__/
 .env
 compile_commands.json
 
+build-asan/
