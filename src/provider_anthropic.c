@@ -573,7 +573,7 @@ anthropic_bridge_feed(anthropic_bridge_t* b, const void* chunk, size_t len)
                 bridge_process_line(b, b->line_buf);
             } else {
                 AIGATE_LOG_WARN("stream line truncated for model %s",
-                                 b->model[0] ? b->model : "unknown");
+                                b->model[0] ? b->model : "unknown");
             }
             b->line_len = 0;
             p = nl + 1;
@@ -585,7 +585,7 @@ anthropic_bridge_feed(anthropic_bridge_t* b, const void* chunk, size_t len)
                 b->line_buf[b->line_len] = '\0';
             } else {
                 AIGATE_LOG_WARN("stream line truncated for model %s",
-                                 b->model[0] ? b->model : "unknown");
+                                b->model[0] ? b->model : "unknown");
                 b->line_len = 0;
             }
             p = end;

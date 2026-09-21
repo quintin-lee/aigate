@@ -79,13 +79,8 @@ main(void)
     }
 
     /* 5. Start CivetWeb transport */
-    transport_civetweb_t* cw =
-        transport_civetweb_start(&core,
-                                  ps,
-                                  cfg.admin_token_hash,
-                                  cfg.listen,
-                                  cfg.metrics_acl,
-                                  cfg.max_body_bytes);
+    transport_civetweb_t* cw = transport_civetweb_start(
+        &core, ps, cfg.admin_token_hash, cfg.listen, cfg.metrics_acl, cfg.max_body_bytes);
     if (cw == NULL) {
         AIGATE_LOG_ERROR("main: failed to start HTTP transport on %s", cfg.listen);
         aigate_core_shutdown(&core);

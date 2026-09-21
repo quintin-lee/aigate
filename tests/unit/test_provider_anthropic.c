@@ -266,8 +266,8 @@ tcap_write_fail(void* impl, const void* buf, size_t len, bool fin)
 
 TEST_CASE(test_anthropic_bridge_client_abort)
 {
-    struct test_cap        c = {0};
-    aigate_response_ctx    rc = {0};
+    struct test_cap     c = {0};
+    aigate_response_ctx rc = {0};
     rc.impl = &c;
     rc.set_header = tcap_set_header;
     rc.write = tcap_write_fail;
@@ -279,7 +279,7 @@ TEST_CASE(test_anthropic_bridge_client_abort)
     const char* chunk = "event: content_block_delta\r\n"
                         "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":"
                         "{\"type\":\"text_delta\",\"text\":\"hi\"}}\r\n\r\n";
-    int fr = anthropic_bridge_feed(&bridge, chunk, strlen(chunk));
+    int         fr = anthropic_bridge_feed(&bridge, chunk, strlen(chunk));
     TEST_ASSERT(fr == -1, "feed returns -1 after client abort");
     TEST_ASSERT(bridge.aborted, "bridge.aborted set");
 }

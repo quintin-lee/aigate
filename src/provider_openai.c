@@ -292,7 +292,7 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
                 openai_stream_process_line(acc, acc->line_buf);
             } else {
                 AIGATE_LOG_WARN("stream line truncated for model %s",
-                                 acc->model[0] ? acc->model : "unknown");
+                                acc->model[0] ? acc->model : "unknown");
             }
             acc->line_len = 0;
             p = nl + 1;
@@ -304,7 +304,7 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
                 acc->line_buf[acc->line_len] = '\0';
             } else {
                 AIGATE_LOG_WARN("stream line truncated for model %s",
-                                 acc->model[0] ? acc->model : "unknown");
+                                acc->model[0] ? acc->model : "unknown");
                 acc->line_len = 0;
             }
             p = end;

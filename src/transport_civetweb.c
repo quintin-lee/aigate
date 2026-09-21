@@ -23,7 +23,7 @@ struct transport_civetweb {
     char               admin_token_hash[65];
     char               metrics_acl[256];
     admin_ctx_t        adm;
-    long             max_body_bytes;
+    long               max_body_bytes;
 };
 
 struct cw_response_state {
@@ -169,8 +169,11 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     /* Enforce body size cap */
     if (ri->content_length > cw->max_body_bytes) {
         AIGATE_LOG_WARN("request body too large (%lld bytes, cap %ld) from %s",
-                        (long long)ri->content_length, cw->max_body_bytes, ri->remote_addr);
-        const char* err413 = "{\"error\":{\"message\":\"request body too large\",\"type\":\"payload_too_large\",\"code\":413}}";
+                        (long long)ri->content_length,
+                        cw->max_body_bytes,
+                        ri->remote_addr);
+        const char* err413 = "{\"error\":{\"message\":\"request body too "
+                             "large\",\"type\":\"payload_too_large\",\"code\":413}}";
         send_http_error_json(conn, 413, err413, (size_t)strlen(err413));
         return 1;
     }
@@ -218,8 +221,11 @@ handle_admin(struct mg_connection* conn, void* cbdata)
     /* Enforce body size cap */
     if (ri->content_length > cw->max_body_bytes) {
         AIGATE_LOG_WARN("request body too large (%lld bytes, cap %ld) from %s",
-                        (long long)ri->content_length, cw->max_body_bytes, ri->remote_addr);
-        const char* err413 = "{\"error\":{\"message\":\"request body too large\",\"type\":\"payload_too_large\",\"code\":413}}";
+                        (long long)ri->content_length,
+                        cw->max_body_bytes,
+                        ri->remote_addr);
+        const char* err413 = "{\"error\":{\"message\":\"request body too "
+                             "large\",\"type\":\"payload_too_large\",\"code\":413}}";
         send_http_error_json(conn, 413, err413, (size_t)strlen(err413));
         return 1;
     }

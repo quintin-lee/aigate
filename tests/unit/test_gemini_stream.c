@@ -160,7 +160,7 @@ TEST_CASE(test_gemini_streaming_client_abort)
     /* A content delta triggers an output write; the write fails, so feed must abort. */
     const char* chunk = "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": "
                         "\"Hi\"}], \"role\": \"model\"}}]}\n\n";
-    int feed_rc = g_provider_gemini.stream_bridge_feed(b, chunk, strlen(chunk));
+    int         feed_rc = g_provider_gemini.stream_bridge_feed(b, chunk, strlen(chunk));
     TEST_ASSERT(feed_rc == -1, "feed returns -1 on client abort, got %d", feed_rc);
 
     g_provider_gemini.stream_bridge_free(b);

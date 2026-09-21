@@ -56,10 +56,10 @@ test_openai_embeddings_parse(void)
                       "\"embedding\":[0.1,0.2]}],"
                       "\"model\":\"text-embedding-3-small\",\"usage\":{\"prompt_tokens\":14,"
                       "\"total_tokens\":14}}";
-    int    status = 0;
-    char*  out_body = NULL;
-    size_t out_len = 0;
-    long   ptok = 0;
+    int         status = 0;
+    char*       out_body = NULL;
+    size_t      out_len = 0;
+    long        ptok = 0;
 
     int rc = provider_openai_parse_embeddings(
         raw, strlen(raw), "text-embedding-3-small", &status, &out_body, &out_len, &ptok);
@@ -212,10 +212,10 @@ test_gemini_embeddings_parse_batch(void)
 {
     const char* raw = "{\"embeddings\":[{\"values\":[0.1,0.2]},{\"values\":[0.3,0.4]}],"
                       "\"usageMetadata\":{\"promptTokenCount\":15}}";
-    int    status = 0;
-    char*  out_body = NULL;
-    size_t out_len = 0;
-    long   ptok = 0;
+    int         status = 0;
+    char*       out_body = NULL;
+    size_t      out_len = 0;
+    long        ptok = 0;
 
     int rc = provider_gemini_parse_embeddings(
         raw, strlen(raw), "text-embedding-004", &status, &out_body, &out_len, &ptok);
@@ -242,10 +242,10 @@ test_gemini_embeddings_parse_error(void)
 {
     const char* raw = "{\"error\":{\"code\":400,\"message\":\"Invalid "
                       "argument\",\"status\":\"INVALID_ARGUMENT\"}}";
-    int    status = 0;
-    char*  out_body = NULL;
-    size_t out_len = 0;
-    long   ptok = 0;
+    int         status = 0;
+    char*       out_body = NULL;
+    size_t      out_len = 0;
+    long        ptok = 0;
 
     int rc = provider_gemini_parse_embeddings(
         raw, strlen(raw), "text-embedding-004", &status, &out_body, &out_len, &ptok);

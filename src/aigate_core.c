@@ -118,7 +118,6 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return 0;
     }
 
-
     /* --- rate limit (before /v1/models and model routing so every data-plane
      *  request, including GET /v1/models, counts against the key's QPS) --- */
     long retry_ms = 0;
@@ -368,7 +367,8 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
 
             if (!is_failover && status >= 400) {
                 if (ubody != NULL && urc == 0) {
-                    um_record(ac->um, krec.key_id, model, status, 0, 0, 0, total_lat, target->provider);
+                    um_record(
+                        ac->um, krec.key_id, model, status, 0, 0, 0, total_lat, target->provider);
                     int rv = aigate_write_json(rc, status, ubody, ulen);
                     free(ubody);
                     json_decref(jbody);

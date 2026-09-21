@@ -230,48 +230,48 @@ server_thread(void* arg)
             const char* body = "{\"object\":\"list\",\"data\":[{\"object\":\"embedding\",\"index\":"
                                "0,\"embedding\":[0.1,0.2,0.3]}],\"model\":\"text-embedding-3-"
                                "small\",\"usage\":{\"prompt_tokens\":8,\"total_tokens\":8}}";
-            char resp[2048];
-            int  blen = snprintf(resp,
-                                 sizeof resp,
-                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                                 "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                                 (int)strlen(body),
-                                 body);
+            char        resp[2048];
+            int         blen = snprintf(resp,
+                                        sizeof resp,
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                        "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                        (int)strlen(body),
+                                        body);
             write(cfd, resp, (size_t)blen);
         } else if (strstr(path, ":embedContent") != NULL) {
             const char* body = "{\"embedding\":{\"values\":[0.05,0.15,0.25]},\"usageMetadata\":{"
                                "\"promptTokenCount\":6}}";
-            char resp[2048];
-            int  blen = snprintf(resp,
-                                 sizeof resp,
-                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                                 "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                                 (int)strlen(body),
-                                 body);
+            char        resp[2048];
+            int         blen = snprintf(resp,
+                                        sizeof resp,
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                        "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                        (int)strlen(body),
+                                        body);
             write(cfd, resp, (size_t)blen);
         } else if (strstr(path, ":batchEmbedContents") != NULL) {
             const char* body = "{\"embeddings\":[{\"values\":[0.05,0.15]},{\"values\":[0.25,0.35]}]"
                                ",\"usageMetadata\":{\"promptTokenCount\":12}}";
-            char resp[2048];
-            int  blen = snprintf(resp,
-                                 sizeof resp,
-                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                                 "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                                 (int)strlen(body),
-                                 body);
+            char        resp[2048];
+            int         blen = snprintf(resp,
+                                        sizeof resp,
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                        "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                        (int)strlen(body),
+                                        body);
             write(cfd, resp, (size_t)blen);
         } else if (strstr(path, ":generateContent") != NULL && strstr(path, "alt=sse") == NULL) {
             const char* body = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello from "
                                "Gemini\"}],\"role\":\"model\"},\"finishReason\":\"STOP\",\"index\":"
                                "0}],\"usageMetadata\":{\"promptTokenCount\":9,"
                                "\"candidatesTokenCount\":5,\"totalTokenCount\":14}}";
-            char resp[2048];
-            int  blen = snprintf(resp,
-                                 sizeof resp,
-                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                                 "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                                 (int)strlen(body),
-                                 body);
+            char        resp[2048];
+            int         blen = snprintf(resp,
+                                        sizeof resp,
+                                        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                        "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                        (int)strlen(body),
+                                        body);
             write(cfd, resp, (size_t)blen);
         } else if (strstr(path, ":streamGenerateContent") != NULL ||
                    strstr(path, "alt=sse") != NULL) {

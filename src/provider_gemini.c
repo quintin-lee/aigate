@@ -471,7 +471,7 @@ gemini_bridge_process_line(gemini_bridge_t* b, const char* line)
             int  w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
             if (w >= (int)sizeof sse_line) {
                 AIGATE_LOG_WARN("stream sse chunk truncated for model %s",
-                                 b->model[0] ? b->model : "unknown");
+                                b->model[0] ? b->model : "unknown");
             }
             free(packed);
             gemini_bridge_send_chunk(b, sse_line);
@@ -506,7 +506,7 @@ gemini_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
                 }
             } else {
                 AIGATE_LOG_WARN("stream line truncated for model %s",
-                                 b->model[0] ? b->model : "unknown");
+                                b->model[0] ? b->model : "unknown");
             }
             b->line_len = 0;
             p = nl + 1;
@@ -518,7 +518,7 @@ gemini_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
                 b->line_buf[b->line_len] = '\0';
             } else {
                 AIGATE_LOG_WARN("stream line truncated for model %s",
-                                 b->model[0] ? b->model : "unknown");
+                                b->model[0] ? b->model : "unknown");
                 b->line_len = 0;
             }
             p = end;
@@ -555,7 +555,7 @@ gemini_stream_bridge_finish(stream_bridge_t* bridge)
             int  w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
             if (w >= (int)sizeof sse_line) {
                 AIGATE_LOG_WARN("stream sse chunk truncated for model %s",
-                                 b->model[0] ? b->model : "unknown");
+                                b->model[0] ? b->model : "unknown");
             }
             free(packed);
             gemini_bridge_send_chunk(b, sse_line);

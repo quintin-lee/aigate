@@ -116,7 +116,6 @@ f_flush_rows(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
-
 static int
 f_list_models(void* ctx, model_rec_t* out, int cap, int* n)
 {

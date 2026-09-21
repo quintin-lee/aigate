@@ -12,7 +12,7 @@ typedef struct aigate_config {
     int  upstream_timeout_ms;  /* default 60000, range (0, 600000] */
     char metrics_acl[256];     /* comma-separated IPv4 CIDRs, default "127.0.0.1" */
     int  usage_flush_s;        /* AIGATE_USAGE_FLUSH_S, default 5, range [1,3600] */
-    long max_body_bytes;      /* AIGATE_MAX_BODY_BYTES, default 10MiB, range (0,1GiB] */
+    long max_body_bytes;       /* AIGATE_MAX_BODY_BYTES, default 10MiB, range (0,1GiB] */
 } aigate_config;
 
 /** @brief Fill @p out from environment variables.

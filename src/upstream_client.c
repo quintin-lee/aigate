@@ -16,7 +16,7 @@ curl_init_once(void)
     curl_global_init(CURL_GLOBAL_DEFAULT);
 }
 
-static pthread_key_t g_curl_tkey;
+static pthread_key_t  g_curl_tkey;
 static pthread_once_t g_curl_tkey_once = PTHREAD_ONCE_INIT;
 static void
 curl_tkey_init(void)
