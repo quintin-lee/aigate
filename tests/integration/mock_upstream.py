@@ -29,7 +29,9 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
 
         if "/fail" in self.path:
             status_code = 500
-            if "429" in self.path:
+            if "400" in self.path:
+                status_code = 400
+            elif "429" in self.path:
                 status_code = 429
             elif "502" in self.path:
                 status_code = 502

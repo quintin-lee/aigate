@@ -970,5 +970,73 @@ def test_body_size_cap_413(gateway):
     assert err["type"] == "payload_too_large"
     assert err["code"] == 413
 
+def test_upstream_400_passthrough(gateway):
+    """A non-failover upstream 400 is passed through to the client verbatim."""
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "test-400-passthrough-model"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": f"{mock_url}/fail400",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={"name": "passthrough-key", "allowed_models": [model_name]},
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={"model": model_name, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    # Upstream 400 body is forwarded verbatim instead of a generic 502
+    assert resp.status_code == 400, resp.text
+    assert resp.json()["error"] == "simulated failure 400"
+
+
+def test_admin_lockout_429(gateway):
+    """10 failed admin auth attempts from one IP lock that IP out (429).
+
+    Runs last: the 300s lockout window blocks this client IP from further
+    admin calls, including correct tokens (by design)."""
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+
+    for _ in range(10):
+        r = requests.get(
+            f"{base_url}/admin/v1/keys",
+            headers={"Authorization": "Bearer definitely-wrong-token"},
+        )
+        assert r.status_code == 401, r.text
+
+    r = requests.get(
+        f"{base_url}/admin/v1/keys",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert r.status_code == 429, r.text
+    err = r.json()["error"]
+    assert err["type"] == "locked_out"
+
 
 

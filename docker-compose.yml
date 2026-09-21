@@ -19,8 +19,8 @@ services:
       context: .
       network: host
     restart: unless-stopped
-    ports:
-      - "${AIGATE_LISTEN_PORT:-8080}:8080"
+    # host network: published ports are ignored by docker (warned and
+    # skipped). The listen port is AIGATE_LISTEN in the environment below.
     environment:
       AIGATE_LISTEN: ":8080"
       AIGATE_PG_DSN: "host=postgres dbname=aigate user=aigate password=${POSTGRES_PASSWORD:-changeme}"
