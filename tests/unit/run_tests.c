@@ -72,6 +72,7 @@ main(void)
     extern void test_upstream_fail_all_toggle(void);
     extern void test_um_counters_and_drain(void);
     extern void test_um_drain_fail_requeue(void);
+    extern void test_um_provider_metering(void);
     extern void test_metrics_acl(void);
     extern void test_metrics_failover(void);
     extern void test_core_pipeline(void);
@@ -121,6 +122,7 @@ main(void)
     test_register("upstream_fail_all", test_upstream_fail_all_toggle);
     test_register("um_counters", test_um_counters_and_drain);
     test_register("um_drain_fail_requeue", test_um_drain_fail_requeue);
+    test_register("um_provider_metering", test_um_provider_metering);
     test_register("metrics_acl", test_metrics_acl);
     test_register("metrics_failover", test_metrics_failover);
     test_register("core_pipeline", test_core_pipeline);

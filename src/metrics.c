@@ -64,10 +64,10 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
     rem -= (size_t)n;
 
     if (um != NULL) {
-        char provs[8][32];
+        char provs[16][32];
         int  nprov = 0;
-        /* re-derive provider names through the meter accessor; cap 8 */
-        nprov = um_provider_names(um, (char (*)[32])provs, 8);
+        /* re-derive provider names through the meter accessor; cap 16 */
+        nprov = um_provider_names(um, (char (*)[32])provs, 16);
 
         for (int i = 0; i < nprov; i++) {
             const char* p = provs[i];

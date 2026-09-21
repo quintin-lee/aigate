@@ -171,6 +171,45 @@ TEST_CASE(test_um_drain_fail_requeue)
     pg_store_close(ps);
 }
 
+TEST_CASE(test_um_provider_metering)
+{
+    struct um_db db;
+    memset(&db, 0, sizeof db);
+    pg_store_t* ps = open_um_store(&db);
+    TEST_ASSERT(ps != NULL, "store open");
+    usage_meter_t* um = usage_meter_new(ps, NULL, 0); /* no worker: manual drain */
+    TEST_ASSERT(um != NULL, "meter new");
+
+    /* Every label the adapter registry can route must be metered; anything
+     * else is skipped. 9 labels vs 16 slots: no overflow. */
+    const char* all_labels[] = {"openai",
+                                "ollama",
+                                "azure",
+                                "deepseek",
+                                "siliconflow",
+                                "vllm",
+                                "anthropic",
+                                "gemini",
+                                "google"};
+    for (size_t i = 0; i < (sizeof all_labels) / (sizeof all_labels[0]); i++) {
+        um_record(um, 1, "m", 200, 0, 0, 0, 1000000, all_labels[i]);
+    }
+    um_record(um, 1, "m", 200, 0, 0, 0, 1000000, "nonexistent");
+    um_record(um, 1, "m", 200, 0, 0, 0, 1000000, NULL);
+
+    char names[16][32];
+    int  n = um_provider_names(um, names, 16);
+    TEST_ASSERT(n == 9, "9 providers metered, got %d", n);
+    for (int i = 0; i < n; i++) {
+        TEST_ASSERT(um_provider_sampled(um, names[i]) == 1, "provider %s sampled once", names[i]);
+    }
+    TEST_ASSERT(um_provider_sampled(um, "vllm") == 1, "vllm metered (regression)");
+    TEST_ASSERT(um_provider_sampled(um, "google") == 1, "google metered (regression)");
+    TEST_ASSERT(um_provider_sampled(um, "nonexistent") == 0, "unknown not metered");
+    usage_meter_free(um);
+    pg_store_close(ps);
+}
+
 TEST_CASE(test_metrics_acl)
 {
     TEST_ASSERT(metrics_acl_allows("127.0.0.1", "") == 1, "empty acl allows");

@@ -2,6 +2,7 @@
  *  @brief Usage metering: atomics + HDR latency + 5s PG batch flush. */
 #include "usage_meter.h"
 #include "aigate_log.h"
+#include "provider_adapter.h"
 
 #include <stdatomic.h>
 #include <hdr/hdr_histogram.h>
@@ -12,7 +13,7 @@
 #include <time.h>
 
 #define UM_ACC_CAP 4096
-#define UM_MAX_PROVS 8
+#define UM_MAX_PROVS 16
 
 typedef struct {
     int    in_use;
@@ -66,18 +67,14 @@ acc_hash(long key_id, const char* model)
     return h;
 }
 
-static int
-is_known_provider(const char* p)
-{
-    return p && (strcmp(p, "openai") == 0 || strcmp(p, "ollama") == 0 || strcmp(p, "azure") == 0 ||
-                 strcmp(p, "anthropic") == 0 || strcmp(p, "gemini") == 0 ||
-                 strcmp(p, "deepseek") == 0 || strcmp(p, "siliconflow") == 0);
-}
+/* Gate latency sampling on the same source of truth as routing: a provider
+ * label is metered iff the adapter registry resolves it. Unknown labels are
+ * silently skipped, and the UM_MAX_PROVS slots backstop any label overflow. */
 
 static um_prov_t*
 prov_slot(usage_meter_t* um, const char* p)
 {
-    if (!is_known_provider(p)) {
+    if (p == NULL || provider_find(p) == NULL) {
         return NULL;
     }
     for (int i = 0; i < UM_MAX_PROVS; i++) {
