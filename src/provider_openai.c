@@ -10,12 +10,10 @@
 int
 provider_openai_supports(const char* provider)
 {
-    return provider != NULL && (strcmp(provider, "openai") == 0 ||
-                                strcmp(provider, "ollama") == 0 ||
-                                strcmp(provider, "azure") == 0 ||
-                                strcmp(provider, "deepseek") == 0 ||
-                                strcmp(provider, "siliconflow") == 0 ||
-                                strcmp(provider, "vllm") == 0);
+    return provider != NULL &&
+           (strcmp(provider, "openai") == 0 || strcmp(provider, "ollama") == 0 ||
+            strcmp(provider, "azure") == 0 || strcmp(provider, "deepseek") == 0 ||
+            strcmp(provider, "siliconflow") == 0 || strcmp(provider, "vllm") == 0);
 }
 
 int
@@ -138,9 +136,15 @@ openai_parse_chat_response(const char* raw_body,
                            long*       out_cached_tok)
 {
     (void)model;
-    if (out_ptok) *out_ptok = 0;
-    if (out_ctok) *out_ctok = 0;
-    if (out_cached_tok) *out_cached_tok = 0;
+    if (out_ptok) {
+        *out_ptok = 0;
+    }
+    if (out_ctok) {
+        *out_ctok = 0;
+    }
+    if (out_cached_tok) {
+        *out_cached_tok = 0;
+    }
     *http_status = 200;
 
     if (raw_body != NULL && raw_len > 0) {
@@ -150,8 +154,12 @@ openai_parse_chat_response(const char* raw_body,
             if (jusage != NULL && json_is_object(jusage)) {
                 json_t* jp = json_object_get(jusage, "prompt_tokens");
                 json_t* jc = json_object_get(jusage, "completion_tokens");
-                if (json_is_integer(jp) && out_ptok) *out_ptok = json_integer_value(jp);
-                if (json_is_integer(jc) && out_ctok) *out_ctok = json_integer_value(jc);
+                if (json_is_integer(jp) && out_ptok) {
+                    *out_ptok = json_integer_value(jp);
+                }
+                if (json_is_integer(jc) && out_ctok) {
+                    *out_ctok = json_integer_value(jc);
+                }
 
                 /* DeepSeek prompt_cache_hit_tokens or OpenAI cached_tokens */
                 json_t* jch = json_object_get(jusage, "prompt_cache_hit_tokens");
@@ -184,8 +192,9 @@ openai_parse_chat_response(const char* raw_body,
 typedef struct {
     aigate_response_ctx* rc;
     bool                 headers_sent;
-    char                 line_buf[4096];
+    char                 line_buf[8192];
     size_t               line_len;
+    char                 model[128];
     long                 prompt_tokens;
     long                 completion_tokens;
     long                 cached_tokens;
@@ -194,12 +203,12 @@ typedef struct {
 static stream_bridge_t*
 openai_bridge_new(aigate_response_ctx* rc, const char* model)
 {
-    (void)model;
     openai_bridge_t* b = calloc(1, sizeof(*b));
     if (b == NULL) {
         return NULL;
     }
     b->rc = rc;
+    snprintf(b->model, sizeof b->model, "%s", model ? model : "");
     return (stream_bridge_t*)b;
 }
 
@@ -226,8 +235,12 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
     if (jusage != NULL && json_is_object(jusage)) {
         json_t* jp = json_object_get(jusage, "prompt_tokens");
         json_t* jc = json_object_get(jusage, "completion_tokens");
-        if (json_is_integer(jp)) acc->prompt_tokens = json_integer_value(jp);
-        if (json_is_integer(jc)) acc->completion_tokens = json_integer_value(jc);
+        if (json_is_integer(jp)) {
+            acc->prompt_tokens = json_integer_value(jp);
+        }
+        if (json_is_integer(jc)) {
+            acc->completion_tokens = json_integer_value(jc);
+        }
 
         json_t* jch = json_object_get(jusage, "prompt_cache_hit_tokens");
         if (json_is_integer(jch)) {
@@ -236,7 +249,9 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
             json_t* jdet = json_object_get(jusage, "prompt_tokens_details");
             if (jdet != NULL && json_is_object(jdet)) {
                 json_t* jcd = json_object_get(jdet, "cached_tokens");
-                if (json_is_integer(jcd)) acc->cached_tokens = json_integer_value(jcd);
+                if (json_is_integer(jcd)) {
+                    acc->cached_tokens = json_integer_value(jcd);
+                }
             }
         }
     }
@@ -275,6 +290,9 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
                 acc->line_len += seg;
                 acc->line_buf[acc->line_len] = '\0';
                 openai_stream_process_line(acc, acc->line_buf);
+            } else {
+                AIGATE_LOG_WARN("stream line truncated for model %s",
+                                 acc->model[0] ? acc->model : "unknown");
             }
             acc->line_len = 0;
             p = nl + 1;
@@ -285,6 +303,8 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
                 acc->line_len += seg;
                 acc->line_buf[acc->line_len] = '\0';
             } else {
+                AIGATE_LOG_WARN("stream line truncated for model %s",
+                                 acc->model[0] ? acc->model : "unknown");
                 acc->line_len = 0;
             }
             p = end;
@@ -314,9 +334,15 @@ static void
 openai_bridge_get_tokens(stream_bridge_t* b, long* out_ptok, long* out_ctok, long* out_cached_tok)
 {
     openai_bridge_t* acc = (openai_bridge_t*)b;
-    if (out_ptok) *out_ptok = acc->prompt_tokens;
-    if (out_ctok) *out_ctok = acc->completion_tokens;
-    if (out_cached_tok) *out_cached_tok = acc->cached_tokens;
+    if (out_ptok) {
+        *out_ptok = acc->prompt_tokens;
+    }
+    if (out_ctok) {
+        *out_ctok = acc->completion_tokens;
+    }
+    if (out_cached_tok) {
+        *out_cached_tok = acc->cached_tokens;
+    }
 }
 
 static void
@@ -339,8 +365,8 @@ provider_openai_build_embeddings(const model_rec_t* route,
     *n_extra_headers = 0;
 
     const char* up_path = "/embeddings";
-    size_t elen = strlen(route->endpoint);
-    bool has_v1 = (strstr(route->endpoint, "/v1") != NULL);
+    size_t      elen = strlen(route->endpoint);
+    bool        has_v1 = (strstr(route->endpoint, "/v1") != NULL);
     if (!has_v1) {
         up_path = "/v1/embeddings";
     }
@@ -363,7 +389,9 @@ provider_openai_parse_embeddings(const char* raw_body,
                                  long*       out_ptok)
 {
     (void)model;
-    if (out_ptok) *out_ptok = 0;
+    if (out_ptok) {
+        *out_ptok = 0;
+    }
     *http_status = 200;
 
     if (raw_body != NULL && raw_len > 0) {
@@ -409,4 +437,3 @@ const provider_adapter_t g_provider_openai = {
     .build_embeddings = provider_openai_build_embeddings,
     .parse_embeddings_response = provider_openai_parse_embeddings,
 };
-

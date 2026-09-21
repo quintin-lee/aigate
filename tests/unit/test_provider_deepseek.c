@@ -12,34 +12,39 @@
 
 TEST_CASE(test_deepseek_reasoning_non_streaming)
 {
-    const char* raw_resp =
-        "{\"id\":\"chatcmpl-ds-test\","
-        "\"object\":\"chat.completion\","
-        "\"choices\":[{"
-        "\"index\":0,"
-        "\"message\":{"
-        "\"role\":\"assistant\","
-        "\"content\":\"The result is 42.\","
-        "\"reasoning_content\":\"Let me ponder the universe and everything...\""
-        "},"
-        "\"finish_reason\":\"stop\""
-        "}],"
-        "\"usage\":{"
-        "\"prompt_tokens\":120,"
-        "\"completion_tokens\":60,"
-        "\"total_tokens\":180,"
-        "\"prompt_cache_hit_tokens\":95,"
-        "\"prompt_cache_miss_tokens\":25"
-        "}}";
+    const char* raw_resp = "{\"id\":\"chatcmpl-ds-test\","
+                           "\"object\":\"chat.completion\","
+                           "\"choices\":[{"
+                           "\"index\":0,"
+                           "\"message\":{"
+                           "\"role\":\"assistant\","
+                           "\"content\":\"The result is 42.\","
+                           "\"reasoning_content\":\"Let me ponder the universe and everything...\""
+                           "},"
+                           "\"finish_reason\":\"stop\""
+                           "}],"
+                           "\"usage\":{"
+                           "\"prompt_tokens\":120,"
+                           "\"completion_tokens\":60,"
+                           "\"total_tokens\":180,"
+                           "\"prompt_cache_hit_tokens\":95,"
+                           "\"prompt_cache_miss_tokens\":25"
+                           "}}";
 
-    int status = 0;
-    char* out_body = NULL;
+    int    status = 0;
+    char*  out_body = NULL;
     size_t out_len = 0;
-    long ptok = 0, ctok = 0, cached_tok = 0;
+    long   ptok = 0, ctok = 0, cached_tok = 0;
 
-    int rc = g_provider_openai.parse_chat_response(
-        raw_resp, strlen(raw_resp), "deepseek-r1", &status,
-        &out_body, &out_len, &ptok, &ctok, &cached_tok);
+    int rc = g_provider_openai.parse_chat_response(raw_resp,
+                                                   strlen(raw_resp),
+                                                   "deepseek-r1",
+                                                   &status,
+                                                   &out_body,
+                                                   &out_len,
+                                                   &ptok,
+                                                   &ctok,
+                                                   &cached_tok);
 
     TEST_ASSERT(rc == 0, "parse ok");
     TEST_ASSERT(status == 200, "status 200");
@@ -83,14 +88,20 @@ TEST_CASE(test_openai_cached_tokens_details)
         "}}"
         "}";
 
-    int status = 0;
-    char* out_body = NULL;
+    int    status = 0;
+    char*  out_body = NULL;
     size_t out_len = 0;
-    long ptok = 0, ctok = 0, cached_tok = 0;
+    long   ptok = 0, ctok = 0, cached_tok = 0;
 
-    int rc = g_provider_openai.parse_chat_response(
-        raw_resp, strlen(raw_resp), "gpt-4o", &status,
-        &out_body, &out_len, &ptok, &ctok, &cached_tok);
+    int rc = g_provider_openai.parse_chat_response(raw_resp,
+                                                   strlen(raw_resp),
+                                                   "gpt-4o",
+                                                   &status,
+                                                   &out_body,
+                                                   &out_len,
+                                                   &ptok,
+                                                   &ctok,
+                                                   &cached_tok);
 
     TEST_ASSERT(rc == 0, "parse ok");
     TEST_ASSERT(ptok == 1000, "ptok 1000");
@@ -141,17 +152,23 @@ TEST_CASE(test_deepseek_streaming_reasoning_and_cache)
     stream_bridge_t* b = g_provider_openai.stream_bridge_new(&rc, "deepseek-r1");
     TEST_ASSERT(b != NULL, "bridge new ok");
 
-    const char* chunk1 =
-        "data: {\"id\":\"ds-stream-1\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Step 1: start thinking...\"}}]}\n\n";
+    const char* chunk1 = "data: "
+                         "{\"id\":\"ds-stream-1\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_"
+                         "content\":\"Step 1: start thinking...\"}}]}\n\n";
     const char* chunk2 =
-        "data: {\"id\":\"ds-stream-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Final conclusion.\"}}]}\n\n";
-    const char* chunk3 =
-        "data: {\"id\":\"ds-stream-1\",\"choices\":[],\"usage\":{\"prompt_tokens\":250,\"completion_tokens\":75,\"prompt_cache_hit_tokens\":180}}\n\n"
-        "data: [DONE]\n\n";
+        "data: {\"id\":\"ds-stream-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Final "
+        "conclusion.\"}}]}\n\n";
+    const char* chunk3 = "data: "
+                         "{\"id\":\"ds-stream-1\",\"choices\":[],\"usage\":{\"prompt_tokens\":250,"
+                         "\"completion_tokens\":75,\"prompt_cache_hit_tokens\":180}}\n\n"
+                         "data: [DONE]\n\n";
 
-    TEST_ASSERT(g_provider_openai.stream_bridge_feed(b, chunk1, strlen(chunk1)) == 0, "feed chunk 1");
-    TEST_ASSERT(g_provider_openai.stream_bridge_feed(b, chunk2, strlen(chunk2)) == 0, "feed chunk 2");
-    TEST_ASSERT(g_provider_openai.stream_bridge_feed(b, chunk3, strlen(chunk3)) == 0, "feed chunk 3");
+    TEST_ASSERT(g_provider_openai.stream_bridge_feed(b, chunk1, strlen(chunk1)) == 0,
+                "feed chunk 1");
+    TEST_ASSERT(g_provider_openai.stream_bridge_feed(b, chunk2, strlen(chunk2)) == 0,
+                "feed chunk 2");
+    TEST_ASSERT(g_provider_openai.stream_bridge_feed(b, chunk3, strlen(chunk3)) == 0,
+                "feed chunk 3");
 
     TEST_ASSERT(g_provider_openai.stream_bridge_finish(b) == 0, "finish ok");
 

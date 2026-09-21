@@ -55,7 +55,8 @@ int provider_anthropic_resp_to_openai(const char* anthropic_resp,
 typedef struct anthropic_bridge {
     aigate_response_ctx* rc;
     bool                 headers_sent;
-    char                 line_buf[4096];
+    bool                 aborted;
+    char                 line_buf[8192];
     size_t               line_len;
     char                 current_event[64];
     char                 msg_id[64];

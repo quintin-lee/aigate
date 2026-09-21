@@ -14,11 +14,11 @@
 #include <string.h>
 
 struct failover_resp {
-    int   status;
-    char  body[4096];
-    int   body_len;
-    char  header_provider[64];
-    bool  headers_sent;
+    int  status;
+    char body[4096];
+    int  body_len;
+    char header_provider[64];
+    bool headers_sent;
 };
 
 static int
@@ -89,7 +89,8 @@ build_failover_ops(struct failover_db* db)
     ops.get_key_by_hash = fo_get_key;
     ops.get_model = fo_get_model;
     ops.flush_usage = (int (*)(void*, const usage_row_t*, int))fo_noop;
-    ops.query_usage = (int (*)(void*, long, const char*, time_t, time_t, usage_row_t*, int, int*))fo_noop;
+    ops.query_usage =
+        (int (*)(void*, long, const char*, time_t, time_t, usage_row_t*, int, int*))fo_noop;
     return ops;
 }
 
@@ -119,14 +120,16 @@ setup_failover_env(struct failover_db* db,
 
     /* Target 1: Priority 0 (primary tier) */
     strcpy(db->model.targets[0].provider, "openai");
-    snprintf(db->model.targets[0].endpoint, sizeof(db->model.targets[0].endpoint), "%s/v1", u1_base);
+    snprintf(
+        db->model.targets[0].endpoint, sizeof(db->model.targets[0].endpoint), "%s/v1", u1_base);
     strcpy(db->model.targets[0].upstream_key, "key1");
     db->model.targets[0].weight = 1;
     db->model.targets[0].priority = 0;
 
     /* Target 2: Priority 1 (backup tier) */
     strcpy(db->model.targets[1].provider, "openai");
-    snprintf(db->model.targets[1].endpoint, sizeof(db->model.targets[1].endpoint), "%s/v1", u2_base);
+    snprintf(
+        db->model.targets[1].endpoint, sizeof(db->model.targets[1].endpoint), "%s/v1", u2_base);
     strcpy(db->model.targets[1].upstream_key, "key2");
     db->model.targets[1].weight = 1;
     db->model.targets[1].priority = 1;
@@ -151,7 +154,8 @@ TEST_CASE(test_failover_on_500_to_backup)
     pg_store_t*        ps = NULL;
     setup_failover_env(&db, &ac, &ps, mock_upstream_base(u1), mock_upstream_base(u2));
 
-    const char* req_json = "{\"model\":\"failover-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    const char* req_json =
+        "{\"model\":\"failover-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
     aigate_request_ctx rq = {
         .method = "POST",
         .path = "/v1/chat/completions",
@@ -174,7 +178,8 @@ TEST_CASE(test_failover_on_500_to_backup)
     TEST_ASSERT(strstr(fr.body, "\"choices\"") != NULL, "valid response body");
     TEST_ASSERT(mock_upstream_request_count(u1) == 1, "target 1 was attempted once");
     TEST_ASSERT(mock_upstream_request_count(u2) == 1, "target 2 served the request");
-    TEST_ASSERT(metrics_get_failover("failover-chat", "openai", "openai") == 1, "metric recorded failover");
+    TEST_ASSERT(metrics_get_failover("failover-chat", "openai", "openai") == 1,
+                "metric recorded failover");
 
     aigate_core_shutdown(&ac);
     pg_store_close(ps);
@@ -196,7 +201,8 @@ TEST_CASE(test_failover_on_429_to_backup)
     pg_store_t*        ps = NULL;
     setup_failover_env(&db, &ac, &ps, mock_upstream_base(u1), mock_upstream_base(u2));
 
-    const char* req_json = "{\"model\":\"failover-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    const char* req_json =
+        "{\"model\":\"failover-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
     aigate_request_ctx rq = {
         .method = "POST",
         .path = "/v1/chat/completions",
@@ -238,7 +244,8 @@ TEST_CASE(test_failover_circuit_breaker_tripping)
     pg_store_t*        ps = NULL;
     setup_failover_env(&db, &ac, &ps, mock_upstream_base(u1), mock_upstream_base(u2));
 
-    const char* req_json = "{\"model\":\"failover-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    const char* req_json =
+        "{\"model\":\"failover-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
     aigate_request_ctx rq = {
         .method = "POST",
         .path = "/v1/chat/completions",

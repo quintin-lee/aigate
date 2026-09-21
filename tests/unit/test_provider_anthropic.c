@@ -23,25 +23,29 @@ TEST_CASE(test_anthropic_build_system_and_defaults)
     snprintf(route.endpoint, sizeof route.endpoint, "http://127.0.0.1:8080");
     snprintf(route.upstream_key, sizeof route.upstream_key, "sk-ant-testkey");
 
-    const char* in_req =
-        "{\"model\":\"claude-3-5-sonnet-20241022\",\"messages\":["
-        "{\"role\":\"system\",\"content\":\"System Rule 1\"},"
-        "{\"role\":\"user\",\"content\":\"Hello Claude\"},"
-        "{\"role\":\"system\",\"content\":\"System Rule 2\"}"
-        "]}";
+    const char* in_req = "{\"model\":\"claude-3-5-sonnet-20241022\",\"messages\":["
+                         "{\"role\":\"system\",\"content\":\"System Rule 1\"},"
+                         "{\"role\":\"user\",\"content\":\"Hello Claude\"},"
+                         "{\"role\":\"system\",\"content\":\"System Rule 2\"}"
+                         "]}";
 
-    char url[512];
+    char        url[512];
     const char* hdrs[4][2];
-    int n_hdrs = 0;
-    char* body = NULL;
-    size_t body_len = 0;
+    int         n_hdrs = 0;
+    char*       body = NULL;
+    size_t      body_len = 0;
 
-    int rc = provider_anthropic_build(&route, in_req, url, sizeof url, hdrs, &n_hdrs, &body, &body_len);
+    int rc =
+        provider_anthropic_build(&route, in_req, url, sizeof url, hdrs, &n_hdrs, &body, &body_len);
     TEST_ASSERT(rc == 0, "build ok");
-    TEST_ASSERT(strcmp(url, "http://127.0.0.1:8080/v1/messages") == 0, "url is /v1/messages, got %s", url);
+    TEST_ASSERT(
+        strcmp(url, "http://127.0.0.1:8080/v1/messages") == 0, "url is /v1/messages, got %s", url);
     TEST_ASSERT(n_hdrs == 2, "2 extra headers");
-    TEST_ASSERT(strcmp(hdrs[0][0], "x-api-key") == 0 && strcmp(hdrs[0][1], "sk-ant-testkey") == 0, "x-api-key");
-    TEST_ASSERT(strcmp(hdrs[1][0], "anthropic-version") == 0 && strcmp(hdrs[1][1], "2023-06-01") == 0, "anthropic-version");
+    TEST_ASSERT(strcmp(hdrs[0][0], "x-api-key") == 0 && strcmp(hdrs[0][1], "sk-ant-testkey") == 0,
+                "x-api-key");
+    TEST_ASSERT(strcmp(hdrs[1][0], "anthropic-version") == 0 &&
+                    strcmp(hdrs[1][1], "2023-06-01") == 0,
+                "anthropic-version");
 
     json_t* out = json_loads(body, 0, NULL);
     TEST_ASSERT(out != NULL, "parsed output json");
@@ -85,15 +89,17 @@ TEST_CASE(test_anthropic_build_params)
         "{\"role\":\"user\",\"content\":\"Hi\"}"
         "],\"max_tokens\":1000,\"temperature\":0.7,\"stop\":[\"STOP\"],\"stream\":true}";
 
-    char url[512];
+    char        url[512];
     const char* hdrs[4][2];
-    int n_hdrs = 0;
-    char* body = NULL;
-    size_t body_len = 0;
+    int         n_hdrs = 0;
+    char*       body = NULL;
+    size_t      body_len = 0;
 
-    int rc = provider_anthropic_build(&route, in_req, url, sizeof url, hdrs, &n_hdrs, &body, &body_len);
+    int rc =
+        provider_anthropic_build(&route, in_req, url, sizeof url, hdrs, &n_hdrs, &body, &body_len);
     TEST_ASSERT(rc == 0, "build ok");
-    TEST_ASSERT(strcmp(url, "http://127.0.0.1:8080/v1/messages") == 0, "endpoint /v1 -> /v1/messages");
+    TEST_ASSERT(strcmp(url, "http://127.0.0.1:8080/v1/messages") == 0,
+                "endpoint /v1 -> /v1/messages");
 
     json_t* out = json_loads(body, 0, NULL);
     TEST_ASSERT(out != NULL, "parsed output json");
@@ -119,14 +125,16 @@ TEST_CASE(test_anthropic_resp_translation)
 {
     const char* ant_resp =
         "{\"id\":\"msg_013Zva2CMHLNnxPQCdQUqGsE\",\"type\":\"message\",\"role\":\"assistant\","
-        "\"model\":\"claude-3-5-sonnet-20241022\",\"content\":[{\"type\":\"text\",\"text\":\"Hello world!\"}],"
+        "\"model\":\"claude-3-5-sonnet-20241022\",\"content\":[{\"type\":\"text\",\"text\":\"Hello "
+        "world!\"}],"
         "\"stop_reason\":\"end_turn\",\"usage\":{\"input_tokens\":12,\"output_tokens\":8}}";
 
-    char* oai_resp = NULL;
+    char*  oai_resp = NULL;
     size_t oai_len = 0;
-    long ptok = 0, ctok = 0;
+    long   ptok = 0, ctok = 0;
 
-    int rc = provider_anthropic_resp_to_openai(ant_resp, "claude-3-5-sonnet", &oai_resp, &oai_len, &ptok, &ctok);
+    int rc = provider_anthropic_resp_to_openai(
+        ant_resp, "claude-3-5-sonnet", &oai_resp, &oai_len, &ptok, &ctok);
     TEST_ASSERT(rc == 0, "resp translation ok");
     TEST_ASSERT(ptok == 12, "input_tokens 12");
     TEST_ASSERT(ctok == 8, "output_tokens 8");
@@ -135,7 +143,8 @@ TEST_CASE(test_anthropic_resp_translation)
     TEST_ASSERT(out != NULL, "parsed translated json");
     if (out != NULL) {
         json_t* jid = json_object_get(out, "id");
-        TEST_ASSERT(jid != NULL && strcmp(json_string_value(jid), "chatcmpl-msg_013Zva2CMHLNnxPQCdQUqGsE") == 0,
+        TEST_ASSERT(jid != NULL && strcmp(json_string_value(jid),
+                                          "chatcmpl-msg_013Zva2CMHLNnxPQCdQUqGsE") == 0,
                     "id prefixed with chatcmpl-");
 
         json_t* jobj = json_object_get(out, "object");
@@ -147,7 +156,8 @@ TEST_CASE(test_anthropic_resp_translation)
         json_t* c0 = json_array_get(jchoices, 0);
         json_t* msg = json_object_get(c0, "message");
         json_t* cnt = json_object_get(msg, "content");
-        TEST_ASSERT(cnt != NULL && strcmp(json_string_value(cnt), "Hello world!") == 0, "content translated");
+        TEST_ASSERT(cnt != NULL && strcmp(json_string_value(cnt), "Hello world!") == 0,
+                    "content translated");
         json_t* fr = json_object_get(c0, "finish_reason");
         TEST_ASSERT(fr != NULL && strcmp(json_string_value(fr), "stop") == 0, "finish_reason stop");
 
@@ -194,7 +204,7 @@ tcap_write(void* impl, const void* buf, size_t len, bool fin)
 
 TEST_CASE(test_anthropic_bridge_streaming)
 {
-    struct test_cap c = {0};
+    struct test_cap     c = {0};
     aigate_response_ctx rc = {0};
     rc.impl = &c;
     rc.set_header = tcap_set_header;
@@ -203,39 +213,75 @@ TEST_CASE(test_anthropic_bridge_streaming)
     anthropic_bridge_t bridge;
     anthropic_bridge_init(&bridge, &rc);
 
-    const char* chunk1 =
-        "event: message_start\r\n"
-        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_stream_test\",\"model\":\"claude-3-5\",\"usage\":{\"input_tokens\":10}}}\r\n\r\n";
+    const char* chunk1 = "event: message_start\r\n"
+                         "data: "
+                         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_stream_test\","
+                         "\"model\":\"claude-3-5\",\"usage\":{\"input_tokens\":10}}}\r\n\r\n";
     anthropic_bridge_feed(&bridge, chunk1, strlen(chunk1));
 
-    const char* chunk2 =
-        "event: content_block_delta\r\n"
-        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello \"}}\r\n\r\n";
+    const char* chunk2 = "event: content_block_delta\r\n"
+                         "data: "
+                         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
+                         "delta\",\"text\":\"Hello \"}}\r\n\r\n";
     anthropic_bridge_feed(&bridge, chunk2, strlen(chunk2));
 
-    const char* chunk3 =
-        "event: content_block_delta\r\n"
-        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"world!\"}}\r\n\r\n";
+    const char* chunk3 = "event: content_block_delta\r\n"
+                         "data: "
+                         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
+                         "delta\",\"text\":\"world!\"}}\r\n\r\n";
     anthropic_bridge_feed(&bridge, chunk3, strlen(chunk3));
 
-    const char* chunk4 =
-        "event: message_delta\r\n"
-        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":20}}\r\n\r\n"
-        "event: message_stop\r\n"
-        "data: {\"type\":\"message_stop\"}\r\n\r\n";
+    const char* chunk4 = "event: message_delta\r\n"
+                         "data: "
+                         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+                         "\"usage\":{\"output_tokens\":20}}\r\n\r\n"
+                         "event: message_stop\r\n"
+                         "data: {\"type\":\"message_stop\"}\r\n\r\n";
     anthropic_bridge_feed(&bridge, chunk4, strlen(chunk4));
 
     anthropic_bridge_finish(&bridge);
 
-    TEST_ASSERT(strstr(c.hdrs, "Content-Type: text/event-stream; charset=utf-8") != NULL, "header text/event-stream");
+    TEST_ASSERT(strstr(c.hdrs, "Content-Type: text/event-stream; charset=utf-8") != NULL,
+                "header text/event-stream");
     TEST_ASSERT(strstr(c.body, "Hello ") != NULL, "body contains Hello ");
     TEST_ASSERT(strstr(c.body, "world!") != NULL, "body contains world!");
-    TEST_ASSERT(strstr(c.body, "\"finish_reason\":\"stop\"") != NULL, "body contains stop finish_reason");
+    TEST_ASSERT(strstr(c.body, "\"finish_reason\":\"stop\"") != NULL,
+                "body contains stop finish_reason");
     TEST_ASSERT(strstr(c.body, "\"prompt_tokens\":10") != NULL, "usage prompt_tokens 10");
     TEST_ASSERT(strstr(c.body, "\"completion_tokens\":20") != NULL, "usage completion_tokens 20");
     TEST_ASSERT(strstr(c.body, "[DONE]") != NULL, "body contains [DONE]");
     TEST_ASSERT(bridge.input_tokens == 10, "bridge input_tokens == 10");
     TEST_ASSERT(bridge.output_tokens == 20, "bridge output_tokens == 20");
+}
+
+static int
+tcap_write_fail(void* impl, const void* buf, size_t len, bool fin)
+{
+    (void)impl;
+    (void)buf;
+    (void)len;
+    (void)fin;
+    return -1; /* simulate a client disconnect */
+}
+
+TEST_CASE(test_anthropic_bridge_client_abort)
+{
+    struct test_cap        c = {0};
+    aigate_response_ctx    rc = {0};
+    rc.impl = &c;
+    rc.set_header = tcap_set_header;
+    rc.write = tcap_write_fail;
+
+    anthropic_bridge_t bridge;
+    anthropic_bridge_init(&bridge, &rc);
+
+    /* feed a content delta: the underlying write fails, so feed must report -1 */
+    const char* chunk = "event: content_block_delta\r\n"
+                        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":"
+                        "{\"type\":\"text_delta\",\"text\":\"hi\"}}\r\n\r\n";
+    int fr = anthropic_bridge_feed(&bridge, chunk, strlen(chunk));
+    TEST_ASSERT(fr == -1, "feed returns -1 after client abort");
+    TEST_ASSERT(bridge.aborted, "bridge.aborted set");
 }
 
 /* -------------------------------- fake ops for pipeline test */
@@ -325,7 +371,7 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
 
     /* 1. Non-streaming call to Claude */
     {
-        struct test_cap c = {0};
+        struct test_cap     c = {0};
         aigate_response_ctx rc = {0};
         rc.impl = &c;
         rc.set_header = tcap_set_header;
@@ -336,17 +382,19 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
         rq.path = "/v1/chat/completions";
         rq.bearer = "claude-key";
         rq.client_ip = "127.0.0.1";
-        const char* b = "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+        const char* b = "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\","
+                        "\"content\":\"hi\"}]}";
         rq.body = b;
         rq.body_len = strlen(b);
 
         int rv = aigate_handle_request(&ac, &rq, &rc);
         TEST_ASSERT(rv == 0, "handle request 0");
         TEST_ASSERT(rc.status == 200, "status 200");
-        TEST_ASSERT(strstr(c.body, "Hello from Claude non-stream") != NULL, "got claude non-stream text");
+        TEST_ASSERT(strstr(c.body, "Hello from Claude non-stream") != NULL,
+                    "got claude non-stream text");
 
         usage_row_t rows[FUSAGE];
-        int n = 0;
+        int         n = 0;
         um_drain(ac.um, rows, FUSAGE, &n);
         TEST_ASSERT(n == 1, "1 usage row");
         if (n == 1) {
@@ -357,7 +405,7 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
 
     /* 2. Streaming call to Claude */
     {
-        struct test_cap c = {0};
+        struct test_cap     c = {0};
         aigate_response_ctx rc = {0};
         rc.impl = &c;
         rc.set_header = tcap_set_header;
@@ -368,7 +416,8 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
         rq.path = "/v1/chat/completions";
         rq.bearer = "claude-key";
         rq.client_ip = "127.0.0.1";
-        const char* b = "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+        const char* b = "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{\"role\":"
+                        "\"user\",\"content\":\"hi\"}]}";
         rq.body = b;
         rq.body_len = strlen(b);
 
@@ -381,7 +430,7 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
         TEST_ASSERT(strstr(c.body, "[DONE]") != NULL, "stream has [DONE]");
 
         usage_row_t rows[FUSAGE];
-        int n = 0;
+        int         n = 0;
         um_drain(ac.um, rows, FUSAGE, &n);
         TEST_ASSERT(n == 1, "1 usage row");
         if (n == 1) {

@@ -16,6 +16,30 @@ curl_init_once(void)
     curl_global_init(CURL_GLOBAL_DEFAULT);
 }
 
+static pthread_key_t g_curl_tkey;
+static pthread_once_t g_curl_tkey_once = PTHREAD_ONCE_INIT;
+static void
+curl_tkey_init(void)
+{
+    pthread_key_create(&g_curl_tkey, NULL);
+}
+
+/* Per-thread CURL handle: reused across calls to amortize init.
+ * Thread-exit leaks one handle per civetweb worker; accepted. */
+static CURL*
+thread_curl(void)
+{
+    pthread_once(&g_curl_tkey_once, curl_tkey_init);
+    CURL* c = (CURL*)pthread_getspecific(g_curl_tkey);
+    if (c == NULL) {
+        c = curl_easy_init();
+        if (c != NULL) {
+            pthread_setspecific(g_curl_tkey, c);
+        }
+    }
+    return c;
+}
+
 struct resp_buf {
     char*  data;
     size_t len;
@@ -64,10 +88,11 @@ upstream_call_ext(const char* url,
     long               http_code = 0;
 
     pthread_once(&g_curl_once, curl_init_once);
-    CURL* c = curl_easy_init();
+    CURL* c = thread_curl();
     if (c == NULL) {
         goto done;
     }
+    curl_easy_reset(c);
 
     int has_custom_auth = 0;
     if (extra_headers_kv != NULL && n_extra_headers > 0) {
@@ -123,7 +148,6 @@ upstream_call_ext(const char* url,
 
 done:
     curl_slist_free_all(hdrs);
-    curl_easy_cleanup(c);
     if (rc != 0 && out_body != NULL) {
         *out_body = NULL;
         *out_body_len = 0;
@@ -238,14 +262,14 @@ upstream_stream_call(const char*       url,
     sc.on_chunk = on_chunk;
     sc.user_data = user_data;
     sc.last_chunk_mono_ns = mono_ns();
-    sc.silence_timeout_ns =
-        (silence_timeout_ms > 0 ? silence_timeout_ms : 30000L) * 1000000ull;
+    sc.silence_timeout_ns = (silence_timeout_ms > 0 ? silence_timeout_ms : 30000L) * 1000000ull;
 
     pthread_once(&g_curl_once, curl_init_once);
-    CURL* c = curl_easy_init();
+    CURL* c = thread_curl();
     if (c == NULL) {
         goto done;
     }
+    curl_easy_reset(c);
     sc.curl = c;
 
     int has_custom_auth = 0;
@@ -305,7 +329,5 @@ upstream_stream_call(const char*       url,
 
 done:
     curl_slist_free_all(hdrs);
-    curl_easy_cleanup(c);
     return rc;
 }
-

@@ -13,8 +13,7 @@
 int
 provider_gemini_supports(const char* provider)
 {
-    return provider != NULL &&
-           (strcmp(provider, "gemini") == 0 || strcmp(provider, "google") == 0);
+    return provider != NULL && (strcmp(provider, "gemini") == 0 || strcmp(provider, "google") == 0);
 }
 
 static bool
@@ -65,15 +64,17 @@ provider_gemini_build(const model_rec_t* route,
 
     /* Check if streaming */
     json_t* jstream = json_object_get(in_req, "stream");
-    bool is_streaming = (jstream != NULL && json_is_true(jstream));
+    bool    is_streaming = (jstream != NULL && json_is_true(jstream));
 
     /* Target URL */
     if (is_streaming) {
-        snprintf(url_out, url_cap, "%s/v1beta/models/%s:streamGenerateContent?alt=sse",
-                 base_ep, route->name);
+        snprintf(url_out,
+                 url_cap,
+                 "%s/v1beta/models/%s:streamGenerateContent?alt=sse",
+                 base_ep,
+                 route->name);
     } else {
-        snprintf(url_out, url_cap, "%s/v1beta/models/%s:generateContent",
-                 base_ep, route->name);
+        snprintf(url_out, url_cap, "%s/v1beta/models/%s:generateContent", base_ep, route->name);
     }
 
     json_t* out_req = json_object();
@@ -86,13 +87,15 @@ provider_gemini_build(const model_rec_t* route,
     system_buf[0] = '\0';
 
     if (msgs != NULL && json_is_array(msgs)) {
-        size_t idx;
+        size_t  idx;
         json_t* m;
-        json_array_foreach(msgs, idx, m) {
-            json_t* jrole = json_object_get(m, "role");
-            json_t* jcontent = json_object_get(m, "content");
+        json_array_foreach(msgs, idx, m)
+        {
+            json_t*     jrole = json_object_get(m, "role");
+            json_t*     jcontent = json_object_get(m, "content");
             const char* role = (jrole && json_is_string(jrole)) ? json_string_value(jrole) : "user";
-            const char* content = (jcontent && json_is_string(jcontent)) ? json_string_value(jcontent) : "";
+            const char* content =
+                (jcontent && json_is_string(jcontent)) ? json_string_value(jcontent) : "";
 
             if (strcmp(role, "system") == 0) {
                 size_t clen = strlen(content);
@@ -109,7 +112,7 @@ provider_gemini_build(const model_rec_t* route,
                 }
             } else {
                 const char* gemini_role = (strcmp(role, "assistant") == 0) ? "model" : "user";
-                json_t* entry = json_object();
+                json_t*     entry = json_object();
                 json_object_set_new(entry, "role", json_string(gemini_role));
                 json_t* parts = json_array();
                 json_t* part = json_object();
@@ -204,8 +207,12 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
                                long*       out_ptok,
                                long*       out_ctok)
 {
-    if (out_ptok) *out_ptok = 0;
-    if (out_ctok) *out_ctok = 0;
+    if (out_ptok) {
+        *out_ptok = 0;
+    }
+    if (out_ctok) {
+        *out_ctok = 0;
+    }
     *out_openai = NULL;
     *out_openai_len = 0;
 
@@ -221,9 +228,10 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
     /* Check for upstream error response */
     json_t* jerr = json_object_get(root, "error");
     if (jerr != NULL && json_is_object(jerr)) {
-        json_t* jmsg = json_object_get(jerr, "message");
-        json_t* jcode = json_object_get(jerr, "code");
-        const char* msg = (jmsg && json_is_string(jmsg)) ? json_string_value(jmsg) : "unknown upstream error";
+        json_t*     jmsg = json_object_get(jerr, "message");
+        json_t*     jcode = json_object_get(jerr, "code");
+        const char* msg =
+            (jmsg && json_is_string(jmsg)) ? json_string_value(jmsg) : "unknown upstream error";
         int code = (jcode && json_is_integer(jcode)) ? (int)json_integer_value(jcode) : 400;
 
         json_t* err_root = json_object();
@@ -269,20 +277,28 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
     }
 
     /* Usage metadata */
-    long ptok = 0, ctok = 0;
+    long    ptok = 0, ctok = 0;
     json_t* usage = json_object_get(root, "usageMetadata");
     if (usage != NULL && json_is_object(usage)) {
         json_t* jp = json_object_get(usage, "promptTokenCount");
         json_t* jc = json_object_get(usage, "candidatesTokenCount");
-        if (jp && json_is_integer(jp)) ptok = json_integer_value(jp);
-        if (jc && json_is_integer(jc)) ctok = json_integer_value(jc);
+        if (jp && json_is_integer(jp)) {
+            ptok = json_integer_value(jp);
+        }
+        if (jc && json_is_integer(jc)) {
+            ctok = json_integer_value(jc);
+        }
     }
-    if (out_ptok) *out_ptok = ptok;
-    if (out_ctok) *out_ctok = ctok;
+    if (out_ptok) {
+        *out_ptok = ptok;
+    }
+    if (out_ctok) {
+        *out_ctok = ctok;
+    }
 
     /* Build OpenAI format response */
     json_t* oai = json_object();
-    char id[64];
+    char    id[64];
     snprintf(id, sizeof id, "chatcmpl-gemini-%ld", (long)time(NULL));
     json_object_set_new(oai, "id", json_string(id));
     json_object_set_new(oai, "object", json_string("chat.completion"));
@@ -324,7 +340,8 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
 typedef struct gemini_bridge {
     aigate_response_ctx* rc;
     bool                 headers_sent;
-    char                 line_buf[4096];
+    bool                 aborted;
+    char                 line_buf[8192];
     size_t               line_len;
     char                 model[64];
     char                 msg_id[64];
@@ -364,7 +381,11 @@ gemini_bridge_send_chunk(gemini_bridge_t* b, const char* str)
         b->headers_sent = true;
         b->rc->headers_sent = true;
     }
-    return b->rc->write(b->rc->impl, str, strlen(str), false);
+    int wr = b->rc->write(b->rc->impl, str, strlen(str), false);
+    if (wr != 0) {
+        b->aborted = true;
+    }
+    return wr;
 }
 
 static void
@@ -392,13 +413,17 @@ gemini_bridge_process_line(gemini_bridge_t* b, const char* line)
     if (usage != NULL && json_is_object(usage)) {
         json_t* jp = json_object_get(usage, "promptTokenCount");
         json_t* jc = json_object_get(usage, "candidatesTokenCount");
-        if (jp && json_is_integer(jp)) b->prompt_tokens = json_integer_value(jp);
-        if (jc && json_is_integer(jc)) b->completion_tokens = json_integer_value(jc);
+        if (jp && json_is_integer(jp)) {
+            b->prompt_tokens = json_integer_value(jp);
+        }
+        if (jc && json_is_integer(jc)) {
+            b->completion_tokens = json_integer_value(jc);
+        }
     }
 
     /* Extract delta text */
     const char* delta_text = NULL;
-    json_t* candidates = json_object_get(root, "candidates");
+    json_t*     candidates = json_object_get(root, "candidates");
     if (candidates != NULL && json_is_array(candidates) && json_array_size(candidates) > 0) {
         json_t* c0 = json_array_get(candidates, 0);
         json_t* content = json_object_get(c0, "content");
@@ -414,7 +439,9 @@ gemini_bridge_process_line(gemini_bridge_t* b, const char* line)
         }
         json_t* jfinish = json_object_get(c0, "finishReason");
         if (jfinish != NULL && json_is_string(jfinish)) {
-            snprintf(b->finish_reason, sizeof b->finish_reason, "%s",
+            snprintf(b->finish_reason,
+                     sizeof b->finish_reason,
+                     "%s",
                      map_gemini_finish_reason(json_string_value(jfinish)));
         }
     }
@@ -440,8 +467,12 @@ gemini_bridge_process_line(gemini_bridge_t* b, const char* line)
         char* packed = json_dumps(chunk, JSON_COMPACT);
         json_decref(chunk);
         if (packed != NULL) {
-            char sse_line[4096];
-            snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
+            char sse_line[8192];
+            int  w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
+            if (w >= (int)sizeof sse_line) {
+                AIGATE_LOG_WARN("stream sse chunk truncated for model %s",
+                                 b->model[0] ? b->model : "unknown");
+            }
             free(packed);
             gemini_bridge_send_chunk(b, sse_line);
         }
@@ -454,8 +485,8 @@ static int
 gemini_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
 {
     gemini_bridge_t* b = bridge;
-    const char* p = chunk;
-    const char* end = p + len;
+    const char*      p = chunk;
+    const char*      end = p + len;
 
     while (p < end) {
         const char* nl = memchr(p, '\n', (size_t)(end - p));
@@ -464,12 +495,18 @@ gemini_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
             if (b->line_len + seg < sizeof(b->line_buf)) {
                 memcpy(b->line_buf + b->line_len, p, seg);
                 b->line_len += seg;
-                while (b->line_len > 0 &&
-                       (b->line_buf[b->line_len - 1] == '\r' || b->line_buf[b->line_len - 1] == ' ')) {
+                while (b->line_len > 0 && (b->line_buf[b->line_len - 1] == '\r' ||
+                                           b->line_buf[b->line_len - 1] == ' ')) {
                     b->line_len--;
                 }
                 b->line_buf[b->line_len] = '\0';
                 gemini_bridge_process_line(b, b->line_buf);
+                if (b->aborted) {
+                    return -1;
+                }
+            } else {
+                AIGATE_LOG_WARN("stream line truncated for model %s",
+                                 b->model[0] ? b->model : "unknown");
             }
             b->line_len = 0;
             p = nl + 1;
@@ -480,6 +517,8 @@ gemini_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
                 b->line_len += seg;
                 b->line_buf[b->line_len] = '\0';
             } else {
+                AIGATE_LOG_WARN("stream line truncated for model %s",
+                                 b->model[0] ? b->model : "unknown");
                 b->line_len = 0;
             }
             p = end;
@@ -504,15 +543,20 @@ gemini_stream_bridge_finish(stream_bridge_t* bridge)
         json_t* choice = json_object();
         json_object_set_new(choice, "index", json_integer(0));
         json_object_set_new(choice, "delta", json_object());
-        json_object_set_new(choice, "finish_reason", json_string(b->finish_reason[0] ? b->finish_reason : "stop"));
+        json_object_set_new(
+            choice, "finish_reason", json_string(b->finish_reason[0] ? b->finish_reason : "stop"));
         json_array_append_new(choices, choice);
         json_object_set_new(chunk, "choices", choices);
 
         char* packed = json_dumps(chunk, JSON_COMPACT);
         json_decref(chunk);
         if (packed != NULL) {
-            char sse_line[1024];
-            snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
+            char sse_line[8192];
+            int  w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
+            if (w >= (int)sizeof sse_line) {
+                AIGATE_LOG_WARN("stream sse chunk truncated for model %s",
+                                 b->model[0] ? b->model : "unknown");
+            }
             free(packed);
             gemini_bridge_send_chunk(b, sse_line);
         }
@@ -540,9 +584,15 @@ gemini_stream_bridge_get_tokens(stream_bridge_t* bridge,
                                 long*            out_cached_tok)
 {
     gemini_bridge_t* b = (gemini_bridge_t*)bridge;
-    if (out_ptok) *out_ptok = b->prompt_tokens;
-    if (out_ctok) *out_ctok = b->completion_tokens;
-    if (out_cached_tok) *out_cached_tok = 0;
+    if (out_ptok) {
+        *out_ptok = b->prompt_tokens;
+    }
+    if (out_ctok) {
+        *out_ctok = b->completion_tokens;
+    }
+    if (out_cached_tok) {
+        *out_cached_tok = 0;
+    }
 }
 
 static void
@@ -579,7 +629,9 @@ gemini_parse_chat_response(const char* raw_body,
                            long*       out_cached_tok)
 {
     (void)raw_len;
-    if (out_cached_tok) *out_cached_tok = 0;
+    if (out_cached_tok) {
+        *out_cached_tok = 0;
+    }
     *http_status = 200;
     return provider_gemini_resp_to_openai(raw_body, model, out_body, out_len, out_ptok, out_ctok);
 }
@@ -625,7 +677,7 @@ provider_gemini_build_embeddings(const model_rec_t* route,
     }
 
     const char* model_name = route->name;
-    json_t* jm = json_object_get(in_req, "model");
+    json_t*     jm = json_object_get(in_req, "model");
     if (jm != NULL && json_is_string(jm)) {
         model_name = json_string_value(jm);
     }
@@ -651,11 +703,12 @@ provider_gemini_build_embeddings(const model_rec_t* route,
         }
 
         json_t* reqs = json_array();
-        size_t idx;
+        size_t  idx;
         json_t* item;
-        json_array_foreach(jinput, idx, item) {
+        json_array_foreach(jinput, idx, item)
+        {
             const char* text = json_is_string(item) ? json_string_value(item) : "";
-            json_t* robj = json_object();
+            json_t*     robj = json_object();
             json_object_set_new(robj, "model", json_string(model_path));
 
             json_t* content = json_object();
@@ -678,9 +731,9 @@ provider_gemini_build_embeddings(const model_rec_t* route,
         snprintf(url_out, url_cap, "%s/v1beta/models/%s:embedContent", base_ep, url_model);
 
         const char* text = json_string_value(jinput);
-        json_t* content = json_object();
-        json_t* parts = json_array();
-        json_t* p = json_object();
+        json_t*     content = json_object();
+        json_t*     parts = json_array();
+        json_t*     p = json_object();
         json_object_set_new(p, "text", json_string(text ? text : ""));
         json_array_append_new(parts, p);
         json_object_set_new(content, "parts", parts);
@@ -721,7 +774,9 @@ provider_gemini_parse_embeddings(const char* raw_body,
                                  long*       out_ptok)
 {
     (void)raw_len;
-    if (out_ptok) *out_ptok = 0;
+    if (out_ptok) {
+        *out_ptok = 0;
+    }
     *http_status = 200;
 
     if (raw_body == NULL || raw_body[0] == '\0') {
@@ -736,28 +791,33 @@ provider_gemini_parse_embeddings(const char* raw_body,
     /* Check for upstream error */
     json_t* jerr = json_object_get(root, "error");
     if (jerr != NULL && json_is_object(jerr)) {
-        json_t* jcode = json_object_get(jerr, "code");
-        json_t* jmsg = json_object_get(jerr, "message");
-        int err_code = json_is_integer(jcode) ? (int)json_integer_value(jcode) : 400;
+        json_t*     jcode = json_object_get(jerr, "code");
+        json_t*     jmsg = json_object_get(jerr, "message");
+        int         err_code = json_is_integer(jcode) ? (int)json_integer_value(jcode) : 400;
         const char* err_msg = json_is_string(jmsg) ? json_string_value(jmsg) : "Gemini error";
         *http_status = err_code;
 
         json_t* err_resp = json_pack("{s:{s:s,s:s,s:i}}",
                                      "error",
-                                     "message", err_msg,
-                                     "type", "upstream_error",
-                                     "code", err_code);
+                                     "message",
+                                     err_msg,
+                                     "type",
+                                     "upstream_error",
+                                     "code",
+                                     err_code);
         json_decref(root);
         char* packed_err = json_dumps(err_resp, JSON_COMPACT);
         json_decref(err_resp);
-        if (packed_err == NULL) return -1;
+        if (packed_err == NULL) {
+            return -1;
+        }
         *out_body = packed_err;
         *out_len = strlen(packed_err);
         return 0;
     }
 
     /* Extract usage token count */
-    long ptok = 0;
+    long    ptok = 0;
     json_t* um = json_object_get(root, "usageMetadata");
     if (um != NULL && json_is_object(um)) {
         json_t* pt = json_object_get(um, "promptTokenCount");
@@ -780,11 +840,14 @@ provider_gemini_parse_embeddings(const char* raw_body,
             json_object_set_new(item, "embedding", jvals);
             json_array_append_new(data_arr, item);
         }
-        if (ptok == 0) ptok = 1;
+        if (ptok == 0) {
+            ptok = 1;
+        }
     } else if (jembs != NULL && json_is_array(jembs)) {
-        size_t idx;
+        size_t  idx;
         json_t* entry;
-        json_array_foreach(jembs, idx, entry) {
+        json_array_foreach(jembs, idx, entry)
+        {
             json_t* jvals = json_object_get(entry, "values");
             if (jvals != NULL && json_is_array(jvals)) {
                 json_t* item = json_object();
@@ -795,14 +858,18 @@ provider_gemini_parse_embeddings(const char* raw_body,
                 json_array_append_new(data_arr, item);
             }
         }
-        if (ptok == 0) ptok = (long)json_array_size(jembs);
+        if (ptok == 0) {
+            ptok = (long)json_array_size(jembs);
+        }
     } else {
         json_decref(data_arr);
         json_decref(root);
         return -1;
     }
 
-    if (out_ptok) *out_ptok = ptok;
+    if (out_ptok) {
+        *out_ptok = ptok;
+    }
 
     json_t* resp = json_object();
     json_object_set_new(resp, "object", json_string("list"));

@@ -44,16 +44,18 @@ test_openai_embeddings_build(void)
     rc = provider_openai_build_embeddings(
         &route, in_req, url, sizeof url, extra_hdrs, &n_extra, &out_body, &out_len);
     TEST_ASSERT(rc == 0, "openai_build_embeddings without v1 in endpoint");
-    TEST_ASSERT(strcmp(url, "http://localhost:11434/v1/embeddings") == 0, "injected /v1/embeddings");
+    TEST_ASSERT(strcmp(url, "http://localhost:11434/v1/embeddings") == 0,
+                "injected /v1/embeddings");
     free(out_body);
 }
 
 void
 test_openai_embeddings_parse(void)
 {
-    const char* raw =
-        "{\"object\":\"list\",\"data\":[{\"object\":\"embedding\",\"index\":0,\"embedding\":[0.1,0.2]}],"
-        "\"model\":\"text-embedding-3-small\",\"usage\":{\"prompt_tokens\":14,\"total_tokens\":14}}";
+    const char* raw = "{\"object\":\"list\",\"data\":[{\"object\":\"embedding\",\"index\":0,"
+                      "\"embedding\":[0.1,0.2]}],"
+                      "\"model\":\"text-embedding-3-small\",\"usage\":{\"prompt_tokens\":14,"
+                      "\"total_tokens\":14}}";
     int    status = 0;
     char*  out_body = NULL;
     size_t out_len = 0;
@@ -78,7 +80,8 @@ test_gemini_embeddings_build_single(void)
     snprintf(route.endpoint, sizeof route.endpoint, "https://generativelanguage.googleapis.com");
     snprintf(route.upstream_key, sizeof route.upstream_key, "AIzaSyTest123");
 
-    const char* in_req = "{\"model\":\"text-embedding-004\",\"input\":\"search query\",\"dimensions\":256}";
+    const char* in_req =
+        "{\"model\":\"text-embedding-004\",\"input\":\"search query\",\"dimensions\":256}";
     char        url[1024] = {0};
     const char* extra_hdrs[4][2] = {{0}};
     int         n_extra = 0;
@@ -88,7 +91,9 @@ test_gemini_embeddings_build_single(void)
     int rc = provider_gemini_build_embeddings(
         &route, in_req, url, sizeof url, extra_hdrs, &n_extra, &out_body, &out_len);
     TEST_ASSERT(rc == 0, "gemini build embeddings single returns 0");
-    TEST_ASSERT(strcmp(url, "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent") == 0,
+    TEST_ASSERT(strcmp(url,
+                       "https://generativelanguage.googleapis.com/v1beta/models/"
+                       "text-embedding-004:embedContent") == 0,
                 "gemini single embed url");
     TEST_ASSERT(n_extra == 1, "has x-goog-api-key header");
     TEST_ASSERT(strcmp(extra_hdrs[0][0], "x-goog-api-key") == 0, "header key");
@@ -101,8 +106,10 @@ test_gemini_embeddings_build_single(void)
     json_t* jparts = json_object_get(jcontent, "parts");
     TEST_ASSERT(jparts != NULL && json_array_size(jparts) == 1, "parts has 1 item");
     json_t* jp0 = json_array_get(jparts, 0);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(jp0, "text")), "search query") == 0, "text matches");
-    TEST_ASSERT(json_integer_value(json_object_get(root, "outputDimensionality")) == 256, "dim matches");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jp0, "text")), "search query") == 0,
+                "text matches");
+    TEST_ASSERT(json_integer_value(json_object_get(root, "outputDimensionality")) == 256,
+                "dim matches");
 
     json_decref(root);
     free(out_body);
@@ -128,7 +135,9 @@ test_gemini_embeddings_build_batch(void)
     int rc = provider_gemini_build_embeddings(
         &route, in_req, url, sizeof url, extra_hdrs, &n_extra, &out_body, &out_len);
     TEST_ASSERT(rc == 0, "gemini build embeddings batch returns 0");
-    TEST_ASSERT(strcmp(url, "https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:batchEmbedContents") == 0,
+    TEST_ASSERT(strcmp(url,
+                       "https://generativelanguage.googleapis.com/v1beta/models/"
+                       "text-embedding-004:batchEmbedContents") == 0,
                 "gemini batch embed url");
 
     json_t* root = json_loads(out_body, 0, NULL);
@@ -137,15 +146,19 @@ test_gemini_embeddings_build_batch(void)
     TEST_ASSERT(jreqs != NULL && json_array_size(jreqs) == 2, "batch requests has 2 items");
 
     json_t* r0 = json_array_get(jreqs, 0);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(r0, "model")), "models/text-embedding-004") == 0, "model path prefixed");
+    TEST_ASSERT(
+        strcmp(json_string_value(json_object_get(r0, "model")), "models/text-embedding-004") == 0,
+        "model path prefixed");
     json_t* c0 = json_object_get(r0, "content");
     json_t* p0 = json_array_get(json_object_get(c0, "parts"), 0);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(p0, "text")), "hello") == 0, "text0 matches");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(p0, "text")), "hello") == 0,
+                "text0 matches");
 
     json_t* r1 = json_array_get(jreqs, 1);
     json_t* c1 = json_object_get(r1, "content");
     json_t* p1 = json_array_get(json_object_get(c1, "parts"), 0);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(p1, "text")), "world") == 0, "text1 matches");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(p1, "text")), "world") == 0,
+                "text1 matches");
 
     json_decref(root);
     free(out_body);
@@ -169,20 +182,26 @@ test_gemini_embeddings_parse_single(void)
 
     json_t* root = json_loads(out_body, 0, NULL);
     TEST_ASSERT(root != NULL, "valid json out");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(root, "object")), "list") == 0, "object list");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(root, "model")), "text-embedding-004") == 0, "model name");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(root, "object")), "list") == 0,
+                "object list");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(root, "model")), "text-embedding-004") ==
+                    0,
+                "model name");
 
     json_t* data = json_object_get(root, "data");
     TEST_ASSERT(data != NULL && json_array_size(data) == 1, "data length 1");
     json_t* d0 = json_array_get(data, 0);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(d0, "object")), "embedding") == 0, "embedding object");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(d0, "object")), "embedding") == 0,
+                "embedding object");
     TEST_ASSERT(json_integer_value(json_object_get(d0, "index")) == 0, "index 0");
     json_t* vals = json_object_get(d0, "embedding");
     TEST_ASSERT(vals != NULL && json_array_size(vals) == 3, "3 values");
 
     json_t* usage = json_object_get(root, "usage");
-    TEST_ASSERT(json_integer_value(json_object_get(usage, "prompt_tokens")) == 7, "usage prompt_tokens");
-    TEST_ASSERT(json_integer_value(json_object_get(usage, "total_tokens")) == 7, "usage total_tokens");
+    TEST_ASSERT(json_integer_value(json_object_get(usage, "prompt_tokens")) == 7,
+                "usage prompt_tokens");
+    TEST_ASSERT(json_integer_value(json_object_get(usage, "total_tokens")) == 7,
+                "usage total_tokens");
 
     json_decref(root);
     free(out_body);
@@ -191,8 +210,8 @@ test_gemini_embeddings_parse_single(void)
 void
 test_gemini_embeddings_parse_batch(void)
 {
-    const char* raw =
-        "{\"embeddings\":[{\"values\":[0.1,0.2]},{\"values\":[0.3,0.4]}],\"usageMetadata\":{\"promptTokenCount\":15}}";
+    const char* raw = "{\"embeddings\":[{\"values\":[0.1,0.2]},{\"values\":[0.3,0.4]}],"
+                      "\"usageMetadata\":{\"promptTokenCount\":15}}";
     int    status = 0;
     char*  out_body = NULL;
     size_t out_len = 0;
@@ -221,7 +240,8 @@ test_gemini_embeddings_parse_batch(void)
 void
 test_gemini_embeddings_parse_error(void)
 {
-    const char* raw = "{\"error\":{\"code\":400,\"message\":\"Invalid argument\",\"status\":\"INVALID_ARGUMENT\"}}";
+    const char* raw = "{\"error\":{\"code\":400,\"message\":\"Invalid "
+                      "argument\",\"status\":\"INVALID_ARGUMENT\"}}";
     int    status = 0;
     char*  out_body = NULL;
     size_t out_len = 0;
@@ -236,8 +256,11 @@ test_gemini_embeddings_parse_error(void)
     TEST_ASSERT(root != NULL, "valid json out");
     json_t* jerr = json_object_get(root, "error");
     TEST_ASSERT(jerr != NULL, "has error object");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(jerr, "message")), "Invalid argument") == 0, "error msg matches");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(jerr, "type")), "upstream_error") == 0, "error type matches");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jerr, "message")), "Invalid argument") ==
+                    0,
+                "error msg matches");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jerr, "type")), "upstream_error") == 0,
+                "error type matches");
 
     json_decref(root);
     free(out_body);
@@ -373,7 +396,7 @@ test_embeddings_pipeline_e2e(void)
     /* 1. Request to OpenAI embedding model */
     {
         struct test_resp_cap c = {0};
-        aigate_response_ctx rc = {0};
+        aigate_response_ctx  rc = {0};
         rc.impl = &c;
         rc.set_header = cap_hdr_cb;
         rc.write = cap_write_cb;
@@ -401,7 +424,7 @@ test_embeddings_pipeline_e2e(void)
     /* 2. Request to Gemini embedding model */
     {
         struct test_resp_cap c = {0};
-        aigate_response_ctx rc = {0};
+        aigate_response_ctx  rc = {0};
         rc.impl = &c;
         rc.set_header = cap_hdr_cb;
         rc.write = cap_write_cb;
@@ -419,7 +442,8 @@ test_embeddings_pipeline_e2e(void)
         TEST_ASSERT(code == 0, "gemini embedding pipeline returns 0");
         TEST_ASSERT(rc.status == 200, "gemini embedding rc.status 200");
         TEST_ASSERT(strstr(c.body, "\"embedding\"") != NULL, "gemini response has embedding");
-        TEST_ASSERT(strstr(c.body, "\"object\":\"list\"") != NULL, "gemini response has object list");
+        TEST_ASSERT(strstr(c.body, "\"object\":\"list\"") != NULL,
+                    "gemini response has object list");
 
         long consumed = 10000 - rl_remaining_daily(ac.rl, 1, 10000);
         TEST_ASSERT(consumed == 8 + 6, "14 total tokens consumed (8 + 6)");
@@ -428,7 +452,7 @@ test_embeddings_pipeline_e2e(void)
     /* 3. Request to Anthropic model on /v1/embeddings -> 400 */
     {
         struct test_resp_cap c = {0};
-        aigate_response_ctx rc = {0};
+        aigate_response_ctx  rc = {0};
         rc.impl = &c;
         rc.set_header = cap_hdr_cb;
         rc.write = cap_write_cb;
@@ -445,7 +469,8 @@ test_embeddings_pipeline_e2e(void)
         int code = aigate_handle_request(&ac, &rq, &rc);
         TEST_ASSERT(code == 0, "returns 0 for handled error");
         TEST_ASSERT(rc.status == 400, "status 400 for unsupported embeddings");
-        TEST_ASSERT(strstr(c.body, "unsupported_endpoint") != NULL, "error code unsupported_endpoint");
+        TEST_ASSERT(strstr(c.body, "unsupported_endpoint") != NULL,
+                    "error code unsupported_endpoint");
     }
 
     aigate_core_shutdown(&ac);

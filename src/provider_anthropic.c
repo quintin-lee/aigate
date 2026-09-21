@@ -18,13 +18,13 @@ provider_anthropic_supports(const char* provider)
 
 int
 provider_anthropic_build(const model_rec_t* route,
-                             const char*        in_body,
-                             char*              url_out,
-                             size_t             url_cap,
-                             const char*        headers_kv[4][2],
-                             int*               n_headers,
-                             char**             out_body,
-                             size_t*            out_body_len)
+                         const char*        in_body,
+                         char*              url_out,
+                         size_t             url_cap,
+                         const char*        headers_kv[4][2],
+                         int*               n_headers,
+                         char**             out_body,
+                         size_t*            out_body_len)
 {
     /* URL: endpoint + /messages or /v1/messages */
     size_t elen = strlen(route->endpoint);
@@ -65,7 +65,7 @@ provider_anthropic_build(const model_rec_t* route,
 
     /* Model: from request, or route name */
     const char* model_name = route->name;
-    json_t* jm = json_object_get(in_req, "model");
+    json_t*     jm = json_object_get(in_req, "model");
     if (jm != NULL && json_is_string(jm)) {
         model_name = json_string_value(jm);
     }
@@ -78,13 +78,15 @@ provider_anthropic_build(const model_rec_t* route,
     json_t* ant_msgs = json_array();
 
     if (msgs != NULL && json_is_array(msgs)) {
-        size_t idx;
+        size_t  idx;
         json_t* item;
-        json_array_foreach(msgs, idx, item) {
-            json_t* jrole = json_object_get(item, "role");
-            json_t* jcontent = json_object_get(item, "content");
+        json_array_foreach(msgs, idx, item)
+        {
+            json_t*     jrole = json_object_get(item, "role");
+            json_t*     jcontent = json_object_get(item, "content");
             const char* role = (jrole && json_is_string(jrole)) ? json_string_value(jrole) : "user";
-            const char* content = (jcontent && json_is_string(jcontent)) ? json_string_value(jcontent) : "";
+            const char* content =
+                (jcontent && json_is_string(jcontent)) ? json_string_value(jcontent) : "";
 
             if (strcmp(role, "system") == 0) {
                 if (content[0] != '\0') {
@@ -94,7 +96,7 @@ provider_anthropic_build(const model_rec_t* route,
                         sys_len = clen;
                     } else {
                         size_t nlen = sys_len + 2 + clen;
-                        char* nbuf = realloc(sys_buf, nlen + 1);
+                        char*  nbuf = realloc(sys_buf, nlen + 1);
                         if (nbuf != NULL) {
                             sys_buf = nbuf;
                             memcpy(sys_buf + sys_len, "\n\n", 2);
@@ -106,7 +108,7 @@ provider_anthropic_build(const model_rec_t* route,
                 }
             } else {
                 const char* ant_role = (strcmp(role, "assistant") == 0) ? "assistant" : "user";
-                json_t* m = json_object();
+                json_t*     m = json_object();
                 json_object_set_new(m, "role", json_string(ant_role));
                 json_object_set_new(m, "content", json_string(content));
                 json_array_append_new(ant_msgs, m);
@@ -207,7 +209,7 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
 
     /* ID */
     const char* ant_id = "unknown";
-    json_t* jid = json_object_get(root, "id");
+    json_t*     jid = json_object_get(root, "id");
     if (jid != NULL && json_is_string(jid)) {
         ant_id = json_string_value(jid);
     }
@@ -216,14 +218,14 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
 
     /* Model */
     const char* model = req_model ? req_model : "claude";
-    json_t* jm = json_object_get(root, "model");
+    json_t*     jm = json_object_get(root, "model");
     if (jm != NULL && json_is_string(jm)) {
         model = json_string_value(jm);
     }
 
     /* Stop reason */
     const char* finish_reason = "stop";
-    json_t* jsr = json_object_get(root, "stop_reason");
+    json_t*     jsr = json_object_get(root, "stop_reason");
     if (jsr != NULL && json_is_string(jsr)) {
         const char* sr = json_string_value(jsr);
         if (strcmp(sr, "max_tokens") == 0) {
@@ -232,20 +234,22 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
     }
 
     /* Content text accumulation */
-    char* content_text = NULL;
-    size_t ct_len = 0;
+    char*   content_text = NULL;
+    size_t  ct_len = 0;
     json_t* jcontent = json_object_get(root, "content");
     if (jcontent != NULL && json_is_array(jcontent)) {
-        size_t idx;
+        size_t  idx;
         json_t* block;
-        json_array_foreach(jcontent, idx, block) {
+        json_array_foreach(jcontent, idx, block)
+        {
             json_t* jtype = json_object_get(block, "type");
-            if (jtype != NULL && json_is_string(jtype) && strcmp(json_string_value(jtype), "text") == 0) {
+            if (jtype != NULL && json_is_string(jtype) &&
+                strcmp(json_string_value(jtype), "text") == 0) {
                 json_t* jt = json_object_get(block, "text");
                 if (jt != NULL && json_is_string(jt)) {
                     const char* t = json_string_value(jt);
-                    size_t tlen = strlen(t);
-                    char* nbuf = realloc(content_text, ct_len + tlen + 1);
+                    size_t      tlen = strlen(t);
+                    char*       nbuf = realloc(content_text, ct_len + tlen + 1);
                     if (nbuf != NULL) {
                         content_text = nbuf;
                         memcpy(content_text + ct_len, t, tlen);
@@ -258,7 +262,7 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
     }
 
     /* Usage */
-    long ptok = 0, ctok = 0;
+    long    ptok = 0, ctok = 0;
     json_t* jusage = json_object_get(root, "usage");
     if (jusage != NULL && json_is_object(jusage)) {
         json_t* jin = json_object_get(jusage, "input_tokens");
@@ -334,7 +338,9 @@ bridge_send_chunk(anthropic_bridge_t* b, const char* chunk_str)
         b->rc->headers_sent = true;
     }
     if (b->rc->write != NULL) {
-        b->rc->write(b->rc->impl, chunk_str, strlen(chunk_str), false);
+        if (b->rc->write(b->rc->impl, chunk_str, strlen(chunk_str), false) != 0) {
+            b->aborted = true;
+        }
     }
 }
 
@@ -343,7 +349,9 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
 {
     if (strncmp(line, "event:", 6) == 0) {
         const char* ev = line + 6;
-        while (*ev == ' ') ev++;
+        while (*ev == ' ') {
+            ev++;
+        }
         snprintf(b->current_event, sizeof b->current_event, "%s", ev);
         return;
     }
@@ -355,7 +363,9 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
     }
 
     const char* d = line + 5;
-    while (*d == ' ') d++;
+    while (*d == ' ') {
+        d++;
+    }
     json_t* data = json_loads(d, 0, NULL);
     if (data == NULL) {
         return;
@@ -386,18 +396,29 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
         }
         /* Emit initial role chunk */
         json_t* c0 = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s,s:s},s:n}]}",
-                               "id", id_buf,
-                               "object", "chat.completion.chunk",
-                               "model", b->model,
+                               "id",
+                               id_buf,
+                               "object",
+                               "chat.completion.chunk",
+                               "model",
+                               b->model,
                                "choices",
-                               "index", 0,
-                               "delta", "role", "assistant", "content", "",
+                               "index",
+                               0,
+                               "delta",
+                               "role",
+                               "assistant",
+                               "content",
+                               "",
                                "finish_reason");
-        char* p0 = json_dumps(c0, JSON_COMPACT);
+        char*   p0 = json_dumps(c0, JSON_COMPACT);
         json_decref(c0);
         if (p0 != NULL) {
-            char sse[512];
-            snprintf(sse, sizeof sse, "data: %s\n\n", p0);
+            char sse[8192];
+            int  w = snprintf(sse, sizeof sse, "data: %s\n\n", p0);
+            if (w >= (int)sizeof sse) {
+                AIGATE_LOG_WARN("stream sse chunk truncated for model %s", b->model);
+            }
             bridge_send_chunk(b, sse);
             free(p0);
         }
@@ -407,19 +428,28 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
             json_t* jt = json_object_get(jdel, "text");
             if (jt != NULL && json_is_string(jt)) {
                 const char* text = json_string_value(jt);
-                json_t* cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
-                                       "id", id_buf,
-                                       "object", "chat.completion.chunk",
-                                       "model", b->model,
-                                       "choices",
-                                       "index", 0,
-                                       "delta", "content", text,
-                                       "finish_reason");
-                char* pd = json_dumps(cd, JSON_COMPACT);
+                json_t*     cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                           "id",
+                                           id_buf,
+                                           "object",
+                                           "chat.completion.chunk",
+                                           "model",
+                                           b->model,
+                                           "choices",
+                                           "index",
+                                           0,
+                                           "delta",
+                                           "content",
+                                           text,
+                                           "finish_reason");
+                char*       pd = json_dumps(cd, JSON_COMPACT);
                 json_decref(cd);
                 if (pd != NULL) {
-                    char sse[4096];
-                    snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                    char sse[8192];
+                    int  w = snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                    if (w >= (int)sizeof sse) {
+                        AIGATE_LOG_WARN("stream sse chunk truncated for model %s", b->model);
+                    }
                     bridge_send_chunk(b, sse);
                     free(pd);
                 }
@@ -427,10 +457,11 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
         }
     } else if (strcmp(b->current_event, "message_delta") == 0) {
         const char* finish_reason = "stop";
-        json_t* jdel = json_object_get(data, "delta");
+        json_t*     jdel = json_object_get(data, "delta");
         if (jdel != NULL && json_is_object(jdel)) {
             json_t* jsr = json_object_get(jdel, "stop_reason");
-            if (jsr != NULL && json_is_string(jsr) && strcmp(json_string_value(jsr), "max_tokens") == 0) {
+            if (jsr != NULL && json_is_string(jsr) &&
+                strcmp(json_string_value(jsr), "max_tokens") == 0) {
                 finish_reason = "length";
             }
         }
@@ -444,37 +475,54 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
 
         /* Emit finish_reason chunk */
         json_t* cf = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{},s:s}]}",
-                               "id", id_buf,
-                               "object", "chat.completion.chunk",
-                               "model", b->model,
+                               "id",
+                               id_buf,
+                               "object",
+                               "chat.completion.chunk",
+                               "model",
+                               b->model,
                                "choices",
-                               "index", 0,
+                               "index",
+                               0,
                                "delta",
-                               "finish_reason", finish_reason);
-        char* pf = json_dumps(cf, JSON_COMPACT);
+                               "finish_reason",
+                               finish_reason);
+        char*   pf = json_dumps(cf, JSON_COMPACT);
         json_decref(cf);
         if (pf != NULL) {
-            char sse[512];
-            snprintf(sse, sizeof sse, "data: %s\n\n", pf);
+            char sse[8192];
+            int  w = snprintf(sse, sizeof sse, "data: %s\n\n", pf);
+            if (w >= (int)sizeof sse) {
+                AIGATE_LOG_WARN("stream sse chunk truncated for model %s", b->model);
+            }
             bridge_send_chunk(b, sse);
             free(pf);
         }
 
         /* Emit usage chunk */
         json_t* cu = json_pack("{s:s,s:s,s:s,s:[],s:{s:i,s:i,s:i}}",
-                               "id", id_buf,
-                               "object", "chat.completion.chunk",
-                               "model", b->model,
+                               "id",
+                               id_buf,
+                               "object",
+                               "chat.completion.chunk",
+                               "model",
+                               b->model,
                                "choices",
                                "usage",
-                               "prompt_tokens", (int)b->input_tokens,
-                               "completion_tokens", (int)b->output_tokens,
-                               "total_tokens", (int)(b->input_tokens + b->output_tokens));
-        char* pu = json_dumps(cu, JSON_COMPACT);
+                               "prompt_tokens",
+                               (int)b->input_tokens,
+                               "completion_tokens",
+                               (int)b->output_tokens,
+                               "total_tokens",
+                               (int)(b->input_tokens + b->output_tokens));
+        char*   pu = json_dumps(cu, JSON_COMPACT);
         json_decref(cu);
         if (pu != NULL) {
-            char sse[512];
-            snprintf(sse, sizeof sse, "data: %s\n\n", pu);
+            char sse[8192];
+            int  w = snprintf(sse, sizeof sse, "data: %s\n\n", pu);
+            if (w >= (int)sizeof sse) {
+                AIGATE_LOG_WARN("stream sse chunk truncated for model %s", b->model);
+            }
             bridge_send_chunk(b, sse);
             free(pu);
         }
@@ -483,18 +531,20 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
         b->done_emitted = true;
     } else if (strcmp(b->current_event, "error") == 0) {
         const char* msg = "upstream error";
-        json_t* jerr = json_object_get(data, "error");
+        json_t*     jerr = json_object_get(data, "error");
         if (jerr != NULL && json_is_object(jerr)) {
             json_t* jm = json_object_get(jerr, "message");
             if (jm != NULL && json_is_string(jm)) {
                 msg = json_string_value(jm);
             }
         }
-        char sse[512];
-        snprintf(sse, sizeof sse,
-                 "data: {\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
-                 "data: [DONE]\n\n",
-                 msg);
+        char sse[8192];
+        snprintf(
+            sse,
+            sizeof sse,
+            "data: {\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
+            "data: [DONE]\n\n",
+            msg);
         bridge_send_chunk(b, sse);
         b->done_emitted = true;
     }
@@ -521,6 +571,9 @@ anthropic_bridge_feed(anthropic_bridge_t* b, const void* chunk, size_t len)
                 }
                 b->line_buf[b->line_len] = '\0';
                 bridge_process_line(b, b->line_buf);
+            } else {
+                AIGATE_LOG_WARN("stream line truncated for model %s",
+                                 b->model[0] ? b->model : "unknown");
             }
             b->line_len = 0;
             p = nl + 1;
@@ -531,12 +584,14 @@ anthropic_bridge_feed(anthropic_bridge_t* b, const void* chunk, size_t len)
                 b->line_len += seg;
                 b->line_buf[b->line_len] = '\0';
             } else {
+                AIGATE_LOG_WARN("stream line truncated for model %s",
+                                 b->model[0] ? b->model : "unknown");
                 b->line_len = 0;
             }
             p = end;
         }
     }
-    return 0;
+    return b->aborted ? -1 : 0;
 }
 
 int
@@ -590,7 +645,8 @@ anthropic_parse_chat_response(const char* raw_body,
         *out_cached_tok = 0;
     }
     *http_status = 200;
-    return provider_anthropic_resp_to_openai(raw_body, model, out_body, out_len, out_ptok, out_ctok);
+    return provider_anthropic_resp_to_openai(
+        raw_body, model, out_body, out_len, out_ptok, out_ctok);
 }
 
 static stream_bridge_t*
@@ -631,9 +687,15 @@ anthropic_stream_bridge_get_tokens(stream_bridge_t* b,
                                    long*            out_cached_tok)
 {
     anthropic_bridge_t* ab = (anthropic_bridge_t*)b;
-    if (out_ptok) *out_ptok = ab->input_tokens;
-    if (out_ctok) *out_ctok = ab->output_tokens;
-    if (out_cached_tok) *out_cached_tok = 0;
+    if (out_ptok) {
+        *out_ptok = ab->input_tokens;
+    }
+    if (out_ctok) {
+        *out_ctok = ab->output_tokens;
+    }
+    if (out_cached_tok) {
+        *out_cached_tok = 0;
+    }
 }
 
 static void
@@ -656,4 +718,3 @@ const provider_adapter_t g_provider_anthropic = {
     .build_embeddings = NULL,
     .parse_embeddings_response = NULL,
 };
-

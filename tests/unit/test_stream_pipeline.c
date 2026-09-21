@@ -85,12 +85,7 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
 }
 
 static void
-fkey_add(struct fdb* db,
-         int         slot,
-         long        key_id,
-         const char* bearer,
-         int         qps,
-         long        quota)
+fkey_add(struct fdb* db, int slot, long key_id, const char* bearer, int qps, long quota)
 {
     struct fkey* fk = &db->keys[slot];
     memset(fk, 0, sizeof *fk);
@@ -193,13 +188,13 @@ TEST_CASE(test_stream_pipeline_normal)
     rq.path = "/v1/chat/completions";
     rq.bearer = "stream-key";
     rq.client_ip = "127.0.0.1";
-    const char* req_body =
-        "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    const char* req_body = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"hi\"}]}";
     rq.body = req_body;
     rq.body_len = strlen(req_body);
 
     aigate_response_ctx rc = cap_rc(&c);
-    int rv = aigate_handle_request(&ac, &rq, &rc);
+    int                 rv = aigate_handle_request(&ac, &rq, &rc);
     TEST_ASSERT(rv == 0, "handle_request returned 0");
     TEST_ASSERT(rc.status == 200, "status == 200, got %d", rc.status);
     TEST_ASSERT(cap_has_header(&c, "Content-Type: text/event-stream; charset=utf-8"),
@@ -221,7 +216,8 @@ TEST_CASE(test_stream_pipeline_normal)
         TEST_ASSERT(rows[ir].requests == 1, "1 request, got %ld", rows[ir].requests);
         TEST_ASSERT(rows[ir].errors == 0, "0 errors, got %ld", rows[ir].errors);
         TEST_ASSERT(rows[ir].prompt_tokens == 5, "prompt 5, got %ld", rows[ir].prompt_tokens);
-        TEST_ASSERT(rows[ir].completion_tokens == 7, "completion 7, got %ld", rows[ir].completion_tokens);
+        TEST_ASSERT(
+            rows[ir].completion_tokens == 7, "completion 7, got %ld", rows[ir].completion_tokens);
     }
 
     /* Verify daily token quota reservation: 1000 - (5+7) = 988 */
@@ -266,16 +262,17 @@ TEST_CASE(test_stream_pipeline_early_error)
     rq.path = "/v1/chat/completions";
     rq.bearer = "stream-key";
     rq.client_ip = "127.0.0.1";
-    const char* req_body =
-        "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    const char* req_body = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"hi\"}]}";
     rq.body = req_body;
     rq.body_len = strlen(req_body);
 
     aigate_response_ctx rc = cap_rc(&c);
-    int rv = aigate_handle_request(&ac, &rq, &rc);
+    int                 rv = aigate_handle_request(&ac, &rq, &rc);
     TEST_ASSERT(rv == 0, "handle_request returned 0");
     TEST_ASSERT(rc.status == 502, "status == 502, got %d", rc.status);
-    TEST_ASSERT(cap_has_header(&c, "Content-Type: application/json"), "has application/json header");
+    TEST_ASSERT(cap_has_header(&c, "Content-Type: application/json"),
+                "has application/json header");
     TEST_ASSERT(cap_has_header(&c, "X-Upstream-Provider: openai"), "has provider header");
     TEST_ASSERT(strstr(c.body, "upstream request failed") != NULL, "body has error message");
 
@@ -329,13 +326,13 @@ TEST_CASE(test_stream_pipeline_silence_timeout)
     rq.bearer = "stream-key";
     rq.client_ip = "127.0.0.1";
     /* stream-slow triggers 1.2s sleep between chunks in mock_upstream */
-    const char* req_body =
-        "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"stream-slow\"}]}";
+    const char* req_body = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"stream-slow\"}]}";
     rq.body = req_body;
     rq.body_len = strlen(req_body);
 
     aigate_response_ctx rc = cap_rc(&c);
-    int rv = aigate_handle_request(&ac, &rq, &rc);
+    int                 rv = aigate_handle_request(&ac, &rq, &rc);
     TEST_ASSERT(rv == 0, "handle_request returned 0");
     TEST_ASSERT(rc.status == 200, "initial status was 200, got %d", rc.status);
     TEST_ASSERT(strstr(c.body, "start") != NULL, "received chunk 1");
