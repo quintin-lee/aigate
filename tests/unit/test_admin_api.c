@@ -812,6 +812,9 @@ TEST_CASE(test_admin_models_multi_target)
     TEST_ASSERT(strcmp(json_string_value(json_object_get(t0, "cb_state")), "open") == 0,
                 "target 0 cb_state is open");
     TEST_ASSERT(json_integer_value(json_object_get(t0, "weight")) == 2, "target 0 weight 2");
+    json_t* t0kref = json_object_get(t0, "upstream_key_ref");
+    TEST_ASSERT(t0kref != NULL && strcmp(json_string_value(t0kref), "k1") == 0,
+                "target 0 upstream_key_ref k1 round-trips");
 
     json_t* t1 = json_array_get(jtargets, 1);
     TEST_ASSERT(strcmp(json_string_value(json_object_get(t1, "endpoint")), "http://ep2") == 0,
@@ -819,6 +822,9 @@ TEST_CASE(test_admin_models_multi_target)
     TEST_ASSERT(strcmp(json_string_value(json_object_get(t1, "cb_state")), "closed") == 0,
                 "target 1 cb_state is closed");
     TEST_ASSERT(json_integer_value(json_object_get(t1, "priority")) == 1, "target 1 priority 1");
+    json_t* t1kref = json_object_get(t1, "upstream_key_ref");
+    TEST_ASSERT(t1kref != NULL && strcmp(json_string_value(t1kref), "k2") == 0,
+                "target 1 upstream_key_ref k2 round-trips");
 
     json_decref(j);
 

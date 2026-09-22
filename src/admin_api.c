@@ -560,7 +560,7 @@ parse_targets_array(json_t* jtargets, upstream_target_t* targets, int max_target
             key = json_object_get(item, "upstream_key");
         }
         if (key && json_is_string(key)) {
-            snprintf(tgt->upstream_key, sizeof tgt->upstream_key, "%s", json_string_value(key));
+            snprintf(tgt->upstream_key_ref, sizeof tgt->upstream_key_ref, "%s", json_string_value(key));
         }
         json_t* w = json_object_get(item, "weight");
         tgt->weight = (w && json_is_integer(w)) ? (int)json_integer_value(w) : 1;
@@ -609,7 +609,7 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     const char* def_endp =
         (m.n_targets > 0 && m.targets[0].endpoint[0]) ? m.targets[0].endpoint : "";
     const char* def_kref =
-        (m.n_targets > 0 && m.targets[0].upstream_key[0]) ? m.targets[0].upstream_key : "";
+        (m.n_targets > 0 && m.targets[0].upstream_key_ref[0]) ? m.targets[0].upstream_key_ref : "";
 
     snprintf(m.provider,
              sizeof m.provider,
@@ -685,7 +685,7 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
             json_t*            to = json_object();
             json_object_set_new(to, "provider", json_string(tgt->provider));
             json_object_set_new(to, "endpoint", json_string(tgt->endpoint));
-            json_object_set_new(to, "upstream_key_ref", json_string(tgt->upstream_key));
+            json_object_set_new(to, "upstream_key_ref", json_string(tgt->upstream_key_ref));
             json_object_set_new(to, "weight", json_integer(tgt->weight));
             json_object_set_new(to, "priority", json_integer(tgt->priority));
 

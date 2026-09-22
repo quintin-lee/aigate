@@ -46,12 +46,22 @@ struct resp_buf {
     size_t cap;
 };
 
+/* Non-streaming responses are buffered whole in memory (the bridge then
+ * re-parses JSON/SSE). Cap the accumulation so a hostile or misconfigured
+ * upstream cannot grow a worker's footprint without bound; aborting the
+ * transfer is reported to the caller as a transport error (-502). */
+#define UPSTREAM_RESP_MAX (32 * 1024 * 1024)
+
 /* libcurl write callback: data first, userdata last. */
 static size_t
 append_body(char* buf, size_t size, size_t nmemb, void* ud)
 {
     struct resp_buf* rb = ud;
     size_t           total = size * nmemb;
+    if (rb->len + total >= UPSTREAM_RESP_MAX) {
+        AIGATE_LOG_WARN("upstream response cap reached, aborting transfer");
+        return 0; /* abort: body exceeds the accumulation cap */
+    }
     if (rb->len + total + 1 > rb->cap) {
         size_t ncap = rb->cap ? rb->cap : 1024;
         while (rb->len + total + 1 > ncap) {
