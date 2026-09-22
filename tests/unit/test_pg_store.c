@@ -764,6 +764,9 @@ TEST_CASE(test_pg_real_roundtrip)
     pg_store_t* ps = pg_store_open(dsn, NULL);
     TEST_ASSERT(ps != NULL, "real store open");
     TEST_ASSERT(pg_store_migrate(ps) == 0, "migrate");
+    /* The schema SQL is re-applied on every boot; a second migrate against an
+     * already-migrated DB must succeed (catches non-idempotent DDL). */
+    TEST_ASSERT(pg_store_migrate(ps) == 0, "second migrate is a no-op");
 
     key_rec_t k;
     memset(&k, 0, sizeof k);

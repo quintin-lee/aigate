@@ -83,7 +83,13 @@ INSERT INTO schema_migrations(version) VALUES (4) ON CONFLICT (version) DO NOTHI
 
 -- Migration v5: BIGINT quota + model name length guard (matches C 128 cap)
 ALTER TABLE api_keys ALTER COLUMN daily_token_quota TYPE BIGINT;
-ALTER TABLE models ADD CONSTRAINT ck_models_name_len CHECK (char_length(model_name) <= 127);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'ck_models_name_len') THEN
+        ALTER TABLE models ADD CONSTRAINT ck_models_name_len CHECK (char_length(model_name) <= 127);
+    END IF;
+END
+$$;
 INSERT INTO schema_migrations(version) VALUES (5) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
