@@ -914,10 +914,11 @@ parse_provider_models_json(const json_t* jarr, char*** out_models, int* out_n)
     return 0;
 }
 
-static void
+static int
 sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
 {
     const pg_ops_t* ops = pg_store_ops(adm->ps);
+    int failed = 0;
     for (int i = 0; i < p->n_models; i++) {
         const char* m_name = p->models[i];
         if (m_name == NULL || m_name[0] == '\0') {
@@ -943,12 +944,16 @@ sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
                                sizeof existing.targets[0].provider,
                                p->provider_type);
                 }
-                ops->update_model(ops->ctx,
-                                  &existing,
-                                  MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED | MMASK_TARGETS);
-            } else {
-                ops->update_model(
-                    ops->ctx, &existing, MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED);
+                if (ops->update_model(ops->ctx,
+                                      &existing,
+                                      MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED |
+                                          MMASK_TARGETS) != 0) {
+                    failed++;
+                }
+            } else if (ops->update_model(
+                           ops->ctx, &existing, MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED) !=
+                       0) {
+                failed++;
             }
             model_rec_free(&existing);
         } else {
@@ -962,12 +967,15 @@ sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
             copy_field(m.upstream_key_ref, sizeof m.upstream_key_ref, p->api_key);
             copy_field(m.lb_policy, sizeof m.lb_policy, "priority");
             m.enabled = p->enabled;
-            ops->create_model(ops->ctx, &m);
+            if (ops->create_model(ops->ctx, &m) != 0) {
+                failed++;
+            }
         }
         if (adm->ac != NULL && adm->ac->router != NULL) {
             model_router_invalidate(adm->ac->router, m_name);
         }
     }
+    return failed;
 }
 
 static int
@@ -1027,12 +1035,13 @@ provider_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const v
     p.id = new_id;
 
     /* Auto-sync models into models table */
-    sync_provider_models(adm, &p);
+    int sf = sync_provider_models(adm, &p);
 
     json_t* out = json_object();
     json_object_set_new(out, "id", json_integer(new_id));
     json_object_set_new(out, "name", json_string(p.name));
     json_object_set_new(out, "created", json_true());
+    json_object_set_new(out, "sync_failed", json_integer(sf));
     provider_rec_free(&p);
     return finish_json(status, body, len, 201, out);
 }
@@ -1171,12 +1180,13 @@ provider_patch(
     }
 
     /* Auto-sync models to models table */
-    sync_provider_models(adm, &p);
+    int sf = sync_provider_models(adm, &p);
 
     json_t* out = json_object();
     json_object_set_new(out, "id", json_integer(p.id));
     json_object_set_new(out, "name", json_string(p.name));
     json_object_set_new(out, "updated", json_true());
+    json_object_set_new(out, "sync_failed", json_integer(sf));
     provider_rec_free(&p);
     return finish_json(status, body, len, 200, out);
 }

@@ -142,6 +142,7 @@ main(void)
     extern void test_admin_usage_query(void);
     extern void test_admin_provider_create_and_list(void);
     extern void test_admin_provider_patch_and_delete(void);
+    extern void test_admin_provider_sync_failed_reported(void);
     extern void test_admin_provider_plaintext_gate(void);
     extern void test_admin_lockout(void);
     test_register("admin_auth", test_admin_auth);
@@ -151,6 +152,7 @@ main(void)
     test_register("admin_usage_query", test_admin_usage_query);
     test_register("admin_provider_create", test_admin_provider_create_and_list);
     test_register("admin_provider_patch_delete", test_admin_provider_patch_and_delete);
+    test_register("admin_provider_sync_failed", test_admin_provider_sync_failed_reported);
     test_register("admin_provider_plaintext_gate", test_admin_provider_plaintext_gate);
     test_register("admin_lockout", test_admin_lockout);
 

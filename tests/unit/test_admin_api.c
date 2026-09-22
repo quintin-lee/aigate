@@ -28,6 +28,7 @@ struct fake_db {
     struct fake_key      keys[FAKE_CAP];
     model_rec_t          models[FAKE_CAP];
     int                  n_models;
+    int                  fail_create_model; /* when nonzero, create_model fails */
     struct fake_provider providers[FAKE_CAP];
     long                 next_provider_id;
     usage_row_t          usage[FAKE_CAP];
@@ -236,6 +237,9 @@ static int
 fake_create_model(void* ctx, const model_rec_t* m)
 {
     struct fake_db* db = ctx;
+    if (db->fail_create_model) {
+        return -1;
+    }
     if (db->n_models >= FAKE_CAP) {
         return -1;
     }
@@ -991,6 +995,73 @@ TEST_CASE(test_admin_provider_create_and_list)
     TEST_ASSERT(masked != NULL && strstr(masked, "••••") != NULL, "masked api key contains dots");
     json_t* marr = json_object_get(p0, "models");
     TEST_ASSERT(marr != NULL && json_array_size(marr) == 2, "2 models in provider");
+    json_decref(res);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_sync_failed_reported)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* create with 2 models; storage fails for both -> sync_failed == 2 */
+    db.fail_create_model = 1;
+    const char* req = "{\"name\":\"sync-fail\",\"provider_type\":\"openai\",\"endpoint\":\"https://"
+                      "api.openai.com/v1\","
+                      "\"api_key\":\"sk-test\",\"models\":[\"m-one\",\"m-two\"]}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/providers",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
+    TEST_ASSERT(rc == 0 && status == 201, "create still 201, got %d", status);
+    json_t* res = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(res != NULL, "parsed create resp");
+    json_t* sf = json_object_get(res, "sync_failed");
+    TEST_ASSERT(sf != NULL, "sync_failed field present");
+    TEST_ASSERT(json_integer_value(sf) == 2, "sync_failed == 2, got %ld",
+                (long)json_integer_value(sf));
+    json_decref(res);
+
+    /* storage healthy: patch reports sync_failed == 0 */
+    db.fail_create_model = 0;
+    const char* patch_req = "{\"enabled\":false}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/providers/1",
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        patch_req,
+                        strlen(patch_req),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "patch 200, got %d", status);
+    res = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(res != NULL, "parsed patch resp");
+    sf = json_object_get(res, "sync_failed");
+    TEST_ASSERT(sf != NULL, "patch sync_failed field present");
+    TEST_ASSERT(json_integer_value(sf) == 0, "patch sync_failed == 0, got %ld",
+                (long)json_integer_value(sf));
     json_decref(res);
 
     teardown_admin(ps, &core, &db);
