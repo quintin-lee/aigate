@@ -2,6 +2,7 @@
 #include "aigate_log.h"
 
 #include <curl/curl.h>
+#include <curl/curlver.h>
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -139,6 +140,18 @@ upstream_call_ext(const char* url,
     curl_easy_setopt(c, CURLOPT_WRITEDATA, &rb);
     curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, timeout_ms > 0 ? timeout_ms : 60000L);
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    /* A 30x may point at any protocol (file://, ftp://, ...); confine
+     * redirects to http/https so a controlled upstream cannot leak via a
+     * redirect to another scheme. */
+#if CURL_AT_LEAST_VERSION(7, 85, 0)
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(c,
+                     CURLOPT_REDIR_PROTOCOLS,
+                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
 
     CURLcode cret = curl_easy_perform(c);
@@ -343,6 +356,17 @@ upstream_stream_call(const char*       url,
     curl_easy_setopt(c, CURLOPT_XFERINFODATA, &sc);
     curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 0L);
     curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    /* Same protocol confinement as the non-streaming path: redirects may
+     * only follow http/https, never file:// or other schemes. */
+#if CURL_AT_LEAST_VERSION(7, 85, 0)
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(c,
+                     CURLOPT_REDIR_PROTOCOLS,
+                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
 
     CURLcode cret = curl_easy_perform(c);
