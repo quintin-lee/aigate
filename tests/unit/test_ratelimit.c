@@ -56,6 +56,7 @@ TEST_CASE(test_rl_daily_quota)
     TEST_ASSERT(rl_reserve_tokens(rl, 3, 100, 50) == -1, "reserve 50 over quota");
     TEST_ASSERT(rl_remaining_daily(rl, 3, 100) == -10, "110 used, -10 remaining");
     TEST_ASSERT(rl_remaining_daily(rl, 3, 0) == LONG_MAX, "unlimited quota");
+    ratelimit_free(rl);
 }
 
 TEST_CASE(test_rl_daily_quota_record_first)
