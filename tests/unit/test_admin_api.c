@@ -745,6 +745,112 @@ TEST_CASE(test_admin_models_lifecycle)
     teardown_admin(ps, &core, &db);
 }
 
+TEST_CASE(test_admin_default_params_oversize_rejected)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1100-char value: the packed JSON exceeds the 1024-byte column */
+    char  big[1101];
+    memset(big, 'a', sizeof big - 1);
+    big[sizeof big - 1] = '\0';
+    char* req = malloc(sizeof big + 128);
+    snprintf(req, sizeof big + 128,
+             "{\"name\":\"big-params\",\"provider\":\"openai\",\"endpoint\":\"https://"
+             "api.openai.com/v1\",\"default_params\":{\"k\":\"%s\"}}",
+             big);
+
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/models",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
+    int n_before = db.n_models;
+    TEST_ASSERT(rc == 0 && status == 400, "oversize create -> 400, got %d", status);
+    free(body);
+    model_rec_t probe;
+    TEST_ASSERT(fake_get_model(&db, "big-params", &probe) != 0, "absent");
+    free(req);
+
+    /* Oversize patch of a fresh model: 400 and stored row untouched */
+    const char* preq_small =
+        "{\"name\":\"ok-model\",\"provider\":\"openai\",\"endpoint\":\"https://api.openai.com/"
+        "v1\",\"default_params\":{\"temperature\":0.2}}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models",
+                        "POST",
+                        NULL,
+                        "admin-secret-token",
+                        preq_small,
+                        strlen(preq_small),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 201, "small create -> 201, got %d", status);
+    free(body);
+
+    req = malloc(sizeof big + 128);
+    snprintf(req,
+             sizeof big + 128,
+             "{\"default_params\":{\"k\":\"%s\"}}",
+             big);
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models/ok-model",
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        req,
+                        strlen(req),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 400, "oversize patch -> 400, got %d", status);
+    free(body);
+    free(req);
+
+    model_rec_t m;
+    TEST_ASSERT(fake_get_model(&db, "ok-model", &m) == 0, "get model ok");
+    TEST_ASSERT(strcmp(m.default_params_json, "{\"temperature\":0.2}") == 0,
+                "stored params untouched after rejected patch");
+
+    /* small patch still lands */
+    const char* ok_patch = "{\"default_params\":{\"top_p\":0.9}}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models/ok-model",
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        ok_patch,
+                        strlen(ok_patch),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "small patch -> 200, got %d", status);
+    free(body);
+    TEST_ASSERT(fake_get_model(&db, "ok-model", &m) == 0, "get model ok (2)");
+    TEST_ASSERT(strcmp(m.default_params_json, "{\"top_p\":0.9}") == 0, "params updated");
+
+    teardown_admin(ps, &core, &db);
+}
+
 TEST_CASE(test_admin_models_multi_target)
 {
     struct fake_db db;

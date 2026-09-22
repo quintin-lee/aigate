@@ -646,15 +646,24 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     snprintf(m.lb_policy, sizeof m.lb_policy, "%s", jstring(jbody, "lb_policy", "priority"));
 
     json_t* jparams = json_object_get(jbody, "default_params");
-    char    params[1024] = "{}";
     if (jparams != NULL && json_is_object(jparams)) {
         char* packed = json_dumps(jparams, JSON_COMPACT);
-        if (packed != NULL) {
-            snprintf(params, sizeof params, "%s", packed);
-            free(packed);
+        if (packed == NULL) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 500, "internal_error", "json encode failed");
         }
+        if (strlen(packed) >= sizeof m.default_params_json) {
+            /* A truncated JSONB blob silently poisons the model row; reject. */
+            free(packed);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "default_params too large");
+        }
+        snprintf(m.default_params_json, sizeof m.default_params_json, "%s", packed);
+        free(packed);
+    } else {
+        snprintf(m.default_params_json, sizeof m.default_params_json, "{}");
     }
-    memcpy(m.default_params_json, params, sizeof m.default_params_json);
     m.enabled = 1;
 
     int rc = pg_store_ops(adm->ps)->create_key != NULL
@@ -762,11 +771,23 @@ model_patch(
     v = json_object_get(jbody, "default_params");
     if (v != NULL && json_is_object(v)) {
         char* packed = json_dumps(v, JSON_COMPACT);
-        if (packed != NULL) {
-            snprintf(m.default_params_json, sizeof m.default_params_json, "%s", packed);
-            free(packed);
-            mask |= MMASK_PARAMS;
+        if (packed == NULL) {
+            model_rec_free(&existing);
+            json_decref(jbody);
+            return finish_error(status, body, len, 500, "internal_error", "json encode failed");
         }
+        if (strlen(packed) >= sizeof m.default_params_json) {
+            /* Oversized blob would truncate the JSONB; reject, leave mask
+             * clear so the stored row is untouched. */
+            free(packed);
+            model_rec_free(&existing);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "default_params too large");
+        }
+        snprintf(m.default_params_json, sizeof m.default_params_json, "%s", packed);
+        free(packed);
+        mask |= MMASK_PARAMS;
     }
     v = json_object_get(jbody, "upstream_key_ref");
     if (v != NULL && json_is_string(v)) {
