@@ -1203,8 +1203,20 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
         free(ps);
         return NULL;
     }
-    snprintf(px->dsn, sizeof px->dsn, "%s", dsn);
-    px->db = PQconnectdb(dsn);
+    /* Bound connection setup so a PG network outage cannot stall every op
+     * behind px->mtx for the OS-level socket timeout (P2). libpq's
+     * connect_timeout defaults to 0 = wait forever; 5s is the worst case
+     * we are willing to hold the store lock in one attempt. Operators who
+     * already pinned a connect_timeout keep their value. */
+    if (strstr(dsn, "connect_timeout") == NULL) {
+        snprintf(px->dsn,
+                 sizeof px->dsn,
+                 "%s connect_timeout=5",
+                 dsn);
+    } else {
+        snprintf(px->dsn, sizeof px->dsn, "%s", dsn);
+    }
+    px->db = PQconnectdb(px->dsn);
     if (PQstatus(px->db) != CONNECTION_OK) {
         AIGATE_LOG_ERROR("pg_store_open: %s", PQerrorMessage(px->db));
         PQfinish(px->db);
