@@ -32,7 +32,10 @@ auth_key_init(auth_key_cache* akc, pg_store_t* ps)
         return -1;
     }
     /* Negative cache: unknown key hashes. A non-fatal OOM here just means
-     * every unknown key still hits PG (old behavior). */
+     * every unknown key still hits PG (old behavior). The positive cache has
+     * no TTL by design: the admin plane is the source of truth, so a key
+     * revoked directly in PostgreSQL is not reflected until its LRU slot is
+     * evicted (P3-2). */
     akc->neg = lru_new(256, NULL);
     return 0;
 }

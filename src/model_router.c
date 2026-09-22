@@ -60,7 +60,16 @@ model_router_free(model_router_t* mr)
 #include <stdatomic.h>
 #include <stdbool.h>
 
+/* One round-robin counter shared by every model (P3-8): it only selects
+ * among a model's own targets, so cross-model interleaving is a harmless
+ * fairness artifact, not a bug. */
 static _Atomic unsigned long g_rr_counter = 0;
+
+/* resolve_single_key: "env:" and "pg:" refs are resolved once and the
+ * decrypted value is frozen in the route cache (P3-10). Environment
+ * variable changes or re-encrypted PG blobs take effect only on process
+ * restart or cache invalidation — by design, keeps the hot path
+ * allocation-free. */
 
 static int
 resolve_single_key(

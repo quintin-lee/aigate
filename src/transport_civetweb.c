@@ -116,6 +116,10 @@ extract_bearer(struct mg_connection* conn)
     return auth;
 }
 
+/* Content-Length based body reader. Transfer-Encoding: chunked requests
+ * (content_length == 0) are treated as empty and answered 400 (P3-12):
+ * no mg_read fallback, by design — a JSON body without a declared length
+ * is not supported. */
 static char*
 read_body(struct mg_connection* conn, long long cl, size_t* out_len)
 {

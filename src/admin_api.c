@@ -1233,6 +1233,9 @@ provider_patch(
     return finish_json(status, body, len, 200, out);
 }
 
+/* Deleting a provider leaves its auto-synced models rows in place (P3-3):
+ * they still route by their own endpoint/upstream_key_ref, so cleanup of
+ * orphan routes is manual until a cascade delete lands (follow-up). */
 static int
 provider_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
 {

@@ -1,5 +1,7 @@
 /** @file provider_anthropic.c
  *  @brief Anthropic Claude provider adapter (messages API & SSE bridge).
+ *  SSE re-emit buffers are 8192 bytes (P3-6): event payloads longer than
+ *  ~8KB are truncated with a warn; token accounting for that delta is lost.
  */
 #include "provider_anthropic.h"
 #include "aigate_log.h"

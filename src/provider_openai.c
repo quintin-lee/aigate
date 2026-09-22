@@ -192,7 +192,7 @@ openai_parse_chat_response(const char* raw_body,
 typedef struct {
     aigate_response_ctx* rc;
     bool                 headers_sent;
-    char                 line_buf[8192];
+    char line_buf[8192]; /* SSE lines >8KB are truncated (P3-6): long deltas beyond this lose token accounting */
     size_t               line_len;
     char                 model[128];
     long                 prompt_tokens;

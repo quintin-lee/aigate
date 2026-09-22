@@ -299,6 +299,10 @@ um_drain(usage_meter_t* um, usage_row_t* out, int cap, int* n_out)
 int
 um_unflush(usage_meter_t* um, const usage_row_t* rows, int n)
 {
+    /* Table-full drop is effectively unreachable (P3-7): the 4096-slot
+     * accumulator and the 4096-row worker batch are sized to the same cap,
+     * and drained rows re-queue into a table that just cleared. The warn
+     * below is the safety net, not an expected path. */
     if (n <= 0) {
         return 0;
     }

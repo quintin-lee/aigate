@@ -1,5 +1,7 @@
 /** @file provider_gemini.c
  *  @brief Google Gemini provider adapter (Plan 3, Tasks 3 & 4).
+ *  SSE line buffer is 8192 bytes (P3-6): lines longer than that are
+ *  truncated with a warn; usage extraction for the dropped part is lost.
  */
 #include "provider_gemini.h"
 #include "aigate_log.h"
