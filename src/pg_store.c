@@ -1209,10 +1209,18 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
      * we are willing to hold the store lock in one attempt. Operators who
      * already pinned a connect_timeout keep their value. */
     if (strstr(dsn, "connect_timeout") == NULL) {
-        snprintf(px->dsn,
-                 sizeof px->dsn,
-                 "%s connect_timeout=5",
-                 dsn);
+        if (strncmp(dsn, "postgres://", 11) == 0 || strncmp(dsn, "postgresql://", 13) == 0) {
+            /* URI form: connect_timeout must be a query parameter, not a
+             * keyword token (libpq rejects mixed forms with "unexpected
+             * spaces"). */
+            const char* q = strchr(dsn, '?');
+            size_t      base = q != NULL ? (size_t)(q - dsn) : strlen(dsn);
+            const char* sep = q != NULL ? "&" : "?";
+            snprintf(px->dsn, sizeof px->dsn, "%.*s%sconnect_timeout=5", (int)base, dsn, sep);
+        } else {
+            /* keyword/value form */
+            snprintf(px->dsn, sizeof px->dsn, "%s connect_timeout=5", dsn);
+        }
     } else {
         snprintf(px->dsn, sizeof px->dsn, "%s", dsn);
     }
