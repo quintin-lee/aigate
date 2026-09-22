@@ -1284,10 +1284,27 @@ pg_store_migrate(pg_store_t* ps)
      * ALTERs even though version 1 is already recorded. */
     pq_lock(px);
     {
-        PQclear(PQexec(px->db, "BEGIN"));
-        PQclear(PQexec(px->db, SCHEMA_SQL));
-        PQclear(PQexec(px->db, "COMMIT"));
-        rc = 0;
+        PGresult* begin = PQexec(px->db, "BEGIN");
+        PGresult* body = begin != NULL ? PQexec(px->db, SCHEMA_SQL) : NULL;
+        /* On any failure the transaction is aborted; COMMIT would be a
+         * no-op, so roll back and surface the error instead of starting
+         * the gateway on a half-applied schema. */
+        PGresult* end =
+            (body != NULL && PQresultStatus(body) == PGRES_COMMAND_OK) ? PQexec(px->db, "COMMIT")
+                                                                       : PQexec(px->db, "ROLLBACK");
+        if (begin != NULL && PQresultStatus(begin) != PGRES_COMMAND_OK) {
+            AIGATE_LOG_ERROR("pg migrate: BEGIN failed: %s", PQerrorMessage(px->db));
+            rc = -1;
+        } else if (body == NULL || PQresultStatus(body) != PGRES_COMMAND_OK) {
+            AIGATE_LOG_ERROR("pg migrate: schema apply failed: %s", PQerrorMessage(px->db));
+            rc = -1;
+        } else if (end != NULL && PQresultStatus(end) != PGRES_COMMAND_OK) {
+            AIGATE_LOG_ERROR("pg migrate: COMMIT/ROLLBACK failed: %s", PQerrorMessage(px->db));
+            rc = -1;
+        }
+        PQclear(begin);
+        PQclear(body);
+        PQclear(end);
     }
     pq_unlock(px);
     return rc;
