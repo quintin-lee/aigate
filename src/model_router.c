@@ -35,6 +35,9 @@ model_router_new(pg_store_t* ps, const uint8_t* master)
     }
     mr->routes = lru_new(1024, free_route_cb);
     if (mr->routes == NULL) {
+        if (mr->have_master) {
+            OPENSSL_cleanse(mr->master, 32);
+        }
         free(mr);
         return NULL;
     }

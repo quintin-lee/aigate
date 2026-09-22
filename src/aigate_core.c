@@ -38,6 +38,22 @@ aigate_core_init(aigate_core*   ac,
     ac->ps = ps;
     ac->default_timeout_ms = default_timeout_ms;
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
+        /* Roll back any partially built sub-objects; the router teardown
+         * also cleanses its master-key copy. */
+        if (ac->cb != NULL) {
+            cb_destroy(ac->cb);
+        }
+        if (ac->um != NULL) {
+            usage_meter_free(ac->um);
+        }
+        if (ac->router != NULL) {
+            model_router_free(ac->router);
+        }
+        if (ac->rl != NULL) {
+            ratelimit_free(ac->rl);
+        }
+        auth_key_shutdown(&ac->keys);
+        memset(ac, 0, sizeof *ac);
         return -1;
     }
     return 0;

@@ -64,6 +64,7 @@ main(void)
     if (cfg.master_key[0] != '\0') {
         if (hex_to_bytes32(cfg.master_key, master) != 0) {
             AIGATE_LOG_ERROR("main: invalid AIGATE_MASTER_KEY hex");
+            OPENSSL_cleanse(master, sizeof master);
             pg_store_close(ps);
             return 1;
         }
@@ -74,6 +75,8 @@ main(void)
     aigate_core core;
     if (aigate_core_init(&core, ps, master_ptr, cfg.upstream_timeout_ms, cfg.usage_flush_s) != 0) {
         AIGATE_LOG_ERROR("main: failed to initialize aigate core pipeline");
+        /* core_init rolled back (and cleansed) the router's master copy */
+        OPENSSL_cleanse(master, sizeof master);
         pg_store_close(ps);
         return 1;
     }
@@ -84,6 +87,7 @@ main(void)
     if (cw == NULL) {
         AIGATE_LOG_ERROR("main: failed to start HTTP transport on %s", cfg.listen);
         aigate_core_shutdown(&core);
+        OPENSSL_cleanse(master, sizeof master);
         pg_store_close(ps);
         return 1;
     }
