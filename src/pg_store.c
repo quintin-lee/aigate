@@ -253,11 +253,11 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
             out->daily_token_quota = atol(PQgetvalue(res, 0, 5));
             const char* exp = PQgetvalue(res, 0, 6);
             const char* rev = PQgetvalue(res, 0, 7);
-            if (exp[0] != '\0') {
+            if (exp != NULL && exp[0] != '\0') {
                 out->expires_at = (time_t)atol(exp);
                 out->has_expiry = 1;
             }
-            out->revoked = rev[0] != '\0';
+            out->revoked = (rev != NULL && rev[0] != '\0');
             rc = 0;
         } else {
             key_rec_free(out);
@@ -283,11 +283,11 @@ fill_key_row(PGresult* res, int row, key_rec_t* out)
     out->daily_token_quota = atol(PQgetvalue(res, row, 5));
     const char* exp = PQgetvalue(res, row, 6);
     const char* rev = PQgetvalue(res, row, 7);
-    if (exp[0] != '\0') {
+    if (exp != NULL && exp[0] != '\0') {
         out->expires_at = (time_t)atol(exp);
         out->has_expiry = 1;
     }
-    out->revoked = rev[0] != '\0';
+    out->revoked = (rev != NULL && rev[0] != '\0');
 }
 
 static int
