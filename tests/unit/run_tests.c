@@ -78,6 +78,7 @@ main(void)
     extern void test_metrics_failover(void);
     extern void test_core_pipeline(void);
     extern void test_core_models_rate_limited(void);
+    extern void test_core_models_list_failure_503(void);
     extern void test_core_upstream_400_passthrough(void);
     extern void test_provider_azure_build(void);
     extern void test_provider_default_params_merge(void);
@@ -129,6 +130,7 @@ main(void)
     test_register("metrics_failover", test_metrics_failover);
     test_register("core_pipeline", test_core_pipeline);
     test_register("core_models_rate_limited", test_core_models_rate_limited);
+    test_register("core_models_503", test_core_models_list_failure_503);
     test_register("core_upstream_400_passthrough", test_core_upstream_400_passthrough);
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);

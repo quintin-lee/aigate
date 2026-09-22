@@ -158,7 +158,15 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             int             n = 0;
             const pg_ops_t* ops = ac->ps != NULL ? pg_store_ops(ac->ps) : NULL;
             if (ops != NULL && ops->list_models != NULL) {
-                ops->list_models(ops->ctx, recs, 256, &n);
+                if (ops->list_models(ops->ctx, recs, 256, &n) != 0) {
+                    /* Storage failure: distinguish "no models" from "PG is
+                     * down" so callers do not mistake an outage for an empty
+                     * catalog. */
+                    free(recs);
+                    key_rec_free(&krec);
+                    return aigate_write_error(rc, 503, "internal_error",
+                                              "model list unavailable");
+                }
             }
             json_t* arr = json_array();
             for (int i = 0; i < n; i++) {

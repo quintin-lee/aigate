@@ -41,6 +41,7 @@ struct fdb {
     struct fkey keys[FKEYS];
     model_rec_t models[FMODELS];
     int         n_models;
+    int         fail_list; /* when nonzero, list_models returns -1 */
     usage_row_t usage[FUSAGE];
     int         n_usage;
     int         flush_calls;
@@ -121,7 +122,11 @@ static int
 f_list_models(void* ctx, model_rec_t* out, int cap, int* n)
 {
     struct fdb* db = ctx;
-    int         cnt = 0;
+    if (db->fail_list) {
+        *n = 0;
+        return -1;
+    }
+    int cnt = 0;
     for (int i = 0; i < db->n_models && cnt < cap; i++) {
         out[cnt++] = db->models[i];
     }
@@ -431,6 +436,49 @@ TEST_CASE(test_core_models_rate_limited)
     TEST_ASSERT(m2.status == 429, "second models GET rate-limited, got %d", m2.status);
     TEST_ASSERT(cap_has_header(&m2, "Retry-After:"), "Retry-After on 429");
     TEST_ASSERT(strstr(m2.body, "rate limit exceeded") != NULL, "429 body");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_core_models_list_failure_503)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "good-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+    db.fail_list = 1; /* simulate a PG outage: list_models fails */
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    run_models(&ac, "good-key", &c);
+    TEST_ASSERT(c.status == 503, "list failure -> 503, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "model list unavailable") != NULL, "503 body");
+
+    /* healthy store lists fine */
+    db.fail_list = 0;
+    memset(&c, 0, sizeof c);
+    run_models(&ac, "good-key", &c);
+    TEST_ASSERT(c.status == 200, "healthy list -> 200, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "gpt-4o") != NULL, "model listed");
 
     aigate_core_shutdown(&ac);
     pg_store_close(ps);
