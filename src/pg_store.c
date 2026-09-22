@@ -262,9 +262,11 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
         } else {
             key_rec_free(out);
         }
+    } else {
+        rc = 1; /* query succeeded but no such key */
     }
     PQclear(res);
-    return rc; /* 0 found, -1 unknown/error */
+    return rc; /* 0 found, 1 missing, -1 error */
 }
 
 /** @brief Fill one api_keys row into @p out (allowlist deep-copied). */

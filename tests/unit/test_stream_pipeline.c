@@ -47,7 +47,7 @@ fget_key(void* ctx, const char* key_hash, key_rec_t* out)
             return 0;
         }
     }
-    return -1;
+    return 1;
 }
 
 static int

@@ -59,7 +59,7 @@ fo_get_key(void* ctx, const char* key_hash, key_rec_t* out)
         out->n_allowed = 0;
         return 0;
     }
-    return -1;
+    return 1;
 }
 
 static int

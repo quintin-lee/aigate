@@ -106,16 +106,23 @@ auth_key_resolve(auth_key_cache* akc, const char* bearer, key_rec_t* out)
     memset(&fresh, 0, sizeof fresh);
 
     /* Unknown-key negative cache: skip the PG round-trip for hashes we
-     * already proved are absent (a DoS mitigation). */
+     * already proved are absent (a DoS mitigation). Only a definite
+     * "row does not exist" answer is cached; a storage error is never
+     * negative-cached, so an outage cannot turn valid keys into 401s
+     * for the life of the process. */
     if (akc->neg != NULL && lru_get(akc->neg, hash) != NULL) {
         return -1;
     }
 
-    if (akc->ops.get_key_by_hash(akc->ops_ctx, hash, &fresh) != 0) {
+    int rrc = akc->ops.get_key_by_hash(akc->ops_ctx, hash, &fresh);
+    if (rrc == 1) {
         if (akc->neg != NULL) {
             lru_put(akc->neg, hash, (void*)0x1);
         }
         return -1;
+    }
+    if (rrc != 0) {
+        return -1; /* storage error: report 401 but do not cache */
     }
 
     key_rec_t* copy = malloc(sizeof *copy);

@@ -9,6 +9,7 @@
 struct akg_db {
     int       get_calls;
     int       n;
+    int       fail_next; /* when nonzero, the next lookup returns a storage error */
     key_rec_t recs[4];
 };
 
@@ -32,7 +33,11 @@ akg_get_key(void* ctx, const char* key_hash, key_rec_t* out)
             return 0;
         }
     }
-    return -1;
+    if (db->fail_next) {
+        db->fail_next = 0;
+        return -1;
+    }
+    return 1; /* definite miss, not a storage error */
 }
 
 static int
@@ -168,6 +173,40 @@ TEST_CASE(test_auth_key_unknown_neg_cache)
     TEST_ASSERT(auth_key_resolve(&akc, "ghost-key", &out) == -1, "re-lookup after invalidate");
     key_rec_free(&out);
     TEST_ASSERT(db.get_calls == calls_after_first + 1, "invalidate cleared neg entry");
+
+    auth_key_shutdown(&akc);
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_auth_key_storage_error_not_neg_cached)
+{
+    struct akg_db db;
+    memset(&db, 0, sizeof db);
+    db.n = 0;
+
+    pg_store_t* ps = open_akg_store(&db);
+    TEST_ASSERT(ps != NULL, "store open");
+    auth_key_cache akc;
+    TEST_ASSERT(auth_key_init(&akc, ps) == 0, "auth init");
+    key_rec_t out;
+
+    /* Simulate a PG failure: the first lookup is a storage error (-1), which
+     * MUST NOT be negative-cached. The next resolve must re-query. */
+    db.fail_next = 1;
+    TEST_ASSERT(auth_key_resolve(&akc, "ghost-key", &out) == -1, "error -> -1");
+    key_rec_free(&out);
+    int calls_after_error = db.get_calls;
+    TEST_ASSERT(calls_after_error == 1, "first resolve hit the store");
+
+    /* No error flag now: the hash is a definite miss (1) and gets cached. */
+    TEST_ASSERT(auth_key_resolve(&akc, "ghost-key", &out) == -1, "miss -> -1");
+    key_rec_free(&out);
+    TEST_ASSERT(db.get_calls == calls_after_error + 1, "second resolve re-queried store");
+
+    /* Third resolve is served from the negative cache: no extra lookup. */
+    TEST_ASSERT(auth_key_resolve(&akc, "ghost-key", &out) == -1, "cached miss -> -1");
+    key_rec_free(&out);
+    TEST_ASSERT(db.get_calls == calls_after_error + 1, "neg cache: no extra lookup");
 
     auth_key_shutdown(&akc);
     pg_store_close(ps);

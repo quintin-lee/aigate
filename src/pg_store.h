@@ -96,6 +96,8 @@ typedef struct provider_rec {
  *
  *  All functions return 0 on success, -1 on error. out parameters may be
  *  NULL when unused. @p ctx is the implementation's private state.
+ *  @c get_key_by_hash is the exception: 0 = found, 1 = key definitively
+ *  absent, -1 = storage error (callers must not treat -1 as "missing").
  *  Thread-safety: implementations MUST be re-entrant safe; the libpq
  *  implementation serializes with an internal mutex. */
 typedef struct pg_ops {
