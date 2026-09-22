@@ -67,8 +67,13 @@ admin_auth_ok(admin_ctx_t* adm, const char* bearer)
 /* ------------------------------------------------------------ brute-force lockout */
 
 #define LOCKOUT_SLOTS 128
-#define LOCKOUT_FAILS 10
-#define LOCKOUT_WINDOW_S 300
+
+/* Policy is process-wide; transport sets it from env at start-up.
+ * Values outside [2..1000] / [5..3600] keep the current value (guards
+ * against a misconfig of 0 fails = lock everyone out, or a window so
+ * short the guard is useless). */
+static int g_lockout_fails = 10;
+static int g_lockout_window_s = 300;
 
 typedef struct {
     char           ip[32];
@@ -100,8 +105,8 @@ lockout_hit(const char* ip)
     }
     lockout_slot_t* s = &g_lockout[lockout_slot_for(ip)];
     pthread_mutex_lock(&g_lockout_mtx);
-    int hit = s->in_use && atomic_load(&s->fails) >= LOCKOUT_FAILS &&
-              time(NULL) - atomic_load(&s->first_fail) < LOCKOUT_WINDOW_S;
+    int hit = s->in_use && atomic_load(&s->fails) >= g_lockout_fails &&
+              time(NULL) - atomic_load(&s->first_fail) < g_lockout_window_s;
     pthread_mutex_unlock(&g_lockout_mtx);
     return hit;
 }
@@ -121,7 +126,7 @@ lockout_fail(const char* ip)
         atomic_store(&s->fails, 1);
         atomic_store(&s->first_fail, now);
     } else {
-        if (now - atomic_load(&s->first_fail) >= LOCKOUT_WINDOW_S) {
+        if (now - atomic_load(&s->first_fail) >= g_lockout_window_s) {
             /* window elapsed: restart the counter */
             atomic_store(&s->fails, 0);
             atomic_store(&s->first_fail, now);
@@ -156,6 +161,22 @@ admin_lockout_reset(void)
         atomic_store(&g_lockout[i].fails, 0);
         atomic_store(&g_lockout[i].first_fail, 0);
     }
+    pthread_mutex_unlock(&g_lockout_mtx);
+}
+
+void
+admin_lockout_set_policy(int max_fails, int window_s)
+{
+    /* Out-of-range values keep the current policy. */
+    if (max_fails < 2 || max_fails > 1000) {
+        return;
+    }
+    if (window_s < 5 || window_s > 3600) {
+        return;
+    }
+    pthread_mutex_lock(&g_lockout_mtx);
+    g_lockout_fails = max_fails;
+    g_lockout_window_s = window_s;
     pthread_mutex_unlock(&g_lockout_mtx);
 }
 

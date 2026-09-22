@@ -1337,3 +1337,59 @@ TEST_CASE(test_admin_lockout)
     teardown_admin(ps, &core, &db);
     admin_lockout_reset();
 }
+
+TEST_CASE(test_admin_lockout_policy_env)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+    admin_lockout_reset();
+
+    int         status = 0;
+    char*       body = NULL;
+    size_t      len = 0;
+    const char* ip = "10.9.9.9";
+
+    /* Tight policy: 3 fails engages the lockout */
+    admin_lockout_set_policy(3, 60);
+    for (int i = 0; i < 3; i++) {
+        body = NULL;
+        int rc = admin_dispatch(
+            &adm, "/admin/v1/keys", "GET", ip, "wrong", NULL, 0, &status, &body, &len);
+        TEST_ASSERT(rc == 0 && status == 401, "tight attempt %d -> 401", i);
+        free(body);
+    }
+    body = NULL;
+    int rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", ip, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 429, "tight policy locks after 3 fails, got %d", status);
+    free(body);
+
+    /* Out-of-range calls keep the current policy */
+    admin_lockout_set_policy(1, 300); /* fails=1 out of [2..1000]: ignored */
+    admin_lockout_set_policy(10, 4);  /* window=4 out of [5..3600]: ignored */
+    admin_lockout_reset();
+    for (int i = 0; i < 2; i++) {
+        body = NULL;
+        rc = admin_dispatch(
+            &adm, "/admin/v1/keys", "GET", ip, "wrong", NULL, 0, &status, &body, &len);
+        TEST_ASSERT(rc == 0 && status == 401, "loose attempt %d -> 401", i);
+        free(body);
+    }
+    body = NULL;
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", ip, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "policy still 3/60: 2 fails not locked, got %d",
+                status);
+    free(body);
+
+    /* Restore defaults for later tests */
+    admin_lockout_set_policy(10, 300);
+    admin_lockout_reset();
+    teardown_admin(ps, &core, &db);
+}

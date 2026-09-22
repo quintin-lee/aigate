@@ -45,4 +45,10 @@ int admin_dispatch(admin_ctx_t* adm,
 /** @brief Clear the failed-admin-token lockout table (tests). */
 void admin_lockout_reset(void);
 
+/** @brief Set the process-wide lockout policy: @p max_fails failed admin
+ *  token attempts before lockout (valid [2..1000]) and @p window_s lockout
+ *  length in seconds (valid [5..3600]). Out-of-range values leave the
+ *  current policy unchanged. */
+void admin_lockout_set_policy(int max_fails, int window_s);
+
 #endif /* AIGATE_ADMIN_API_H */

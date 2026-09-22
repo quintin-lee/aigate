@@ -145,6 +145,7 @@ main(void)
     extern void test_admin_provider_sync_failed_reported(void);
     extern void test_admin_provider_plaintext_gate(void);
     extern void test_admin_lockout(void);
+    extern void test_admin_lockout_policy_env(void);
     test_register("admin_auth", test_admin_auth);
     test_register("admin_keys_lifecycle", test_admin_keys_lifecycle);
     test_register("admin_models_lifecycle", test_admin_models_lifecycle);
@@ -155,6 +156,7 @@ main(void)
     test_register("admin_provider_sync_failed", test_admin_provider_sync_failed_reported);
     test_register("admin_provider_plaintext_gate", test_admin_provider_plaintext_gate);
     test_register("admin_lockout", test_admin_lockout);
+    test_register("admin_lockout_policy_env", test_admin_lockout_policy_env);
 
     extern void test_upstream_stream_normal(void);
     extern void test_upstream_stream_silence_timeout(void);

@@ -370,6 +370,11 @@ transport_civetweb_start(aigate_core* ac,
     const char* apk = getenv("AIGATE_ALLOW_PLAINTEXT_KEYS");
     cw->adm.allow_plaintext_keys = (apk != NULL && atoi(apk) == 1);
 
+    /* Admin lockout policy: out-of-range values keep the defaults. */
+    const char* lf = getenv("AIGATE_LOCKOUT_MAX_FAILS");
+    const char* lw = getenv("AIGATE_LOCKOUT_WINDOW_S");
+    admin_lockout_set_policy(lf != NULL ? atoi(lf) : 10, lw != NULL ? atoi(lw) : 300);
+
     const char* port_spec = listen_addr;
     if (port_spec == NULL || port_spec[0] == '\0') {
         port_spec = "8080";
