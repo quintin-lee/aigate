@@ -40,7 +40,7 @@ TEST_CASE(test_upstream_stream_normal)
     int                   status = 0;
 
     int rc = upstream_stream_call(
-        url, "secret-key", NULL, 0, "{}", 2, 5000, capture_chunk, &sc, &status);
+        url, "secret-key", NULL, 0, "{}", 2, 5000, capture_chunk, &sc, &status, NULL, NULL);
 
     TEST_ASSERT(rc == 0, "stream call rc == 0");
     TEST_ASSERT(status == 200, "stream call status == 200");
@@ -65,7 +65,8 @@ TEST_CASE(test_upstream_stream_silence_timeout)
 
     /* 200ms silence timeout; upstream sleeps 1200ms between chunks */
     int rc =
-        upstream_stream_call(url, "secret-key", NULL, 0, "{}", 2, 200, capture_chunk, &sc, &status);
+        upstream_stream_call(
+            url, "secret-key", NULL, 0, "{}", 2, 200, capture_chunk, &sc, &status, NULL, NULL);
 
     TEST_ASSERT(rc == -110, "stream silence timeout returned -110");
 

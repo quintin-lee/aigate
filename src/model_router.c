@@ -270,9 +270,14 @@ model_router_select_candidates(circuit_breaker_t* cb,
     int total_added = 0;
     int healthy_count = 0;
 
-    /* First pass: count healthy targets */
+    /* One cb_allow_request per target: the first call on a HALF_OPEN
+     * entry flips probe_active and later calls for the same entry
+     * reject, so the result is captured here and reused by the tier
+     * pass instead of being re-queried. */
+    bool allowed[MAX_TARGETS_PER_MODEL];
     for (int i = 0; i < n_tgts; i++) {
-        if (cb == NULL || cb_allow_request(cb, model->name, src_targets[i].endpoint)) {
+        allowed[i] = (cb == NULL) || cb_allow_request(cb, model->name, src_targets[i].endpoint);
+        if (allowed[i]) {
             healthy_count++;
         }
     }
@@ -285,7 +290,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
             int n_th = 0;
             for (int i = 0; i < n_tgts; i++) {
                 if (src_targets[i].priority == p) {
-                    if (cb == NULL || cb_allow_request(cb, model->name, src_targets[i].endpoint)) {
+                    if (allowed[i]) {
                         tier_healthy_idx[n_th++] = i;
                     }
                 }

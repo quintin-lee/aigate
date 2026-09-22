@@ -204,6 +204,13 @@ struct stream_ctx {
     int               aborted;
     CURL*             curl;
     int               status;
+    /* Error-body capture: when the upstream answers 4xx/5xx before the first
+     * SSE chunk, the body is accumulated here so the caller can surface the
+     * upstream's own error instead of a generic 502. Capped like the
+     * non-streaming buffer. */
+    char*  err_body;
+    size_t err_len;
+    size_t err_cap;
 };
 
 static size_t
@@ -221,6 +228,21 @@ stream_write_cb(char* buf, size_t size, size_t nmemb, void* ud)
     }
 
     if (sc->status >= 400) {
+        /* Accumulate the upstream error body (capped) so the caller can
+         * surface it instead of a generic 502. */
+        if (total > 0 && sc->err_len + total < UPSTREAM_RESP_MAX) {
+            size_t need = sc->err_len + total + 1;
+            if (need > sc->err_cap) {
+                sc->err_cap = need * 2;
+                sc->err_body = realloc(sc->err_body, sc->err_cap);
+                if (sc->err_body == NULL) {
+                    return 0; /* out of memory: abort */
+                }
+            }
+            memcpy(sc->err_body + sc->err_len, buf, total);
+            sc->err_len += total;
+            sc->err_body[sc->err_len] = '\0';
+        }
         return total;
     }
 
@@ -262,7 +284,9 @@ upstream_stream_call(const char*       url,
                      long              silence_timeout_ms,
                      upstream_chunk_fn on_chunk,
                      void*             user_data,
-                     int*              out_status)
+                     int*              out_status,
+                     char**           out_err_body,
+                     size_t*          out_err_len)
 {
     struct stream_ctx  sc = {0};
     struct curl_slist* hdrs = NULL;
@@ -339,5 +363,11 @@ upstream_stream_call(const char*       url,
 
 done:
     curl_slist_free_all(hdrs);
+    if (out_err_body != NULL && out_err_len != NULL) {
+        *out_err_body = sc.err_body;
+        *out_err_len = sc.err_len;
+    } else {
+        free(sc.err_body);
+    }
     return rc;
 }

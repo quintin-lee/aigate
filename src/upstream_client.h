@@ -60,7 +60,10 @@ typedef int (*upstream_chunk_fn)(void* user_data, const void* chunk, size_t len)
  * @param on_chunk           called on every incoming data chunk
  * @param user_data          passed to on_chunk
  * @param out_status         receives HTTP status code
- * @return 0 on success; -110 on timeout; -502 on transport error. */
+ * @return 0 on success; -110 on timeout; -502 on transport error.
+ * @note When the upstream answers 4xx/5xx before any SSE data, the error
+ *       body is accumulated and returned via @p out_err_body (malloc'd,
+ *       caller frees via free; NULL when no error or on success paths). */
 int upstream_stream_call(const char*       url,
                          const char*       upstream_key,
                          const char*       extra_headers_kv[][2],
@@ -70,6 +73,8 @@ int upstream_stream_call(const char*       url,
                          long              silence_timeout_ms,
                          upstream_chunk_fn on_chunk,
                          void*             user_data,
-                         int*              out_status);
+                         int*              out_status,
+                         char**            out_err_body,
+                         size_t*           out_err_len);
 
 #endif /* AIGATE_UPSTREAM_CLIENT_H */

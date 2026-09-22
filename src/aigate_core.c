@@ -493,6 +493,8 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             }
 
             int      status = 0;
+            char*    sbody = NULL;
+            size_t   slen = 0;
             uint64_t t0 = mono_ns();
             long     silence_timeout_ms =
                 ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
@@ -505,12 +507,16 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                                             silence_timeout_ms,
                                             (upstream_chunk_fn)adapter->stream_bridge_feed,
                                             bridge,
-                                            &status);
+                                            &status,
+                                            &sbody,
+                                            &slen);
             bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
 
             if (n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {
                 struct timespec sl = {0, 200 * 1000000}; /* 200ms */
                 nanosleep(&sl, NULL);
+                free(sbody); /* the retry re-captures into the same pointers */
+                sbody = NULL;
                 urc = upstream_stream_call(url,
                                            cur_route.upstream_key,
                                            extra_hdrs,
@@ -520,7 +526,9 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                                            silence_timeout_ms,
                                            (upstream_chunk_fn)adapter->stream_bridge_feed,
                                            bridge,
-                                           &status);
+                                           &status,
+                                           &sbody,
+                                           &slen);
                 headers_sent = adapter->stream_bridge_headers_sent(bridge);
             }
             uint64_t lat = mono_ns() - t0;
@@ -534,7 +542,20 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 adapter->stream_bridge_free(bridge);
 
                 if (!is_failover && status >= 400) {
-                    break;
+                    /* Pre-headers 4xx: surface the upstream's own error body
+                     * (mirrors the non-streaming passthrough). Only when a
+                     * body was actually received (urc == 0). */
+                    if (sbody != NULL && urc == 0) {
+                        um_record(
+                            ac->um, krec.key_id, model, status, 0, 0, 0, total_lat, target->provider);
+                        int rv = aigate_write_json(rc, status, sbody, slen);
+                        free(sbody);
+                        json_decref(jbody);
+                        key_rec_free(&krec);
+                        return rv;
+                    }
+                    free(sbody);
+                    break; /* no error body: fall through to the generic 502 */
                 }
 
                 if (ci + 1 < n_candidates) {
@@ -548,8 +569,10 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                                     status,
                                     urc);
                     metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
+                    free(sbody);
                     continue;
                 }
+                free(sbody);
                 break;
             }
 

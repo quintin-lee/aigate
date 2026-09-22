@@ -315,8 +315,10 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
                             (long)e->open_until);
         }
     } else {
-        /* Already OPEN: refresh cooloff */
-        e->open_until = now + cb->cooloff_sec;
+        /* Already OPEN: keep the original cool-off window. Refreshing
+         * open_until on every failure would extend it indefinitely under
+         * continuous traffic and the endpoint would never get the quiet
+         * window its half-open probe needs to recover. */
     }
     pthread_mutex_unlock(&cb->mtx);
 }

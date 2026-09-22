@@ -140,6 +140,39 @@ TEST_CASE(test_cb_probe_failure_trips_back_to_open)
     cb_destroy(cb);
 }
 
+TEST_CASE(test_cb_open_failures_do_not_refresh_cooloff)
+{
+    circuit_breaker_t* cb = cb_create();
+    cb_set_params(cb, 3, 30);
+    g_fake_time = 1000;
+    cb_set_time_fn(cb, fake_time_provider);
+
+    /* Trip to OPEN at t = 1000: open_until = 1030 */
+    cb_record_failure(cb, "m", "http://ep1", 500);
+    cb_record_failure(cb, "m", "http://ep1", 500);
+    cb_record_failure(cb, "m", "http://ep1", 500);
+    TEST_ASSERT(cb_get_state(cb, "m", "http://ep1") == CB_OPEN, "open");
+    TEST_ASSERT(cb_get_open_until(cb, "m", "http://ep1") == 1030, "open_until 1030");
+
+    /* Continuous failures while OPEN must not extend the cool-off window,
+     * or the quiet window the probe needs would never arrive. */
+    g_fake_time = 1005;
+    cb_record_failure(cb, "m", "http://ep1", 500);
+    g_fake_time = 1010;
+    cb_record_failure(cb, "m", "http://ep1", 500);
+    TEST_ASSERT(cb_get_state(cb, "m", "http://ep1") == CB_OPEN, "still open");
+    TEST_ASSERT(cb_get_open_until(cb, "m", "http://ep1") == 1030, "cooloff not extended");
+
+    /* Quiet window arrives: probe fires and the endpoint recovers. */
+    g_fake_time = 1030;
+    TEST_ASSERT(cb_get_state(cb, "m", "http://ep1") == CB_HALF_OPEN, "quiet window reached");
+    TEST_ASSERT(cb_allow_request(cb, "m", "http://ep1") == true, "probe allowed");
+    cb_record_success(cb, "m", "http://ep1");
+    TEST_ASSERT(cb_get_state(cb, "m", "http://ep1") == CB_CLOSED, "recovered to closed");
+
+    cb_destroy(cb);
+}
+
 struct thread_arg {
     circuit_breaker_t* cb;
     int                id;

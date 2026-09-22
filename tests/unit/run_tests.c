@@ -66,6 +66,7 @@ main(void)
     extern void test_model_router_round_robin(void);
     extern void test_model_router_weighted(void);
     extern void test_model_router_cb_exclusion_and_fallback(void);
+    extern void test_model_router_half_open_probe_in_candidates(void);
     extern void test_upstream_200_roundtrip(void);
     extern void test_upstream_500_passthrough(void);
     extern void test_upstream_timeout(void);
@@ -116,6 +117,7 @@ main(void)
     test_register("model_router_round_robin", test_model_router_round_robin);
     test_register("model_router_weighted", test_model_router_weighted);
     test_register("model_router_cb_exclusion", test_model_router_cb_exclusion_and_fallback);
+    test_register("model_router_half_open_probe", test_model_router_half_open_probe_in_candidates);
     test_register("upstream_200", test_upstream_200_roundtrip);
     test_register("upstream_500", test_upstream_500_passthrough);
     test_register("upstream_timeout", test_upstream_timeout);
@@ -157,9 +159,11 @@ main(void)
 
     extern void test_stream_pipeline_normal(void);
     extern void test_stream_pipeline_early_error(void);
+    extern void test_stream_pipeline_4xx_passthrough(void);
     extern void test_stream_pipeline_silence_timeout(void);
     test_register("stream_pipeline_normal", test_stream_pipeline_normal);
     test_register("stream_pipeline_early_error", test_stream_pipeline_early_error);
+    test_register("stream_pipeline_4xx_passthrough", test_stream_pipeline_4xx_passthrough);
     test_register("stream_pipeline_silence_timeout", test_stream_pipeline_silence_timeout);
 
     extern void test_anthropic_build_system_and_defaults(void);
@@ -222,11 +226,13 @@ main(void)
     extern void test_cb_tripping_on_consecutive_failures(void);
     extern void test_cb_cooloff_and_half_open_probe_success(void);
     extern void test_cb_probe_failure_trips_back_to_open(void);
+    extern void test_cb_open_failures_do_not_refresh_cooloff(void);
     extern void test_cb_concurrency_stress(void);
     test_register("cb_normal_traffic", test_cb_normal_traffic);
     test_register("cb_tripping", test_cb_tripping_on_consecutive_failures);
     test_register("cb_cooloff_and_probe_success", test_cb_cooloff_and_half_open_probe_success);
     test_register("cb_probe_failure_trips_back", test_cb_probe_failure_trips_back_to_open);
+    test_register("cb_open_no_refresh", test_cb_open_failures_do_not_refresh_cooloff);
     test_register("cb_concurrency_stress", test_cb_concurrency_stress);
 
     extern void test_failover_on_500_to_backup(void);

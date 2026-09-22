@@ -2,8 +2,18 @@
  *  @brief model_router resolve/invalidate + key-ref resolution tests. */
 #include "run_tests.h"
 #include "model_router.h"
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+static time_t g_fake_time = 1000000;
+
+static time_t
+fake_time_provider(void)
+{
+    return g_fake_time;
+}
 
 struct mro_db {
     int         get_model_calls;
@@ -290,6 +300,49 @@ TEST_CASE(test_model_router_cb_exclusion_and_fallback)
     TEST_ASSERT(model_router_select_candidates(cb, &m, cands, 8, &count) == 0,
                 "select all tripped");
     TEST_ASSERT(count == 3, "returns all tripped targets in recovery order");
+
+    cb_destroy(cb);
+}
+
+TEST_CASE(test_model_router_half_open_probe_in_candidates)
+{
+    circuit_breaker_t* cb = cb_create();
+    cb_set_params(cb, 3, 30);
+    cb_set_time_fn(cb, fake_time_provider);
+    g_fake_time = 1000;
+
+    model_rec_t m;
+    memset(&m, 0, sizeof m);
+    strcpy(m.name, "probe-model");
+    strcpy(m.lb_policy, "priority");
+    m.n_targets = 2;
+
+    strcpy(m.targets[0].endpoint, "http://probe-a");
+    m.targets[0].priority = 0;
+    strcpy(m.targets[1].endpoint, "http://probe-b");
+    m.targets[1].priority = 0;
+
+    /* Trip probe-a, then let the cool-off elapse so the entry is HALF_OPEN
+     * and its first cb_allow_request flips probe_active. */
+    cb_record_failure(cb, "probe-model", "http://probe-a", 500);
+    cb_record_failure(cb, "probe-model", "http://probe-a", 500);
+    cb_record_failure(cb, "probe-model", "http://probe-a", 500);
+    g_fake_time = 1031;
+    TEST_ASSERT(cb_get_state(cb, "probe-model", "http://probe-a") == CB_HALF_OPEN,
+                "probe-a half open");
+
+    upstream_target_t cands[8];
+    int               count = 0;
+    TEST_ASSERT(model_router_select_candidates(cb, &m, cands, 8, &count) == 0, "select");
+    /* Before the fix, the probe entry's first call flipped probe_active and
+     * the second call (in the tier pass) rejected it, so only probe-b
+     * survived. Both candidates must be present after the fix. */
+    TEST_ASSERT(count == 2, "half-open probe target kept in candidates");
+
+    /* The probe should have won: probe-a first (only target of its tier's
+     * probe slot), probe-b second. */
+    TEST_ASSERT(strcmp(cands[0].endpoint, "http://probe-a") == 0, "probe-a picked");
+    TEST_ASSERT(strcmp(cands[1].endpoint, "http://probe-b") == 0, "probe-b picked");
 
     cb_destroy(cb);
 }

@@ -292,6 +292,59 @@ TEST_CASE(test_stream_pipeline_early_error)
     mock_upstream_stop(mu);
 }
 
+TEST_CASE(test_stream_pipeline_4xx_passthrough)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+    /* Upstream answers 400 with its own JSON error body, not SSE */
+    mock_upstream_fail_all(mu, 400);
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "stream-key", 0, 1000);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+
+    aigate_request_ctx rq;
+    memset(&rq, 0, sizeof rq);
+    rq.method = "POST";
+    rq.path = "/v1/chat/completions";
+    rq.bearer = "stream-key";
+    rq.client_ip = "127.0.0.1";
+    const char* req_body = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"hi\"}]}";
+    rq.body = req_body;
+    rq.body_len = strlen(req_body);
+
+    aigate_response_ctx rc = cap_rc(&c);
+    int                 rv = aigate_handle_request(&ac, &rq, &rc);
+    TEST_ASSERT(rv == 0, "handle_request returned 0");
+    /* Before the fix this path fell through to the generic 502 */
+    TEST_ASSERT(rc.status == 400, "status == 400, got %d", rc.status);
+    TEST_ASSERT(strstr(c.body, "boom") != NULL, "upstream error body passed through");
+    TEST_ASSERT(strstr(c.body, "upstream request failed") == NULL,
+                "no generic gateway error");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    mock_upstream_stop(mu);
+}
+
 TEST_CASE(test_stream_pipeline_silence_timeout)
 {
     mock_upstream_t* mu = mock_upstream_start();
