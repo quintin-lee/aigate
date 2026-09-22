@@ -53,9 +53,20 @@ TEST_CASE(test_rl_daily_quota)
     TEST_ASSERT(rl != NULL, "new");
     TEST_ASSERT(rl_reserve_tokens(rl, 3, 100, 60) == 0, "reserve 60");
     TEST_ASSERT(rl_remaining_daily(rl, 3, 100) == 40, "40 remaining");
-    TEST_ASSERT(rl_reserve_tokens(rl, 3, 100, 50) == -1, "reserve 50 denied");
-    TEST_ASSERT(rl_remaining_daily(rl, 3, 100) == 40, "still 40 (not applied)");
+    TEST_ASSERT(rl_reserve_tokens(rl, 3, 100, 50) == -1, "reserve 50 over quota");
+    TEST_ASSERT(rl_remaining_daily(rl, 3, 100) == -10, "110 used, -10 remaining");
     TEST_ASSERT(rl_remaining_daily(rl, 3, 0) == LONG_MAX, "unlimited quota");
+}
+
+TEST_CASE(test_rl_daily_quota_record_first)
+{
+    ratelimit_t* rl = ratelimit_new();
+    TEST_ASSERT(rl != NULL, "new");
+    /* record-first: even a denied reservation is accounted */
+    TEST_ASSERT(rl_reserve_tokens(rl, 7, 100, 60) == 0, "reserve 60 ok");
+    TEST_ASSERT(rl_remaining_daily(rl, 7, 100) == 40, "40 remaining");
+    TEST_ASSERT(rl_reserve_tokens(rl, 7, 100, 50) == -1, "reserve 50 over quota");
+    TEST_ASSERT(rl_remaining_daily(rl, 7, 100) == -10, "110 used, -10 remaining");
     ratelimit_free(rl);
 }
 

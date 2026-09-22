@@ -195,10 +195,11 @@ rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
     bt = find_or_make(rl, key_id);
     if (bt == NULL) {
         rc = -1;
-    } else if (daily_quota > 0 && bt->daily_used + tokens > daily_quota) {
-        rc = -1;
     } else {
+        /* Record-first: the tokens are always accounted; -1 merely
+         * reports that the daily quota is (now) exceeded. */
         bt->daily_used += tokens;
+        rc = (daily_quota > 0 && bt->daily_used > daily_quota) ? -1 : 0;
     }
     pthread_mutex_unlock(&rl->mtx);
     return rc;

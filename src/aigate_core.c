@@ -134,6 +134,19 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         key_rec_free(&krec);
         return 0;
     }
+    /* --- daily token quota gate (after the QPS gate, before /v1/models so
+     *  the limit applies uniformly to all data-plane traffic) --- */
+    if (krec.daily_token_quota > 0 &&
+        rl_remaining_daily(ac->rl, krec.key_id, krec.daily_token_quota) <= 0) {
+        time_t now = time(NULL);
+        time_t next = (time_t)(now - (now % 86400)) + 86400; /* next UTC midnight */
+        char ra[32];
+        snprintf(ra, sizeof ra, "%ld", (long)(next - now));
+        rc->set_header(rc->impl, "Retry-After", ra);
+        aigate_write_error(rc, PIPE_RATE, "daily_quota_exceeded", "daily token quota exceeded");
+        key_rec_free(&krec);
+        return 0;
+    }
     /* --- handle GET /v1/models (data plane: list allowed enabled models) --- */
     if (rq->path != NULL && strcmp(rq->path, "/v1/models") == 0) {
         if (rq->method != NULL && strcmp(rq->method, "GET") == 0) {

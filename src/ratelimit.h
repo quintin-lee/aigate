@@ -27,8 +27,10 @@ void ratelimit_free(ratelimit_t* rl);
 int rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms);
 
 /** @brief Consume @p tokens of the key's daily quota after upstream usage.
- * @param daily_quota 0 = unlimited (never denied)
- * @return 0 ok; -1 over quota (blocks subsequent requests, in-flight done). */
+ * Tokens are recorded first (accounting always happens); the return
+ * reports whether the running total now exceeds @p daily_quota.
+ * @param daily_quota 0 = unlimited (never returns -1)
+ * @return 0 within quota (or unlimited); -1 over quota or allocation failure. */
 int rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens);
 
 /** @brief Remaining daily tokens; LONG_MAX when unlimited or unused yet. */

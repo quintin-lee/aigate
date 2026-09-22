@@ -19,6 +19,7 @@
 #include "provider_openai.h"
 #include "sha256.h"
 #include "usage_meter.h"
+#include "ratelimit.h"
 
 #include <jansson.h>
 #include <stdio.h>
@@ -545,4 +546,44 @@ TEST_CASE(test_provider_default_params_merge)
                 "default top_p filled in");
     json_decref(j);
     free(merged);
+}
+
+TEST_CASE(test_core_daily_quota_429)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "quota-key", 0, 50, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    /* exhaust the daily quota out-of-band, then the pipeline must 429 */
+    TEST_ASSERT(rl_reserve_tokens(ac.rl, 1, 50, 50) == -1, "quota exhausted (recorded)");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    run(&ac, "quota-key", "gpt-4o", &c);
+    TEST_ASSERT(c.status == 429, "429 when daily quota exhausted, got %d", c.status);
+    TEST_ASSERT(cap_has_header(&c, "Retry-After:"), "Retry-After header on quota 429");
+    TEST_ASSERT(strstr(c.body, "daily token quota exceeded") != NULL, "quota 429 body");
+    TEST_ASSERT(mock_upstream_request_count(mu) == 0, "no upstream request sent");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
 }
