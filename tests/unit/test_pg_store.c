@@ -31,6 +31,8 @@ struct fake_db {
     long                 next_provider_id;
     usage_row_t          usage[FAKE_CAP];
     int                  n_usage;
+    usage_request_row_t reqs[FAKE_CAP];
+    int                 n_reqs;
     long                 next_key_id;
     /* counters for assertions */
     int lookup_calls;
@@ -378,6 +380,39 @@ fake_query_usage(void*        ctx,
 }
 
 static int
+fake_flush_requests(void* ctx, const usage_request_row_t* rows, int n)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < n && db->n_reqs < FAKE_CAP; i++) {
+        db->reqs[db->n_reqs++] = rows[i];
+    }
+    return 0;
+}
+
+static int
+fake_query_requests(void*        ctx,
+                    long         key_id,
+                    time_t       since,
+                    usage_request_row_t* out,
+                    int          cap,
+                    int*         n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < db->n_reqs && *n < cap; i++) {
+        usage_request_row_t* r = &db->reqs[i];
+        if (key_id != 0 && r->key_id != key_id) {
+            continue;
+        }
+        if (r->ts < since) {
+            continue;
+        }
+        out[(*n)++] = *r;
+    }
+    return 0;
+}
+
+static int
 fake_list_providers(void* ctx, provider_rec_t* out, int cap, int* n)
 {
     struct fake_db* db = ctx;
@@ -519,6 +554,8 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->delete_provider = fake_delete_provider;
     ops->flush_usage = fake_flush_usage;
     ops->query_usage = fake_query_usage;
+    ops->flush_usage_requests = fake_flush_requests;
+    ops->query_usage_requests = fake_query_requests;
 }
 
 TEST_CASE(test_pg_fake_key_lifecycle)
@@ -740,6 +777,52 @@ TEST_CASE(test_pg_fake_usage_flush_and_query)
     pg_store_close(ps);
 }
 
+TEST_CASE(test_pg_fake_request_flush_and_query)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    usage_request_row_t rr, buf[4];
+    int                 n = 0;
+
+    memset(&db, 0, sizeof db);
+    build_fake_ops(&db, &ops);
+    ps = pg_store_open("unused", &ops);
+    TEST_ASSERT(ps != NULL, "fake store open");
+
+    memset(&rr, 0, sizeof rr);
+    rr.key_id = 7;
+    strcpy(rr.model_name, "gpt-4o");
+    strcpy(rr.provider, "openai");
+    rr.http_status = 200;
+    rr.prompt_tokens = 12;
+    rr.completion_tokens = 34;
+    rr.cached_prompt_tokens = 4;
+    rr.latency_ns = 88000000;
+    rr.ts = 1726704000; /* 2024-09-19 00:00:00 UTC */
+    TEST_ASSERT(pg_store_ops(ps)->flush_usage_requests(&db, &rr, 1) == 0, "flush rr");
+
+    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(
+                    &db, 7, 1726600000, buf, 4, &n) == 0,
+                "query key 7");
+    TEST_ASSERT(n == 1, "1 request row, got %d", n);
+    TEST_ASSERT(buf[0].http_status == 200 && buf[0].latency_ns == 88000000,
+                "fields roundtrip");
+
+    n = 0;
+    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(&db, 8, 1726600000, buf, 4, &n) == 0,
+                "query other key");
+    TEST_ASSERT(n == 0, "no rows for other key");
+
+    n = 0;
+    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(
+                    &db, 0, 1726704000, buf, 4, &n) == 0,
+                "all keys, since boundary");
+    TEST_ASSERT(n == 1, "all-keys query returns the row");
+
+    pg_store_close(ps);
+}
+
 TEST_CASE(test_pg_migrate_noop_for_fake)
 {
     struct fake_db db;
@@ -778,7 +861,30 @@ TEST_CASE(test_pg_real_roundtrip)
     long id = 0;
     TEST_ASSERT(pg_store_ops(ps)->create_key(pg_store_ops(ps)->ctx, &k, &id) == 0,
                 "real create_key");
-    (void)id;
+    /* P0-1: per-request detail roundtrip */
+    usage_request_row_t rreq;
+    memset(&rreq, 0, sizeof rreq);
+    rreq.key_id = id; /* key created above */
+    strcpy(rreq.model_name, "itest-req");
+    strcpy(rreq.provider, "openai");
+    rreq.http_status = 200;
+    rreq.prompt_tokens = 5;
+    rreq.completion_tokens = 6;
+    rreq.latency_ns = 42000000;
+    rreq.ts = (time_t)(time(NULL) - 60);
+    TEST_ASSERT(pg_store_ops(ps)->flush_usage_requests(
+                    pg_store_ops(ps)->ctx, &rreq, 1) == 0,
+                "real flush requests");
+    usage_request_row_t rbuf[4];
+    int                 rn = 0;
+    time_t              t_from = (time_t)(time(NULL) - 3600);
+    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(
+                    pg_store_ops(ps)->ctx, id, t_from, rbuf, 4, &rn) == 0,
+                "real query requests");
+    TEST_ASSERT(rn >= 1, "at least one request row");
+    TEST_ASSERT(strcmp(rbuf[0].model_name, "itest-req") == 0 &&
+                    rbuf[0].http_status == 200,
+                "request row fields");
     pg_store_close(ps);
 }
 

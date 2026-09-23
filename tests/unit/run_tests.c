@@ -45,6 +45,7 @@ main(void)
     extern void test_pg_fake_model_lifecycle(void);
     extern void test_pg_fake_multi_target_model(void);
     extern void test_pg_fake_usage_flush_and_query(void);
+    extern void test_pg_fake_request_flush_and_query(void);
     extern void test_pg_migrate_noop_for_fake(void);
     extern void test_pg_real_roundtrip(void);
     extern void test_secret_roundtrip(void);
@@ -98,6 +99,7 @@ main(void)
     test_register("pg_fake_model_lifecycle", test_pg_fake_model_lifecycle);
     test_register("pg_fake_multi_target_model", test_pg_fake_multi_target_model);
     test_register("pg_fake_usage_flush_and_query", test_pg_fake_usage_flush_and_query);
+    test_register("pg_fake_request_flush_and_query", test_pg_fake_request_flush_and_query);
     test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
     test_register("pg_real_roundtrip", test_pg_real_roundtrip);
     test_register("secret_roundtrip", test_secret_roundtrip);
