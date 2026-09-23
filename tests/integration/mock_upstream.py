@@ -368,6 +368,25 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
         self.send_response(404)
         self.end_headers()
 
+    def do_GET(self):
+        """P1-4 probe support: GET {endpoint}/models answers 200 with a list body.
+        Any other GET path gets 404 (probe verdict endpoint_unverified)."""
+        self.__class__.recorded_requests.append({
+            "path": self.path,
+            "method": "GET",
+        })
+        if self.path.rstrip("/").endswith("/models"):
+            payload = json.dumps({"object": "list", "data": []}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+
     def log_message(self, format, *args):
         pass  # quiet test logs
 

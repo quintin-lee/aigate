@@ -1015,6 +1015,69 @@ def test_upstream_400_passthrough(gateway):
     assert resp.json()["error"] == "simulated failure 400"
 
 
+def test_provider_probe_endpoint(gateway):
+    """P1-4: POST /admin/v1/providers/{id}/test probes a provider's /models endpoint.
+
+    Must run BEFORE test_admin_lockout_429 (which locks this client IP)."""
+    import uuid
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+    suffix = uuid.uuid4().hex[:8]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Reachable mock endpoint -> verdict ok
+    resp = requests.post(
+        f"{base_url}/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "name": f"probe-ok-provider-{suffix}",
+            "provider_type": "openai",
+            "endpoint": mock_url,
+            "api_key": "sk-probe-direct",
+            "models": [f"probe-model-{suffix}"],
+            "enabled": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    provider_id = resp.json()["id"]
+
+    resp = requests.post(f"{base_url}/admin/v1/providers/{provider_id}/test",
+                         headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["verdict"] == "ok", body
+    assert body["status"] == 200
+    assert body["provider"] == provider_id
+
+    # 2. Unreachable endpoint (closed port) -> verdict unreachable
+    resp = requests.post(
+        f"{base_url}/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "name": f"probe-dead-provider-{suffix}",
+            "provider_type": "openai",
+            "endpoint": "http://127.0.0.1:9",
+            "api_key": "sk-probe-dead",
+            "models": [f"probe-dead-model-{suffix}"],
+            "enabled": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    dead_id = resp.json()["id"]
+
+    resp = requests.post(f"{base_url}/admin/v1/providers/{dead_id}/test",
+                         headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["verdict"] == "unreachable", body
+    assert body["status"] == 0
+
+
 def test_admin_lockout_429(gateway):
     """10 failed admin auth attempts from one IP lock that IP out (429).
 
@@ -1037,6 +1100,7 @@ def test_admin_lockout_429(gateway):
     assert r.status_code == 429, r.text
     err = r.json()["error"]
     assert err["type"] == "locked_out"
+
 
 
 
