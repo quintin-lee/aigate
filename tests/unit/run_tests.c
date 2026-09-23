@@ -145,6 +145,7 @@ main(void)
     extern void test_admin_models_multi_target(void);
     extern void test_admin_default_params_oversize_rejected(void);
     extern void test_admin_usage_query(void);
+    extern void test_admin_usage_requests_query(void);
     extern void test_admin_provider_create_and_list(void);
     extern void test_admin_provider_patch_and_delete(void);
     extern void test_admin_provider_sync_failed_reported(void);
@@ -156,6 +157,7 @@ main(void)
     test_register("admin_models_multi_target", test_admin_models_multi_target);
     test_register("admin_default_params_oversize", test_admin_default_params_oversize_rejected);
     test_register("admin_usage_query", test_admin_usage_query);
+    test_register("admin_usage_requests_query", test_admin_usage_requests_query);
     test_register("admin_provider_create", test_admin_provider_create_and_list);
     test_register("admin_provider_patch_delete", test_admin_provider_patch_and_delete);
     test_register("admin_provider_sync_failed", test_admin_provider_sync_failed_reported);

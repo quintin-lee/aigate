@@ -8,6 +8,7 @@
 #include "sha256.h"
 
 #include <jansson.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -34,6 +35,8 @@ struct fake_db {
     usage_row_t          usage[FAKE_CAP];
     int                  n_usage;
     long                 next_key_id;
+    usage_request_row_t reqs[FAKE_CAP];
+    int                 n_reqs;
 };
 
 static int
@@ -344,6 +347,39 @@ fake_query_usage(void*        ctx,
 }
 
 static int
+fake_flush_requests(void* ctx, const usage_request_row_t* rows, int n)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < n && db->n_reqs < FAKE_CAP; i++) {
+        db->reqs[db->n_reqs++] = rows[i];
+    }
+    return 0;
+}
+
+static int
+fake_query_requests(void*        ctx,
+                    long         key_id,
+                    time_t       since,
+                    usage_request_row_t* out,
+                    int          cap,
+                    int*         n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < db->n_reqs && *n < cap; i++) {
+        usage_request_row_t* r = &db->reqs[i];
+        if (key_id != 0 && r->key_id != key_id) {
+            continue;
+        }
+        if (r->ts < since) {
+            continue;
+        }
+        out[(*n)++] = *r;
+    }
+    return 0;
+}
+
+static int
 fake_list_providers(void* ctx, provider_rec_t* out, int cap, int* n)
 {
     struct fake_db* db = ctx;
@@ -483,6 +519,8 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->delete_provider = fake_delete_provider;
     ops->flush_usage = fake_flush_usage;
     ops->query_usage = fake_query_usage;
+    ops->flush_usage_requests = fake_flush_requests;
+    ops->query_usage_requests = fake_query_requests;
 }
 
 static void
@@ -1019,6 +1057,87 @@ TEST_CASE(test_admin_usage_query)
     TEST_ASSERT(json_integer_value(json_object_get(r0, "requests")) == 100, "requests == 100");
     TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 5000,
                 "prompt_tokens == 5000");
+    json_decref(j);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_usage_requests_query)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    usage_request_row_t rr;
+    memset(&rr, 0, sizeof rr);
+    rr.key_id = 42;
+    snprintf(rr.model_name, sizeof rr.model_name, "gpt-4o");
+    snprintf(rr.provider, sizeof rr.provider, "openai");
+    rr.http_status = 200;
+    rr.prompt_tokens = 500;
+    rr.completion_tokens = 200;
+    rr.cached_prompt_tokens = 10;
+    rr.latency_ns = 123000000;
+    rr.ts = 1726704000; /* 2024-09-19 00:00 UTC */
+    fake_flush_requests(&db, &rr, 1);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* keyed + since inside the row's day */
+    int rc = admin_dispatch(
+        &adm,
+        "/admin/v1/usage/requests?key_id=42&since=2024-09-01",
+        "GET",
+        "127.0.0.1",
+        "admin-secret-token",
+        NULL,
+        0,
+        &status,
+        &body,
+        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "requests query -> 200");
+    json_t* j = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(j != NULL, "parsed json");
+    json_t* rarr = json_object_get(j, "requests");
+    TEST_ASSERT(rarr != NULL && json_array_size(rarr) == 1, "1 request row");
+    json_t* r0 = json_array_get(rarr, 0);
+    TEST_ASSERT(json_integer_value(json_object_get(r0, "http_status")) == 200,
+                "http_status 200");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(r0, "model")), "gpt-4o") == 0,
+                "model");
+    TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 500,
+                "prompt_tokens");
+    TEST_ASSERT(fabs(json_real_value(json_object_get(r0, "latency_ms")) - 123.0) < 0.01,
+                "latency_ms 123");
+    json_decref(j);
+
+    /* other key: empty array */
+    body = NULL;
+    rc = admin_dispatch(
+        &adm,
+        "/admin/v1/usage/requests?key_id=99&since=2024-09-01",
+        "GET",
+        "127.0.0.1",
+        "admin-secret-token",
+        NULL,
+        0,
+        &status,
+        &body,
+        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "empty query -> 200");
+    j = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(json_object_get(j, "requests") != NULL &&
+                    json_array_size(json_object_get(j, "requests")) == 0,
+                "zero rows for unknown key");
     json_decref(j);
 
     teardown_admin(ps, &core, &db);
