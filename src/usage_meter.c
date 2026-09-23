@@ -14,6 +14,8 @@
 
 #define UM_ACC_CAP 4096
 #define UM_MAX_PROVS 16
+#define UM_REQ_CAP 4096
+#define UM_REQ_BATCH 512
 
 typedef struct {
     int    in_use;
@@ -42,6 +44,9 @@ struct usage_meter {
     int             have_worker;
     int             flush_interval_s;
     int             stop;
+    usage_request_row_t* req_ring;
+    int                  req_head, req_tail;
+    atomic_int           req_dropped;
 };
 
 static time_t
@@ -92,17 +97,43 @@ prov_slot(usage_meter_t* um, const char* p)
     return NULL; /* provider slots exhausted; drop the latency sample */
 }
 
+/* Drain the audit ring (copy + advance) and flush one batch; re-queue the
+ * batch on flush failure so rows are retried next tick. */
+static void
+um_flush_request_batch(usage_meter_t* um, usage_request_row_t* rreqs, int rcap)
+{
+    if (um->ps == NULL || rreqs == NULL || um->req_ring == NULL) {
+        return;
+    }
+    int rn = 0;
+    if (um_drain_requests(um, rreqs, rcap, &rn) != 0 || rn == 0) {
+        return;
+    }
+    const pg_ops_t* ops = pg_store_ops(um->ps);
+    if (ops != NULL && ops->flush_usage_requests != NULL &&
+        ops->flush_usage_requests(ops->ctx, rreqs, rn) == 0) {
+        um_release_requests(um, rn);
+    } else {
+        um_requeue_requests(um, rn);
+        AIGATE_LOG_WARN("usage request flush failed; %d rows requeued", rn);
+    }
+}
 static void*
+
 worker_main(void* arg)
 {
     usage_meter_t* um = arg;
     usage_row_t*   rows = malloc((size_t)UM_ACC_CAP * sizeof *rows);
+    usage_request_row_t* rreqs = malloc(UM_REQ_BATCH * sizeof *rreqs);
     if (rows == NULL) {
         AIGATE_LOG_WARN("usage worker row buffer alloc failed; flushing disabled");
         /* stay alive so usage_meter_free's join cannot deadlock; the
          * stop flag is checked every second. */
         while (!um->stop) {
             sleep(1);
+        }
+        if (rreqs != NULL) {
+            free(rreqs);
         }
         return 0;
     }
@@ -128,8 +159,10 @@ worker_main(void* arg)
             }
             AIGATE_LOG_WARN("usage flush failed, %d rows re-queued", n);
         }
+        um_flush_request_batch(um, rreqs, UM_REQ_BATCH);
     }
     free(rows);
+    free(rreqs);
     return 0;
 }
 
@@ -148,6 +181,12 @@ usage_meter_new(pg_store_t* ps, ratelimit_t* rl, int flush_interval_s)
     atomic_init(&um->reqs, 0);
     atomic_init(&um->errs, 0);
     atomic_init(&um->toks, 0);
+    atomic_init(&um->cached_toks, 0);
+    atomic_init(&um->req_dropped, 0);
+    um->req_ring = malloc(UM_REQ_CAP * sizeof *um->req_ring);
+    if (um->req_ring == NULL) {
+        AIGATE_LOG_WARN("usage ring alloc failed; per-request audit disabled");
+    }
 
     for (int i = 0; i < UM_MAX_PROVS; i++) {
         if (hdr_init(1, 3600LL * 1000000000LL, 4, &um->provs[i].h) != 0) {
@@ -188,10 +227,29 @@ usage_meter_free(usage_meter_t* um)
             break;
         }
     } while (n > 0);
+    /* final audit drain in bounded chunks; a failed flush loses the tail batch */
+    usage_request_row_t* rreqs = malloc(256 * sizeof *rreqs);
+    if (rreqs != NULL && um->ps != NULL) {
+        const pg_ops_t* ops = pg_store_ops(um->ps);
+        int             rn = 0;
+        do {
+            um_drain_requests(um, rreqs, 256, &rn);
+            if (rn > 0) {
+                if (ops != NULL && ops->flush_usage_requests != NULL &&
+                    ops->flush_usage_requests(ops->ctx, rreqs, rn) != 0) {
+                    AIGATE_LOG_WARN("usage_meter shutdown: lost %d audit rows", rn);
+                    break;
+                }
+                um_release_requests(um, rn);
+            }
+        } while (rn > 0);
+        free(rreqs);
+    }
     pthread_mutex_destroy(&um->mtx);
     for (int i = 0; i < UM_MAX_PROVS; i++) {
         hdr_close(um->provs[i].h);
     }
+    free(um->req_ring);
     free(um);
 }
 
@@ -237,8 +295,8 @@ um_record(usage_meter_t* um,
             if (http_status >= 500) {
                 a->errors++;
             }
-            pthread_mutex_unlock(&um->mtx);
-            return;
+            i = UM_ACC_CAP;
+            break;
         }
         if (!a->in_use) {
             a->in_use = 1;
@@ -250,11 +308,39 @@ um_record(usage_meter_t* um,
             a->completion = completion_tokens;
             a->cached_prompt = cached_prompt_tokens;
             a->errors = http_status >= 500 ? 1 : 0;
-            pthread_mutex_unlock(&um->mtx);
-            return;
+            i = UM_ACC_CAP;
+            break;
         }
     }
-    pthread_mutex_unlock(&um->mtx); /* table full: drop the row */
+
+    /* per-request audit ring (P0-1); written under the same lock, after the
+     * accumulator pass so table-full still records the detail row. */
+    if (um->req_ring != NULL) {
+        int slot_idx = um->req_tail % UM_REQ_CAP;
+        usage_request_row_t* rr = &um->req_ring[slot_idx];
+        rr->key_id = key_id;
+        snprintf(rr->model_name, sizeof rr->model_name, "%s", model);
+        rr->provider[0] = '\0';
+        if (provider != NULL) {
+            snprintf(rr->provider, sizeof rr->provider, "%s", provider);
+        }
+        rr->http_status = http_status;
+        rr->prompt_tokens = prompt_tokens;
+        rr->completion_tokens = completion_tokens;
+        rr->cached_prompt_tokens = cached_prompt_tokens;
+        rr->latency_ns = latency_ns;
+        rr->ts = time(NULL);
+        um->req_tail++;
+        if (um->req_tail - um->req_head > UM_REQ_CAP) {
+            /* ring full: backpressure on a brand-new slot would evict an
+             * unflushed row, so drop this one and count it */
+            um->req_tail--;
+            atomic_fetch_add(&um->req_dropped, 1);
+            AIGATE_LOG_WARN("usage ring full; dropping audit row (total dropped: %d)",
+                             atomic_load(&um->req_dropped));
+        }
+    }
+    pthread_mutex_unlock(&um->mtx);
 }
 
 int
@@ -347,6 +433,64 @@ um_unflush(usage_meter_t* um, const usage_row_t* rows, int n)
         AIGATE_LOG_WARN("um_unflush: accumulator table full, %d rows dropped", n);
     }
     return failed ? -1 : 0;
+}
+
+int
+um_drain_requests(usage_meter_t* um, usage_request_row_t* out, int cap, int* n_out)
+{
+    *n_out = 0;
+    if (um == NULL || um->req_ring == NULL) {
+        return 0;
+    }
+    pthread_mutex_lock(&um->mtx);
+    int n = um->req_tail - um->req_head;
+    if (n > cap) {
+        n = cap;
+    }
+    for (int i = 0; i < n; i++) {
+        out[i] = um->req_ring[(um->req_head + i) % UM_REQ_CAP];
+    }
+    um->req_head += n;
+    pthread_mutex_unlock(&um->mtx);
+    *n_out = n;
+    return 0;
+}
+
+int
+um_release_requests(usage_meter_t* um, int n)
+{
+    (void)um;
+    (void)n;
+    /* head already advanced by um_drain_requests; no-op kept for caller
+     * symmetry with the failure path (um_requeue_requests). */
+    return 0;
+}
+
+int
+um_requeue_requests(usage_meter_t* um, int n)
+{
+    if (um == NULL || um->req_ring == NULL || n <= 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&um->mtx);
+    um->req_head -= n;
+    if (um->req_head < um->req_tail - UM_REQ_CAP) {
+        int lost = um->req_tail - UM_REQ_CAP - um->req_head;
+        um->req_head = um->req_tail - UM_REQ_CAP;
+        atomic_fetch_add(&um->req_dropped, lost);
+        AIGATE_LOG_WARN("usage ring re-queue overflow: %d rows dropped "
+                        "(total dropped: %d)",
+                         lost,
+                         atomic_load(&um->req_dropped));
+    }
+    pthread_mutex_unlock(&um->mtx);
+    return 0;
+}
+
+int
+um_requests_dropped(const usage_meter_t* um)
+{
+    return um == NULL ? 0 : atomic_load((atomic_int*)&um->req_dropped);
 }
 
 long

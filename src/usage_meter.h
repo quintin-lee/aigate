@@ -55,6 +55,22 @@ int um_drain(usage_meter_t* um, usage_row_t* out, int cap, int* n_out);
  *  @return 0 ok; -1 when the accumulator table is full. */
 int um_unflush(usage_meter_t* um, const usage_row_t* rows, int n);
 
+/** @brief Copy up to @p cap pending audit rows out of the ring and
+ *  advance the head (the worker owns them until re-queue). No flush call
+ *  is made here. @p n_out rows copied (<= cap).
+ *  @return 0 (NULL um / NULL ring is a no-op). */
+int um_drain_requests(usage_meter_t* um, usage_request_row_t* out, int cap, int* n_out);
+/** @brief Confirm @p n drained rows after a successful flush. No-op
+ *  under copy+advance drain (head already moved); retained for caller
+ *  symmetry with the failure path. */
+int um_release_requests(usage_meter_t* um, int n);
+/** @brief Re-queue @p n rows after a failed flush: head rewinds by n.
+ *  If the rewind lands past the oldest pending slot, the excess is
+ *  dropped into the counter with a warn. */
+int um_requeue_requests(usage_meter_t* um, int n);
+/** @brief Total audit rows dropped on ring overflow / re-queue overflow. */
+int um_requests_dropped(const usage_meter_t* um);
+
 /* Provider histogram accessors for metrics_render. */
 /** @brief Fills @p names (char[32] each) with providers that recorded
  *  samples. @return count written (<= cap). */
