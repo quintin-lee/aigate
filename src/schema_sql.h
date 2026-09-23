@@ -91,6 +91,22 @@ BEGIN
 END
 $$;
 INSERT INTO schema_migrations(version) VALUES (5) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v6: per-request usage audit detail (P0-1)
+CREATE TABLE IF NOT EXISTS usage_requests (
+  key_id          BIGINT NOT NULL,
+  model_name      TEXT NOT NULL,
+  provider        TEXT NOT NULL DEFAULT '',
+  http_status     INT NOT NULL,
+  prompt_tokens   BIGINT NOT NULL DEFAULT 0,
+  completion_tokens BIGINT NOT NULL DEFAULT 0,
+  cached_prompt_tokens BIGINT NOT NULL DEFAULT 0,
+  latency_ns      BIGINT NOT NULL DEFAULT 0,
+  ts              BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_usage_requests_key_ts ON usage_requests (key_id, ts);
+CREATE INDEX IF NOT EXISTS ix_usage_requests_ts ON usage_requests (ts);
+INSERT INTO schema_migrations(version) VALUES (6) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */
