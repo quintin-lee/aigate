@@ -323,6 +323,13 @@ fflush_cb(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
+static int
+f_req_stub(void* ctx, ...)
+{
+    (void)ctx;
+    return 0;
+}
+
 struct test_resp_cap {
     char   hdrs[2048];
     char   body[16384];
@@ -388,6 +395,10 @@ test_embeddings_pipeline_e2e(void)
     ops.get_key_by_hash = fget_key_cb;
     ops.get_model = fget_model_cb;
     ops.flush_usage = fflush_cb;
+    ops.flush_usage_requests =
+        (int (*)(void*, const usage_request_row_t*, int))f_req_stub;
+    ops.query_usage_requests =
+        (int (*)(void*, long, time_t, usage_request_row_t*, int, int*))f_req_stub;
     pg_store_t* ps = pg_store_open(NULL, &ops);
 
     aigate_core ac;

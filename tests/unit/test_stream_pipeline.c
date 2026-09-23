@@ -74,6 +74,13 @@ f_flush_rows(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
+static int
+f_req_stub(void* ctx, ...)
+{
+    (void)ctx;
+    return 0;
+}
+
 static void
 fbuild_ops(struct fdb* db, pg_ops_t* ops)
 {
@@ -82,6 +89,10 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
     ops->get_key_by_hash = fget_key;
     ops->get_model = fget_model;
     ops->flush_usage = f_flush_rows;
+    ops->flush_usage_requests =
+        (int (*)(void*, const usage_request_row_t*, int))f_req_stub;
+    ops->query_usage_requests =
+        (int (*)(void*, long, time_t, usage_request_row_t*, int, int*))f_req_stub;
 }
 
 static void
