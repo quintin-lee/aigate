@@ -1181,6 +1181,117 @@ pq_query_usage(void*        vctx,
     return 0;
 }
 
+static int
+pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
+{
+    struct pq_ctx* px = vctx;
+    static const char q[] =
+        "INSERT INTO usage_requests(key_id, model_name, provider, http_status, "
+        "prompt_tokens, completion_tokens, cached_prompt_tokens, latency_ns, ts) "
+        "VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)";
+    int rc = 0;
+
+    if (n <= 0) {
+        return 0;
+    }
+
+    char num[32], st[16], pt[32], ct[32], cpt[32], lat[32], tsb[32];
+    const char* vals[9];
+    int         plens[9] = {0};
+
+    pq_lock(px);
+    PQclear(PQexec(px->db, "BEGIN"));
+    for (int i = 0; i < n; i++) {
+        snprintf(num, sizeof num, "%ld", rows[i].key_id);
+        vals[0] = num;
+        vals[1] = rows[i].model_name;
+        vals[2] = rows[i].provider;
+        snprintf(st, sizeof st, "%d", rows[i].http_status);
+        vals[3] = st;
+        snprintf(pt, sizeof pt, "%ld", rows[i].prompt_tokens);
+        vals[4] = pt;
+        snprintf(ct, sizeof ct, "%ld", rows[i].completion_tokens);
+        vals[5] = ct;
+        snprintf(cpt, sizeof cpt, "%ld", rows[i].cached_prompt_tokens);
+        vals[6] = cpt;
+        snprintf(lat, sizeof lat, "%llu", (unsigned long long)rows[i].latency_ns);
+        vals[7] = lat;
+        snprintf(tsb, sizeof tsb, "%ld", (long)rows[i].ts);
+        vals[8] = tsb;
+        PGresult* res = PQexecParams(px->db, q, 9, NULL, vals, plens, NULL, 0);
+        if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
+            AIGATE_LOG_ERROR("pg flush_requests: %s",
+                             res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+            PQclear(res);
+            PQclear(PQexec(px->db, "ROLLBACK"));
+            rc = -1;
+            break;
+        }
+        PQclear(res);
+    }
+    PQclear(PQexec(px->db, "COMMIT"));
+    pq_unlock(px);
+    return rc;
+}
+
+static int
+pq_query_requests(void*        vctx,
+                  long         key_id,
+                  time_t       since,
+                  usage_request_row_t* out,
+                  int          cap,
+                  int*         n)
+{
+    struct pq_ctx* px = vctx;
+    static const char q[] =
+        "SELECT key_id, model_name, provider, http_status, prompt_tokens, "
+        "completion_tokens, cached_prompt_tokens, latency_ns, ts "
+        "FROM usage_requests "
+        "WHERE ($1::bigint = 0 OR key_id = $1) AND ts >= $2 "
+        "ORDER BY ts DESC LIMIT $3";
+    char key[32], since_b[32], cap_b[16];
+    const char* vals[3];
+    int         plens[3] = {0};
+
+    snprintf(key, sizeof key, "%ld", key_id);
+    snprintf(since_b, sizeof since_b, "%ld", (long)since);
+    snprintf(cap_b, sizeof cap_b, "%d", cap);
+    vals[0] = key;
+    vals[1] = since_b;
+    vals[2] = cap_b;
+
+    *n = 0;
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 3, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg query_requests: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        out[i].key_id = atol(PQgetvalue(res, i, 0));
+        copy_field(out[i].model_name, sizeof out[i].model_name, PQgetvalue(res, i, 1));
+        copy_field(out[i].provider, sizeof out[i].provider, PQgetvalue(res, i, 2));
+        out[i].http_status = (int)strtol(PQgetvalue(res, i, 3), NULL, 10);
+        out[i].prompt_tokens = atol(PQgetvalue(res, i, 4));
+        out[i].completion_tokens = atol(PQgetvalue(res, i, 5));
+        out[i].cached_prompt_tokens =
+            PQnfields(res) > 6 ? atol(PQgetvalue(res, i, 6)) : 0;
+        out[i].latency_ns =
+            PQnfields(res) > 7 ? strtoull(PQgetvalue(res, i, 7), NULL, 10) : 0;
+        out[i].ts = PQnfields(res) > 8 ? (time_t)atol(PQgetvalue(res, i, 8)) : 0;
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
 /* ------------------------------------------------------- store lifecycle */
 
 pg_store_t*
@@ -1252,6 +1363,8 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.delete_provider = pq_delete_provider;
     ps->ops.flush_usage = pq_flush_usage;
     ps->ops.query_usage = pq_query_usage;
+    ps->ops.flush_usage_requests = pq_flush_requests;
+    ps->ops.query_usage_requests = pq_query_requests;
     ps->ops.ctx = px;
     ps->ctx = px;
     ps->owns_ctx = 1;
