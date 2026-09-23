@@ -1374,6 +1374,82 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
     return finish_json(status, body, len, 200, root);
 }
 
+/** @brief GET /admin/v1/usage/requests?key_id=&since=YYYY-MM-DD
+ * Per-request audit detail (newest first); since empty = last 7 days. */
+static int
+usage_requests_query(admin_ctx_t* adm,
+                    int*        status,
+                    char**      body,
+                    size_t*     len,
+                    const char* query)
+{
+    char key[32] = "", since[16] = "";
+    query_param(query, "key_id", key, sizeof key);
+    query_param(query, "since", since, sizeof since);
+
+    char* kend = NULL;
+    long  key_id = strtol(key, &kend, 10);
+    if (key[0] != '\0' && (kend == key || key_id <= 0)) {
+        return finish_error(status, body, len, 400, "bad_request", "bad ?key_id=<id>");
+    }
+    time_t t_since;
+    if (since[0] == '\0') {
+        time_t now = time(NULL);
+        t_since = now - (now % 86400) - 6 * 86400;
+    } else if (parse_day(since, &t_since) != 0) {
+        return finish_error(status, body, len, 400, "bad_request",
+                            "bad since date (use YYYY-MM-DD)");
+    }
+
+    usage_request_row_t* rows = calloc(USAGE_LIST_CAP, sizeof *rows);
+    if (rows == NULL) {
+        return -1;
+    }
+    int n = 0;
+    int rc = pg_store_ops(adm->ps)->query_usage_requests(pg_store_ops(adm->ps)->ctx,
+                                                         key_id,
+                                                         t_since,
+                                                         rows,
+                                                         USAGE_LIST_CAP,
+                                                         &n);
+    if (rc != 0) {
+        free(rows);
+        return finish_error(status, body, len, 500, "internal_error", "request query failed");
+    }
+
+    json_t* arr = json_array();
+    for (int i = 0; i < n; i++) {
+        json_t*   o = json_object();
+        char      ts_iso[32];
+        struct tm tmv;
+        if (gmtime_r(&rows[i].ts, &tmv) != NULL) {
+            strftime(ts_iso, sizeof ts_iso, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+        } else {
+            snprintf(ts_iso, sizeof ts_iso, "1970-01-01T00:00:00Z");
+        }
+        json_object_set_new(o, "key_id", json_integer(rows[i].key_id));
+        json_object_set_new(o, "model", json_string(rows[i].model_name));
+        json_object_set_new(o, "provider", json_string(rows[i].provider));
+        json_object_set_new(o, "http_status", json_integer(rows[i].http_status));
+        json_object_set_new(o, "prompt_tokens", json_integer(rows[i].prompt_tokens));
+        json_object_set_new(o, "completion_tokens", json_integer(rows[i].completion_tokens));
+        json_object_set_new(o, "cached_prompt_tokens",
+                            json_integer(rows[i].cached_prompt_tokens));
+        json_object_set_new(o, "latency_ms",
+                            json_real(rows[i].latency_ns / 1000000.0));
+        json_object_set_new(o, "ts", json_string(ts_iso));
+        json_array_append_new(arr, o);
+    }
+    free(rows);
+
+    json_t* root = json_object();
+    json_object_set_new(root, "key_id", json_integer(key_id));
+    json_object_set_new(root, "requests", arr);
+    int dropped = adm->ac != NULL ? um_requests_dropped(adm->ac->um) : 0;
+    json_object_set_new(root, "dropped", json_integer(dropped));
+    return finish_json(status, body, len, 200, root);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -1483,6 +1559,8 @@ admin_dispatch(admin_ctx_t* adm,
                 return provider_delete(adm, out_status, out_body, out_len, rest + 10);
             }
         }
+    } else if (strcmp(rest, "usage/requests") == 0 && strcmp(method, "GET") == 0) {
+        return usage_requests_query(adm, out_status, out_body, out_len, query);
     } else if (strcmp(rest, "usage") == 0 && strcmp(method, "GET") == 0) {
         return usage_query(adm, out_status, out_body, out_len, query);
     }
