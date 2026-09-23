@@ -35,8 +35,8 @@ struct fake_db {
     usage_row_t          usage[FAKE_CAP];
     int                  n_usage;
     long                 next_key_id;
-    usage_request_row_t reqs[FAKE_CAP];
-    int                 n_reqs;
+    usage_request_row_t  reqs[FAKE_CAP];
+    int                  n_reqs;
 };
 
 static int
@@ -357,12 +357,7 @@ fake_flush_requests(void* ctx, const usage_request_row_t* rows, int n)
 }
 
 static int
-fake_query_requests(void*        ctx,
-                    long         key_id,
-                    time_t       since,
-                    usage_request_row_t* out,
-                    int          cap,
-                    int*         n)
+fake_query_requests(void* ctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n)
 {
     struct fake_db* db = ctx;
     *n = 0;
@@ -799,11 +794,12 @@ TEST_CASE(test_admin_default_params_oversize_rejected)
     size_t len = 0;
 
     /* 1100-char value: the packed JSON exceeds the 1024-byte column */
-    char  big[1101];
+    char big[1101];
     memset(big, 'a', sizeof big - 1);
     big[sizeof big - 1] = '\0';
     char* req = malloc(sizeof big + 128);
-    snprintf(req, sizeof big + 128,
+    snprintf(req,
+             sizeof big + 128,
              "{\"name\":\"big-params\",\"provider\":\"openai\",\"endpoint\":\"https://"
              "api.openai.com/v1\",\"default_params\":{\"k\":\"%s\"}}",
              big);
@@ -844,10 +840,7 @@ TEST_CASE(test_admin_default_params_oversize_rejected)
     free(body);
 
     req = malloc(sizeof big + 128);
-    snprintf(req,
-             sizeof big + 128,
-             "{\"default_params\":{\"k\":\"%s\"}}",
-             big);
+    snprintf(req, sizeof big + 128, "{\"default_params\":{\"k\":\"%s\"}}", big);
     body = NULL;
     rc = admin_dispatch(&adm,
                         "/admin/v1/models/ok-model",
@@ -1091,17 +1084,16 @@ TEST_CASE(test_admin_usage_requests_query)
     size_t len = 0;
 
     /* keyed + since inside the row's day */
-    int rc = admin_dispatch(
-        &adm,
-        "/admin/v1/usage/requests?key_id=42&since=2024-09-01",
-        "GET",
-        "127.0.0.1",
-        "admin-secret-token",
-        NULL,
-        0,
-        &status,
-        &body,
-        &len);
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/usage/requests?key_id=42&since=2024-09-01",
+                            "GET",
+                            "127.0.0.1",
+                            "admin-secret-token",
+                            NULL,
+                            0,
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 200, "requests query -> 200");
     json_t* j = json_loads(body, 0, NULL);
     free(body);
@@ -1109,29 +1101,25 @@ TEST_CASE(test_admin_usage_requests_query)
     json_t* rarr = json_object_get(j, "requests");
     TEST_ASSERT(rarr != NULL && json_array_size(rarr) == 1, "1 request row");
     json_t* r0 = json_array_get(rarr, 0);
-    TEST_ASSERT(json_integer_value(json_object_get(r0, "http_status")) == 200,
-                "http_status 200");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(r0, "model")), "gpt-4o") == 0,
-                "model");
-    TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 500,
-                "prompt_tokens");
+    TEST_ASSERT(json_integer_value(json_object_get(r0, "http_status")) == 200, "http_status 200");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(r0, "model")), "gpt-4o") == 0, "model");
+    TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 500, "prompt_tokens");
     TEST_ASSERT(fabs(json_real_value(json_object_get(r0, "latency_ms")) - 123.0) < 0.01,
                 "latency_ms 123");
     json_decref(j);
 
     /* other key: empty array */
     body = NULL;
-    rc = admin_dispatch(
-        &adm,
-        "/admin/v1/usage/requests?key_id=99&since=2024-09-01",
-        "GET",
-        "127.0.0.1",
-        "admin-secret-token",
-        NULL,
-        0,
-        &status,
-        &body,
-        &len);
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/usage/requests?key_id=99&since=2024-09-01",
+                        "GET",
+                        "127.0.0.1",
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
     TEST_ASSERT(rc == 0 && status == 200, "empty query -> 200");
     j = json_loads(body, 0, NULL);
     free(body);
@@ -1245,24 +1233,24 @@ TEST_CASE(test_admin_provider_sync_failed_reported)
     const char* req = "{\"name\":\"sync-fail\",\"provider_type\":\"openai\",\"endpoint\":\"https://"
                       "api.openai.com/v1\","
                       "\"api_key\":\"sk-test\",\"models\":[\"m-one\",\"m-two\"]}";
-    int rc = admin_dispatch(&adm,
-                            "/admin/v1/providers",
-                            "POST",
-                            NULL,
-                            "admin-secret-token",
-                            req,
-                            strlen(req),
-                            &status,
-                            &body,
-                            &len);
+    int         rc = admin_dispatch(&adm,
+                                    "/admin/v1/providers",
+                                    "POST",
+                                    NULL,
+                                    "admin-secret-token",
+                                    req,
+                                    strlen(req),
+                                    &status,
+                                    &body,
+                                    &len);
     TEST_ASSERT(rc == 0 && status == 201, "create still 201, got %d", status);
     json_t* res = json_loads(body, 0, NULL);
     free(body);
     TEST_ASSERT(res != NULL, "parsed create resp");
     json_t* sf = json_object_get(res, "sync_failed");
     TEST_ASSERT(sf != NULL, "sync_failed field present");
-    TEST_ASSERT(json_integer_value(sf) == 2, "sync_failed == 2, got %ld",
-                (long)json_integer_value(sf));
+    TEST_ASSERT(
+        json_integer_value(sf) == 2, "sync_failed == 2, got %ld", (long)json_integer_value(sf));
     json_decref(res);
 
     /* storage healthy: patch reports sync_failed == 0 */
@@ -1285,7 +1273,8 @@ TEST_CASE(test_admin_provider_sync_failed_reported)
     TEST_ASSERT(res != NULL, "parsed patch resp");
     sf = json_object_get(res, "sync_failed");
     TEST_ASSERT(sf != NULL, "patch sync_failed field present");
-    TEST_ASSERT(json_integer_value(sf) == 0, "patch sync_failed == 0, got %ld",
+    TEST_ASSERT(json_integer_value(sf) == 0,
+                "patch sync_failed == 0, got %ld",
                 (long)json_integer_value(sf));
     json_decref(res);
 
@@ -1609,8 +1598,7 @@ TEST_CASE(test_admin_lockout_policy_env)
     body = NULL;
     rc = admin_dispatch(
         &adm, "/admin/v1/keys", "GET", ip, "admin-secret-token", NULL, 0, &status, &body, &len);
-    TEST_ASSERT(rc == 0 && status == 200, "policy still 3/60: 2 fails not locked, got %d",
-                status);
+    TEST_ASSERT(rc == 0 && status == 200, "policy still 3/60: 2 fails not locked, got %d", status);
     free(body);
 
     /* Restore defaults for later tests */

@@ -31,8 +31,8 @@ struct fake_db {
     long                 next_provider_id;
     usage_row_t          usage[FAKE_CAP];
     int                  n_usage;
-    usage_request_row_t reqs[FAKE_CAP];
-    int                 n_reqs;
+    usage_request_row_t  reqs[FAKE_CAP];
+    int                  n_reqs;
     long                 next_key_id;
     /* counters for assertions */
     int lookup_calls;
@@ -390,12 +390,7 @@ fake_flush_requests(void* ctx, const usage_request_row_t* rows, int n)
 }
 
 static int
-fake_query_requests(void*        ctx,
-                    long         key_id,
-                    time_t       since,
-                    usage_request_row_t* out,
-                    int          cap,
-                    int*         n)
+fake_query_requests(void* ctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n)
 {
     struct fake_db* db = ctx;
     *n = 0;
@@ -779,9 +774,9 @@ TEST_CASE(test_pg_fake_usage_flush_and_query)
 
 TEST_CASE(test_pg_fake_request_flush_and_query)
 {
-    struct fake_db db;
-    pg_ops_t       ops;
-    pg_store_t*    ps;
+    struct fake_db      db;
+    pg_ops_t            ops;
+    pg_store_t*         ps;
     usage_request_row_t rr, buf[4];
     int                 n = 0;
 
@@ -802,12 +797,10 @@ TEST_CASE(test_pg_fake_request_flush_and_query)
     rr.ts = 1726704000; /* 2024-09-19 00:00:00 UTC */
     TEST_ASSERT(pg_store_ops(ps)->flush_usage_requests(&db, &rr, 1) == 0, "flush rr");
 
-    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(
-                    &db, 7, 1726600000, buf, 4, &n) == 0,
+    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(&db, 7, 1726600000, buf, 4, &n) == 0,
                 "query key 7");
     TEST_ASSERT(n == 1, "1 request row, got %d", n);
-    TEST_ASSERT(buf[0].http_status == 200 && buf[0].latency_ns == 88000000,
-                "fields roundtrip");
+    TEST_ASSERT(buf[0].http_status == 200 && buf[0].latency_ns == 88000000, "fields roundtrip");
 
     n = 0;
     TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(&db, 8, 1726600000, buf, 4, &n) == 0,
@@ -815,8 +808,7 @@ TEST_CASE(test_pg_fake_request_flush_and_query)
     TEST_ASSERT(n == 0, "no rows for other key");
 
     n = 0;
-    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(
-                    &db, 0, 1726704000, buf, 4, &n) == 0,
+    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(&db, 0, 1726704000, buf, 4, &n) == 0,
                 "all keys, since boundary");
     TEST_ASSERT(n == 1, "all-keys query returns the row");
 
@@ -872,8 +864,7 @@ TEST_CASE(test_pg_real_roundtrip)
     rreq.completion_tokens = 6;
     rreq.latency_ns = 42000000;
     rreq.ts = (time_t)(time(NULL) - 60);
-    TEST_ASSERT(pg_store_ops(ps)->flush_usage_requests(
-                    pg_store_ops(ps)->ctx, &rreq, 1) == 0,
+    TEST_ASSERT(pg_store_ops(ps)->flush_usage_requests(pg_store_ops(ps)->ctx, &rreq, 1) == 0,
                 "real flush requests");
     usage_request_row_t rbuf[4];
     int                 rn = 0;
@@ -882,8 +873,7 @@ TEST_CASE(test_pg_real_roundtrip)
                     pg_store_ops(ps)->ctx, id, t_from, rbuf, 4, &rn) == 0,
                 "real query requests");
     TEST_ASSERT(rn >= 1, "at least one request row");
-    TEST_ASSERT(strcmp(rbuf[0].model_name, "itest-req") == 0 &&
-                    rbuf[0].http_status == 200,
+    TEST_ASSERT(strcmp(rbuf[0].model_name, "itest-req") == 0 && rbuf[0].http_status == 200,
                 "request row fields");
     pg_store_close(ps);
 }

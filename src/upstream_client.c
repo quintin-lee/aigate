@@ -148,9 +148,7 @@ upstream_call_ext(const char* url,
     curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
 #else
     curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
-    curl_easy_setopt(c,
-                     CURLOPT_REDIR_PROTOCOLS,
-                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
 #endif
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
 
@@ -298,8 +296,8 @@ upstream_stream_call(const char*       url,
                      upstream_chunk_fn on_chunk,
                      void*             user_data,
                      int*              out_status,
-                     char**           out_err_body,
-                     size_t*          out_err_len)
+                     char**            out_err_body,
+                     size_t*           out_err_len)
 {
     struct stream_ctx  sc = {0};
     struct curl_slist* hdrs = NULL;
@@ -363,9 +361,7 @@ upstream_stream_call(const char*       url,
     curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
 #else
     curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
-    curl_easy_setopt(c,
-                     CURLOPT_REDIR_PROTOCOLS,
-                     (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
 #endif
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
 

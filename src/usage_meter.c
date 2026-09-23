@@ -33,17 +33,17 @@ typedef struct {
 } um_prov_t;
 
 struct usage_meter {
-    pg_store_t*     ps;
-    ratelimit_t*    rl;
-    time_t          last_rollover_day;
-    pthread_mutex_t mtx;
-    um_acc_t        accs[UM_ACC_CAP];
-    um_prov_t       provs[UM_MAX_PROVS];
-    atomic_long     reqs, errs, toks, cached_toks;
-    pthread_t       worker;
-    int             have_worker;
-    int             flush_interval_s;
-    int             stop;
+    pg_store_t*          ps;
+    ratelimit_t*         rl;
+    time_t               last_rollover_day;
+    pthread_mutex_t      mtx;
+    um_acc_t             accs[UM_ACC_CAP];
+    um_prov_t            provs[UM_MAX_PROVS];
+    atomic_long          reqs, errs, toks, cached_toks;
+    pthread_t            worker;
+    int                  have_worker;
+    int                  flush_interval_s;
+    int                  stop;
     usage_request_row_t* req_ring;
     int                  req_head, req_tail;
     atomic_int           req_dropped;
@@ -122,8 +122,8 @@ static void*
 
 worker_main(void* arg)
 {
-    usage_meter_t* um = arg;
-    usage_row_t*   rows = malloc((size_t)UM_ACC_CAP * sizeof *rows);
+    usage_meter_t*       um = arg;
+    usage_row_t*         rows = malloc((size_t)UM_ACC_CAP * sizeof *rows);
     usage_request_row_t* rreqs = malloc(UM_REQ_BATCH * sizeof *rreqs);
     if (rows == NULL) {
         AIGATE_LOG_WARN("usage worker row buffer alloc failed; flushing disabled");
@@ -316,7 +316,7 @@ um_record(usage_meter_t* um,
     /* per-request audit ring (P0-1); written under the same lock, after the
      * accumulator pass so table-full still records the detail row. */
     if (um->req_ring != NULL) {
-        int slot_idx = um->req_tail % UM_REQ_CAP;
+        int                  slot_idx = um->req_tail % UM_REQ_CAP;
         usage_request_row_t* rr = &um->req_ring[slot_idx];
         rr->key_id = key_id;
         snprintf(rr->model_name, sizeof rr->model_name, "%s", model);
@@ -337,7 +337,7 @@ um_record(usage_meter_t* um,
             um->req_tail--;
             atomic_fetch_add(&um->req_dropped, 1);
             AIGATE_LOG_WARN("usage ring full; dropping audit row (total dropped: %d)",
-                             atomic_load(&um->req_dropped));
+                            atomic_load(&um->req_dropped));
         }
     }
     pthread_mutex_unlock(&um->mtx);
@@ -480,8 +480,8 @@ um_requeue_requests(usage_meter_t* um, int n)
         atomic_fetch_add(&um->req_dropped, lost);
         AIGATE_LOG_WARN("usage ring re-queue overflow: %d rows dropped "
                         "(total dropped: %d)",
-                         lost,
-                         atomic_load(&um->req_dropped));
+                        lost,
+                        atomic_load(&um->req_dropped));
     }
     pthread_mutex_unlock(&um->mtx);
     return 0;

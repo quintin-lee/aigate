@@ -89,8 +89,7 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
     ops->get_key_by_hash = fget_key;
     ops->get_model = fget_model;
     ops->flush_usage = f_flush_rows;
-    ops->flush_usage_requests =
-        (int (*)(void*, const usage_request_row_t*, int))f_req_stub;
+    ops->flush_usage_requests = (int (*)(void*, const usage_request_row_t*, int))f_req_stub;
     ops->query_usage_requests =
         (int (*)(void*, long, time_t, usage_request_row_t*, int, int*))f_req_stub;
 }
@@ -348,8 +347,7 @@ TEST_CASE(test_stream_pipeline_4xx_passthrough)
     /* Before the fix this path fell through to the generic 502 */
     TEST_ASSERT(rc.status == 400, "status == 400, got %d", rc.status);
     TEST_ASSERT(strstr(c.body, "boom") != NULL, "upstream error body passed through");
-    TEST_ASSERT(strstr(c.body, "upstream request failed") == NULL,
-                "no generic gateway error");
+    TEST_ASSERT(strstr(c.body, "upstream request failed") == NULL, "no generic gateway error");
 
     aigate_core_shutdown(&ac);
     pg_store_close(ps);

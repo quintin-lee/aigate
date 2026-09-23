@@ -581,7 +581,8 @@ parse_targets_array(json_t* jtargets, upstream_target_t* targets, int max_target
             key = json_object_get(item, "upstream_key");
         }
         if (key && json_is_string(key)) {
-            snprintf(tgt->upstream_key_ref, sizeof tgt->upstream_key_ref, "%s", json_string_value(key));
+            snprintf(
+                tgt->upstream_key_ref, sizeof tgt->upstream_key_ref, "%s", json_string_value(key));
         }
         json_t* w = json_object_get(item, "weight");
         tgt->weight = (w && json_is_integer(w)) ? (int)json_integer_value(w) : 1;
@@ -656,8 +657,7 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
             /* A truncated JSONB blob silently poisons the model row; reject. */
             free(packed);
             json_decref(jbody);
-            return finish_error(
-                status, body, len, 400, "bad_request", "default_params too large");
+            return finish_error(status, body, len, 400, "bad_request", "default_params too large");
         }
         snprintf(m.default_params_json, sizeof m.default_params_json, "%s", packed);
         free(packed);
@@ -782,8 +782,7 @@ model_patch(
             free(packed);
             model_rec_free(&existing);
             json_decref(jbody);
-            return finish_error(
-                status, body, len, 400, "bad_request", "default_params too large");
+            return finish_error(status, body, len, 400, "bad_request", "default_params too large");
         }
         snprintf(m.default_params_json, sizeof m.default_params_json, "%s", packed);
         free(packed);
@@ -960,7 +959,7 @@ static int
 sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
 {
     const pg_ops_t* ops = pg_store_ops(adm->ps);
-    int failed = 0;
+    int             failed = 0;
     for (int i = 0; i < p->n_models; i++) {
         const char* m_name = p->models[i];
         if (m_name == NULL || m_name[0] == '\0') {
@@ -992,9 +991,9 @@ sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
                                           MMASK_TARGETS) != 0) {
                     failed++;
                 }
-            } else if (ops->update_model(
-                           ops->ctx, &existing, MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED) !=
-                       0) {
+            } else if (ops->update_model(ops->ctx,
+                                         &existing,
+                                         MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED) != 0) {
                 failed++;
             }
             model_rec_free(&existing);
@@ -1377,11 +1376,7 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
 /** @brief GET /admin/v1/usage/requests?key_id=&since=YYYY-MM-DD
  * Per-request audit detail (newest first); since empty = last 7 days. */
 static int
-usage_requests_query(admin_ctx_t* adm,
-                    int*        status,
-                    char**      body,
-                    size_t*     len,
-                    const char* query)
+usage_requests_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
     char key[32] = "", since[16] = "";
     query_param(query, "key_id", key, sizeof key);
@@ -1397,8 +1392,8 @@ usage_requests_query(admin_ctx_t* adm,
         time_t now = time(NULL);
         t_since = now - (now % 86400) - 6 * 86400;
     } else if (parse_day(since, &t_since) != 0) {
-        return finish_error(status, body, len, 400, "bad_request",
-                            "bad since date (use YYYY-MM-DD)");
+        return finish_error(
+            status, body, len, 400, "bad_request", "bad since date (use YYYY-MM-DD)");
     }
 
     usage_request_row_t* rows = calloc(USAGE_LIST_CAP, sizeof *rows);
@@ -1406,12 +1401,8 @@ usage_requests_query(admin_ctx_t* adm,
         return -1;
     }
     int n = 0;
-    int rc = pg_store_ops(adm->ps)->query_usage_requests(pg_store_ops(adm->ps)->ctx,
-                                                         key_id,
-                                                         t_since,
-                                                         rows,
-                                                         USAGE_LIST_CAP,
-                                                         &n);
+    int rc = pg_store_ops(adm->ps)->query_usage_requests(
+        pg_store_ops(adm->ps)->ctx, key_id, t_since, rows, USAGE_LIST_CAP, &n);
     if (rc != 0) {
         free(rows);
         return finish_error(status, body, len, 500, "internal_error", "request query failed");
@@ -1433,10 +1424,8 @@ usage_requests_query(admin_ctx_t* adm,
         json_object_set_new(o, "http_status", json_integer(rows[i].http_status));
         json_object_set_new(o, "prompt_tokens", json_integer(rows[i].prompt_tokens));
         json_object_set_new(o, "completion_tokens", json_integer(rows[i].completion_tokens));
-        json_object_set_new(o, "cached_prompt_tokens",
-                            json_integer(rows[i].cached_prompt_tokens));
-        json_object_set_new(o, "latency_ms",
-                            json_real(rows[i].latency_ns / 1000000.0));
+        json_object_set_new(o, "cached_prompt_tokens", json_integer(rows[i].cached_prompt_tokens));
+        json_object_set_new(o, "latency_ms", json_real(rows[i].latency_ns / 1000000.0));
         json_object_set_new(o, "ts", json_string(ts_iso));
         json_array_append_new(arr, o);
     }

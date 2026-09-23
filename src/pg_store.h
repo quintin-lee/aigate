@@ -63,15 +63,15 @@ typedef struct usage_row {
 
 /** @brief One usage_requests (per-request audit) row. */
 typedef struct usage_request_row {
-    long      key_id;
-    char      model_name[128];
-    char      provider[32];
-    int       http_status;
-    long      prompt_tokens;
-    long      completion_tokens;
-    long      cached_prompt_tokens;
-    uint64_t  latency_ns;
-    time_t    ts;
+    long     key_id;
+    char     model_name[128];
+    char     provider[32];
+    int      http_status;
+    long     prompt_tokens;
+    long     completion_tokens;
+    long     cached_prompt_tokens;
+    uint64_t latency_ns;
+    time_t   ts;
 } usage_request_row_t;
 
 /* update_key / update_model / update_provider field masks (bit flags). */
@@ -146,15 +146,9 @@ typedef struct pg_ops {
                        usage_row_t* out,
                        int          cap,
                        int*         n);
-    int (*flush_usage_requests)(void* ctx,
-                                const usage_request_row_t* rows,
-                                int n);
-    int (*query_usage_requests)(void*        ctx,
-                                long         key_id,
-                                time_t       since,
-                                usage_request_row_t* out,
-                                int          cap,
-                                int*         n);
+    int (*flush_usage_requests)(void* ctx, const usage_request_row_t* rows, int n);
+    int (*query_usage_requests)(
+        void* ctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n);
 } pg_ops_t;
 
 typedef struct pg_store pg_store_t;

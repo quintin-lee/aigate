@@ -8,10 +8,10 @@
 #include <string.h>
 
 struct um_db {
-    int         flush_calls;
-    int         fail_flush;
-    usage_row_t rows[64];
-    int         n_rows;
+    int                 flush_calls;
+    int                 fail_flush;
+    usage_row_t         rows[64];
+    int                 n_rows;
     usage_request_row_t reqs[64];
     int                 n_reqs;
     int                 fail_req_flush;
@@ -291,10 +291,8 @@ TEST_CASE(test_um_request_ring)
     TEST_ASSERT(um_drain_requests(um, buf, 16, &n) == 0, "drain reqs");
     TEST_ASSERT(n == 2, "2 audit rows, got %d", n);
     TEST_ASSERT(db.n_reqs == 0, "drain does not flush");
-    TEST_ASSERT(buf[0].key_id == 1 &&
-                    strcmp(buf[0].provider, "openai") == 0 &&
-                    buf[0].http_status == 200 &&
-                    buf[0].prompt_tokens == 7 &&
+    TEST_ASSERT(buf[0].key_id == 1 && strcmp(buf[0].provider, "openai") == 0 &&
+                    buf[0].http_status == 200 && buf[0].prompt_tokens == 7 &&
                     buf[0].latency_ns == 50000000,
                 "row 0 fields");
     TEST_ASSERT(buf[1].key_id == 2 && buf[1].http_status == 500, "row 1 fields");

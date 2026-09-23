@@ -156,7 +156,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         rl_remaining_daily(ac->rl, krec.key_id, krec.daily_token_quota) <= 0) {
         time_t now = time(NULL);
         time_t next = (time_t)(now - (now % 86400)) + 86400; /* next UTC midnight */
-        char ra[32];
+        char   ra[32];
         snprintf(ra, sizeof ra, "%ld", (long)(next - now));
         rc->set_header(rc->impl, "Retry-After", ra);
         aigate_write_error(rc, PIPE_RATE, "daily_quota_exceeded", "daily token quota exceeded");
@@ -180,8 +180,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                      * catalog. */
                     free(recs);
                     key_rec_free(&krec);
-                    return aigate_write_error(rc, 503, "internal_error",
-                                              "model list unavailable");
+                    return aigate_write_error(rc, 503, "internal_error", "model list unavailable");
                 }
             }
             json_t* arr = json_array();
@@ -570,8 +569,15 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                      * (mirrors the non-streaming passthrough). Only when a
                      * body was actually received (urc == 0). */
                     if (sbody != NULL && urc == 0) {
-                        um_record(
-                            ac->um, krec.key_id, model, status, 0, 0, 0, total_lat, target->provider);
+                        um_record(ac->um,
+                                  krec.key_id,
+                                  model,
+                                  status,
+                                  0,
+                                  0,
+                                  0,
+                                  total_lat,
+                                  target->provider);
                         int rv = aigate_write_json(rc, status, sbody, slen);
                         free(sbody);
                         json_decref(jbody);

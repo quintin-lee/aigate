@@ -22,7 +22,7 @@ typedef struct {
 
 static failover_metric_entry_t g_failovers[METRICS_MAX_FAILOVERS];
 static pthread_mutex_t         g_failover_mtx = PTHREAD_MUTEX_INITIALIZER;
-static _Atomic int g_failover_warned = 0;
+static _Atomic int             g_failover_warned = 0;
 
 #define NUM_BUCKETS 6
 static const char* BUCKET_LE[NUM_BUCKETS] = {
@@ -218,7 +218,7 @@ metrics_inc_failover(const char* model, const char* from_prov, const char* to_pr
     pthread_mutex_unlock(&g_failover_mtx);
     if (atomic_exchange(&g_failover_warned, 1) == 0) {
         AIGATE_LOG_WARN("metrics: failover table full (%d slots); new triples no longer counted",
-                         METRICS_MAX_FAILOVERS);
+                        METRICS_MAX_FAILOVERS);
     }
     return;
 }

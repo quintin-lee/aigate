@@ -60,8 +60,7 @@ build_mro_ops(struct mro_db* db)
     ops.flush_usage = (int (*)(void*, const usage_row_t*, int))mro_fail;
     ops.query_usage =
         (int (*)(void*, long, const char*, time_t, time_t, usage_row_t*, int, int*))mro_fail;
-    ops.flush_usage_requests =
-        (int (*)(void*, const usage_request_row_t*, int))mro_fail;
+    ops.flush_usage_requests = (int (*)(void*, const usage_request_row_t*, int))mro_fail;
     ops.query_usage_requests =
         (int (*)(void*, long, time_t, usage_request_row_t*, int, int*))mro_fail;
     return ops;

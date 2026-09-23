@@ -266,7 +266,7 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
         rc = 1; /* query succeeded but no such key */
     }
     PQclear(res);
-    return rc; /* 0 found, 1 missing, -1 error */
+    return rc;  /* 0 found, 1 missing, -1 error */
 }
 
 /** @brief Fill one api_keys row into @p out (allowlist deep-copied). */
@@ -1184,7 +1184,7 @@ pq_query_usage(void*        vctx,
 static int
 pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
 {
-    struct pq_ctx* px = vctx;
+    struct pq_ctx*    px = vctx;
     static const char q[] =
         "INSERT INTO usage_requests(key_id, model_name, provider, http_status, "
         "prompt_tokens, completion_tokens, cached_prompt_tokens, latency_ns, ts) "
@@ -1195,7 +1195,7 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
         return 0;
     }
 
-    char num[32], st[16], pt[32], ct[32], cpt[32], lat[32], tsb[32];
+    char        num[32], st[16], pt[32], ct[32], cpt[32], lat[32], tsb[32];
     const char* vals[9];
     int         plens[9] = {0};
 
@@ -1235,23 +1235,17 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
 }
 
 static int
-pq_query_requests(void*        vctx,
-                  long         key_id,
-                  time_t       since,
-                  usage_request_row_t* out,
-                  int          cap,
-                  int*         n)
+pq_query_requests(void* vctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n)
 {
-    struct pq_ctx* px = vctx;
-    static const char q[] =
-        "SELECT key_id, model_name, provider, http_status, prompt_tokens, "
-        "completion_tokens, cached_prompt_tokens, latency_ns, ts "
-        "FROM usage_requests "
-        "WHERE ($1::bigint = 0 OR key_id = $1) AND ts >= $2 "
-        "ORDER BY ts DESC LIMIT $3";
-    char key[32], since_b[32], cap_b[16];
-    const char* vals[3];
-    int         plens[3] = {0};
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "SELECT key_id, model_name, provider, http_status, prompt_tokens, "
+                            "completion_tokens, cached_prompt_tokens, latency_ns, ts "
+                            "FROM usage_requests "
+                            "WHERE ($1::bigint = 0 OR key_id = $1) AND ts >= $2 "
+                            "ORDER BY ts DESC LIMIT $3";
+    char              key[32], since_b[32], cap_b[16];
+    const char*       vals[3];
+    int               plens[3] = {0};
 
     snprintf(key, sizeof key, "%ld", key_id);
     snprintf(since_b, sizeof since_b, "%ld", (long)since);
@@ -1281,10 +1275,8 @@ pq_query_requests(void*        vctx,
         out[i].http_status = (int)strtol(PQgetvalue(res, i, 3), NULL, 10);
         out[i].prompt_tokens = atol(PQgetvalue(res, i, 4));
         out[i].completion_tokens = atol(PQgetvalue(res, i, 5));
-        out[i].cached_prompt_tokens =
-            PQnfields(res) > 6 ? atol(PQgetvalue(res, i, 6)) : 0;
-        out[i].latency_ns =
-            PQnfields(res) > 7 ? strtoull(PQgetvalue(res, i, 7), NULL, 10) : 0;
+        out[i].cached_prompt_tokens = PQnfields(res) > 6 ? atol(PQgetvalue(res, i, 6)) : 0;
+        out[i].latency_ns = PQnfields(res) > 7 ? strtoull(PQgetvalue(res, i, 7), NULL, 10) : 0;
         out[i].ts = PQnfields(res) > 8 ? (time_t)atol(PQgetvalue(res, i, 8)) : 0;
     }
     *n = nt;
@@ -1410,9 +1402,9 @@ pg_store_migrate(pg_store_t* ps)
         /* On any failure the transaction is aborted; COMMIT would be a
          * no-op, so roll back and surface the error instead of starting
          * the gateway on a half-applied schema. */
-        PGresult* end =
-            (body != NULL && PQresultStatus(body) == PGRES_COMMAND_OK) ? PQexec(px->db, "COMMIT")
-                                                                       : PQexec(px->db, "ROLLBACK");
+        PGresult* end = (body != NULL && PQresultStatus(body) == PGRES_COMMAND_OK)
+                            ? PQexec(px->db, "COMMIT")
+                            : PQexec(px->db, "ROLLBACK");
         if (begin != NULL && PQresultStatus(begin) != PGRES_COMMAND_OK) {
             AIGATE_LOG_ERROR("pg migrate: BEGIN failed: %s", PQerrorMessage(px->db));
             rc = -1;
