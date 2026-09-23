@@ -14,8 +14,10 @@
 #include "auth_key.h"
 #include "circuit_breaker.h"
 #include "model_router.h"
+#include "provider_adapter.h"
 #include "secrets.h"
 #include "sha256.h"
+#include "upstream_client.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -1255,6 +1257,137 @@ provider_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const c
     return finish_json(status, body, len, 200, out);
 }
 
+/* P1-4: resolve a provider api_key ref for the probe (mirrors
+ * model_router.c resolve_single_key semantics):
+ *   ""      → no auth (local endpoints)
+ *   "env:X" → getenv, 400 key_unresolvable when unset/empty
+ *   "pg:Y"  → secret_decrypt, 400 key_unresolvable without master or on failure
+ *   plain   → used as-is (allow_plaintext_keys era rows) */
+static int
+provider_probe_resolve_key(admin_ctx_t* adm,
+                           const char*  key_ref,
+                           char*        out_key,
+                           size_t       out_sz)
+{
+    const uint8_t* master = NULL;
+    int            have_master = 0;
+    if (adm->ac != NULL && adm->ac->router != NULL && adm->ac->router->have_master) {
+        master = adm->ac->router->master;
+        have_master = 1;
+    }
+    if (key_ref == NULL || key_ref[0] == '\0') {
+        out_key[0] = '\0';
+        return 0;
+    }
+    if (strncmp(key_ref, "env:", 4) == 0) {
+        const char* env = getenv(key_ref + 4);
+        if (env == NULL || env[0] == '\0') {
+            return -1;
+        }
+        snprintf(out_key, out_sz, "%s", env);
+        return 0;
+    }
+    if (strncmp(key_ref, "pg:", 3) == 0) {
+        if (!have_master || master == NULL) {
+            return -1;
+        }
+        if (secret_decrypt(master, key_ref + 3, out_key, out_sz, NULL) != 0) {
+            return -1;
+        }
+        return 0;
+    }
+    snprintf(out_key, out_sz, "%s", key_ref);
+    return 0;
+}
+
+/* P1-4: only "<digits>/test" subpaths enter the probe; everything else
+ * keeps the existing 404 fall-through. */
+static int
+suffix_is_provider_test(const char* sub)
+{
+    char* slash = strchr(sub, '/');
+    if (slash == NULL || strcmp(slash + 1, "test") != 0) {
+        return 0;
+    }
+    size_t idlen = (size_t)(slash - sub);
+    if (idlen == 0 || idlen > 18) {
+        return 0;
+    }
+    for (size_t i = 0; i < idlen; i++) {
+        if (sub[i] < '0' || sub[i] > '9') {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/* P1-4: one-shot GET /models probe of a single provider.
+ * The probe itself always yields an admin 200 with a verdict in the body;
+ * upstream failures are diagnostic data, not admin errors. */
+static int
+provider_test(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
+{
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid provider id");
+    }
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    provider_rec_t  rec;
+    if (ops->get_provider(ops->ctx, id, &rec) != 0) {
+        return finish_error(status, body, len, 404, "not_found", "provider not found");
+    }
+
+    provider_probe_plan_t plan;
+    if (provider_probe_plan(rec.provider_type, rec.endpoint, &plan) != 0) {
+        provider_rec_free(&rec);
+        return finish_error(status, body, len, 400, "probe_unsupported",
+                            "no adapter supports provider_type");
+    }
+
+    char key[1080];
+    if (provider_probe_resolve_key(adm, rec.api_key, key, sizeof key) != 0) {
+        provider_rec_free(&rec);
+        return finish_error(status, body, len, 400, "key_unresolvable",
+                            "cannot resolve provider api_key ref");
+    }
+
+    char auth_value[1120];
+    if (key[0] != '\0') {
+        snprintf(auth_value, sizeof auth_value, "%s%s", plan.bearer ? "Bearer " : "", key);
+    } else {
+        auth_value[0] = '\0';
+    }
+
+    const char* hdr_name = key[0] != '\0' ? plan.auth_header : NULL;
+    const char* hdr_value = key[0] != '\0' ? auth_value : NULL;
+    const char* extra_name = plan.extra_header[0] != '\0' ? plan.extra_header : NULL;
+    const char* extra_value = plan.extra_header[0] != '\0' ? "2023-06-01" : NULL;
+
+    int  us = 0;
+    long lat_ns = 0;
+    int  rc = upstream_probe(plan.url, hdr_name, hdr_value, extra_name, extra_value,
+                             10000L, &us, &lat_ns);
+
+    const char* verdict = "unreachable";
+    if (rc == 0) {
+        verdict = (us >= 200 && us < 400)   ? "ok"
+               : (us == 401 || us == 403)   ? "key_invalid"
+               : us == 404                   ? "endpoint_unverified"
+               : "upstream_error";
+    } else if (rc == -110) {
+        verdict = "timeout";
+    }
+
+    json_t* o = json_object();
+    json_object_set_new(o, "provider", json_integer(id));
+    json_object_set_new(o, "name", json_string(rec.name));
+    json_object_set_new(o, "status", json_integer(us));
+    json_object_set_new(o, "verdict", json_string(verdict));
+    json_object_set_new(o, "latency_ms", json_real((double)lat_ns / 1000000.0));
+    provider_rec_free(&rec);
+    return finish_json(status, body, len, 200, o);
+}
+
 /* ------------------------------------------------------------ usage */
 
 /** @brief "YYYY-MM-DD" (UTC) or ""/"today" → UTC-midnight time_t. */
@@ -1546,6 +1679,9 @@ admin_dispatch(admin_ctx_t* adm,
             }
             if (strcmp(method, "DELETE") == 0) {
                 return provider_delete(adm, out_status, out_body, out_len, rest + 10);
+            }
+            if (strcmp(method, "POST") == 0 && suffix_is_provider_test(rest + 10)) {
+                return provider_test(adm, out_status, out_body, out_len, rest + 10);
             }
         }
     } else if (strcmp(rest, "usage/requests") == 0 && strcmp(method, "GET") == 0) {

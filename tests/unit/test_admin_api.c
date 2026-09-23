@@ -6,6 +6,7 @@
 #include "aigate_core.h"
 #include "pg_store.h"
 #include "sha256.h"
+#include "mock_upstream.h"
 
 #include <jansson.h>
 #include <math.h>
@@ -1604,5 +1605,195 @@ TEST_CASE(test_admin_lockout_policy_env)
     /* Restore defaults for later tests */
     admin_lockout_set_policy(10, 300);
     admin_lockout_reset();
+    teardown_admin(ps, &core, &db);
+}
+
+/* ---- P1-4: POST /admin/v1/providers/{id}/test ---- */
+
+/* Create one provider via the admin API with the mock as its endpoint.
+ * Returns provider id on success, or -1 on failure (caller asserts). */
+static long
+admin_create_probe_provider(admin_ctx_t*    adm,
+                            const char*     api_key,
+                            const char*     base_url,
+                            const char*     ptype)
+{
+    char    req[1024];
+    snprintf(req,
+             sizeof req,
+             "{\"name\":\"probe\",\"provider_type\":\"%s\",\"endpoint\":\"%s\","
+             "\"api_key\":\"%s\",\"models\":[\"m1\"],\"enabled\":true}",
+             ptype,
+             base_url,
+             api_key);
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+    int    rc = admin_dispatch(adm,
+                               "/admin/v1/providers",
+                               "POST",
+                               NULL,
+                               "admin-secret-token",
+                               req,
+                               strlen(req),
+                               &status,
+                               &body,
+                               &len);
+    if (rc != 0 || status != 201) {
+        free(body);
+        return -1;
+    }
+    json_t* res = json_loads(body, 0, NULL);
+    free(body);
+    long id = (long)json_integer_value(json_object_get(res, "id"));
+    json_decref(res);
+    return id;
+}
+
+/* Fire the probe endpoint; returns the admin HTTP status and copies the
+ * verdict string into @p verdict_out (before the response JSON is freed).
+ * Returns -1 when the dispatch itself failed (caller asserts on the HTTP
+ * status, so -1 will not match any expected code). */
+static int
+admin_run_probe(admin_ctx_t* adm, long provider_id, char* verdict_out, size_t cap)
+{
+    char uri[128];
+    snprintf(uri, sizeof uri, "/admin/v1/providers/%ld/test", provider_id);
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+    int    rc = admin_dispatch(adm, uri, "POST", NULL, "admin-secret-token",
+                               NULL, 0, &status, &body, &len);
+    if (rc != 0) {
+        free(body);
+        snprintf(verdict_out, cap, "dispatch_failed");
+        return -1;
+    }
+    json_t* res = json_loads(body, 0, NULL);
+    free(body);
+    const json_t* jv = json_object_get(res, "verdict");
+    if (json_is_string(jv) && cap > 0) {
+        snprintf(verdict_out, cap, "%s", json_string_value(jv));
+    } else {
+        snprintf(verdict_out, cap, "null");
+    }
+    json_decref(res);
+    return status;
+}
+
+TEST_CASE(test_admin_provider_test_ok)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock");
+    long id = admin_create_probe_provider(&adm, "sk-test", mock_upstream_base(mu), "openai");
+    TEST_ASSERT(id > 0, "provider created");
+
+    char verdict[32] = "";
+    TEST_ASSERT(admin_run_probe(&adm, id, verdict, sizeof verdict) == 200, "admin 200");
+    TEST_ASSERT(strcmp(verdict, "ok") == 0, "verdict ok");
+    mock_upstream_stop(mu);
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_test_key_invalid)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock");
+    mock_upstream_status(mu, 401);
+    long id = admin_create_probe_provider(&adm, "sk-bad", mock_upstream_base(mu), "openai");
+    TEST_ASSERT(id > 0, "provider created");
+
+    char verdict[32] = "";
+    TEST_ASSERT(admin_run_probe(&adm, id, verdict, sizeof verdict) == 200, "admin 200");
+    TEST_ASSERT(strcmp(verdict, "key_invalid") == 0, "verdict key_invalid");
+    mock_upstream_stop(mu);
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_test_unverified_404)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock");
+    mock_upstream_status(mu, 404);
+    long id = admin_create_probe_provider(&adm, "sk-test", mock_upstream_base(mu), "openai");
+    TEST_ASSERT(id > 0, "provider created");
+
+    char verdict[32] = "";
+    TEST_ASSERT(admin_run_probe(&adm, id, verdict, sizeof verdict) == 200, "admin 200");
+    TEST_ASSERT(strcmp(verdict, "endpoint_unverified") == 0, "verdict endpoint_unverified");
+    mock_upstream_stop(mu);
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_test_env_missing)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    char verdict[32] = "";
+    long id = admin_create_probe_provider(&adm, "env:AIGATE_NOPE_PROBE", "http://127.0.0.1:1", "openai");
+    TEST_ASSERT(id > 0, "provider created");
+    TEST_ASSERT(admin_run_probe(&adm, id, verdict, sizeof verdict) == 400, "env missing -> 400");
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_test_unknown_type)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    char verdict[32] = "";
+    long id = admin_create_probe_provider(&adm, "k", "http://127.0.0.1:1", "vertex");
+    TEST_ASSERT(id > 0, "provider created");
+    TEST_ASSERT(admin_run_probe(&adm, id, verdict, sizeof verdict) == 400, "probe_unsupported -> 400");
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_provider_test_not_found)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    char verdict[32] = "";
+    TEST_ASSERT(admin_run_probe(&adm, 999, verdict, sizeof verdict) == 404, "not found -> 404");
     teardown_admin(ps, &core, &db);
 }

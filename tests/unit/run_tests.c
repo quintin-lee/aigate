@@ -139,6 +139,21 @@ main(void)
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
 
+
+    extern void test_probe_plan_openai_family(void);
+    extern void test_probe_plan_anthropic_suffixes(void);
+    extern void test_probe_plan_gemini(void);
+    extern void test_probe_plan_errors(void);
+    extern void test_probe_transport_ok(void);
+    extern void test_probe_transport_key_invalid(void);
+    extern void test_probe_transport_unreachable(void);
+    test_register("probe_plan_openai_family", test_probe_plan_openai_family);
+    test_register("probe_plan_anthropic", test_probe_plan_anthropic_suffixes);
+    test_register("probe_plan_gemini", test_probe_plan_gemini);
+    test_register("probe_plan_errors", test_probe_plan_errors);
+    test_register("probe_transport_ok", test_probe_transport_ok);
+    test_register("probe_transport_key_invalid", test_probe_transport_key_invalid);
+    test_register("probe_transport_unreachable", test_probe_transport_unreachable);
     extern void test_admin_auth(void);
     extern void test_admin_keys_lifecycle(void);
     extern void test_admin_models_lifecycle(void);
@@ -164,6 +179,19 @@ main(void)
     test_register("admin_provider_plaintext_gate", test_admin_provider_plaintext_gate);
     test_register("admin_lockout", test_admin_lockout);
     test_register("admin_lockout_policy_env", test_admin_lockout_policy_env);
+
+    extern void test_admin_provider_test_ok(void);
+    extern void test_admin_provider_test_key_invalid(void);
+    extern void test_admin_provider_test_unverified_404(void);
+    extern void test_admin_provider_test_env_missing(void);
+    extern void test_admin_provider_test_unknown_type(void);
+    extern void test_admin_provider_test_not_found(void);
+    test_register("admin_provider_test_ok", test_admin_provider_test_ok);
+    test_register("admin_provider_test_key_invalid", test_admin_provider_test_key_invalid);
+    test_register("admin_provider_test_unverified", test_admin_provider_test_unverified_404);
+    test_register("admin_provider_test_env_missing", test_admin_provider_test_env_missing);
+    test_register("admin_provider_test_unknown_type", test_admin_provider_test_unknown_type);
+    test_register("admin_provider_test_not_found", test_admin_provider_test_not_found);
 
     extern void test_upstream_stream_normal(void);
     extern void test_upstream_stream_silence_timeout(void);
