@@ -83,4 +83,23 @@ typedef struct provider_adapter {
 /** @brief Look up the provider adapter by provider name; returns NULL if unsupported. */
 const provider_adapter_t* provider_find(const char* provider);
 
+/** @brief GET /models probe plan for a provider family (P1-4).
+ * Family is decided by the adapter registry (supports()); URL/header
+ * conventions mirror the adapters' own build_chat rules.
+ * @p out->extra_header holds "anthropic-version" for the anthropic
+ * family (fixed value "2023-06-01"); empty string otherwise. */
+typedef struct {
+    char url[1024];
+    char auth_header[32];
+    int  bearer; /* 1 = prefix the key value with "Bearer " */
+    char extra_header[32];
+} provider_probe_plan_t;
+
+/** @brief Map a provider_type + endpoint to a GET /models probe plan.
+ * @return 0 ok; -1 when no adapter supports @p provider_type, @p endpoint
+ *         is empty, or the URL would exceed 1024 chars. */
+int provider_probe_plan(const char* provider_type,
+                        const char* endpoint,
+                        provider_probe_plan_t* out);
+
 #endif /* AIGATE_PROVIDER_ADAPTER_H */
