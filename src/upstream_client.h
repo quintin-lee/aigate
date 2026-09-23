@@ -76,5 +76,23 @@ int upstream_stream_call(const char*       url,
                          int*              out_status,
                          char**            out_err_body,
                          size_t*           out_err_len);
+/** @brief One upstream GET probe (P1-4 provider health check).
+ * Reuses the per-thread curl handle; the response body is discarded.
+ * @param hdr_name/hdr_value        auth header pair (value is final,
+ *                                   e.g. "Bearer sk-…"); either NULL skips
+ * @param extra_hdr_name/extra_hdr_value optional second header pair;
+ *                                   either NULL skips
+ * @param out_status    receives upstream status (0 when transport failed)
+ * @param out_latency_ns optional wall duration in ns (may be NULL)
+ * @return 0 transport success (even 4xx/5xx); -110 timeout; -502 failure. */
+int upstream_probe(const char* url,
+                  const char* hdr_name,
+                  const char* hdr_value,
+                  const char* extra_hdr_name,
+                  const char* extra_hdr_value,
+                  long        timeout_ms,
+                  int*        out_status,
+                  long*       out_latency_ns);
+
 
 #endif /* AIGATE_UPSTREAM_CLIENT_H */

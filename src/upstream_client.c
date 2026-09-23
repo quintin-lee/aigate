@@ -207,6 +207,97 @@ mono_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+/* libcurl write callback: accept all data, discard. */
+static size_t
+discard_body(char* buf, size_t size, size_t nmemb, void* ud)
+{
+    (void)buf;
+    (void)ud;
+    return size * nmemb;
+}
+
+int
+upstream_probe(const char* url,
+               const char* hdr_name,
+               const char* hdr_value,
+               const char* extra_hdr_name,
+               const char* extra_hdr_value,
+               long        timeout_ms,
+               int*        out_status,
+               long*       out_latency_ns)
+{
+    struct curl_slist* hdrs = NULL;
+    int                rc = -502;
+    long               http_code = 0;
+    uint64_t           t0;
+
+    if (out_status != NULL) {
+        *out_status = 0;
+    }
+    if (out_latency_ns != NULL) {
+        *out_latency_ns = 0;
+    }
+    if (url == NULL || url[0] == '\0') {
+        return -502;
+    }
+    t0 = mono_ns();
+
+    pthread_once(&g_curl_once, curl_init_once);
+    CURL* c = thread_curl();
+    if (c == NULL) {
+        return -502;
+    }
+    curl_easy_reset(c);
+
+    if (hdr_name != NULL && hdr_value != NULL && hdr_name[0] != '\0') {
+        char hdr[1080];
+        snprintf(hdr, sizeof hdr, "%s: %s", hdr_name, hdr_value);
+        hdrs = curl_slist_append(hdrs, hdr);
+    }
+    if (extra_hdr_name != NULL && extra_hdr_value != NULL && extra_hdr_name[0] != '\0') {
+        char hdr[256];
+        snprintf(hdr, sizeof hdr, "%s: %s", extra_hdr_name, extra_hdr_value);
+        hdrs = curl_slist_append(hdrs, hdr);
+    }
+
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_HTTPGET, 1L);
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, discard_body);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, timeout_ms > 0 ? timeout_ms : 60000L);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+    /* confine redirects to http/https like upstream_call_ext */
+#if CURL_AT_LEAST_VERSION(7, 85, 0)
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+
+    CURLcode cret = curl_easy_perform(c);
+    if (cret == CURLE_OK) {
+        if (curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code) == CURLE_OK) {
+            if (out_status != NULL) {
+                *out_status = (int)http_code;
+            }
+            rc = 0;
+        }
+    } else if (cret == CURLE_OPERATION_TIMEDOUT) {
+        rc = -110;
+    } else {
+        AIGATE_LOG_WARN("upstream probe transport error: %s", curl_easy_strerror(cret));
+        rc = -502;
+    }
+
+    if (out_latency_ns != NULL) {
+        *out_latency_ns = (long)(mono_ns() - t0);
+    }
+    curl_slist_free_all(hdrs);
+    return rc;
+}
+
 struct stream_ctx {
     upstream_chunk_fn on_chunk;
     void*             user_data;

@@ -32,6 +32,7 @@ struct mock_upstream {
     pthread_t       thread;
     int             running;
     int             fail_all;
+    int             mock_status; /* forced status (100..599) for all requests */
     int             request_count;
     char            last_path[256];
     char            last_body[MAX_BODY];
@@ -110,6 +111,7 @@ server_thread(void* arg)
         size_t      body_off = hstart != NULL ? (size_t)(hstart - buf + 4) : 0;
         snprintf(mu->last_body, sizeof mu->last_body, "%s", buf + body_off);
         int fail = mu->fail_all;
+        int mstatus = mu->mock_status;
         pthread_mutex_unlock(&mu->mtx);
 
         int is_fail = 0;
@@ -121,6 +123,21 @@ server_thread(void* arg)
                                 strstr(mu->last_body, "\"stream\": true") != NULL);
         int is_slow = (strstr(mu->last_body, "stream-slow") != NULL);
 
+        if (mstatus >= 100 && mstatus <= 599) {
+            const char* body = "{\"mock\":\"forced-status\"}";
+            char resp[512];
+            int blen = snprintf(resp,
+                                sizeof resp,
+                                "HTTP/1.1 %d Mock\r\n"
+                                "Content-Type: application/json\r\n"
+                                "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                                mstatus,
+                                strlen(body),
+                                body);
+            write(cfd, resp, (size_t)blen);
+            close(cfd);
+            continue;
+        }
         if (is_fail) {
             int         status = (fail >= 400 && fail <= 599) ? fail : 500;
             const char* status_text =
@@ -377,6 +394,13 @@ mock_upstream_fail_all(mock_upstream_t* mu, int fail)
 {
     pthread_mutex_lock(&mu->mtx);
     mu->fail_all = fail;
+    pthread_mutex_unlock(&mu->mtx);
+}
+void
+mock_upstream_status(mock_upstream_t* mu, int status)
+{
+    pthread_mutex_lock(&mu->mtx);
+    mu->mock_status = status;
     pthread_mutex_unlock(&mu->mtx);
 }
 

@@ -28,6 +28,10 @@ void mock_upstream_fail_all(mock_upstream_t* mu, int fail);
 
 /** @brief Total requests served by this instance. */
 int mock_upstream_request_count(const mock_upstream_t* mu);
+/** @brief Force a fixed response status (any 100..599) for all requests,
+ *  overriding path-based and fail_all rules; 0 restores normal behavior. */
+void mock_upstream_status(mock_upstream_t* mu, int status);
+
 
 /** @brief The most recently received request body (NUL-terminated,
  *  instance-owned; valid until the next request or stop). */
