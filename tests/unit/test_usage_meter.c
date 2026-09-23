@@ -12,6 +12,10 @@ struct um_db {
     int         fail_flush;
     usage_row_t rows[64];
     int         n_rows;
+    usage_request_row_t reqs[64];
+    int                 n_reqs;
+    int                 fail_req_flush;
+    int                 req_flush_calls;
 };
 
 static int
@@ -24,6 +28,20 @@ um_flush(void* ctx, const usage_row_t* rows, int n)
     }
     for (int i = 0; i < n && db->n_rows < (int)(sizeof db->rows / sizeof db->rows[0]); i++) {
         db->rows[db->n_rows++] = rows[i];
+    }
+    return 0;
+}
+
+static int
+um_flush_reqs(void* ctx, const usage_request_row_t* rows, int n)
+{
+    struct um_db* db = ctx;
+    if (db->fail_req_flush) {
+        return -1;
+    }
+    db->req_flush_calls++;
+    for (int i = 0; i < n && db->n_reqs < (int)(sizeof db->reqs / sizeof db->reqs[0]); i++) {
+        db->reqs[db->n_reqs++] = rows[i];
     }
     return 0;
 }
@@ -53,6 +71,9 @@ open_um_store(struct um_db* db)
     ops.flush_usage = um_flush;
     ops.query_usage =
         (int (*)(void*, long, const char*, time_t, time_t, usage_row_t*, int, int*))um_fail;
+    ops.flush_usage_requests = um_flush_reqs;
+    ops.query_usage_requests =
+        (int (*)(void*, long, time_t, usage_request_row_t*, int, int*))um_fail;
     return pg_store_open("unused", &ops);
 }
 
@@ -249,4 +270,57 @@ TEST_CASE(test_metrics_failover)
 
     metrics_reset_failovers();
     TEST_ASSERT(metrics_total_failovers() == 0, "reset ok");
+}
+
+TEST_CASE(test_um_request_ring)
+{
+    struct um_db db;
+    memset(&db, 0, sizeof db);
+    pg_store_t* ps = open_um_store(&db);
+    TEST_ASSERT(ps != NULL, "store open");
+    usage_meter_t* um = usage_meter_new(ps, NULL, 0); /* no worker: manual drain */
+    TEST_ASSERT(um != NULL, "meter new");
+
+    um_record(um, 1, "gpt-4o", 200, 7, 11, 5, 50000000, "openai");
+    um_record(um, 2, "claude-3", 500, 3, 4, 2, 90000000, "anthropic");
+
+    usage_request_row_t buf[16];
+    int                 n = 0;
+
+    /* drain = copy + advance head; no flush call */
+    TEST_ASSERT(um_drain_requests(um, buf, 16, &n) == 0, "drain reqs");
+    TEST_ASSERT(n == 2, "2 audit rows, got %d", n);
+    TEST_ASSERT(db.n_reqs == 0, "drain does not flush");
+    TEST_ASSERT(buf[0].key_id == 1 &&
+                    strcmp(buf[0].provider, "openai") == 0 &&
+                    buf[0].http_status == 200 &&
+                    buf[0].prompt_tokens == 7 &&
+                    buf[0].latency_ns == 50000000,
+                "row 0 fields");
+    TEST_ASSERT(buf[1].key_id == 2 && buf[1].http_status == 500, "row 1 fields");
+    TEST_ASSERT(um_requests_dropped(um) == 0, "nothing dropped");
+
+    /* manual flush of the drained rows, then release (no-op confirm) */
+    TEST_ASSERT(um_flush_reqs(&db, buf, n) == 0, "manual flush");
+    TEST_ASSERT(um_release_requests(um, n) == 0, "release no-op confirm");
+    TEST_ASSERT(db.n_reqs == 2, "fake now holds 2");
+    TEST_ASSERT(db.req_flush_calls == 1, "one flush call");
+
+    /* simulate a worker tick: record, drain, flush fails -> re-queue */
+    db.fail_req_flush = 1;
+    um_record(um, 3, "gpt-4o", 200, 1, 1, 0, 1000000, "openai");
+    TEST_ASSERT(um_drain_requests(um, buf, 16, &n) == 0, "drain reqs 2");
+    TEST_ASSERT(n == 1, "1 pending audit row, got %d", n);
+    TEST_ASSERT(um_flush_reqs(&db, buf, n) == -1, "flush fails");
+    TEST_ASSERT(um_requeue_requests(um, n) == 0, "re-queue after failure");
+    TEST_ASSERT(um_drain_requests(um, buf, 16, &n) == 0, "drain again");
+    TEST_ASSERT(n == 1, "row survives re-queue");
+    db.fail_req_flush = 0;
+    TEST_ASSERT(um_flush_reqs(&db, buf, n) == 0, "flush succeeds on retry");
+    TEST_ASSERT(um_release_requests(um, n) == 0, "release after success");
+    TEST_ASSERT(um_drain_requests(um, buf, 16, &n) == 0, "drain empty");
+    TEST_ASSERT(n == 0, "ring empty after release");
+
+    usage_meter_free(um);
+    pg_store_close(ps);
 }
