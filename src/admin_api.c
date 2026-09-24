@@ -1264,10 +1264,7 @@ provider_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const c
  *   "pg:Y"  → secret_decrypt, 400 key_unresolvable without master or on failure
  *   plain   → used as-is (allow_plaintext_keys era rows) */
 static int
-provider_probe_resolve_key(admin_ctx_t* adm,
-                           const char*  key_ref,
-                           char*        out_key,
-                           size_t       out_sz)
+provider_probe_resolve_key(admin_ctx_t* adm, const char* key_ref, char* out_key, size_t out_sz)
 {
     const uint8_t* master = NULL;
     int            have_master = 0;
@@ -1340,15 +1337,15 @@ provider_test(admin_ctx_t* adm, int* status, char** body, size_t* len, const cha
     provider_probe_plan_t plan;
     if (provider_probe_plan(rec.provider_type, rec.endpoint, &plan) != 0) {
         provider_rec_free(&rec);
-        return finish_error(status, body, len, 400, "probe_unsupported",
-                            "no adapter supports provider_type");
+        return finish_error(
+            status, body, len, 400, "probe_unsupported", "no adapter supports provider_type");
     }
 
     char key[1080];
     if (provider_probe_resolve_key(adm, rec.api_key, key, sizeof key) != 0) {
         provider_rec_free(&rec);
-        return finish_error(status, body, len, 400, "key_unresolvable",
-                            "cannot resolve provider api_key ref");
+        return finish_error(
+            status, body, len, 400, "key_unresolvable", "cannot resolve provider api_key ref");
     }
 
     char auth_value[1120];
@@ -1365,15 +1362,15 @@ provider_test(admin_ctx_t* adm, int* status, char** body, size_t* len, const cha
 
     int  us = 0;
     long lat_ns = 0;
-    int  rc = upstream_probe(plan.url, hdr_name, hdr_value, extra_name, extra_value,
-                             10000L, &us, &lat_ns);
+    int  rc = upstream_probe(
+        plan.url, hdr_name, hdr_value, extra_name, extra_value, 10000L, &us, &lat_ns);
 
     const char* verdict = "unreachable";
     if (rc == 0) {
-        verdict = (us >= 200 && us < 400)   ? "ok"
-               : (us == 401 || us == 403)   ? "key_invalid"
-               : us == 404                   ? "endpoint_unverified"
-               : "upstream_error";
+        verdict = (us >= 200 && us < 400)    ? "ok"
+                  : (us == 401 || us == 403) ? "key_invalid"
+                  : us == 404                ? "endpoint_unverified"
+                                             : "upstream_error";
     } else if (rc == -110) {
         verdict = "timeout";
     }

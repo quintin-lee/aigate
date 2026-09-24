@@ -27,9 +27,7 @@ provider_find(const char* provider)
 }
 
 int
-provider_probe_plan(const char* provider_type,
-                    const char* endpoint,
-                    provider_probe_plan_t* out)
+provider_probe_plan(const char* provider_type, const char* endpoint, provider_probe_plan_t* out)
 {
     const provider_adapter_t* adp = provider_find(provider_type);
     if (adp == NULL || endpoint == NULL || endpoint[0] == '\0' || out == NULL) {

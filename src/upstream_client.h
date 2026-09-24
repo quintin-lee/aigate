@@ -86,13 +86,12 @@ int upstream_stream_call(const char*       url,
  * @param out_latency_ns optional wall duration in ns (may be NULL)
  * @return 0 transport success (even 4xx/5xx); -110 timeout; -502 failure. */
 int upstream_probe(const char* url,
-                  const char* hdr_name,
-                  const char* hdr_value,
-                  const char* extra_hdr_name,
-                  const char* extra_hdr_value,
-                  long        timeout_ms,
-                  int*        out_status,
-                  long*       out_latency_ns);
-
+                   const char* hdr_name,
+                   const char* hdr_value,
+                   const char* extra_hdr_name,
+                   const char* extra_hdr_value,
+                   long        timeout_ms,
+                   int*        out_status,
+                   long*       out_latency_ns);
 
 #endif /* AIGATE_UPSTREAM_CLIENT_H */

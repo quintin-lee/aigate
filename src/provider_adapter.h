@@ -98,8 +98,7 @@ typedef struct {
 /** @brief Map a provider_type + endpoint to a GET /models probe plan.
  * @return 0 ok; -1 when no adapter supports @p provider_type, @p endpoint
  *         is empty, or the URL would exceed 1024 chars. */
-int provider_probe_plan(const char* provider_type,
-                        const char* endpoint,
-                        provider_probe_plan_t* out);
+int
+provider_probe_plan(const char* provider_type, const char* endpoint, provider_probe_plan_t* out);
 
 #endif /* AIGATE_PROVIDER_ADAPTER_H */
