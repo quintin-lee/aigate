@@ -1078,6 +1078,180 @@ def test_provider_probe_endpoint(gateway):
     assert body["status"] == 0
 
 
+def test_provider_key_encrypted_storage(gateway, pg_dsn):
+    """Direct plaintext provider keys are stored encrypted (pg: prefix) when
+    AIGATE_MASTER_KEY is set; env: references pass through untouched."""
+    import subprocess
+
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    def stored_key(provider_id: int) -> str:
+        res = subprocess.run(
+            ["psql", "-A", "-t", pg_dsn, "-c",
+             f"SELECT api_key FROM providers WHERE id = {provider_id}"],
+            capture_output=True, text=True,
+        )
+        assert res.returncode == 0, res.stderr
+        return res.stdout.strip()
+
+    # 1. Direct plaintext key -> stored as pg:<encrypted>
+    resp = requests.post(
+        f"{base_url}/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "name": "key-enc-plaintext",
+            "provider_type": "openai",
+            "endpoint": mock_url,
+            "api_key": "sk-plaintext-secret-do-not-store-raw",
+            "models": ["enc-model"],
+            "enabled": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    plain_id = resp.json()["id"]
+    stored = stored_key(plain_id)
+    assert stored.startswith("pg:"), f"expected pg:-prefixed storage, got {stored!r}"
+    assert "sk-plaintext-secret-do-not-store-raw" not in stored
+
+    # 2. env: reference -> stored verbatim (resolved at request time)
+    resp = requests.post(
+        f"{base_url}/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "name": "key-enc-envref",
+            "provider_type": "anthropic",
+            "endpoint": mock_url,
+            "api_key": "env:ANTHROPIC_API_KEY",
+            "models": ["enc-env-model"],
+            "enabled": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    env_id = resp.json()["id"]
+    assert stored_key(env_id) == "env:ANTHROPIC_API_KEY"
+
+    # 3. Update with another plaintext key -> re-encrypted
+    resp = requests.patch(
+        f"{base_url}/admin/v1/providers/{plain_id}",
+        headers=admin_headers,
+        json={"api_key": "sk-rotated-key-5678"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert stored_key(plain_id).startswith("pg:")
+
+    # cleanup: drop both providers (their auto-synced models cascade)
+    for pid in (plain_id, env_id):
+        resp = requests.delete(
+            f"{base_url}/admin/v1/providers/{pid}", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+
+
+def test_pg_reconnect_recovers(gateway, pg_dsn):
+    """Kill the gateway's PG backend mid-session; store ops then recover via
+    the reconnect path (pg_store.c pq_ensure_conn) once libpq's lazy
+    detection flips PQstatus to CONNECTION_BAD after the first failed query.
+
+    libpq does not probe the socket proactively: the first op on the dead
+    connection fails, and the NEXT op (flush worker or any admin read)
+    triggers the reconnect. So we poll an admin key-list read -- which is
+    always a PG round-trip -- until it stops returning 500.
+    """
+    import subprocess
+
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # Fresh provider/key so this test is self-contained.
+    resp = requests.post(
+        f"{base_url}/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "name": "reconnect-provider",
+            "provider_type": "openai",
+            "endpoint": mock_url,
+            "api_key": "env:ANTHROPIC_API_KEY",
+            "models": ["reconnect-model"],
+            "enabled": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    provider_id = resp.json()["id"]
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={"name": "reconnect-client", "allowed_models": ["reconnect-model"]},
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    # Baseline: request works before the kill.
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={"model": "reconnect-model",
+              "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Terminate every PG backend on the aigate DB that is not this psql
+    # session -> the gateway's single libpq connection dies (CONNECTION_BAD).
+    res = subprocess.run(
+        ["psql", "-A", "-t", pg_dsn, "-c",
+         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+         "WHERE datname = current_database() AND pid <> pg_backend_pid() "
+         "AND usename = 'aigate'"],
+        capture_output=True, text=True,
+    )
+    assert res.returncode == 0, res.stderr
+    assert "t" in res.stdout, f"expected at least one terminated backend: {res.stdout!r}"
+
+    # Poll until the store recovers: first PG op after the kill fails
+    # (lazy detection), the next op reconnects. The admin key list always
+    # hits PG, so it is the observable recovery signal (500 until then).
+    import time
+    deadline = time.time() + 30
+    last = None
+    recovered = False
+    while time.time() < deadline:
+        last = requests.get(f"{base_url}/admin/v1/keys", headers=admin_headers)
+        if last.status_code == 200:
+            recovered = True
+            break
+        time.sleep(0.5)
+    assert recovered, f"PG reconnect did not recover within 30s; last: {last.status_code if last is not None else None}"
+
+    # End-to-end: chat still works after recovery.
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={"model": "reconnect-model",
+              "messages": [{"role": "user", "content": "hi again"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["choices"][0]["message"]["content"] == "Hello from mock upstream!"
+
+    # cleanup: delete the provider (its auto-synced models cascade)
+    resp = requests.delete(
+        f"{base_url}/admin/v1/providers/{provider_id}", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+
+
 def test_admin_lockout_429(gateway):
     """10 failed admin auth attempts from one IP lock that IP out (429).
 
