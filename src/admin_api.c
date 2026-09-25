@@ -15,6 +15,9 @@
 #include "circuit_breaker.h"
 #include "model_router.h"
 #include "provider_adapter.h"
+#include "redis_client.h"
+#include "redis_pool.h"
+#include "redis_scripts.h"
 #include "secrets.h"
 #include "sha256.h"
 #include "upstream_client.h"
@@ -78,6 +81,10 @@ admin_auth_ok(admin_ctx_t* adm, const char* bearer)
 static int g_lockout_fails = 10;
 static int g_lockout_window_s = 300;
 
+/* Optional Redis pool for distributed lockout (NULL = in-process only). */
+static redis_pool_t* g_lockout_pool = NULL;
+static char          g_lockout_sha[48] = { 0 };
+
 typedef struct {
     char           ip[32];
     _Atomic long   fails;
@@ -106,6 +113,31 @@ lockout_hit(const char* ip)
     if (ip == NULL) {
         return 0;
     }
+
+    if (g_lockout_pool != NULL) {
+        char redis_key[80];
+        snprintf(redis_key, sizeof(redis_key), "aigate:lockout:%s", ip);
+        redisContext* c = redis_pool_acquire(g_lockout_pool);
+        if (c == NULL) {
+            /* Fail-Closed: Redis down → treat as locked out to prevent bypass */
+            return 1;
+        }
+        redisReply* reply = (redisReply*)redisCommand(c, "GET %s", redis_key);
+        int hit = 0;
+        if (reply != NULL && reply->type == REDIS_REPLY_STRING) {
+            long fails = strtol(reply->str, NULL, 10);
+            hit = (fails >= g_lockout_fails) ? 1 : 0;
+        } else if (reply == NULL) {
+            /* Network error → fail-closed */
+            hit = 1;
+        }
+        if (reply != NULL) {
+            freeReplyObject(reply);
+        }
+        redis_pool_release(g_lockout_pool, c);
+        return hit;
+    }
+
     lockout_slot_t* s = &g_lockout[lockout_slot_for(ip)];
     pthread_mutex_lock(&g_lockout_mtx);
     int hit = s->in_use && atomic_load(&s->fails) >= g_lockout_fails &&
@@ -120,6 +152,29 @@ lockout_fail(const char* ip)
     if (ip == NULL) {
         return;
     }
+
+    if (g_lockout_pool != NULL) {
+        char redis_key[80];
+        snprintf(redis_key, sizeof(redis_key), "aigate:lockout:%s", ip);
+        redisContext* c = redis_pool_acquire(g_lockout_pool);
+        if (c == NULL) {
+            goto local_fail;
+        }
+        char max_buf[16], win_buf[16];
+        snprintf(max_buf, sizeof(max_buf), "%d", g_lockout_fails);
+        snprintf(win_buf, sizeof(win_buf), "%d", g_lockout_window_s);
+        const char* keys[1] = { redis_key };
+        const char* argv[2] = { max_buf, win_buf };
+        redisReply* reply =
+            redis_eval_sha(c, g_lockout_sha, SCRIPT_ADMIN_LOCKOUT, 1, keys, argv, 2);
+        if (reply != NULL) {
+            freeReplyObject(reply);
+        }
+        redis_pool_release(g_lockout_pool, c);
+        /* Fall through to also record locally */
+    }
+
+local_fail:;
     lockout_slot_t* s = &g_lockout[lockout_slot_for(ip)];
     time_t          now = time(NULL);
     pthread_mutex_lock(&g_lockout_mtx);
@@ -180,6 +235,21 @@ admin_lockout_set_policy(int max_fails, int window_s)
     pthread_mutex_lock(&g_lockout_mtx);
     g_lockout_fails = max_fails;
     g_lockout_window_s = window_s;
+    pthread_mutex_unlock(&g_lockout_mtx);
+}
+
+void
+admin_lockout_set_pool(struct redis_pool* pool)
+{
+    pthread_mutex_lock(&g_lockout_mtx);
+    g_lockout_pool = pool;
+    if (pool != NULL) {
+        redisContext* c = redis_pool_acquire(pool);
+        if (c != NULL) {
+            redis_script_load(c, SCRIPT_ADMIN_LOCKOUT, g_lockout_sha);
+            redis_pool_release(pool, c);
+        }
+    }
     pthread_mutex_unlock(&g_lockout_mtx);
 }
 

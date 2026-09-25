@@ -11,6 +11,8 @@
 #include "aigate_core.h"
 #include "pg_store.h"
 
+struct redis_pool; /* forward-declare for admin_lockout_set_pool */
+
 /** @brief Admin plane state: pipeline caches (for invalidation after
  *  mutations), the store, and the SHA-256 hex of the admin token. */
 typedef struct admin_ctx {
@@ -50,6 +52,10 @@ void admin_lockout_reset(void);
  *  length in seconds (valid [5..3600]). Out-of-range values leave the
  *  current policy unchanged. */
 void admin_lockout_set_policy(int max_fails, int window_s);
+
+/** @brief Inject a Redis connection pool for distributed admin IP lockout.
+ *  Pass NULL to revert to in-process-only mode. */
+void admin_lockout_set_pool(struct redis_pool* pool);
 
 /** @brief Pure calculation: transform cost_row_t rows + models pricing into a JSON cost report.
  *  Exported for unit testing. */

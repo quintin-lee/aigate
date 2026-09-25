@@ -13,6 +13,9 @@ typedef struct aigate_config {
     char metrics_acl[256];     /* comma-separated IPv4 CIDRs, default "127.0.0.1" */
     int  usage_flush_s;        /* AIGATE_USAGE_FLUSH_S, default 5, range [1,3600] */
     long max_body_bytes;       /* AIGATE_MAX_BODY_BYTES, default 10MiB, range (0,1GiB] */
+    char redis_url[512];       /* AIGATE_REDIS_URL, default "" (disabled) */
+    int  redis_timeout_ms;     /* AIGATE_REDIS_TIMEOUT_MS, default 100, range [1,60000] */
+    int  redis_pool_size;      /* AIGATE_REDIS_POOL_SIZE, default 32, range [1,512] */
 } aigate_config;
 
 /** @brief Fill @p out from environment variables.

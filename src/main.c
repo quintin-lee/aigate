@@ -15,8 +15,12 @@
 
 #include "aigate_core.h"
 #include "aigate_log.h"
+#include "admin_api.h"
+#include "circuit_breaker.h"
 #include "config.h"
 #include <openssl/evp.h>
+#include "redis_pool.h"
+#include "ratelimit.h"
 #include "secrets.h"
 #include "transport_civetweb.h"
 
@@ -81,6 +85,23 @@ main(void)
         return 1;
     }
 
+    /* 4b. Optional Redis clustering: inject shared pool into rate limiter,
+     *     circuit breaker, and admin lockout subsystems. */
+    redis_pool_t* redis_pool = NULL;
+    if (cfg.redis_url[0] != '\0') {
+        redis_pool = redis_pool_create(cfg.redis_url, cfg.redis_pool_size, cfg.redis_timeout_ms);
+        if (redis_pool != NULL) {
+            ratelimit_set_redis_pool(core.rl, redis_pool);
+            cb_set_redis_pool(core.cb, redis_pool);
+            admin_lockout_set_pool(redis_pool);
+            AIGATE_LOG_INFO("main: Redis clustering enabled (%s, pool=%d)",
+                            cfg.redis_url, cfg.redis_pool_size);
+        } else {
+            AIGATE_LOG_WARN("main: AIGATE_REDIS_URL set but Redis pool creation failed "
+                            "— running in standalone mode");
+        }
+    }
+
     /* 5. Start CivetWeb transport */
     transport_civetweb_t* cw = transport_civetweb_start(
         &core, ps, cfg.admin_token_hash, cfg.listen, cfg.metrics_acl, cfg.max_body_bytes);
@@ -112,6 +133,12 @@ main(void)
     AIGATE_LOG_INFO("aigate shutting down gracefully...");
     transport_civetweb_stop(cw);
     aigate_core_shutdown(&core);
+    if (redis_pool != NULL) {
+        admin_lockout_set_pool(NULL);
+        ratelimit_set_redis_pool(core.rl, NULL);
+        cb_set_redis_pool(core.cb, NULL);
+        redis_pool_destroy(redis_pool);
+    }
     pg_store_close(ps);
     AIGATE_LOG_INFO("aigate shutdown complete");
     OPENSSL_cleanse(master, sizeof master);

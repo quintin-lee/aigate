@@ -62,6 +62,7 @@ main(void)
     extern void test_rl_daily_quota(void);
     extern void test_rl_reset_day(void);
     extern void test_rl_concurrent_smoke(void);
+    extern void test_rl_redis_fail_closed(void);
     extern void test_model_router_env_key(void);
     extern void test_model_router_missing_env_key(void);
     extern void test_model_router_multi_target_keys(void);
@@ -119,6 +120,7 @@ main(void)
     test_register("rl_daily_quota", test_rl_daily_quota);
     test_register("rl_reset_day", test_rl_reset_day);
     test_register("rl_concurrent", test_rl_concurrent_smoke);
+    test_register("rl_redis_fail_closed", test_rl_redis_fail_closed);
     test_register("model_router_env", test_model_router_env_key);
     test_register("model_router_missing", test_model_router_missing_env_key);
     test_register("model_router_multi_target_keys", test_model_router_multi_target_keys);
@@ -298,6 +300,11 @@ main(void)
     test_register("failover_on_500", test_failover_on_500_to_backup);
     test_register("failover_on_429", test_failover_on_429_to_backup);
     test_register("failover_cb_tripping", test_failover_circuit_breaker_tripping);
+
+    extern void test_redis_pool_invalid_args(void);
+    extern void test_redis_client_eval_and_pool_live(void);
+    test_register("redis_pool_invalid_args", test_redis_pool_invalid_args);
+    test_register("redis_client_eval_and_pool_live", test_redis_client_eval_and_pool_live);
 
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

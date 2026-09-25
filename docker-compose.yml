@@ -14,6 +14,17 @@ services:
       timeout: 3s
       retries: 10
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   aigate:
     build:
       context: .
@@ -28,8 +39,36 @@ services:
       AIGATE_MASTER_KEY: "${AIGATE_MASTER_KEY:-}"
       AIGATE_UPSTREAM_TIMEOUT_MS: "${AIGATE_UPSTREAM_TIMEOUT_MS:-60000}"
       AIGATE_METRICS_ACL: "${AIGATE_METRICS_ACL:-127.0.0.1}"
+      AIGATE_REDIS_URL: "redis://redis:6379"
+      AIGATE_REDIS_POOL_SIZE: "16"
+      AIGATE_REDIS_TIMEOUT_MS: "100"
     depends_on:
       postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  aigate-peer:
+    build:
+      context: .
+      network: host
+    restart: unless-stopped
+    ports:
+      - "${AIGATE_PEER_PORT:-8081}:8081"
+    environment:
+      AIGATE_LISTEN: ":8081"
+      AIGATE_PG_DSN: "host=postgres dbname=aigate user=aigate password=${POSTGRES_PASSWORD:-changeme}"
+      AIGATE_ADMIN_TOKEN: "${AIGATE_ADMIN_TOKEN}"
+      AIGATE_MASTER_KEY: "${AIGATE_MASTER_KEY:-}"
+      AIGATE_UPSTREAM_TIMEOUT_MS: "${AIGATE_UPSTREAM_TIMEOUT_MS:-60000}"
+      AIGATE_METRICS_ACL: "${AIGATE_METRICS_ACL:-127.0.0.1}"
+      AIGATE_REDIS_URL: "redis://redis:6379"
+      AIGATE_REDIS_POOL_SIZE: "16"
+      AIGATE_REDIS_TIMEOUT_MS: "100"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
 volumes:
