@@ -10,23 +10,68 @@
 #include <strings.h>
 #include <time.h>
 
+static CURLSH*         g_curl_sh = NULL;
+static pthread_mutex_t g_curl_sh_dns_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_curl_sh_ssl_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+curl_sh_lock(CURL* handle, curl_lock_data data, curl_lock_access access, void* userptr)
+{
+    (void)handle;
+    (void)access;
+    (void)userptr;
+    if (data == CURL_LOCK_DATA_DNS) {
+        pthread_mutex_lock(&g_curl_sh_dns_mtx);
+    } else if (data == CURL_LOCK_DATA_SSL_SESSION) {
+        pthread_mutex_lock(&g_curl_sh_ssl_mtx);
+    }
+}
+
+static void
+curl_sh_unlock(CURL* handle, curl_lock_data data, void* userptr)
+{
+    (void)handle;
+    (void)userptr;
+    if (data == CURL_LOCK_DATA_DNS) {
+        pthread_mutex_unlock(&g_curl_sh_dns_mtx);
+    } else if (data == CURL_LOCK_DATA_SSL_SESSION) {
+        pthread_mutex_unlock(&g_curl_sh_ssl_mtx);
+    }
+}
+
 static pthread_once_t g_curl_once = PTHREAD_ONCE_INIT;
 static void
 curl_init_once(void)
 {
     curl_global_init(CURL_GLOBAL_DEFAULT);
+    g_curl_sh = curl_share_init();
+    if (g_curl_sh != NULL) {
+        curl_share_setopt(g_curl_sh, CURLSHOPT_LOCKFUNC, curl_sh_lock);
+        curl_share_setopt(g_curl_sh, CURLSHOPT_UNLOCKFUNC, curl_sh_unlock);
+        curl_share_setopt(g_curl_sh, CURLSHOPT_SHARE, CURL_LOCK_DATA_DNS);
+        curl_share_setopt(g_curl_sh, CURLSHOPT_SHARE, CURL_LOCK_DATA_SSL_SESSION);
+    }
 }
 
 static pthread_key_t  g_curl_tkey;
 static pthread_once_t g_curl_tkey_once = PTHREAD_ONCE_INIT;
+
+static void
+curl_thread_cleanup(void* val)
+{
+    if (val != NULL) {
+        curl_easy_cleanup((CURL*)val);
+    }
+}
+
 static void
 curl_tkey_init(void)
 {
-    pthread_key_create(&g_curl_tkey, NULL);
+    pthread_key_create(&g_curl_tkey, curl_thread_cleanup);
 }
 
 /* Per-thread CURL handle: reused across calls to amortize init.
- * Thread-exit leaks one handle per civetweb worker; accepted. */
+ * Automatically cleaned up on worker thread exit. */
 static CURL*
 thread_curl(void)
 {
@@ -39,6 +84,18 @@ thread_curl(void)
         }
     }
     return c;
+}
+
+static void
+curl_apply_common_opts(CURL* c)
+{
+    if (g_curl_sh != NULL) {
+        curl_easy_setopt(c, CURLOPT_SHARE, g_curl_sh);
+    }
+    curl_easy_setopt(c, CURLOPT_HTTP_VERSION, (long)CURL_HTTP_VERSION_2TLS);
+    curl_easy_setopt(c, CURLOPT_TCP_KEEPALIVE, 1L);
+    curl_easy_setopt(c, CURLOPT_TCP_KEEPIDLE, 60L);
+    curl_easy_setopt(c, CURLOPT_TCP_KEEPINTVL, 30L);
 }
 
 struct resp_buf {
@@ -104,6 +161,7 @@ upstream_call_ext(const char* url,
         goto done;
     }
     curl_easy_reset(c);
+    curl_apply_common_opts(c);
 
     int has_custom_auth = 0;
     if (extra_headers_kv != NULL && n_extra_headers > 0) {
@@ -248,6 +306,7 @@ upstream_probe(const char* url,
         return -502;
     }
     curl_easy_reset(c);
+    curl_apply_common_opts(c);
 
     if (hdr_name != NULL && hdr_value != NULL && hdr_name[0] != '\0') {
         char hdr[1080];
@@ -406,6 +465,7 @@ upstream_stream_call(const char*       url,
         goto done;
     }
     curl_easy_reset(c);
+    curl_apply_common_opts(c);
     sc.curl = c;
 
     int has_custom_auth = 0;
