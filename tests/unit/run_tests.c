@@ -299,6 +299,11 @@ main(void)
     test_register("failover_on_429", test_failover_on_429_to_backup);
     test_register("failover_cb_tripping", test_failover_circuit_breaker_tripping);
 
+    extern void test_redis_pool_invalid_args(void);
+    extern void test_redis_client_eval_and_pool_live(void);
+    test_register("redis_pool_invalid_args", test_redis_pool_invalid_args);
+    test_register("redis_client_eval_and_pool_live", test_redis_client_eval_and_pool_live);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
