@@ -26,6 +26,11 @@ struct fake_provider {
     provider_rec_t p;
 };
 
+struct fake_group {
+    int         in_use;
+    group_rec_t g;
+};
+
 struct fake_db {
     struct fake_key      keys[FAKE_CAP];
     model_rec_t          models[FAKE_CAP];
@@ -33,11 +38,15 @@ struct fake_db {
     int                  fail_create_model; /* when nonzero, create_model fails */
     struct fake_provider providers[FAKE_CAP];
     long                 next_provider_id;
+    struct fake_group    groups[FAKE_CAP];
+    long                 next_group_id;
     usage_row_t          usage[FAKE_CAP];
     int                  n_usage;
     long                 next_key_id;
     usage_request_row_t  reqs[FAKE_CAP];
     int                  n_reqs;
+    cost_row_t           cost_rows[FAKE_CAP];
+    int                  n_cost_rows;
 };
 
 static int
@@ -148,6 +157,18 @@ static int
 fake_create_key(void* ctx, const key_rec_t* k, long* out_key_id)
 {
     struct fake_db* db = ctx;
+    if (k->group_id > 0) {
+        int found = 0;
+        for (int i = 0; i < FAKE_CAP; i++) {
+            if (db->groups[i].in_use && db->groups[i].g.id == k->group_id) {
+                found = 1;
+                break;
+            }
+        }
+        if (!found) {
+            return -2;
+        }
+    }
     for (int i = 0; i < FAKE_CAP; i++) {
         struct fake_key* fk = &db->keys[i];
         if (!fk->in_use) {
@@ -191,6 +212,21 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
                 if (deep_copy_allowlist(&fk->k, k) != 0) {
                     return -1;
                 }
+            }
+            if (mask & KMASK_GROUP) {
+                if (k->group_id > 0) {
+                    int found = 0;
+                    for (int g = 0; g < FAKE_CAP; g++) {
+                        if (db->groups[g].in_use && db->groups[g].g.id == k->group_id) {
+                            found = 1;
+                            break;
+                        }
+                    }
+                    if (!found) {
+                        return -2;
+                    }
+                }
+                fk->k.group_id = k->group_id;
             }
             return 0;
         }
@@ -288,6 +324,12 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
             if (mask & MMASK_LB_POLICY) {
                 snprintf(
                     db->models[i].lb_policy, sizeof db->models[i].lb_policy, "%s", m->lb_policy);
+            }
+            if (mask & MMASK_PRICING) {
+                snprintf(db->models[i].pricing_json,
+                         sizeof db->models[i].pricing_json,
+                         "%s",
+                         m->pricing_json);
             }
             return 0;
         }
@@ -492,6 +534,119 @@ fake_delete_provider(void* ctx, long id)
     return -1;
 }
 
+static int
+fake_create_group(void* ctx, const char* name, long* out_id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && strcmp(db->groups[i].g.name, name) == 0) {
+            return -2;
+        }
+    }
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_group* fg = &db->groups[i];
+        if (!fg->in_use) {
+            fg->in_use = 1;
+            fg->g.id = db->next_group_id++;
+            snprintf(fg->g.name, sizeof fg->g.name, "%s", name);
+            fg->g.created_at = time(NULL);
+            fg->g.key_count = 0;
+            *out_id = fg->g.id;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_list_groups(void* ctx, group_rec_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        if (db->groups[i].in_use) {
+            out[*n] = db->groups[i].g;
+            long cnt = 0;
+            for (int k = 0; k < FAKE_CAP; k++) {
+                if (db->keys[k].in_use && db->keys[k].k.group_id == db->groups[i].g.id) {
+                    cnt++;
+                }
+            }
+            out[*n].key_count = cnt;
+            (*n)++;
+        }
+    }
+    return 0;
+}
+
+static int
+fake_patch_group(void* ctx, long id, const char* name)
+{
+    struct fake_db* db = ctx;
+    int             target = -1;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && db->groups[i].g.id == id) {
+            target = i;
+            break;
+        }
+    }
+    if (target < 0) {
+        return 1;
+    }
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (i != target && db->groups[i].in_use && strcmp(db->groups[i].g.name, name) == 0) {
+            return -2;
+        }
+    }
+    snprintf(db->groups[target].g.name, sizeof db->groups[target].g.name, "%s", name);
+    return 0;
+}
+
+static int
+fake_delete_group(void* ctx, long id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && db->groups[i].g.id == id) {
+            db->groups[i].in_use = 0;
+            for (int k = 0; k < FAKE_CAP; k++) {
+                if (db->keys[k].in_use && db->keys[k].k.group_id == id) {
+                    db->keys[k].k.group_id = 0;
+                }
+            }
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+fake_count_keys_in_group(void* ctx, long group_id, long* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->keys[i].in_use && db->keys[i].k.group_id == group_id) {
+            (*n)++;
+        }
+    }
+    return 0;
+}
+
+static int
+fake_query_cost(void* ctx, long since_s, long until_s, cost_row_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < db->n_cost_rows && *n < cap; i++) {
+        cost_row_t* r = &db->cost_rows[i];
+        if (r->bucket_day >= since_s && r->bucket_day <= until_s) {
+            out[(*n)++] = *r;
+        }
+    }
+    return 0;
+}
+
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
 {
@@ -517,6 +672,12 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->query_usage = fake_query_usage;
     ops->flush_usage_requests = fake_flush_requests;
     ops->query_usage_requests = fake_query_requests;
+    ops->create_group = fake_create_group;
+    ops->list_groups = fake_list_groups;
+    ops->patch_group = fake_patch_group;
+    ops->delete_group = fake_delete_group;
+    ops->count_keys_in_group = fake_count_keys_in_group;
+    ops->query_cost = fake_query_cost;
 }
 
 static void
@@ -530,6 +691,7 @@ setup_admin(struct fake_db* db,
     memset(db, 0, sizeof *db);
     db->next_key_id = 1;
     db->next_provider_id = 0; /* first created provider gets id 1 */
+    db->next_group_id = 1;
     build_fake_ops(db, ops);
     *out_ps = pg_store_open("unused", ops);
 
@@ -1613,12 +1775,12 @@ TEST_CASE(test_admin_lockout_policy_env)
 /* Create one provider via the admin API with the mock as its endpoint.
  * Returns provider id on success, or -1 on failure (caller asserts). */
 static long
-admin_create_probe_provider(admin_ctx_t*    adm,
-                            const char*     api_key,
-                            const char*     base_url,
-                            const char*     ptype)
+admin_create_probe_provider(admin_ctx_t* adm,
+                            const char*  api_key,
+                            const char*  base_url,
+                            const char*  ptype)
 {
-    char    req[1024];
+    char req[1024];
     snprintf(req,
              sizeof req,
              "{\"name\":\"probe\",\"provider_type\":\"%s\",\"endpoint\":\"%s\","
@@ -1662,8 +1824,8 @@ admin_run_probe(admin_ctx_t* adm, long provider_id, char* verdict_out, size_t ca
     int    status = 0;
     char*  body = NULL;
     size_t len = 0;
-    int    rc = admin_dispatch(adm, uri, "POST", NULL, "admin-secret-token",
-                               NULL, 0, &status, &body, &len);
+    int    rc =
+        admin_dispatch(adm, uri, "POST", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     if (rc != 0) {
         free(body);
         snprintf(verdict_out, cap, "dispatch_failed");
@@ -1760,7 +1922,8 @@ TEST_CASE(test_admin_provider_test_env_missing)
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
     char verdict[32] = "";
-    long id = admin_create_probe_provider(&adm, "env:AIGATE_NOPE_PROBE", "http://127.0.0.1:1", "openai");
+    long id =
+        admin_create_probe_provider(&adm, "env:AIGATE_NOPE_PROBE", "http://127.0.0.1:1", "openai");
     TEST_ASSERT(id > 0, "provider created");
     TEST_ASSERT(admin_run_probe(&adm, id, verdict, sizeof verdict) == 400, "env missing -> 400");
     teardown_admin(ps, &core, &db);
@@ -1779,7 +1942,8 @@ TEST_CASE(test_admin_provider_test_unknown_type)
     char verdict[32] = "";
     long id = admin_create_probe_provider(&adm, "k", "http://127.0.0.1:1", "vertex");
     TEST_ASSERT(id > 0, "provider created");
-    TEST_ASSERT(admin_run_probe(&adm, id, verdict, sizeof verdict) == 400, "probe_unsupported -> 400");
+    TEST_ASSERT(admin_run_probe(&adm, id, verdict, sizeof verdict) == 400,
+                "probe_unsupported -> 400");
     teardown_admin(ps, &core, &db);
 }
 
@@ -1795,5 +1959,543 @@ TEST_CASE(test_admin_provider_test_not_found)
 
     char verdict[32] = "";
     TEST_ASSERT(admin_run_probe(&adm, 999, verdict, sizeof verdict) == 404, "not found -> 404");
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_groups_crud)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status;
+    char*  body;
+    size_t len;
+
+    /* 1. Empty name -> 400 */
+    const char* req_bad = "{\"name\":\"\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/groups",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   req_bad,
+                   strlen(req_bad),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 400, "empty group name -> 400");
+    free(body);
+
+    /* 2. Create group "engineering" -> 201 */
+    const char* req_eng = "{\"name\":\"engineering\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/groups",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   req_eng,
+                   strlen(req_eng),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "create engineering -> 201");
+    json_error_t jerr;
+    json_t*      j = json_loads(body, 0, &jerr);
+    TEST_ASSERT(j != NULL, "json");
+    TEST_ASSERT(json_integer_value(json_object_get(j, "id")) == 1, "id == 1");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(j, "name")), "engineering") == 0, "name");
+    json_decref(j);
+    free(body);
+
+    /* 3. Duplicate name "engineering" -> 409 group_exists */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   req_eng,
+                   strlen(req_eng),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 409, "duplicate group name -> 409");
+    j = json_loads(body, 0, &jerr);
+    json_t* err = json_object_get(j, "error");
+    TEST_ASSERT(err && strcmp(json_string_value(json_object_get(err, "type")), "group_exists") == 0,
+                "error == group_exists");
+    json_decref(j);
+    free(body);
+
+    /* 4. Create second group "marketing" -> 201 */
+    const char* req_mkt = "{\"name\":\"marketing\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/groups",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   req_mkt,
+                   strlen(req_mkt),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "create marketing -> 201");
+    free(body);
+
+    /* 5. List groups -> 200, 2 entries */
+    admin_dispatch(
+        &adm, "/admin/v1/groups", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(status == 200, "list groups -> 200");
+    j = json_loads(body, 0, &jerr);
+    json_t* garr = json_object_get(j, "groups");
+    TEST_ASSERT(json_is_array(garr) && json_array_size(garr) == 2, "2 groups returned");
+    json_decref(j);
+    free(body);
+
+    /* 6. Create key with non-existent group_id 999 -> 404 group_not_found */
+    const char* req_key_bad = "{\"name\":\"k1\",\"group_id\":999}";
+    admin_dispatch(&adm,
+                   "/admin/v1/keys",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   req_key_bad,
+                   strlen(req_key_bad),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 404, "group_id 999 -> 404");
+    j = json_loads(body, 0, &jerr);
+    err = json_object_get(j, "error");
+    TEST_ASSERT(err &&
+                    strcmp(json_string_value(json_object_get(err, "type")), "group_not_found") == 0,
+                "group_not_found error");
+    json_decref(j);
+    free(body);
+
+    /* 7. Create key with group_id 1 -> 201 */
+    const char* req_key_ok = "{\"name\":\"k1\",\"group_id\":1}";
+    admin_dispatch(&adm,
+                   "/admin/v1/keys",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   req_key_ok,
+                   strlen(req_key_ok),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "key created with group_id 1");
+    j = json_loads(body, 0, &jerr);
+    long kid = json_integer_value(json_object_get(j, "key_id"));
+    TEST_ASSERT(json_integer_value(json_object_get(j, "group_id")) == 1, "key group_id == 1");
+    json_decref(j);
+    free(body);
+
+    /* 8. Verify list_groups reflects key_count = 1 on group 1 */
+    admin_dispatch(
+        &adm, "/admin/v1/groups", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    j = json_loads(body, 0, &jerr);
+    garr = json_object_get(j, "groups");
+    TEST_ASSERT(json_integer_value(json_object_get(json_array_get(garr, 0), "key_count")) == 1,
+                "group 1 key_count == 1");
+    TEST_ASSERT(json_integer_value(json_object_get(json_array_get(garr, 1), "key_count")) == 0,
+                "group 2 key_count == 0");
+    json_decref(j);
+    free(body);
+
+    /* 9. Delete group 1 while key attached -> 409 group_has_keys */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups/1",
+                   "DELETE",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 409, "delete group with keys -> 409");
+    j = json_loads(body, 0, &jerr);
+    err = json_object_get(j, "error");
+    TEST_ASSERT(err &&
+                    strcmp(json_string_value(json_object_get(err, "type")), "group_has_keys") == 0,
+                "group_has_keys error");
+    json_decref(j);
+    free(body);
+
+    /* 10. Patch key 1 to ungrouped (group_id: null) */
+    char uri_kpatch[64];
+    snprintf(uri_kpatch, sizeof uri_kpatch, "/admin/v1/keys/%ld", kid);
+    const char* req_kpatch = "{\"group_id\":null}";
+    admin_dispatch(&adm,
+                   uri_kpatch,
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   req_kpatch,
+                   strlen(req_kpatch),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "key patch to group null -> 200");
+    free(body);
+
+    /* 11. Now delete group 1 -> 200 */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups/1",
+                   "DELETE",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "delete group 1 now succeeds -> 200");
+    free(body);
+
+    /* 12. Delete group 999 -> 404 */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups/999",
+                   "DELETE",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 404, "delete non-existent group -> 404");
+    free(body);
+
+    /* 13. Patch group 2 name to "sales" -> 200 */
+    const char* req_rename = "{\"name\":\"sales\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/groups/2",
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   req_rename,
+                   strlen(req_rename),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "patch group 2 -> 200");
+    j = json_loads(body, 0, &jerr);
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(j, "name")), "sales") == 0,
+                "renamed to sales");
+    json_decref(j);
+    free(body);
+
+    /* 14. Patch group 999 -> 404 */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups/999",
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   req_rename,
+                   strlen(req_rename),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 404, "patch non-existent group -> 404");
+    free(body);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_models_pricing)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status;
+    char*  body;
+    size_t len;
+
+    /* Create model with pricing */
+    const char* req_cm =
+        "{\"name\":\"gpt-4o\",\"provider\":\"openai\",\"endpoint\":\"http://127.0.0.1:8080\","
+        "\"pricing\":{\"in_mtok\":2.5,\"out_mtok\":10.0,\"cached_mtok_discount\":0.1}}";
+    admin_dispatch(&adm,
+                   "/admin/v1/models",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   req_cm,
+                   strlen(req_cm),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "create model with pricing -> 201");
+    free(body);
+
+    /* List models and verify pricing is an object */
+    admin_dispatch(
+        &adm, "/admin/v1/models", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(status == 200, "list models -> 200");
+    json_error_t jerr;
+    json_t*      j = json_loads(body, 0, &jerr);
+    json_t*      marr = json_object_get(j, "models");
+    TEST_ASSERT(json_is_array(marr) && json_array_size(marr) == 1, "1 model");
+    json_t* m0 = json_array_get(marr, 0);
+    json_t* pricing = json_object_get(m0, "pricing");
+    TEST_ASSERT(json_is_object(pricing), "pricing is object");
+    TEST_ASSERT(fabs(json_number_value(json_object_get(pricing, "in_mtok")) - 2.5) < 1e-6,
+                "in_mtok == 2.5");
+    TEST_ASSERT(fabs(json_number_value(json_object_get(pricing, "out_mtok")) - 10.0) < 1e-6,
+                "out_mtok == 10.0");
+    TEST_ASSERT(fabs(json_number_value(json_object_get(pricing, "cached_mtok_discount")) - 0.1) <
+                    1e-6,
+                "cached discount == 0.1");
+    json_decref(j);
+    free(body);
+
+    /* Patch pricing */
+    const char* req_pm = "{\"pricing\":{\"in_mtok\":3.0,\"out_mtok\":12.0}}";
+    admin_dispatch(&adm,
+                   "/admin/v1/models/gpt-4o",
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   req_pm,
+                   strlen(req_pm),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "patch pricing -> 200");
+    free(body);
+
+    /* Invalid pricing (not object) -> 400 */
+    const char* req_bad = "{\"pricing\":\"invalid\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/models/gpt-4o",
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   req_bad,
+                   strlen(req_bad),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 400, "invalid pricing -> 400");
+    free(body);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_cost_from_rows_pure)
+{
+    /* Model 1: gpt-4o with pricing in_mtok=2.5, out_mtok=10.0, cached_mtok_discount=0.1 */
+    /* Model 2: claude-3 with pricing in_mtok=3.0, out_mtok=15.0 (no cached discount -> defaults to 1.0) */
+    /* Model 3: unpriced with pricing = "{}" */
+    model_rec_t models[3];
+    memset(models, 0, sizeof models);
+    strcpy(models[0].name, "gpt-4o");
+    strcpy(models[0].pricing_json,
+           "{\"in_mtok\":2.5,\"out_mtok\":10.0,\"cached_mtok_discount\":0.1}");
+    strcpy(models[1].name, "claude-3");
+    strcpy(models[1].pricing_json, "{\"in_mtok\":3.0,\"out_mtok\":15.0}");
+    strcpy(models[2].name, "unpriced");
+    strcpy(models[2].pricing_json, "{}");
+
+    group_rec_t groups[2];
+    memset(groups, 0, sizeof groups);
+    groups[0].id = 1;
+    strcpy(groups[0].name, "engineering");
+    groups[1].id = 2;
+    strcpy(groups[1].name, "marketing");
+
+    cost_row_t rows[4];
+    memset(rows, 0, sizeof rows);
+    /* Row 0: day 1, group 1, gpt-4o, prompt=1,000,000, completion=100,000, cached=200,000, requests=10
+     * Unhit = 800,000 * 2.5 = 2,000,000
+     * Cached = 200,000 * 2.5 * 0.1 = 50,000
+     * Completion = 100,000 * 10.0 = 1,000,000
+     * Total = 3,050,000 / 1e6 = 3.05 USD = 305 cents
+     */
+    rows[0].bucket_day = 1700000000;
+    rows[0].group_id = 1;
+    strcpy(rows[0].model, "gpt-4o");
+    rows[0].prompt = 1000000;
+    rows[0].completion = 100000;
+    rows[0].cached = 200000;
+    rows[0].requests = 10;
+
+    /* Row 1: day 2, group 1, gpt-4o, prompt=1,000,000, completion=100,000, cached=200,000, requests=10
+     * 305 cents
+     */
+    rows[1].bucket_day = 1700086400;
+    rows[1].group_id = 1;
+    strcpy(rows[1].model, "gpt-4o");
+    rows[1].prompt = 1000000;
+    rows[1].completion = 100000;
+    rows[1].cached = 200000;
+    rows[1].requests = 10;
+
+    /* Row 2: day 1, group 0 (ungrouped), claude-3, prompt=500,000, completion=50,000, cached=0, reqs=5
+     * 500,000 * 3.0 + 50,000 * 15.0 = 1,500,000 + 750,000 = 2,250,000 / 1e6 = 2.25 USD = 225 cents
+     */
+    rows[2].bucket_day = 1700000000;
+    rows[2].group_id = 0;
+    strcpy(rows[2].model, "claude-3");
+    rows[2].prompt = 500000;
+    rows[2].completion = 50000;
+    rows[2].cached = 0;
+    rows[2].requests = 5;
+
+    /* Row 3: day 1, group 2, unpriced model -> cost_cents should be omitted */
+    rows[3].bucket_day = 1700000000;
+    rows[3].group_id = 2;
+    strcpy(rows[3].model, "unpriced");
+    rows[3].prompt = 100000;
+    rows[3].completion = 10000;
+    rows[3].cached = 0;
+    rows[3].requests = 2;
+
+    /* 1. Test by=day (by_model = 0) */
+    char* json_day = cost_from_rows(rows, 4, models, 3, groups, 2, -1, 0, 0);
+    TEST_ASSERT(json_day != NULL, "json_day not null");
+    json_error_t jerr;
+    json_t*      jd = json_loads(json_day, 0, &jerr);
+    json_t*      r_arr = json_object_get(jd, "rows");
+    TEST_ASSERT(json_is_array(r_arr) && json_array_size(r_arr) == 4, "4 rows in day mode");
+    json_t* item0 = json_array_get(r_arr, 0);
+    TEST_ASSERT(json_integer_value(json_object_get(item0, "cost_cents")) == 305, "row0 305 cents");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(item0, "group_name")), "engineering") == 0,
+                "engineering");
+
+    json_t* item2 = json_array_get(r_arr, 2);
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(item2, "group_name")), "(ungrouped)") == 0,
+                "(ungrouped)");
+    TEST_ASSERT(json_integer_value(json_object_get(item2, "cost_cents")) == 225, "row2 225 cents");
+
+    json_t* item3 = json_array_get(r_arr, 3);
+    TEST_ASSERT(json_object_get(item3, "cost_cents") == NULL, "unpriced model has no cost_cents");
+    TEST_ASSERT(json_integer_value(json_object_get(item3, "prompt_tokens")) == 100000,
+                "prompt tokens preserved");
+    json_decref(jd);
+    free(json_day);
+
+    /* 2. Test by=model (by_model = 1): should aggregate Row 0 and Row 1 into 1 entry with 610 cents! */
+    char* json_model = cost_from_rows(rows, 4, models, 3, groups, 2, -1, 1, 0);
+    TEST_ASSERT(json_model != NULL, "json_model not null");
+    json_t* jm = json_loads(json_model, 0, &jerr);
+    json_t* m_arr = json_object_get(jm, "rows");
+    TEST_ASSERT(json_is_array(m_arr) && json_array_size(m_arr) == 3, "3 aggregated model rows");
+    json_t* agg0 = json_array_get(m_arr, 0);
+    TEST_ASSERT(json_integer_value(json_object_get(agg0, "prompt_tokens")) == 2000000,
+                "agg prompt 2M");
+    TEST_ASSERT(json_integer_value(json_object_get(agg0, "cost_cents")) == 610,
+                "agg cost 610 cents");
+    json_decref(jm);
+    free(json_model);
+
+    /* 3. Test group filter (group_filter = 1): should only return rows for group 1 */
+    char* json_filtered = cost_from_rows(rows, 4, models, 3, groups, 2, 1, 0, 0);
+    TEST_ASSERT(json_filtered != NULL, "json_filtered not null");
+    json_t* jf = json_loads(json_filtered, 0, &jerr);
+    json_t* f_arr = json_object_get(jf, "rows");
+    TEST_ASSERT(json_is_array(f_arr) && json_array_size(f_arr) == 2, "2 rows for group 1");
+    json_decref(jf);
+    free(json_filtered);
+}
+
+TEST_CASE(test_admin_cost_endpoint)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    /* Populate 1 group, 1 model, 1 cost row */
+    long gid = 0;
+    ops.create_group(ops.ctx, "rnd", &gid);
+    model_rec_t m;
+    memset(&m, 0, sizeof m);
+    strcpy(m.name, "gpt-4o");
+    strcpy(m.pricing_json, "{\"in_mtok\":2.0,\"out_mtok\":8.0}");
+    ops.create_model(ops.ctx, &m);
+
+    time_t now = time(NULL);
+    db.cost_rows[0].bucket_day = now;
+    db.cost_rows[0].group_id = gid;
+    strcpy(db.cost_rows[0].model, "gpt-4o");
+    db.cost_rows[0].prompt = 1000000;
+    db.cost_rows[0].completion = 100000;
+    db.cost_rows[0].cached = 0;
+    db.cost_rows[0].requests = 5;
+    db.n_cost_rows = 1;
+
+    int    status;
+    char*  body;
+    size_t len;
+
+    /* GET /admin/v1/cost default */
+    admin_dispatch(
+        &adm, "/admin/v1/cost", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(status == 200, "cost query -> 200");
+    json_error_t jerr;
+    json_t*      j = json_loads(body, 0, &jerr);
+    json_t*      rarr = json_object_get(j, "rows");
+    TEST_ASSERT(json_is_array(rarr) && json_array_size(rarr) == 1, "1 row");
+    json_decref(j);
+    free(body);
+
+    /* GET /admin/v1/cost?by=model */
+    admin_dispatch(&adm,
+                   "/admin/v1/cost?by=model",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "cost query by=model -> 200");
+    free(body);
+
+    /* GET /admin/v1/cost with from > to -> 400 */
+    admin_dispatch(&adm,
+                   "/admin/v1/cost?from=2026-09-01&to=2026-08-01",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 400, "from > to -> 400");
+    free(body);
+
+    /* GET /admin/v1/cost range > 365 days -> 400 */
+    admin_dispatch(&adm,
+                   "/admin/v1/cost?from=2024-01-01&to=2026-01-01",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 400, "range > 365 days -> 400");
+    free(body);
+
     teardown_admin(ps, &core, &db);
 }

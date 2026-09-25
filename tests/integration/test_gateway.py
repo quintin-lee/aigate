@@ -1252,6 +1252,157 @@ def test_pg_reconnect_recovers(gateway, pg_dsn):
     assert resp.status_code == 200, resp.text
 
 
+def test_groups_and_cost_attribution(gateway):
+    """P1-5: Groups CRUD, pricing on models, and cost attribution aggregation."""
+    import time
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    import uuid
+    group_name = f"rnd-dept-{uuid.uuid4().hex[:8]}"
+    resp = requests.post(
+        f"{base_url}/admin/v1/groups",
+        headers=admin_headers,
+        json={"name": group_name},
+    )
+    assert resp.status_code == 201, resp.text
+    group_data = resp.json()
+    group_id = group_data["id"]
+    assert group_id > 0
+    assert group_data["name"] == group_name
+
+    # Duplicate group name returns 409
+    dup = requests.post(
+        f"{base_url}/admin/v1/groups",
+        headers=admin_headers,
+        json={"name": group_name},
+    )
+    assert dup.status_code == 409, dup.text
+    assert dup.json()["error"]["type"] == "group_exists"
+
+    # 2. List groups
+    resp = requests.get(f"{base_url}/admin/v1/groups", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    groups = resp.json().get("groups", [])
+    matched_group = next((g for g in groups if g["id"] == group_id), None)
+    assert matched_group is not None
+    assert matched_group["name"] == group_name
+    assert matched_group["key_count"] == 0
+
+    # 3. Create model with pricing
+    model_name = f"priced-model-{uuid.uuid4().hex[:8]}"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": mock_url,
+            "pricing": {
+                "in_mtok": 1000.0,
+                "out_mtok": 3000.0,
+                "cached_mtok_discount": 0.5,
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    # Verify model has pricing in GET /admin/v1/models
+    resp = requests.get(f"{base_url}/admin/v1/models", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    models = resp.json().get("models", [])
+    m_info = next((m for m in models if m.get("name") == model_name), None)
+    assert m_info is not None
+    assert m_info.get("pricing", {}).get("in_mtok") == 1000.0
+
+    # 4. Create API key assigned to group
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "rnd-client-key",
+            "allowed_models": [model_name],
+            "group_id": group_id,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    key_info = resp.json()
+    api_key = key_info["plaintext"]
+    key_id = key_info["key_id"]
+
+    # Verify key list contains group_id
+    resp = requests.get(f"{base_url}/admin/v1/keys", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    keys_list = resp.json().get("keys", [])
+    k_found = next((k for k in keys_list if k["key_id"] == key_id), None)
+    assert k_found is not None
+    assert k_found.get("group_id") == group_id
+
+    # Verify group key_count is now 1
+    resp = requests.get(f"{base_url}/admin/v1/groups", headers=admin_headers)
+    assert resp.status_code == 200, resp.text
+    matched_group = next((g for g in resp.json().get("groups", []) if g["id"] == group_id), None)
+    assert matched_group is not None
+    assert matched_group["key_count"] == 1
+
+    # 5. Deleting group with attached keys fails with 409
+    del_resp = requests.delete(f"{base_url}/admin/v1/groups/{group_id}", headers=admin_headers)
+    assert del_resp.status_code == 409, del_resp.text
+    assert del_resp.json()["error"]["type"] == "group_has_keys"
+
+    # 6. Send chat completion request
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={"model": model_name, "messages": [{"role": "user", "content": "cost attribution test"}]},
+    )
+    assert resp.status_code == 200, resp.text
+    usage = resp.json().get("usage", {})
+    p_tok = usage.get("prompt_tokens", 7)
+    c_tok = usage.get("completion_tokens", 11)
+
+    # 7. Poll cost attribution endpoint until the row is flushed by the worker
+    deadline = time.time() + 10
+    cost_rows = []
+    while time.time() < deadline:
+        c_resp = requests.get(f"{base_url}/admin/v1/cost?group={group_id}&by=model", headers=admin_headers)
+        if c_resp.status_code == 200:
+            data = c_resp.json()
+            cost_rows = data.get("rows", [])
+            if cost_rows:
+                break
+        time.sleep(0.5)
+
+    assert len(cost_rows) >= 1, f"Cost report did not return rows in time: {cost_rows}"
+    crow = cost_rows[0]
+    assert crow["model"] == model_name
+    assert crow["prompt_tokens"] >= p_tok
+    assert crow["completion_tokens"] >= c_tok
+    # With in_mtok=1000, out_mtok=3000, prompt=7, completion=11: (7*1000 + 11*3000)/1e6 = 0.04 -> 4 cents
+    assert crow.get("cost_cents") is not None
+    assert crow["cost_cents"] >= 4
+
+    # 8. Clean up key and group: patch key group_id to null, then delete group
+    patch_resp = requests.patch(
+        f"{base_url}/admin/v1/keys/{key_id}",
+        headers=admin_headers,
+        json={"group_id": None},
+    )
+    assert patch_resp.status_code == 200, patch_resp.text
+
+    del_resp = requests.delete(f"{base_url}/admin/v1/groups/{group_id}", headers=admin_headers)
+    assert del_resp.status_code == 200, del_resp.text
+
+
 def test_admin_lockout_429(gateway):
     """10 failed admin auth attempts from one IP lock that IP out (429).
 

@@ -845,7 +845,7 @@ TEST_CASE(test_pg_real_roundtrip)
 
     key_rec_t k;
     memset(&k, 0, sizeof k);
-    strcpy(k.key_hash, "unittest_key_hash");
+    snprintf(k.key_hash, sizeof k.key_hash, "unittest_key_hash_%ld", (long)time(NULL));
     strcpy(k.name, "itest");
     char* am[] = {"m1"};
     k.allowed_models = am;
@@ -993,6 +993,91 @@ TEST_CASE(test_pg_real_provider_crud)
 
     TEST_ASSERT(ops->delete_provider(ops->ctx, p_id) == 0, "real delete_provider");
     TEST_ASSERT(ops->get_provider(ops->ctx, p_id, &out) == -1, "real deleted");
+
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_pg_real_groups_and_cost)
+{
+    const char* dsn = getenv("TEST_PG_DSN");
+    if (dsn == NULL || dsn[0] == '\0') {
+        return;
+    }
+
+    pg_store_t* ps = pg_store_open(dsn, NULL);
+    TEST_ASSERT(ps != NULL, "real store open");
+    TEST_ASSERT(pg_store_migrate(ps) == 0, "migrate");
+
+    const pg_ops_t* ops = pg_store_ops(ps);
+
+    /* 1. Create group */
+    char grp_name[128];
+    snprintf(grp_name, sizeof(grp_name), "real-pg-test-group-%ld", (long)time(NULL));
+    long group_id = 0;
+    TEST_ASSERT(ops->create_group(ops->ctx, grp_name, &group_id) == 0, "create_group");
+    TEST_ASSERT(group_id > 0, "group_id > 0");
+
+    /* 2. List groups */
+    group_rec_t glist[16];
+    int         n_groups = 0;
+    TEST_ASSERT(ops->list_groups(ops->ctx, glist, 16, &n_groups) == 0, "list_groups");
+    TEST_ASSERT(n_groups >= 1, "at least 1 group");
+    int found = 0;
+    for (int i = 0; i < n_groups; i++) {
+        if (glist[i].id == group_id) {
+            found = 1;
+            break;
+        }
+    }
+    TEST_ASSERT(found == 1, "group found in list");
+
+    /* 3. Patch group */
+    TEST_ASSERT(ops->patch_group(ops->ctx, group_id, "real-pg-test-group-renamed") == 0,
+                "patch_group");
+
+    /* 4. Count keys in group (should be 0) */
+    long key_count = -1;
+    TEST_ASSERT(ops->count_keys_in_group(ops->ctx, group_id, &key_count) == 0,
+                "count_keys_in_group");
+    TEST_ASSERT(key_count == 0, "count is 0");
+
+    /* 5. Create key assigned to this group */
+    key_rec_t k;
+    memset(&k, 0, sizeof(k));
+    snprintf(k.key_hash, sizeof(k.key_hash), "real_grp_hash_%ld", (long)time(NULL));
+    snprintf(k.name, sizeof(k.name), "real-grp-key");
+    char* am[] = {"gpt-4o"};
+    k.allowed_models = am;
+    k.n_allowed = 1;
+    k.group_id = group_id;
+    long kid = 0;
+    TEST_ASSERT(ops->create_key(ops->ctx, &k, &kid) == 0, "create_key with group_id");
+    TEST_ASSERT(kid > 0, "key id > 0");
+
+    /* Verify count is now 1 */
+    TEST_ASSERT(ops->count_keys_in_group(ops->ctx, group_id, &key_count) == 0,
+                "count_keys_in_group after key");
+    TEST_ASSERT(key_count == 1, "count is 1");
+
+    /* 6. Verify delete non-existent group returns 1 */
+    TEST_ASSERT(ops->delete_group(ops->ctx, 999999999) == 1, "delete non-existent group");
+
+    /* 7. Query cost */
+    cost_row_t crows[16];
+    int        n_crows = 0;
+    time_t     t_now = time(NULL);
+    TEST_ASSERT(ops->query_cost(
+                    ops->ctx, (long)(t_now - 86400), (long)(t_now + 86400), crows, 16, &n_crows) ==
+                    0,
+                "query_cost");
+
+    /* 8. Clear key group_id and cleanup group */
+    k.key_id = kid;
+    k.group_id = 0;
+    TEST_ASSERT(ops->update_key(ops->ctx, &k, KMASK_GROUP) == 0, "update_key clear group_id");
+    TEST_ASSERT(ops->count_keys_in_group(ops->ctx, group_id, &key_count) == 0, "count_keys is 0");
+    TEST_ASSERT(key_count == 0, "key count is 0");
+    TEST_ASSERT(ops->delete_group(ops->ctx, group_id) == 0, "delete_group succeeds");
 
     pg_store_close(ps);
 }

@@ -102,3 +102,15 @@ CREATE INDEX IF NOT EXISTS ix_usage_requests_key_ts ON usage_requests (key_id, t
 CREATE INDEX IF NOT EXISTS ix_usage_requests_ts ON usage_requests (ts);
 INSERT INTO schema_migrations(version) VALUES (6) ON CONFLICT (version) DO NOTHING;
 
+-- Migration v7: dept groups + model pricing (internal SaaS cost attribution)
+CREATE TABLE IF NOT EXISTS groups (
+  id         BIGSERIAL PRIMARY KEY,
+  name       TEXT NOT NULL UNIQUE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS group_id BIGINT
+  REFERENCES groups(id) ON DELETE SET NULL;
+ALTER TABLE models ADD COLUMN IF NOT EXISTS pricing JSONB NOT NULL DEFAULT '{}';
+INSERT INTO schema_migrations(version) VALUES (7) ON CONFLICT (version) DO NOTHING;
+
+

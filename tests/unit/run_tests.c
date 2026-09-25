@@ -48,6 +48,8 @@ main(void)
     extern void test_pg_fake_request_flush_and_query(void);
     extern void test_pg_migrate_noop_for_fake(void);
     extern void test_pg_real_roundtrip(void);
+    extern void test_pg_real_provider_crud(void);
+    extern void test_pg_real_groups_and_cost(void);
     extern void test_secret_roundtrip(void);
     extern void test_secret_tamper_and_wrong_key(void);
     extern void test_secret_hex_to_bytes(void);
@@ -103,6 +105,8 @@ main(void)
     test_register("pg_fake_request_flush_and_query", test_pg_fake_request_flush_and_query);
     test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
     test_register("pg_real_roundtrip", test_pg_real_roundtrip);
+    test_register("pg_real_provider_crud", test_pg_real_provider_crud);
+    test_register("pg_real_groups_and_cost", test_pg_real_groups_and_cost);
     test_register("secret_roundtrip", test_secret_roundtrip);
     test_register("secret_tamper", test_secret_tamper_and_wrong_key);
     test_register("secret_hex", test_secret_hex_to_bytes);
@@ -193,6 +197,15 @@ main(void)
     test_register("admin_provider_test_env_missing", test_admin_provider_test_env_missing);
     test_register("admin_provider_test_unknown_type", test_admin_provider_test_unknown_type);
     test_register("admin_provider_test_not_found", test_admin_provider_test_not_found);
+
+    extern void test_admin_groups_crud(void);
+    extern void test_admin_models_pricing(void);
+    extern void test_cost_from_rows_pure(void);
+    extern void test_admin_cost_endpoint(void);
+    test_register("admin_groups_crud", test_admin_groups_crud);
+    test_register("admin_models_pricing", test_admin_models_pricing);
+    test_register("cost_from_rows_pure", test_cost_from_rows_pure);
+    test_register("admin_cost_endpoint", test_admin_cost_endpoint);
 
     extern void test_upstream_stream_normal(void);
     extern void test_upstream_stream_silence_timeout(void);
@@ -287,6 +300,8 @@ main(void)
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
+        printf("=== TEST: %s ===\n", g_tests[i].name);
+        fflush(stdout);
         g_tests[i].fn();
         if (g_failures > 0) {
             failed++;

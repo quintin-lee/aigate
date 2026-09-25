@@ -227,7 +227,8 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
 {
     struct pq_ctx*    px = vctx;
     static const char q[] = "SELECT key_id, key_hash, name, array_to_string(allowed_models, '|'), "
-                            "rate_qps, daily_token_quota, expires_at, revoked_at "
+                            "rate_qps, daily_token_quota, expires_at, revoked_at, "
+                            "COALESCE(group_id, 0) "
                             "FROM api_keys WHERE key_hash = $1";
     const char*       val[1] = {key_hash};
     int               plen[1] = {0};
@@ -258,6 +259,10 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
                 out->has_expiry = 1;
             }
             out->revoked = (rev != NULL && rev[0] != '\0');
+            if (PQnfields(res) > 8) {
+                const char* gid = PQgetvalue(res, 0, 8);
+                out->group_id = (gid != NULL && gid[0] != '\0') ? atol(gid) : 0;
+            }
             rc = 0;
         } else {
             key_rec_free(out);
@@ -290,6 +295,10 @@ fill_key_row(PGresult* res, int row, key_rec_t* out)
         out->has_expiry = 1;
     }
     out->revoked = (rev != NULL && rev[0] != '\0');
+    if (PQnfields(res) > 8) {
+        const char* gid = PQgetvalue(res, row, 8);
+        out->group_id = (gid != NULL && gid[0] != '\0') ? atol(gid) : 0;
+    }
 }
 
 static int
@@ -298,7 +307,8 @@ pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
     struct pq_ctx*    px = vctx;
     static const char q[] = "SELECT key_id, key_hash, name, "
                             "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
-                            "expires_at, revoked_at FROM api_keys ORDER BY key_id";
+                            "expires_at, revoked_at, COALESCE(group_id, 0) "
+                            "FROM api_keys ORDER BY key_id";
     *n = 0;
 
     pq_lock(px);
@@ -328,7 +338,8 @@ pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
     struct pq_ctx*    px = vctx;
     static const char q[] = "SELECT key_id, key_hash, name, "
                             "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
-                            "expires_at, revoked_at FROM api_keys WHERE key_id = $1";
+                            "expires_at, revoked_at, COALESCE(group_id, 0) "
+                            "FROM api_keys WHERE key_id = $1";
     char              id[32];
     const char*       val[1] = {0};
     int               plen[1] = {0};
@@ -415,6 +426,12 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
     if (out->lb_policy[0] == '\0') {
         snprintf(out->lb_policy, sizeof out->lb_policy, "priority");
     }
+    if (nfields > 8) {
+        copy_field(out->pricing_json, sizeof out->pricing_json, PQgetvalue(res, row, 8));
+    }
+    if (out->pricing_json[0] == '\0') {
+        snprintf(out->pricing_json, sizeof out->pricing_json, "{}");
+    }
 
     /* Fallback: if no targets configured, synthesize targets[0] from primary fields */
     if (out->n_targets == 0) {
@@ -439,7 +456,7 @@ pq_get_model(void* vctx, const char* name, model_rec_t* out)
     static const char q[] =
         "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
         "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, "
-        "'priority') "
+        "'priority'), COALESCE(pricing::text, '{}') "
         "FROM models WHERE model_name = $1 AND enabled = true";
     const char* val[1] = {name};
     int         plen[1] = {0};
@@ -470,7 +487,7 @@ pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
     static const char q[] =
         "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
         "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, "
-        "'priority') "
+        "'priority'), COALESCE(pricing::text, '{}') "
         "FROM models ORDER BY model_name";
     *n = 0;
 
@@ -501,14 +518,15 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
-        "daily_token_quota, expires_at) "
+        "daily_token_quota, expires_at, group_id) "
         "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
         "ELSE string_to_array($3, '|') END, $4, $5, "
         "CASE WHEN $6 = 'null' THEN NULL "
-        "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END) RETURNING key_id";
-    char        joined[512], rate[16], quota[32], exp[32];
-    const char* vals[6];
-    int         plens[6] = {0};
+        "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END, "
+        "CASE WHEN $7 = '0' THEN NULL ELSE ($7)::bigint END) RETURNING key_id";
+    char        joined[512], rate[16], quota[32], exp[32], gid_str[32];
+    const char* vals[7];
+    int         plens[7] = {0};
     long        id = -1;
 
     if (join_model_list(k, joined, sizeof joined) != 0) {
@@ -521,37 +539,45 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     } else {
         strcpy(exp, "null");
     }
+    snprintf(gid_str, sizeof gid_str, "%ld", k->group_id);
     vals[0] = k->key_hash;
     vals[1] = k->name;
     vals[2] = joined;
     vals[3] = rate;
     vals[4] = quota;
     vals[5] = exp;
+    vals[6] = gid_str;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 6, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 7, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
         id = atol(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        *out_key_id = id;
+        return 0;
+    }
+    int err = -1;
+    if (res != NULL) {
+        const char* sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+        if (sqlstate != NULL && strcmp(sqlstate, "23503") == 0) {
+            err = -2;
+        }
+        AIGATE_LOG_ERROR("pg create_key: %s", PQerrorMessage(px->db));
+        PQclear(res);
     } else {
-        AIGATE_LOG_ERROR("pg create_key: %s",
-                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        AIGATE_LOG_ERROR("pg create_key: query alloc failed");
     }
-    PQclear(res);
-    if (id < 0) {
-        return -1;
-    }
-    *out_key_id = id;
-    return 0;
+    return err;
 }
 
 static int
 pq_update_key(void* vctx, const key_rec_t* k, int mask)
 {
     struct pq_ctx* px = vctx;
-    char           sql[1024], joined[512], rate[16], quota[32], exp[32], id[32];
-    const char*    vals[5];
-    int            plens[5] = {0};
+    char           sql[1024], joined[512], rate[16], quota[32], exp[32], id[32], gid_str[32];
+    const char*    vals[8];
+    int            plens[8] = {0};
     int            nv = 0, off;
 
     if (mask == 0) {
@@ -568,6 +594,7 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
         strcpy(exp, "null");
     }
     snprintf(id, sizeof id, "%ld", k->key_id);
+    snprintf(gid_str, sizeof gid_str, "%ld", k->group_id);
 
     off = snprintf(sql, sizeof sql, "UPDATE api_keys SET ");
     if (mask & KMASK_RATE) {
@@ -606,22 +633,39 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
                         nv);
         vals[nv - 1] = exp;
     }
+    if (mask & KMASK_GROUP) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sgroup_id = CASE WHEN $%d = '0' THEN NULL ELSE ($%d)::bigint END",
+                        nv > 1 ? ", " : "",
+                        nv,
+                        nv);
+        vals[nv - 1] = gid_str;
+    }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE key_id = $%d", nv);
     vals[nv - 1] = id;
 
-    int ok = 0;
     pq_lock(px);
     PGresult* res = PQexecParams(px->db, sql, nv, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
-        ok = 1;
-    } else {
-        AIGATE_LOG_ERROR("pg update_key: %s",
-                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return 0;
     }
-    PQclear(res);
-    return ok ? 0 : -1;
+    int err = -1;
+    if (res != NULL) {
+        const char* sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+        if (sqlstate != NULL && strcmp(sqlstate, "23503") == 0) {
+            err = -2;
+        }
+        AIGATE_LOG_ERROR("pg update_key: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg update_key: query alloc failed");
+    }
+    return err;
 }
 
 static int
@@ -703,10 +747,11 @@ pq_create_model(void* vctx, const model_rec_t* m)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "INSERT INTO models(model_name, provider, endpoint, upstream_key_ref, "
-        "default_params, targets, lb_policy) "
-        "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb, $6::jsonb, $7)";
-    const char* vals[7];
-    int         plens[7] = {0};
+        "default_params, targets, lb_policy, pricing) "
+        "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb, $6::jsonb, $7, "
+        "$8::jsonb)";
+    const char* vals[8];
+    int         plens[8] = {0};
 
     char*       targets_json = serialize_targets_json(m);
     const char* t_str = targets_json ? targets_json : "[]";
@@ -719,6 +764,7 @@ pq_create_model(void* vctx, const model_rec_t* m)
     const char* kr = (m->upstream_key_ref[0] != '\0')
                          ? m->upstream_key_ref
                          : (m->n_targets > 0 ? m->targets[0].upstream_key_ref : "");
+    const char* pricing = (m->pricing_json[0] != '\0') ? m->pricing_json : "{}";
 
     vals[0] = m->name;
     vals[1] = prov;
@@ -727,9 +773,10 @@ pq_create_model(void* vctx, const model_rec_t* m)
     vals[4] = m->default_params_json[0] != '\0' ? m->default_params_json : "{}";
     vals[5] = t_str;
     vals[6] = lb;
+    vals[7] = pricing;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 7, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 8, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (targets_json != NULL) {
         free(targets_json);
@@ -749,8 +796,8 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
 {
     struct pq_ctx* px = vctx;
     char           sql[2048];
-    const char*    vals[8];
-    int            plens[8] = {0};
+    const char*    vals[10];
+    int            plens[10] = {0};
     int            nv = 0, off;
     char*          targets_json = NULL;
 
@@ -802,6 +849,12 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
         off += snprintf(
             sql + off, sizeof sql - (size_t)off, "%slb_policy = $%d", nv > 1 ? ", " : "", nv);
         vals[nv - 1] = m->lb_policy[0] != '\0' ? m->lb_policy : "priority";
+    }
+    if (mask & MMASK_PRICING) {
+        nv++;
+        off += snprintf(
+            sql + off, sizeof sql - (size_t)off, "%spricing = $%d::jsonb", nv > 1 ? ", " : "", nv);
+        vals[nv - 1] = m->pricing_json[0] != '\0' ? m->pricing_json : "{}";
     }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE model_name = $%d", nv);
@@ -1384,6 +1437,218 @@ pq_query_requests(void* vctx, long key_id, time_t since, usage_request_row_t* ou
     return 0;
 }
 
+static int
+pq_create_group(void* vctx, const char* name, long* out_id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "INSERT INTO groups(name) VALUES($1) RETURNING id";
+    const char*       vals[1] = {name};
+    int               plens[1] = {0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
+        long id = atol(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        if (out_id != NULL) {
+            *out_id = id;
+        }
+        return 0;
+    }
+    int err = -1;
+    if (res != NULL) {
+        const char* sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+        if (sqlstate != NULL && strcmp(sqlstate, "23505") == 0) {
+            err = -2;
+        }
+        AIGATE_LOG_ERROR("pg create_group: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg create_group: query alloc failed");
+    }
+    return err;
+}
+
+static int
+pq_list_groups(void* vctx, group_rec_t* out, int cap, int* n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT g.id, g.name, EXTRACT(EPOCH FROM g.created_at)::bigint, COUNT(k.key_id) "
+        "FROM groups g "
+        "LEFT JOIN api_keys k ON k.group_id = g.id "
+        "GROUP BY g.id, g.name, g.created_at "
+        "ORDER BY g.id";
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_groups: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        out[i].id = atol(PQgetvalue(res, i, 0));
+        copy_field(out[i].name, sizeof out[i].name, PQgetvalue(res, i, 1));
+        out[i].created_at = (time_t)atol(PQgetvalue(res, i, 2));
+        out[i].key_count = atol(PQgetvalue(res, i, 3));
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
+static int
+pq_patch_group(void* vctx, long id, const char* name)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "UPDATE groups SET name = $1 WHERE id = $2";
+    char              id_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", id);
+    const char* vals[2] = {name, id_str};
+    int         plens[2] = {0, 0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 2, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    int err = -1;
+    if (res != NULL) {
+        const char* sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+        if (sqlstate != NULL && strcmp(sqlstate, "23505") == 0) {
+            err = -2;
+        }
+        AIGATE_LOG_ERROR("pg patch_group: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg patch_group: query alloc failed");
+    }
+    return err;
+}
+
+static int
+pq_delete_group(void* vctx, long id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "DELETE FROM groups WHERE id = $1";
+    char              id_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", id);
+    const char* vals[1] = {id_str};
+    int         plens[1] = {0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    int err = -1;
+    if (res != NULL) {
+        const char* sqlstate = PQresultErrorField(res, PG_DIAG_SQLSTATE);
+        if (sqlstate != NULL && strcmp(sqlstate, "23503") == 0) {
+            err = -2;
+        }
+        AIGATE_LOG_ERROR("pg delete_group: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg delete_group: query alloc failed");
+    }
+    return err;
+}
+
+static int
+pq_count_keys_in_group(void* vctx, long group_id, long* n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "SELECT COUNT(*) FROM api_keys WHERE group_id = $1";
+    char              id_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", group_id);
+    const char* vals[1] = {id_str};
+    int         plens[1] = {0};
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
+        *n = atol(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        return 0;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg count_keys_in_group: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg count_keys_in_group: query alloc failed");
+    }
+    return -1;
+}
+
+static int
+pq_query_cost(void* vctx, long since_s, long until_s, cost_row_t* out, int cap, int* n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT COALESCE(k.group_id, 0) AS gid, "
+        "       ur.model_name, "
+        "       SUM(ur.prompt_tokens) AS p, "
+        "       SUM(ur.completion_tokens) AS c, "
+        "       SUM(ur.cached_prompt_tokens) AS cp, "
+        "       COUNT(*) AS rq, "
+        "       (EXTRACT(EPOCH FROM date_trunc('day', to_timestamp(ur.ts)))::bigint) AS bday "
+        "FROM usage_requests ur "
+        "LEFT JOIN api_keys k ON k.key_id = ur.key_id "
+        "WHERE ur.ts >= $1 AND ur.ts < $2 "
+        "GROUP BY 1, 2, 7 "
+        "ORDER BY bday, gid, ur.model_name";
+    char s_str[32], u_str[32];
+    snprintf(s_str, sizeof s_str, "%ld", since_s);
+    snprintf(u_str, sizeof u_str, "%ld", until_s);
+    const char* vals[2] = {s_str, u_str};
+    int         plens[2] = {0, 0};
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 2, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg query_cost: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        out[i].group_id = atol(PQgetvalue(res, i, 0));
+        copy_field(out[i].model, sizeof out[i].model, PQgetvalue(res, i, 1));
+        out[i].prompt = atol(PQgetvalue(res, i, 2));
+        out[i].completion = atol(PQgetvalue(res, i, 3));
+        out[i].cached = atol(PQgetvalue(res, i, 4));
+        out[i].requests = atol(PQgetvalue(res, i, 5));
+        out[i].bucket_day = (time_t)atol(PQgetvalue(res, i, 6));
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
 /* ------------------------------------------------------- store lifecycle */
 
 pg_store_t*
@@ -1457,6 +1722,12 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.query_usage = pq_query_usage;
     ps->ops.flush_usage_requests = pq_flush_requests;
     ps->ops.query_usage_requests = pq_query_requests;
+    ps->ops.create_group = pq_create_group;
+    ps->ops.list_groups = pq_list_groups;
+    ps->ops.patch_group = pq_patch_group;
+    ps->ops.delete_group = pq_delete_group;
+    ps->ops.count_keys_in_group = pq_count_keys_in_group;
+    ps->ops.query_cost = pq_query_cost;
     ps->ops.ctx = px;
     ps->ctx = px;
     ps->owns_ctx = 1;

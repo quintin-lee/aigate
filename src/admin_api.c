@@ -21,6 +21,7 @@
 
 #include <jansson.h>
 #include <limits.h>
+#include <math.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -332,6 +333,10 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
         k.expires_at = (time_t)json_integer_value(jexp);
         k.has_expiry = 1;
     }
+    json_t* jgroup = json_object_get(jbody, "group_id");
+    if (jgroup != NULL && json_is_integer(jgroup)) {
+        k.group_id = json_integer_value(jgroup);
+    }
 
     char plain[48], hash[65];
     if (gen_key_plaintext(plain, hash) != 0) {
@@ -350,6 +355,9 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     }
     free(k.allowed_models);
     json_decref(jbody);
+    if (rc == -2) {
+        return finish_error(status, body, len, 404, "group_not_found", "group not found");
+    }
     if (rc != 0) {
         return finish_error(status, body, len, 500, "internal_error", "key create failed");
     }
@@ -358,6 +366,7 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     json_object_set_new(out, "key_id", json_integer(id));
     json_object_set_new(out, "plaintext", json_string(plain));
     json_object_set_new(out, "name", json_string(k.name));
+    json_object_set_new(out, "group_id", k.group_id > 0 ? json_integer(k.group_id) : json_null());
     return finish_json(status, body, len, 201, out);
 }
 
@@ -392,6 +401,8 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
         if (recs[i].has_expiry) {
             json_object_set_new(o, "expires_at", json_integer((int64_t)recs[i].expires_at));
         }
+        json_object_set_new(
+            o, "group_id", recs[i].group_id > 0 ? json_integer(recs[i].group_id) : json_null());
         json_array_append_new(arr, o);
         key_rec_free(&recs[i]);
     }
@@ -507,10 +518,28 @@ key_patch(
         }
         mask |= KMASK_EXPIRY;
     }
+    v = json_object_get(jbody, "group_id");
+    if (v != NULL) {
+        if (json_is_integer(v)) {
+            k.group_id = json_integer_value(v);
+            mask |= KMASK_GROUP;
+        } else if (json_is_null(v)) {
+            k.group_id = 0;
+            mask |= KMASK_GROUP;
+        } else {
+            key_rec_free(&k);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "group_id must be integer or null");
+        }
+    }
     json_decref(jbody);
 
     int rc = ops->update_key(ops->ctx, &k, mask);
     key_rec_free(&k);
+    if (rc == -2) {
+        return finish_error(status, body, len, 404, "group_not_found", "group not found");
+    }
     if (rc != 0) {
         return finish_error(status, body, len, 500, "internal_error", "key update failed");
     }
@@ -666,6 +695,21 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     } else {
         snprintf(m.default_params_json, sizeof m.default_params_json, "{}");
     }
+
+    json_t* jpricing = json_object_get(jbody, "pricing");
+    if (jpricing != NULL) {
+        if (!json_is_object(jpricing)) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 400, "bad_request", "pricing must be an object");
+        }
+        char* packed = json_dumps(jpricing, JSON_COMPACT);
+        if (packed != NULL) {
+            snprintf(m.pricing_json, sizeof m.pricing_json, "%s", packed);
+            free(packed);
+        }
+    } else {
+        snprintf(m.pricing_json, sizeof m.pricing_json, "{}");
+    }
     m.enabled = 1;
 
     int rc = pg_store_ops(adm->ps)->create_key != NULL
@@ -710,6 +754,15 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
             o,
             "lb_policy",
             json_string(recs[i].lb_policy[0] != '\0' ? recs[i].lb_policy : "priority"));
+
+        json_error_t jerr;
+        json_t*      jp =
+            json_loads(recs[i].pricing_json[0] != '\0' ? recs[i].pricing_json : "{}", 0, &jerr);
+        if (jp != NULL) {
+            json_object_set_new(o, "pricing", jp);
+        } else {
+            json_object_set_new(o, "pricing", json_object());
+        }
 
         json_t* tgts_arr = json_array();
         for (int t = 0; t < recs[i].n_targets; t++) {
@@ -813,6 +866,29 @@ model_patch(
             return finish_error(status, body, len, 400, "bad_request", "invalid targets array");
         }
         mask |= MMASK_TARGETS;
+    }
+    v = json_object_get(jbody, "pricing");
+    if (v != NULL) {
+        if (!json_is_object(v)) {
+            model_rec_free(&existing);
+            json_decref(jbody);
+            return finish_error(status, body, len, 400, "bad_request", "pricing must be an object");
+        }
+        char* packed = json_dumps(v, JSON_COMPACT);
+        if (packed == NULL) {
+            model_rec_free(&existing);
+            json_decref(jbody);
+            return finish_error(status, body, len, 500, "internal_error", "json encode failed");
+        }
+        if (strlen(packed) >= sizeof m.pricing_json) {
+            free(packed);
+            model_rec_free(&existing);
+            json_decref(jbody);
+            return finish_error(status, body, len, 400, "bad_request", "pricing too large");
+        }
+        snprintf(m.pricing_json, sizeof m.pricing_json, "%s", packed);
+        free(packed);
+        mask |= MMASK_PRICING;
     }
     json_decref(jbody);
 
@@ -1569,6 +1645,454 @@ usage_requests_query(admin_ctx_t* adm, int* status, char** body, size_t* len, co
     return finish_json(status, body, len, 200, root);
 }
 
+/* ------------------------------------------------------------ groups */
+
+static int
+group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+    const char* name = jstring(jbody, "name", NULL);
+    if (name == NULL || name[0] == '\0') {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "name is required");
+    }
+    if (strlen(name) > 64) {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "name too long (max 64 chars)");
+    }
+    char group_name[128];
+    snprintf(group_name, sizeof group_name, "%s", name);
+    long            id = 0;
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    int             rc = ops->create_group(ops->ctx, group_name, &id);
+    json_decref(jbody);
+    if (rc == -2) {
+        return finish_error(status, body, len, 409, "group_exists", "group name already exists");
+    }
+    if (rc != 0) {
+        return finish_error(status, body, len, 500, "internal_error", "group create failed");
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(id));
+    json_object_set_new(out, "name", json_string(group_name));
+    return finish_json(status, body, len, 201, out);
+}
+
+static int
+group_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    group_rec_t     recs[256];
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    int             n = 0;
+    if (ops->list_groups(ops->ctx, recs, 256, &n) != 0) {
+        return finish_error(status, body, len, 500, "internal_error", "group list failed");
+    }
+    json_t* arr = json_array();
+    for (int i = 0; i < n; i++) {
+        json_t* o = json_object();
+        json_object_set_new(o, "id", json_integer(recs[i].id));
+        json_object_set_new(o, "name", json_string(recs[i].name));
+        json_object_set_new(o, "key_count", json_integer(recs[i].key_count));
+        if (recs[i].created_at > 0) {
+            char      ts_iso[32];
+            struct tm tmv;
+            if (gmtime_r(&recs[i].created_at, &tmv) != NULL) {
+                strftime(ts_iso, sizeof ts_iso, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+            } else {
+                snprintf(ts_iso, sizeof ts_iso, "1970-01-01T00:00:00Z");
+            }
+            json_object_set_new(o, "created_at", json_string(ts_iso));
+        }
+        json_array_append_new(arr, o);
+    }
+    json_t* root = json_object();
+    json_object_set_new(root, "groups", arr);
+    return finish_json(status, body, len, 200, root);
+}
+
+static int
+group_patch(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
+{
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid group id");
+    }
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+    const char* name = jstring(jbody, "name", NULL);
+    if (name == NULL || name[0] == '\0') {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "name is required");
+    }
+    if (strlen(name) > 64) {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "name too long (max 64 chars)");
+    }
+    char group_name[128];
+    snprintf(group_name, sizeof group_name, "%s", name);
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    int             rc = ops->patch_group(ops->ctx, id, group_name);
+    json_decref(jbody);
+    if (rc == -2) {
+        return finish_error(status, body, len, 409, "group_exists", "group name already exists");
+    }
+    if (rc == 1) {
+        return finish_error(status, body, len, 404, "group_not_found", "group not found");
+    }
+    if (rc != 0) {
+        return finish_error(status, body, len, 500, "internal_error", "group patch failed");
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(id));
+    json_object_set_new(out, "name", json_string(group_name));
+    json_object_set_new(out, "updated", json_true());
+    return finish_json(status, body, len, 200, out);
+}
+
+static int
+group_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
+{
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid group id");
+    }
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    long            key_count = 0;
+    if (ops->count_keys_in_group(ops->ctx, id, &key_count) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to check group members");
+    }
+    if (key_count > 0) {
+        return finish_error(
+            status, body, len, 409, "group_has_keys", "group still has attached api keys");
+    }
+    int rc = ops->delete_group(ops->ctx, id);
+    if (rc == 1) {
+        return finish_error(status, body, len, 404, "group_not_found", "group not found");
+    }
+    if (rc != 0) {
+        return finish_error(status, body, len, 500, "internal_error", "group delete failed");
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(id));
+    json_object_set_new(out, "deleted", json_true());
+    return finish_json(status, body, len, 200, out);
+}
+
+/* ------------------------------------------------------------ cost attribution */
+
+static const char*
+lookup_group_name(long group_id, const group_rec_t* groups, int n_groups)
+{
+    if (group_id == 0) {
+        return "(ungrouped)";
+    }
+    for (int i = 0; i < n_groups; i++) {
+        if (groups[i].id == group_id) {
+            return groups[i].name;
+        }
+    }
+    return "(unknown)";
+}
+
+static int
+calculate_model_cost(const char*        model_name,
+                     const model_rec_t* models,
+                     int                n_models,
+                     long               prompt,
+                     long               completion,
+                     long               cached,
+                     long long*         out_cents)
+{
+    for (int i = 0; i < n_models; i++) {
+        if (strcmp(models[i].name, model_name) == 0) {
+            json_error_t jerr;
+            json_t*      jp = json_loads(models[i].pricing_json, 0, &jerr);
+            if (jp == NULL || !json_is_object(jp)) {
+                if (jp != NULL) {
+                    json_decref(jp);
+                }
+                return 0;
+            }
+            json_t* jin = json_object_get(jp, "in_mtok");
+            json_t* jout = json_object_get(jp, "out_mtok");
+            if (jin == NULL || jout == NULL || !json_is_number(jin) || !json_is_number(jout)) {
+                json_decref(jp);
+                return 0;
+            }
+            double  in_mtok = json_number_value(jin);
+            double  out_mtok = json_number_value(jout);
+            json_t* jdisc = json_object_get(jp, "cached_mtok_discount");
+            double  cached_discount =
+                (jdisc != NULL && json_is_number(jdisc)) ? json_number_value(jdisc) : 1.0;
+            json_decref(jp);
+
+            long   unhit_prompt = (prompt >= cached) ? (prompt - cached) : 0;
+            double usd =
+                ((double)unhit_prompt * in_mtok + (double)cached * in_mtok * cached_discount +
+                 (double)completion * out_mtok) /
+                1000000.0;
+            *out_cents = (long long)llround(usd * 100.0);
+            return 1;
+        }
+    }
+    return 0;
+}
+
+struct model_agg {
+    long group_id;
+    char group_name[128];
+    char model[128];
+    long prompt;
+    long completion;
+    long cached;
+    long requests;
+};
+
+char*
+cost_from_rows(const cost_row_t*  rows,
+               int                n_rows,
+               const model_rec_t* models,
+               int                n_models,
+               const group_rec_t* groups,
+               int                n_groups,
+               long               group_filter,
+               int                by_model,
+               int                truncated)
+{
+    json_t* arr = json_array();
+    if (arr == NULL) {
+        return NULL;
+    }
+
+    if (by_model) {
+        int               cap = n_rows > 0 ? n_rows : 1;
+        struct model_agg* aggs = calloc((size_t)cap, sizeof *aggs);
+        if (aggs == NULL) {
+            json_decref(arr);
+            return NULL;
+        }
+        int n_agg = 0;
+
+        for (int i = 0; i < n_rows; i++) {
+            if (group_filter >= 0 && rows[i].group_id != group_filter) {
+                continue;
+            }
+            int idx = -1;
+            for (int k = 0; k < n_agg; k++) {
+                if (aggs[k].group_id == rows[i].group_id &&
+                    strcmp(aggs[k].model, rows[i].model) == 0) {
+                    idx = k;
+                    break;
+                }
+            }
+            if (idx >= 0) {
+                aggs[idx].prompt += rows[i].prompt;
+                aggs[idx].completion += rows[i].completion;
+                aggs[idx].cached += rows[i].cached;
+                aggs[idx].requests += rows[i].requests;
+            } else if (n_agg < cap) {
+                idx = n_agg++;
+                aggs[idx].group_id = rows[i].group_id;
+                snprintf(aggs[idx].group_name,
+                         sizeof aggs[idx].group_name,
+                         "%s",
+                         lookup_group_name(rows[i].group_id, groups, n_groups));
+                snprintf(aggs[idx].model, sizeof aggs[idx].model, "%s", rows[i].model);
+                aggs[idx].prompt = rows[i].prompt;
+                aggs[idx].completion = rows[i].completion;
+                aggs[idx].cached = rows[i].cached;
+                aggs[idx].requests = rows[i].requests;
+            }
+        }
+
+        for (int k = 0; k < n_agg; k++) {
+            json_t*   o = json_object();
+            long long cost_cents = 0;
+            int       has_cost = calculate_model_cost(aggs[k].model,
+                                                      models,
+                                                      n_models,
+                                                      aggs[k].prompt,
+                                                      aggs[k].completion,
+                                                      aggs[k].cached,
+                                                      &cost_cents);
+            json_object_set_new(o, "group_id", json_integer(aggs[k].group_id));
+            json_object_set_new(o, "group_name", json_string(aggs[k].group_name));
+            json_object_set_new(o, "model", json_string(aggs[k].model));
+            json_object_set_new(o, "prompt_tokens", json_integer(aggs[k].prompt));
+            json_object_set_new(o, "completion_tokens", json_integer(aggs[k].completion));
+            json_object_set_new(o, "cached_prompt_tokens", json_integer(aggs[k].cached));
+            json_object_set_new(o, "requests", json_integer(aggs[k].requests));
+            if (has_cost) {
+                json_object_set_new(o, "cost_cents", json_integer(cost_cents));
+            }
+            json_array_append_new(arr, o);
+        }
+        free(aggs);
+    } else {
+        for (int i = 0; i < n_rows; i++) {
+            if (group_filter >= 0 && rows[i].group_id != group_filter) {
+                continue;
+            }
+            json_t*   o = json_object();
+            char      day_str[32];
+            struct tm tmv;
+            if (gmtime_r(&rows[i].bucket_day, &tmv) != NULL) {
+                strftime(day_str, sizeof day_str, "%Y-%m-%d", &tmv);
+            } else {
+                snprintf(day_str, sizeof day_str, "1970-01-01");
+            }
+            long long   cost_cents = 0;
+            int         has_cost = calculate_model_cost(rows[i].model,
+                                                        models,
+                                                        n_models,
+                                                        rows[i].prompt,
+                                                        rows[i].completion,
+                                                        rows[i].cached,
+                                                        &cost_cents);
+            const char* gname = lookup_group_name(rows[i].group_id, groups, n_groups);
+            json_object_set_new(o, "date", json_string(day_str));
+            json_object_set_new(o, "bucket_day", json_integer((int64_t)rows[i].bucket_day));
+            json_object_set_new(o, "group_id", json_integer(rows[i].group_id));
+            json_object_set_new(o, "group_name", json_string(gname));
+            json_object_set_new(o, "model", json_string(rows[i].model));
+            json_object_set_new(o, "prompt_tokens", json_integer(rows[i].prompt));
+            json_object_set_new(o, "completion_tokens", json_integer(rows[i].completion));
+            json_object_set_new(o, "cached_prompt_tokens", json_integer(rows[i].cached));
+            json_object_set_new(o, "requests", json_integer(rows[i].requests));
+            if (has_cost) {
+                json_object_set_new(o, "cost_cents", json_integer(cost_cents));
+            }
+            json_array_append_new(arr, o);
+        }
+    }
+
+    json_t* root = json_object();
+    json_object_set_new(root, "rows", arr);
+    json_object_set_new(root, "truncated", truncated ? json_true() : json_false());
+    char* ret = json_dumps(root, JSON_COMPACT);
+    json_decref(root);
+    return ret;
+}
+
+static int
+cost_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
+{
+    char group_str[32] = "", from_str[32] = "", to_str[32] = "", by_str[32] = "";
+    query_param(query, "group", group_str, sizeof group_str);
+    query_param(query, "from", from_str, sizeof from_str);
+    query_param(query, "to", to_str, sizeof to_str);
+    query_param(query, "by", by_str, sizeof by_str);
+
+    long group_filter = -1;
+    if (group_str[0] != '\0') {
+        char* end = NULL;
+        group_filter = strtol(group_str, &end, 10);
+        if (end == group_str || *end != '\0' || group_filter < 0) {
+            return finish_error(status, body, len, 400, "bad_request", "invalid ?group=<id>");
+        }
+    }
+
+    time_t now = time(NULL);
+    time_t from_s = 0, to_s = 0;
+    if (from_str[0] == '\0') {
+        from_s = now - 30 * 86400;
+    } else if (strchr(from_str, '-') != NULL) {
+        if (parse_day(from_str, &from_s) != 0) {
+            return finish_error(status, body, len, 400, "bad_request", "invalid from date");
+        }
+    } else {
+        char* end = NULL;
+        from_s = strtol(from_str, &end, 10);
+        if (end == from_str || *end != '\0') {
+            return finish_error(status, body, len, 400, "bad_request", "invalid from timestamp");
+        }
+    }
+
+    if (to_str[0] == '\0') {
+        to_s = now + 86400;
+    } else if (strchr(to_str, '-') != NULL) {
+        if (parse_day(to_str, &to_s) != 0) {
+            return finish_error(status, body, len, 400, "bad_request", "invalid to date");
+        }
+        to_s += 86400;
+    } else {
+        char* end = NULL;
+        to_s = strtol(to_str, &end, 10);
+        if (end == to_str || *end != '\0') {
+            return finish_error(status, body, len, 400, "bad_request", "invalid to timestamp");
+        }
+    }
+
+    if (from_s < 0 || to_s < 0 || from_s >= to_s) {
+        return finish_error(status, body, len, 400, "bad_request", "from must be before to");
+    }
+    if ((to_s - from_s) > 366 * 86400) {
+        return finish_error(status, body, len, 400, "bad_request", "time range exceeds 365 days");
+    }
+
+    int by_model = (strcmp(by_str, "model") == 0);
+
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    cost_row_t*     rows = calloc(4096, sizeof *rows);
+    if (rows == NULL) {
+        return -1;
+    }
+    int n_rows = 0;
+    if (ops->query_cost(ops->ctx, (long)from_s, (long)to_s, rows, 4096, &n_rows) != 0) {
+        free(rows);
+        return finish_error(status, body, len, 500, "internal_error", "cost query failed");
+    }
+    int truncated = (n_rows >= 4096);
+
+    model_rec_t* models = calloc(MODEL_LIST_CAP, sizeof *models);
+    if (models == NULL) {
+        free(rows);
+        return -1;
+    }
+    int n_models = 0;
+    if (ops->list_models(ops->ctx, models, MODEL_LIST_CAP, &n_models) != 0) {
+        free(models);
+        free(rows);
+        return finish_error(status, body, len, 500, "internal_error", "failed to list models");
+    }
+
+    group_rec_t groups[256];
+    int         n_groups = 0;
+    if (ops->list_groups(ops->ctx, groups, 256, &n_groups) != 0) {
+        for (int i = 0; i < n_models; i++) {
+            model_rec_free(&models[i]);
+        }
+        free(models);
+        free(rows);
+        return finish_error(status, body, len, 500, "internal_error", "failed to list groups");
+    }
+
+    char* json_str = cost_from_rows(
+        rows, n_rows, models, n_models, groups, n_groups, group_filter, by_model, truncated);
+
+    for (int i = 0; i < n_models; i++) {
+        model_rec_free(&models[i]);
+    }
+    free(models);
+    free(rows);
+
+    if (json_str == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "cost formatting failed");
+    }
+
+    *status = 200;
+    *body = json_str;
+    *len = strlen(json_str);
+    return 0;
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -1661,6 +2185,23 @@ admin_dispatch(admin_ctx_t* adm,
                 return model_delete(adm, out_status, out_body, out_len, rest + 7);
             }
         }
+    } else if (strncmp(rest, "groups", 6) == 0) {
+        if (strcmp(rest, "groups") == 0) {
+            if (strcmp(method, "POST") == 0) {
+                return group_create(adm, out_status, out_body, out_len, body);
+            }
+            if (strcmp(method, "GET") == 0) {
+                return group_list(adm, out_status, out_body, out_len);
+            }
+        }
+        if (rest[6] == '/') {
+            if (strcmp(method, "PATCH") == 0 || strcmp(method, "PUT") == 0) {
+                return group_patch(adm, out_status, out_body, out_len, rest + 7, body);
+            }
+            if (strcmp(method, "DELETE") == 0) {
+                return group_delete(adm, out_status, out_body, out_len, rest + 7);
+            }
+        }
     } else if (strncmp(rest, "providers", 9) == 0) {
         if (strcmp(rest, "providers") == 0) {
             if (strcmp(method, "POST") == 0) {
@@ -1681,6 +2222,8 @@ admin_dispatch(admin_ctx_t* adm,
                 return provider_test(adm, out_status, out_body, out_len, rest + 10);
             }
         }
+    } else if (strcmp(rest, "cost") == 0 && strcmp(method, "GET") == 0) {
+        return cost_query(adm, out_status, out_body, out_len, query);
     } else if (strcmp(rest, "usage/requests") == 0 && strcmp(method, "GET") == 0) {
         return usage_requests_query(adm, out_status, out_body, out_len, query);
     } else if (strcmp(rest, "usage") == 0 && strcmp(method, "GET") == 0) {

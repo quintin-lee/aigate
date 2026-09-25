@@ -11,6 +11,7 @@ from mock_upstream import start_mock_upstream
 
 DEFAULT_PG_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/aigate_test"
 DOCKER_PG_DSN = "postgresql://aigate:changeme@172.39.4.2:5432/aigate"
+DOCKER_PG_DSN_3 = "postgresql://aigate:changeme@172.39.4.3:5432/aigate"
 ADMIN_TOKEN = "admin_integration_test_secret"
 
 @pytest.fixture(scope="session", autouse=True)
@@ -20,7 +21,7 @@ def ensure_no_proxy():
 @pytest.fixture(scope="session")
 def pg_dsn() -> str:
     dsn = os.environ.get("TEST_PG_DSN")
-    candidates = [dsn] if dsn else [DEFAULT_PG_DSN, DOCKER_PG_DSN]
+    candidates = [dsn] if dsn else [DEFAULT_PG_DSN, DOCKER_PG_DSN, DOCKER_PG_DSN_3]
     for candidate in candidates:
         try:
             res = subprocess.run(["pg_isready", "-d", candidate, "-t", "2"], capture_output=True)
@@ -43,13 +44,17 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
         s.bind(("", 0))
         port = s.getsockname()[1]
 
-    bin_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build/aigate"))
-    if not os.path.exists(bin_path):
-        pytest.fail(f"aigate binary not found at {bin_path}. Run cmake --build build first.")
+    candidates_bin = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.build/aigate")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build/aigate")),
+    ]
+    bin_path = next((b for b in candidates_bin if os.path.exists(b)), None)
+    if not bin_path:
+        pytest.fail(f"aigate binary not found in {candidates_bin}. Run cmake --build first.")
 
     # Clean DB state for tests
     try:
-        subprocess.run(["psql", pg_dsn, "-c", "DELETE FROM models; DELETE FROM api_keys; DELETE FROM usage_daily;"], capture_output=True)
+        subprocess.run(["psql", pg_dsn, "-c", "DELETE FROM models; DELETE FROM api_keys; DELETE FROM groups; DELETE FROM usage_requests; DELETE FROM usage_daily;"], capture_output=True)
     except Exception:
         pass
 
@@ -59,6 +64,7 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
     env["AIGATE_ADMIN_TOKEN"] = ADMIN_TOKEN
     env["AIGATE_METRICS_ACL"] = "127.0.0.1"
     env["AIGATE_MAX_BODY_BYTES"] = "2048"
+    env["AIGATE_USAGE_FLUSH_S"] = "1"
     env["AIGATE_MASTER_KEY"] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     env["ANTHROPIC_API_KEY"] = "sk-ant-test-key"
 

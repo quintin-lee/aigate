@@ -23,6 +23,7 @@ typedef struct key_rec {
     time_t expires_at;
     int    has_expiry;
     int    revoked;
+    long   group_id; /* 0 = ungrouped */
 } key_rec_t;
 
 #define MAX_TARGETS_PER_MODEL 8
@@ -49,7 +50,8 @@ typedef struct model_rec {
     /* Multi-target additions */
     int               n_targets;
     upstream_target_t targets[MAX_TARGETS_PER_MODEL];
-    char lb_policy[32]; /* "priority", "round_robin", "weighted", "weighted_round_robin" */
+    char lb_policy[32];      /* "priority", "round_robin", "weighted", "weighted_round_robin" */
+    char pricing_json[1024]; /* jansson object with in_mtok, out_mtok, cached_mtok_discount */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
@@ -74,11 +76,31 @@ typedef struct usage_request_row {
     time_t   ts;
 } usage_request_row_t;
 
+/** @brief Group record (groups row + key count). */
+typedef struct group_rec {
+    long   id;
+    char   name[128];
+    long   key_count;
+    time_t created_at;
+} group_rec_t;
+
+/** @brief One cost attribution row. */
+typedef struct cost_row {
+    long   group_id;
+    char   model[128];
+    long   prompt;
+    long   completion;
+    long   cached;
+    long   requests;
+    time_t bucket_day; /* midnight UTC timestamp */
+} cost_row_t;
+
 /* update_key / update_model / update_provider field masks (bit flags). */
 #define KMASK_RATE (1 << 0)
 #define KMASK_QUOTA (1 << 1)
 #define KMASK_ALLOWLIST (1 << 2)
 #define KMASK_EXPIRY (1 << 3)
+#define KMASK_GROUP (1 << 4)
 
 #define MMASK_ENDPOINT (1 << 0)
 #define MMASK_PARAMS (1 << 1)
@@ -86,6 +108,7 @@ typedef struct usage_request_row {
 #define MMASK_KEYREF (1 << 3)
 #define MMASK_TARGETS (1 << 4)
 #define MMASK_LB_POLICY (1 << 5)
+#define MMASK_PRICING (1 << 6)
 
 #define PMASK_TYPE (1 << 0)
 #define PMASK_ENDPOINT (1 << 1)
@@ -149,6 +172,13 @@ typedef struct pg_ops {
     int (*flush_usage_requests)(void* ctx, const usage_request_row_t* rows, int n);
     int (*query_usage_requests)(
         void* ctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n);
+
+    int (*create_group)(void* ctx, const char* name, long* out_id);
+    int (*list_groups)(void* ctx, group_rec_t* out, int cap, int* n);
+    int (*patch_group)(void* ctx, long id, const char* name);
+    int (*delete_group)(void* ctx, long id);
+    int (*count_keys_in_group)(void* ctx, long group_id, long* n);
+    int (*query_cost)(void* ctx, long since_s, long until_s, cost_row_t* out, int cap, int* n);
 } pg_ops_t;
 
 typedef struct pg_store pg_store_t;
