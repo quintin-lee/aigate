@@ -22,4 +22,6 @@ TEST_CASE(admin_ui_content)
     TEST_ASSERT(strstr(html, "tab-usage") != NULL, "missing tab-usage");
     TEST_ASSERT(strstr(html, "tab-playground") != NULL, "missing tab-playground");
     TEST_ASSERT(strstr(html, "tab-metrics") != NULL, "missing tab-metrics");
+    TEST_ASSERT(strstr(html, "tab-groups") != NULL, "missing tab-groups");
+    TEST_ASSERT(strstr(html, "tab-cost") != NULL, "missing tab-cost");
 }

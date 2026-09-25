@@ -123,7 +123,7 @@ INSERT INTO schema_migrations(version) VALUES (7) ON CONFLICT (version) DO NOTHI
 - **users/department 身份栈、OAuth、passkey、2FA、多角色**——§1 #8 已判;单 admin token + IP 锁留覆盖管理面。
 - **表达式计费引擎 / 预扣 / 余额 / 返利**——转售闭环组件,内部止于成本报表(§1 #9)。
 - **组级硬配额(P1-5b)与 Redis 共享态**——本 spec 只铺「组 + 报表」原语;限额与多实例一致性是下一批(§2 序 2/5),触发条件显式记录。
-- **`usage_requests` 保留期/分区**——表持续增长是 P2 运维题,与本设计解耦。
+- **`usage_requests` 保留期/分区**——表持续增长是运维与数据生命周期题，与本 spec 逻辑解耦；详细原生声明式 RANGE 分区与零停机迁移架构方案详见 [`docs/architecture/usage_requests_partitioning.md`](../architecture/usage_requests_partitioning.md)。
 - **admin UI 加组/成本页**——API 先行;UI 页另立项(admin UI 目前是内嵌单页)。
 
 ## §5 自查
