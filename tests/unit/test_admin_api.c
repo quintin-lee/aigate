@@ -2499,3 +2499,165 @@ TEST_CASE(test_admin_cost_endpoint)
 
     teardown_admin(ps, &core, &db);
 }
+
+TEST_CASE(test_admin_pagination)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. Groups Pagination */
+    long g1 = 0, g2 = 0, g3 = 0;
+    ops.create_group(ops.ctx, "grp-1", &g1);
+    ops.create_group(ops.ctx, "grp-2", &g2);
+    ops.create_group(ops.ctx, "grp-3", &g3);
+
+    /* Page 1, limit 2 */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups?page=1&limit=2",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "groups page 1 -> 200");
+    json_error_t jerr;
+    json_t*      j = json_loads(body, 0, &jerr);
+    TEST_ASSERT(j != NULL, "parsed groups page 1");
+    TEST_ASSERT(json_integer_value(json_object_get(j, "total")) == 3, "groups total 3");
+    TEST_ASSERT(json_integer_value(json_object_get(j, "page")) == 1, "groups page 1");
+    TEST_ASSERT(json_integer_value(json_object_get(j, "limit")) == 2, "groups limit 2");
+    json_t* arr = json_object_get(j, "groups");
+    TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 2, "groups page 1 size 2");
+    json_decref(j);
+    free(body);
+
+    /* Page 2, limit 2 */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups?page=2&limit=2",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "groups page 2 -> 200");
+    j = json_loads(body, 0, &jerr);
+    arr = json_object_get(j, "groups");
+    TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 1, "groups page 2 size 1");
+    json_decref(j);
+    free(body);
+
+    /* Page 3, limit 2 (out of bounds) */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups?page=3&limit=2",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "groups page 3 -> 200");
+    j = json_loads(body, 0, &jerr);
+    arr = json_object_get(j, "groups");
+    TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 0, "groups page 3 size 0");
+    json_decref(j);
+    free(body);
+
+    /* 2. Keys Pagination */
+    key_rec_t k1 = {0}, k2 = {0}, k3 = {0};
+    strcpy(k1.name, "k1");
+    strcpy(k1.key_hash, "h1");
+    strcpy(k2.name, "k2");
+    strcpy(k2.key_hash, "h2");
+    strcpy(k3.name, "k3");
+    strcpy(k3.key_hash, "h3");
+    long kid = 0;
+    ops.create_key(ops.ctx, &k1, &kid);
+    ops.create_key(ops.ctx, &k2, &kid);
+    ops.create_key(ops.ctx, &k3, &kid);
+
+    admin_dispatch(&adm,
+                   "/admin/v1/keys?page=1&limit=2",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "keys page 1 -> 200");
+    j = json_loads(body, 0, &jerr);
+    TEST_ASSERT(json_integer_value(json_object_get(j, "total")) == 3, "keys total 3");
+    arr = json_object_get(j, "keys");
+    TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 2, "keys page 1 size 2");
+    json_decref(j);
+    free(body);
+
+    /* 3. Models Pagination */
+    model_rec_t m1 = {0}, m2 = {0};
+    strcpy(m1.name, "m1");
+    strcpy(m1.provider, "openai");
+    strcpy(m2.name, "m2");
+    strcpy(m2.provider, "openai");
+    ops.create_model(ops.ctx, &m1);
+    ops.create_model(ops.ctx, &m2);
+
+    admin_dispatch(&adm,
+                   "/admin/v1/models?page=1&limit=1",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "models page 1 -> 200");
+    j = json_loads(body, 0, &jerr);
+    TEST_ASSERT(json_integer_value(json_object_get(j, "total")) == 2, "models total 2");
+    arr = json_object_get(j, "models");
+    TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 1, "models page 1 size 1");
+    json_decref(j);
+    free(body);
+
+    /* 4. Cost from rows paginated pure check */
+    cost_row_t crows[4];
+    memset(crows, 0, sizeof crows);
+    model_rec_t cmodels[1];
+    memset(cmodels, 0, sizeof cmodels);
+    strcpy(cmodels[0].name, "m1");
+    group_rec_t cgroups[1];
+    memset(cgroups, 0, sizeof cgroups);
+    cgroups[0].id = 1;
+    strcpy(cgroups[0].name, "g1");
+
+    char* cost_paged = cost_from_rows_paginated(crows, 4, cmodels, 1, cgroups, 1, -1, 0, 0, 1, 2);
+    TEST_ASSERT(cost_paged != NULL, "cost_paged not null");
+    j = json_loads(cost_paged, 0, &jerr);
+    TEST_ASSERT(json_integer_value(json_object_get(j, "total")) == 4, "cost total 4");
+    TEST_ASSERT(json_integer_value(json_object_get(j, "page")) == 1, "cost page 1");
+    TEST_ASSERT(json_integer_value(json_object_get(j, "limit")) == 2, "cost limit 2");
+    arr = json_object_get(j, "rows");
+    TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 2, "cost page 1 size 2");
+    json_decref(j);
+    free(cost_paged);
+
+    teardown_admin(ps, &core, &db);
+}

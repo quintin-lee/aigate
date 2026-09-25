@@ -53,6 +53,18 @@ void admin_lockout_set_policy(int max_fails, int window_s);
 
 /** @brief Pure calculation: transform cost_row_t rows + models pricing into a JSON cost report.
  *  Exported for unit testing. */
+char* cost_from_rows_paginated(const cost_row_t*  rows,
+                               int                n_rows,
+                               const model_rec_t* models,
+                               int                n_models,
+                               const group_rec_t* groups,
+                               int                n_groups,
+                               long               group_filter,
+                               int                by_model,
+                               int                truncated,
+                               int                page,
+                               int                limit);
+
 char* cost_from_rows(const cost_row_t*  rows,
                      int                n_rows,
                      const model_rec_t* models,

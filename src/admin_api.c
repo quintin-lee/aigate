@@ -239,6 +239,120 @@ jstring(const json_t* obj, const char* field, const char* fallback)
     return fallback;
 }
 
+/** @brief Copy the value of @p field from the query string into @p out. */
+static int
+query_param(const char* query, const char* field, char* out, size_t cap)
+{
+    out[0] = '\0';
+    if (query == NULL || field == NULL || field[0] == '\0') {
+        return 0;
+    }
+    size_t      flen = strlen(field);
+    const char* p = query;
+    while (p != NULL && *p != '\0') {
+        size_t seglen = strcspn(p, "&");
+        if (strncmp(p, field, flen) == 0 && p[flen] == '=') {
+            size_t vlen = seglen - flen - 1;
+            if (vlen >= cap) {
+                vlen = cap - 1;
+            }
+            memcpy(out, p + flen + 1, vlen);
+            out[vlen] = '\0';
+            return 0;
+        }
+        p = strchr(p, '&');
+        if (p != NULL) {
+            p++;
+        }
+    }
+    return 0;
+}
+
+static void
+parse_pagination_params(const char* query, int* out_page, int* out_limit)
+{
+    char page_str[32] = "";
+    char limit_str[32] = "";
+    char offset_str[32] = "";
+
+    query_param(query, "page", page_str, sizeof page_str);
+    query_param(query, "limit", limit_str, sizeof limit_str);
+    if (limit_str[0] == '\0') {
+        query_param(query, "page_size", limit_str, sizeof limit_str);
+    }
+    if (limit_str[0] == '\0') {
+        query_param(query, "size", limit_str, sizeof limit_str);
+    }
+    query_param(query, "offset", offset_str, sizeof offset_str);
+
+    int page = 1;
+    int limit = 0;
+
+    if (limit_str[0] != '\0') {
+        limit = (int)strtol(limit_str, NULL, 10);
+        if (limit < 1) {
+            limit = 1;
+        }
+        if (limit > 1000) {
+            limit = 1000;
+        }
+    }
+
+    if (page_str[0] != '\0') {
+        page = (int)strtol(page_str, NULL, 10);
+        if (page < 1) {
+            page = 1;
+        }
+    } else if (offset_str[0] != '\0' && limit > 0) {
+        long off = strtol(offset_str, NULL, 10);
+        if (off < 0) {
+            off = 0;
+        }
+        page = (int)(off / limit) + 1;
+    }
+
+    *out_page = page;
+    *out_limit = limit;
+}
+
+static json_t*
+paginate_json_array(json_t* all_items, int page, int limit, size_t* out_total)
+{
+    size_t total = json_array_size(all_items);
+    if (out_total != NULL) {
+        *out_total = total;
+    }
+    if (limit <= 0) {
+        return all_items;
+    }
+
+    json_t* paged = json_array();
+    size_t  start = (size_t)(page > 0 ? (page - 1) : 0) * (size_t)limit;
+    if (start < total) {
+        size_t end = start + (size_t)limit;
+        if (end > total) {
+            end = total;
+        }
+        for (size_t i = start; i < end; i++) {
+            json_t* item = json_array_get(all_items, i);
+            json_incref(item);
+            json_array_append_new(paged, item);
+        }
+    }
+    json_decref(all_items);
+    return paged;
+}
+
+static void
+add_pagination_meta(json_t* root, size_t total, int page, int limit)
+{
+    json_object_set_new(root, "total", json_integer((json_int_t)total));
+    if (limit > 0) {
+        json_object_set_new(root, "page", json_integer(page));
+        json_object_set_new(root, "limit", json_integer(limit));
+    }
+}
+
 #define KEY_PLAIN_CAP 48
 #define KEY_HASH_CAP 65
 
@@ -371,15 +485,26 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
 }
 
 static int
-key_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
-    key_rec_t* recs = calloc(KEY_LIST_CAP, sizeof *recs);
+    int page = 1, limit = 0;
+    parse_pagination_params(query, &page, &limit);
+
+    int req_cap = KEY_LIST_CAP;
+    if (limit > 0 && page > 0) {
+        int needed = page * limit;
+        if (needed > req_cap) {
+            req_cap = needed <= 4096 ? needed : 4096;
+        }
+    }
+
+    key_rec_t* recs = calloc((size_t)req_cap, sizeof *recs);
     if (recs == NULL) {
         return -1;
     }
     const pg_ops_t* ops = pg_store_ops(adm->ps);
     int             n = 0;
-    if (ops->list_keys(ops->ctx, recs, KEY_LIST_CAP, &n) != 0) {
+    if (ops->list_keys(ops->ctx, recs, req_cap, &n) != 0) {
         free(recs);
         return finish_error(status, body, len, 500, "internal_error", "key list failed");
     }
@@ -408,8 +533,12 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
     }
     free(recs);
 
+    size_t total = 0;
+    arr = paginate_json_array(arr, page, limit, &total);
+
     json_t* root = json_object();
     json_object_set_new(root, "keys", arr);
+    add_pagination_meta(root, total, page, limit);
     return finish_json(status, body, len, 200, root);
 }
 
@@ -728,15 +857,26 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
 }
 
 static int
-model_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
-    model_rec_t* recs = calloc(MODEL_LIST_CAP, sizeof *recs);
+    int page = 1, limit = 0;
+    parse_pagination_params(query, &page, &limit);
+
+    int req_cap = MODEL_LIST_CAP;
+    if (limit > 0 && page > 0) {
+        int needed = page * limit;
+        if (needed > req_cap) {
+            req_cap = needed <= 4096 ? needed : 4096;
+        }
+    }
+
+    model_rec_t* recs = calloc((size_t)req_cap, sizeof *recs);
     if (recs == NULL) {
         return -1;
     }
     const pg_ops_t* ops = pg_store_ops(adm->ps);
     int             n = 0;
-    if (ops->list_models(ops->ctx, recs, MODEL_LIST_CAP, &n) != 0) {
+    if (ops->list_models(ops->ctx, recs, req_cap, &n) != 0) {
         free(recs);
         return finish_error(status, body, len, 500, "internal_error", "model list failed");
     }
@@ -792,8 +932,13 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
         model_rec_free(&recs[i]);
     }
     free(recs);
+
+    size_t total = 0;
+    arr = paginate_json_array(arr, page, limit, &total);
+
     json_t* root = json_object();
     json_object_set_new(root, "models", arr);
+    add_pagination_meta(root, total, page, limit);
     return finish_json(status, body, len, 200, root);
 }
 
@@ -1166,15 +1311,26 @@ provider_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const v
 }
 
 static int
-provider_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+provider_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
-    provider_rec_t* recs = calloc(PROVIDER_LIST_CAP, sizeof *recs);
+    int page = 1, limit = 0;
+    parse_pagination_params(query, &page, &limit);
+
+    int req_cap = PROVIDER_LIST_CAP;
+    if (limit > 0 && page > 0) {
+        int needed = page * limit;
+        if (needed > req_cap) {
+            req_cap = needed <= 4096 ? needed : 4096;
+        }
+    }
+
+    provider_rec_t* recs = calloc((size_t)req_cap, sizeof *recs);
     if (recs == NULL) {
         return -1;
     }
     const pg_ops_t* ops = pg_store_ops(adm->ps);
     int             n = 0;
-    if (ops->list_providers(ops->ctx, recs, PROVIDER_LIST_CAP, &n) != 0) {
+    if (ops->list_providers(ops->ctx, recs, req_cap, &n) != 0) {
         free(recs);
         return finish_error(status, body, len, 500, "internal_error", "provider list failed");
     }
@@ -1212,8 +1368,12 @@ provider_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
     }
     free(recs);
 
+    size_t total = 0;
+    arr = paginate_json_array(arr, page, limit, &total);
+
     json_t* root = json_object();
     json_object_set_new(root, "providers", arr);
+    add_pagination_meta(root, total, page, limit);
     return finish_json(status, body, len, 200, root);
 }
 
@@ -1482,35 +1642,6 @@ parse_day(const char* s, time_t* out)
     return 0;
 }
 
-/** @brief Copy the value of @p field from the query string into @p out. */
-static int
-query_param(const char* query, const char* field, char* out, size_t cap)
-{
-    out[0] = '\0';
-    if (query == NULL || field == NULL || field[0] == '\0') {
-        return 0;
-    }
-    size_t      flen = strlen(field);
-    const char* p = query;
-    while (p != NULL && *p != '\0') {
-        size_t seglen = strcspn(p, "&");
-        if (strncmp(p, field, flen) == 0 && p[flen] == '=') {
-            size_t vlen = seglen - flen - 1;
-            if (vlen >= cap) {
-                vlen = cap - 1;
-            }
-            memcpy(out, p + flen + 1, vlen);
-            out[vlen] = '\0';
-            return 0;
-        }
-        p = strchr(p, '&');
-        if (p != NULL) {
-            p++;
-        }
-    }
-    return 0;
-}
-
 static int
 usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -1519,6 +1650,9 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
     query_param(query, "model", model, sizeof model);
     query_param(query, "from", from, sizeof from);
     query_param(query, "to", to, sizeof to);
+
+    int page = 1, limit = 0;
+    parse_pagination_params(query, &page, &limit);
 
     char* kend = NULL;
     long  key_id = strtol(key, &kend, 10);
@@ -1540,7 +1674,15 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
         return finish_error(status, body, len, 400, "bad_request", "bad to date (use YYYY-MM-DD)");
     }
 
-    usage_row_t* rows = calloc(USAGE_LIST_CAP, sizeof *rows);
+    int req_cap = USAGE_LIST_CAP;
+    if (limit > 0 && page > 0) {
+        int needed = page * limit;
+        if (needed > req_cap) {
+            req_cap = needed <= 4096 ? needed : 4096;
+        }
+    }
+
+    usage_row_t* rows = calloc((size_t)req_cap, sizeof *rows);
     if (rows == NULL) {
         return -1;
     }
@@ -1551,7 +1693,7 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
                                                 t_from,
                                                 t_to,
                                                 rows,
-                                                USAGE_LIST_CAP,
+                                                req_cap,
                                                 &n);
     if (rc != 0) {
         free(rows);
@@ -1573,9 +1715,13 @@ usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char*
     }
     free(rows);
 
+    size_t total = 0;
+    arr = paginate_json_array(arr, page, limit, &total);
+
     json_t* root = json_object();
     json_object_set_new(root, "key_id", json_integer(key_id));
     json_object_set_new(root, "usage", arr);
+    add_pagination_meta(root, total, page, limit);
     return finish_json(status, body, len, 200, root);
 }
 
@@ -1587,6 +1733,9 @@ usage_requests_query(admin_ctx_t* adm, int* status, char** body, size_t* len, co
     char key[32] = "", since[16] = "";
     query_param(query, "key_id", key, sizeof key);
     query_param(query, "since", since, sizeof since);
+
+    int page = 1, limit = 0;
+    parse_pagination_params(query, &page, &limit);
 
     char* kend = NULL;
     long  key_id = strtol(key, &kend, 10);
@@ -1602,13 +1751,21 @@ usage_requests_query(admin_ctx_t* adm, int* status, char** body, size_t* len, co
             status, body, len, 400, "bad_request", "bad since date (use YYYY-MM-DD)");
     }
 
-    usage_request_row_t* rows = calloc(USAGE_LIST_CAP, sizeof *rows);
+    int req_cap = USAGE_LIST_CAP;
+    if (limit > 0 && page > 0) {
+        int needed = page * limit;
+        if (needed > req_cap) {
+            req_cap = needed <= 4096 ? needed : 4096;
+        }
+    }
+
+    usage_request_row_t* rows = calloc((size_t)req_cap, sizeof *rows);
     if (rows == NULL) {
         return -1;
     }
     int n = 0;
     int rc = pg_store_ops(adm->ps)->query_usage_requests(
-        pg_store_ops(adm->ps)->ctx, key_id, t_since, rows, USAGE_LIST_CAP, &n);
+        pg_store_ops(adm->ps)->ctx, key_id, t_since, rows, req_cap, &n);
     if (rc != 0) {
         free(rows);
         return finish_error(status, body, len, 500, "internal_error", "request query failed");
@@ -1637,11 +1794,15 @@ usage_requests_query(admin_ctx_t* adm, int* status, char** body, size_t* len, co
     }
     free(rows);
 
+    size_t total = 0;
+    arr = paginate_json_array(arr, page, limit, &total);
+
     json_t* root = json_object();
     json_object_set_new(root, "key_id", json_integer(key_id));
     json_object_set_new(root, "requests", arr);
     int dropped = adm->ac != NULL ? um_requests_dropped(adm->ac->um) : 0;
     json_object_set_new(root, "dropped", json_integer(dropped));
+    add_pagination_meta(root, total, page, limit);
     return finish_json(status, body, len, 200, root);
 }
 
@@ -1682,12 +1843,26 @@ group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
 }
 
 static int
-group_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+group_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
-    group_rec_t     recs[256];
+    int page = 1, limit = 0;
+    parse_pagination_params(query, &page, &limit);
+
+    int req_cap = 256;
+    if (limit > 0 && page > 0) {
+        int needed = page * limit;
+        if (needed > req_cap) {
+            req_cap = needed <= 4096 ? needed : 4096;
+        }
+    }
+    group_rec_t* recs = calloc((size_t)req_cap, sizeof *recs);
+    if (recs == NULL) {
+        return -1;
+    }
     const pg_ops_t* ops = pg_store_ops(adm->ps);
     int             n = 0;
-    if (ops->list_groups(ops->ctx, recs, 256, &n) != 0) {
+    if (ops->list_groups(ops->ctx, recs, req_cap, &n) != 0) {
+        free(recs);
         return finish_error(status, body, len, 500, "internal_error", "group list failed");
     }
     json_t* arr = json_array();
@@ -1708,8 +1883,14 @@ group_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
         }
         json_array_append_new(arr, o);
     }
+    free(recs);
+
+    size_t total = 0;
+    arr = paginate_json_array(arr, page, limit, &total);
+
     json_t* root = json_object();
     json_object_set_new(root, "groups", arr);
+    add_pagination_meta(root, total, page, limit);
     return finish_json(status, body, len, 200, root);
 }
 
@@ -1856,15 +2037,17 @@ struct model_agg {
 };
 
 char*
-cost_from_rows(const cost_row_t*  rows,
-               int                n_rows,
-               const model_rec_t* models,
-               int                n_models,
-               const group_rec_t* groups,
-               int                n_groups,
-               long               group_filter,
-               int                by_model,
-               int                truncated)
+cost_from_rows_paginated(const cost_row_t*  rows,
+                         int                n_rows,
+                         const model_rec_t* models,
+                         int                n_models,
+                         const group_rec_t* groups,
+                         int                n_groups,
+                         long               group_filter,
+                         int                by_model,
+                         int                truncated,
+                         int                page,
+                         int                limit)
 {
     json_t* arr = json_array();
     if (arr == NULL) {
@@ -1973,12 +2156,31 @@ cost_from_rows(const cost_row_t*  rows,
         }
     }
 
+    size_t total = 0;
+    arr = paginate_json_array(arr, page, limit, &total);
+
     json_t* root = json_object();
     json_object_set_new(root, "rows", arr);
     json_object_set_new(root, "truncated", truncated ? json_true() : json_false());
+    add_pagination_meta(root, total, page, limit);
     char* ret = json_dumps(root, JSON_COMPACT);
     json_decref(root);
     return ret;
+}
+
+char*
+cost_from_rows(const cost_row_t*  rows,
+               int                n_rows,
+               const model_rec_t* models,
+               int                n_models,
+               const group_rec_t* groups,
+               int                n_groups,
+               long               group_filter,
+               int                by_model,
+               int                truncated)
+{
+    return cost_from_rows_paginated(
+        rows, n_rows, models, n_models, groups, n_groups, group_filter, by_model, truncated, 1, 0);
 }
 
 static int
@@ -1989,6 +2191,9 @@ cost_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
     query_param(query, "from", from_str, sizeof from_str);
     query_param(query, "to", to_str, sizeof to_str);
     query_param(query, "by", by_str, sizeof by_str);
+
+    int page = 1, limit = 0;
+    parse_pagination_params(query, &page, &limit);
 
     long group_filter = -1;
     if (group_str[0] != '\0') {
@@ -2074,8 +2279,17 @@ cost_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
         return finish_error(status, body, len, 500, "internal_error", "failed to list groups");
     }
 
-    char* json_str = cost_from_rows(
-        rows, n_rows, models, n_models, groups, n_groups, group_filter, by_model, truncated);
+    char* json_str = cost_from_rows_paginated(rows,
+                                              n_rows,
+                                              models,
+                                              n_models,
+                                              groups,
+                                              n_groups,
+                                              group_filter,
+                                              by_model,
+                                              truncated,
+                                              page,
+                                              limit);
 
     for (int i = 0; i < n_models; i++) {
         model_rec_free(&models[i]);
@@ -2157,7 +2371,7 @@ admin_dispatch(admin_ctx_t* adm,
                 return key_create(adm, out_status, out_body, out_len, body);
             }
             if (strcmp(method, "GET") == 0) {
-                return key_list(adm, out_status, out_body, out_len);
+                return key_list(adm, out_status, out_body, out_len, query);
             }
         }
         if (rest[4] == '/') {
@@ -2174,7 +2388,7 @@ admin_dispatch(admin_ctx_t* adm,
                 return model_create(adm, out_status, out_body, out_len, body);
             }
             if (strcmp(method, "GET") == 0) {
-                return model_list(adm, out_status, out_body, out_len);
+                return model_list(adm, out_status, out_body, out_len, query);
             }
         }
         if (rest[6] == '/') {
@@ -2191,7 +2405,7 @@ admin_dispatch(admin_ctx_t* adm,
                 return group_create(adm, out_status, out_body, out_len, body);
             }
             if (strcmp(method, "GET") == 0) {
-                return group_list(adm, out_status, out_body, out_len);
+                return group_list(adm, out_status, out_body, out_len, query);
             }
         }
         if (rest[6] == '/') {
@@ -2208,7 +2422,7 @@ admin_dispatch(admin_ctx_t* adm,
                 return provider_create(adm, out_status, out_body, out_len, body);
             }
             if (strcmp(method, "GET") == 0) {
-                return provider_list(adm, out_status, out_body, out_len);
+                return provider_list(adm, out_status, out_body, out_len, query);
             }
         }
         if (rest[9] == '/') {

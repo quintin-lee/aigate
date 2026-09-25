@@ -388,7 +388,7 @@
           <p class="text-xs text-slate-400 mt-0.5">集中配置供应商接入点与 API 密钥，统一管理并自动同步多个模型至网关</p>
         </div>
         <div class="flex items-center space-x-3">
-          <input type="text" id="providerSearchInput" oninput="filterProvidersTable()" placeholder="搜索供应商..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
+          <input type="text" id="providerSearchInput" oninput="filterProvidersTable(true)" placeholder="搜索供应商..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
           <button onclick="openProviderModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/20 transition flex items-center space-x-1.5">
             <span>+</span>
             <span>新建供应商</span>
@@ -418,6 +418,22 @@
         <div id="providersEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
           尚未配置模型供应商，点击 <span class="text-brand-400 font-semibold cursor-pointer" onclick="openProviderModal()">+ 新建供应商</span> 添加一个。
         </div>
+        <div id="providersPagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="providersTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="providersPageSize" onchange="changePageSize('providers', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="providersPrevBtn" onclick="prevPage('providers')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="providersCurrentPage">1</span> / <span id="providersTotalPages">1</span> 页</span>
+            <button id="providersNextBtn" onclick="nextPage('providers')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -429,7 +445,7 @@
           <p class="text-xs text-slate-400 mt-0.5">配置路由与上游模型凭证</p>
         </div>
         <div class="flex items-center space-x-3">
-          <input type="text" id="modelSearchInput" oninput="filterModelsTable()" placeholder="搜索模型..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
+          <input type="text" id="modelSearchInput" oninput="filterModelsTable(true)" placeholder="搜索模型..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
           <button onclick="openModelModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/20 transition flex items-center space-x-1.5">
             <span>+</span>
             <span>注册模型</span>
@@ -458,6 +474,22 @@
         <div id="modelsEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
           尚未注册模型，点击 <span class="text-brand-400 font-semibold cursor-pointer" onclick="openModelModal()">+ 注册模型</span> 添加一个。
         </div>
+        <div id="modelsPagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="modelsTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="modelsPageSize" onchange="changePageSize('models', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="modelsPrevBtn" onclick="prevPage('models')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="modelsCurrentPage">1</span> / <span id="modelsTotalPages">1</span> 页</span>
+            <button id="modelsNextBtn" onclick="nextPage('models')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -469,7 +501,7 @@
           <p class="text-xs text-slate-400 mt-0.5">管理租户凭证、限流与模型访问控制</p>
         </div>
         <div class="flex items-center space-x-3">
-          <input type="text" id="keySearchInput" oninput="filterKeysTable()" placeholder="搜索密钥..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
+          <input type="text" id="keySearchInput" oninput="filterKeysTable(true)" placeholder="搜索密钥..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-48">
           <button onclick="openKeyModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-500/20 transition flex items-center space-x-1.5">
             <span>+</span>
             <span>创建密钥</span>
@@ -499,6 +531,22 @@
         </div>
         <div id="keysEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
           尚未签发密钥，点击 <span class="text-emerald-400 font-semibold cursor-pointer" onclick="openKeyModal()">+ 创建密钥</span> 生成一个。
+        </div>
+        <div id="keysPagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="keysTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="keysPageSize" onchange="changePageSize('keys', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="keysPrevBtn" onclick="prevPage('keys')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="keysCurrentPage">1</span> / <span id="keysTotalPages">1</span> 页</span>
+            <button id="keysNextBtn" onclick="nextPage('keys')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
         </div>
       </div>
     </div>
@@ -536,6 +584,22 @@
         </div>
         <div id="groupsEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
           暂未创建部门分组，点击 <span class="text-brand-400 font-semibold cursor-pointer" onclick="openGroupModal()">+ 新建部门分组</span> 开始管理。
+        </div>
+        <div id="groupsPagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="groupsTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="groupsPageSize" onchange="changePageSize('groups', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="groupsPrevBtn" onclick="prevPage('groups')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="groupsCurrentPage">1</span> / <span id="groupsTotalPages">1</span> 页</span>
+            <button id="groupsNextBtn" onclick="nextPage('groups')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
         </div>
       </div>
     </div>
@@ -624,6 +688,22 @@
         <div id="costEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
           选定时间范围内暂无成本消费数据。
         </div>
+        <div id="costPagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="costTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="costPageSize" onchange="changePageSize('cost', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="costPrevBtn" onclick="prevPage('cost')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="costCurrentPage">1</span> / <span id="costTotalPages">1</span> 页</span>
+            <button id="costNextBtn" onclick="nextPage('cost')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -699,6 +779,22 @@
         </div>
         <div id="usageEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
           所选条件下暂无用量记录，调整筛选条件或到调试场发起一次请求后回来查看。
+        </div>
+        <div id="usagePagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="usageTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="usagePageSize" onchange="changePageSize('usage', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="usagePrevBtn" onclick="prevPage('usage')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="usageCurrentPage">1</span> / <span id="usageTotalPages">1</span> 页</span>
+            <button id="usageNextBtn" onclick="nextPage('usage')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
         </div>
       </div>
     </div>
@@ -1132,6 +1228,84 @@
       streamAbortController: null,
     };
 
+    // --- Pagination State & Helpers ---
+    const paginationState = {
+      providers: { page: 1, limit: 10, total: 0 },
+      models: { page: 1, limit: 10, total: 0 },
+      keys: { page: 1, limit: 10, total: 0 },
+      groups: { page: 1, limit: 10, total: 0 },
+      cost: { page: 1, limit: 10, total: 0 },
+      usage: { page: 1, limit: 10, total: 0 },
+    };
+
+    function getPageSlice(key, fullList) {
+      if (!paginationState[key]) return fullList || [];
+      const p = paginationState[key];
+      p.total = (fullList && Array.isArray(fullList)) ? fullList.length : 0;
+      const totalPages = Math.max(1, Math.ceil(p.total / p.limit));
+      if (p.page > totalPages) p.page = totalPages;
+      if (p.page < 1) p.page = 1;
+      updatePaginationUI(key, totalPages);
+      const start = (p.page - 1) * p.limit;
+      return fullList ? fullList.slice(start, start + p.limit) : [];
+    }
+
+    function updatePaginationUI(key, totalPages) {
+      const p = paginationState[key];
+      if (!p) return;
+      const totalEl = document.getElementById(`${key}TotalCount`);
+      const curEl = document.getElementById(`${key}CurrentPage`);
+      const totalPagesEl = document.getElementById(`${key}TotalPages`);
+      const prevBtn = document.getElementById(`${key}PrevBtn`);
+      const nextBtn = document.getElementById(`${key}NextBtn`);
+      const sizeSelect = document.getElementById(`${key}PageSize`);
+
+      if (totalEl) totalEl.innerText = p.total.toLocaleString();
+      if (curEl) curEl.innerText = p.page;
+      if (totalPagesEl) totalPagesEl.innerText = totalPages;
+      if (prevBtn) prevBtn.disabled = (p.page <= 1);
+      if (nextBtn) nextBtn.disabled = (p.page >= totalPages);
+      if (sizeSelect && sizeSelect.value !== String(p.limit)) sizeSelect.value = String(p.limit);
+    }
+
+    function reRenderTable(key) {
+      if (key === "providers") {
+        filterProvidersTable(false);
+      } else if (key === "models") {
+        filterModelsTable(false);
+      } else if (key === "keys") {
+        filterKeysTable(false);
+      } else if (key === "groups") {
+        renderGroupsTable();
+      } else if (key === "cost") {
+        const by = document.getElementById("costByDimension")?.value || "model";
+        renderCostTable(state.costRows, by);
+      } else if (key === "usage") {
+        renderUsageTable();
+      }
+    }
+
+    function changePageSize(key, val) {
+      if (!paginationState[key]) return;
+      paginationState[key].limit = parseInt(val, 10) || 10;
+      paginationState[key].page = 1;
+      reRenderTable(key);
+    }
+
+    function prevPage(key) {
+      if (!paginationState[key]) return;
+      if (paginationState[key].page > 1) {
+        paginationState[key].page--;
+        reRenderTable(key);
+      }
+    }
+
+    function nextPage(key) {
+      if (!paginationState[key]) return;
+      paginationState[key].page++;
+      reRenderTable(key);
+    }
+
     // --- Init & Auth ---
     window.addEventListener("DOMContentLoaded", () => {
       updateTokenUI();
@@ -1447,6 +1621,7 @@
       if (!resp || !resp.ok) return;
       const data = await resp.json();
       state.providers = data.providers || [];
+      paginationState.providers.page = 1;
       renderProvidersTable();
     }
 
@@ -1458,11 +1633,13 @@
 
       if (!list || list.length === 0) {
         empty.classList.remove("hidden");
+        getPageSlice("providers", []);
         return;
       }
       empty.classList.add("hidden");
 
-      list.forEach(p => {
+      const pageItems = getPageSlice("providers", list);
+      pageItems.forEach(p => {
         const id = p.id;
         const name = p.name || "unknown";
         const type = p.provider_type || "openai";
@@ -1524,8 +1701,9 @@
       });
     }
 
-    function filterProvidersTable() {
-      const q = (document.getElementById("providerSearchInput").value || "").toLowerCase();
+    function filterProvidersTable(resetPage = false) {
+      if (resetPage) paginationState.providers.page = 1;
+      const q = (document.getElementById("providerSearchInput")?.value || "").toLowerCase();
       const filtered = state.providers.filter(p => {
         const name = (p.name || "").toLowerCase();
         const type = (p.provider_type || "").toLowerCase();
@@ -1662,6 +1840,7 @@
       if (!resp || !resp.ok) return;
       const data = await resp.json();
       state.models = data.models || data.data || [];
+      paginationState.models.page = 1;
       renderModelsTable();
       populateModelFilters();
     }
@@ -1673,11 +1852,13 @@
 
       if (!list || list.length === 0) {
         empty.classList.remove("hidden");
+        getPageSlice("models", []);
         return;
       }
       empty.classList.add("hidden");
 
-      list.forEach(m => {
+      const pageItems = getPageSlice("models", list);
+      pageItems.forEach(m => {
         const name = m.name || m.model_name || "unknown";
         const lbPolicy = m.lb_policy || "priority";
         const isWrr = lbPolicy === "weighted_round_robin" || lbPolicy === "weighted";
@@ -1758,8 +1939,9 @@
       });
     }
 
-    function filterModelsTable() {
-      const q = (document.getElementById("modelSearchInput").value || "").toLowerCase();
+    function filterModelsTable(resetPage = false) {
+      if (resetPage) paginationState.models.page = 1;
+      const q = (document.getElementById("modelSearchInput")?.value || "").toLowerCase();
       const filtered = state.models.filter(m => {
         const name = (m.name || m.model_name || "").toLowerCase();
         const policy = (m.lb_policy || "").toLowerCase();
@@ -2070,6 +2252,7 @@
       if (!resp || !resp.ok) return;
       const data = await resp.json();
       state.keys = data.keys || data.data || [];
+      paginationState.keys.page = 1;
       renderKeysTable();
     }
 
@@ -2080,11 +2263,13 @@
 
       if (!list || list.length === 0) {
         empty.classList.remove("hidden");
+        getPageSlice("keys", []);
         return;
       }
       empty.classList.add("hidden");
 
-      list.forEach(k => {
+      const pageItems = getPageSlice("keys", list);
+      pageItems.forEach(k => {
         const allowed = (!k.allowed_models || k.allowed_models.length === 0)
           ? `<span class="px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300">全部模型</span>`
           : k.allowed_models.map(m => `<span class="px-1.5 py-0.5 rounded text-[10px] bg-indigo-500/10 text-indigo-300 mr-1">${m}</span>`).join("");
@@ -2121,10 +2306,11 @@
       });
     }
 
-    function filterKeysTable() {
-      const q = (document.getElementById("keySearchInput").value || "").toLowerCase();
+    function filterKeysTable(resetPage = false) {
+      if (resetPage) paginationState.keys.page = 1;
+      const q = (document.getElementById("keySearchInput")?.value || "").toLowerCase();
       const filtered = state.keys.filter(k =>
-        k.name.toLowerCase().includes(q) ||
+        (k.name || "").toLowerCase().includes(q) ||
         String(k.key_id).includes(q)
       );
       renderKeysTable(filtered);
@@ -2247,6 +2433,7 @@
       if (!resp || !resp.ok) return;
       const data = await resp.json();
       state.groups = data.groups || [];
+      paginationState.groups.page = 1;
       renderGroupsTable();
       populateCostGroupFilters();
     }
@@ -2259,11 +2446,13 @@
 
       if (!list || list.length === 0) {
         empty.classList.remove("hidden");
+        getPageSlice("groups", []);
         return;
       }
       empty.classList.add("hidden");
 
-      list.forEach(g => {
+      const pageItems = getPageSlice("groups", list);
+      pageItems.forEach(g => {
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
         tr.innerHTML = `
@@ -2382,6 +2571,7 @@
       if (!resp || !resp.ok) return;
       const data = await resp.json();
       state.costRows = data.rows || [];
+      paginationState.cost.page = 1;
       renderCostTable(state.costRows, by);
     }
 
@@ -2423,6 +2613,7 @@
 
       if (!rows || rows.length === 0) {
         empty.classList.remove("hidden");
+        getPageSlice("cost", []);
       } else {
         empty.classList.add("hidden");
         rows.forEach(r => {
@@ -2433,7 +2624,10 @@
           if (r.cost_cents != null) {
             sumDollars += r.cost_cents / 100.0;
           }
+        });
 
+        const pageItems = getPageSlice("cost", rows);
+        pageItems.forEach(r => {
           const costText = r.cost_cents != null
             ? `<span class="text-emerald-400 font-semibold">$${(r.cost_cents / 100.0).toFixed(4)}</span>`
             : `<span class="text-slate-500">未定价</span>`;
@@ -2530,6 +2724,7 @@
 
       const data = await resp.json();
       state.usageRows = data.usage || data.data || [];
+      paginationState.usage.page = 1;
       renderUsageTable();
       if (!silent) {
         showToast("用量查询已更新", "info");
@@ -2543,11 +2738,13 @@
 
       if (!state.usageRows || state.usageRows.length === 0) {
         empty.classList.remove("hidden");
+        getPageSlice("usage", []);
         return;
       }
       empty.classList.add("hidden");
 
-      state.usageRows.forEach(r => {
+      const pageItems = getPageSlice("usage", state.usageRows);
+      pageItems.forEach(r => {
         const total = (r.prompt_tokens || 0) + (r.completion_tokens || 0);
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";

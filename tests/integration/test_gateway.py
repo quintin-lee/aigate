@@ -1403,6 +1403,75 @@ def test_groups_and_cost_attribution(gateway):
     assert del_resp.status_code == 200, del_resp.text
 
 
+def test_list_pagination(gateway):
+    """Test pagination across all admin collection endpoints (P0-P2 requirement)."""
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Models pagination
+    r = requests.get(f"{base_url}/admin/v1/models?page=1&limit=2", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "total" in data
+    assert data["page"] == 1
+    assert data["limit"] == 2
+    assert len(data.get("models", [])) <= 2
+
+    # 2. Keys pagination
+    r = requests.get(f"{base_url}/admin/v1/keys?page=1&limit=2", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "total" in data
+    assert data["page"] == 1
+    assert data["limit"] == 2
+    assert len(data.get("keys", [])) <= 2
+
+    # 3. Providers pagination
+    r = requests.get(f"{base_url}/admin/v1/providers?page=1&limit=2", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "total" in data
+    assert data["page"] == 1
+    assert data["limit"] == 2
+    assert len(data.get("providers", [])) <= 2
+
+    # 4. Groups pagination
+    r = requests.get(f"{base_url}/admin/v1/groups?page=1&limit=2", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "total" in data
+    assert data["page"] == 1
+    assert data["limit"] == 2
+    assert len(data.get("groups", [])) <= 2
+
+    # 5. Usage & Usage Requests pagination
+    r = requests.get(f"{base_url}/admin/v1/usage?page=1&limit=2", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "total" in data
+    assert data["page"] == 1
+    assert data["limit"] == 2
+
+    r = requests.get(f"{base_url}/admin/v1/usage/requests?page=1&limit=2", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "total" in data
+    assert data["page"] == 1
+    assert data["limit"] == 2
+
+    # 6. Cost pagination
+    r = requests.get(f"{base_url}/admin/v1/cost?page=1&limit=2", headers=admin_headers)
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "total" in data
+    assert data["page"] == 1
+    assert data["limit"] == 2
+
+
 def test_admin_lockout_429(gateway):
     """10 failed admin auth attempts from one IP lock that IP out (429).
 

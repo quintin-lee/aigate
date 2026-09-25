@@ -202,10 +202,12 @@ main(void)
     extern void test_admin_models_pricing(void);
     extern void test_cost_from_rows_pure(void);
     extern void test_admin_cost_endpoint(void);
+    extern void test_admin_pagination(void);
     test_register("admin_groups_crud", test_admin_groups_crud);
     test_register("admin_models_pricing", test_admin_models_pricing);
     test_register("cost_from_rows_pure", test_cost_from_rows_pure);
     test_register("admin_cost_endpoint", test_admin_cost_endpoint);
+    test_register("admin_pagination", test_admin_pagination);
 
     extern void test_upstream_stream_normal(void);
     extern void test_upstream_stream_silence_timeout(void);
