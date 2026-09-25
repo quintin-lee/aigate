@@ -76,6 +76,7 @@ main(void)
     extern void test_um_drain_fail_requeue(void);
     extern void test_um_provider_metering(void);
     extern void test_um_request_ring(void);
+    extern void test_um_high_volume_drain(void);
     extern void test_metrics_acl(void);
     extern void test_metrics_failover(void);
     extern void test_core_pipeline(void);
@@ -130,6 +131,7 @@ main(void)
     test_register("um_drain_fail_requeue", test_um_drain_fail_requeue);
     test_register("um_provider_metering", test_um_provider_metering);
     test_register("um_request_ring", test_um_request_ring);
+    test_register("um_high_volume_drain", test_um_high_volume_drain);
     test_register("metrics_acl", test_metrics_acl);
     test_register("metrics_failover", test_metrics_failover);
     test_register("core_pipeline", test_core_pipeline);
@@ -138,7 +140,6 @@ main(void)
     test_register("core_upstream_400_passthrough", test_core_upstream_400_passthrough);
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
-
 
     extern void test_probe_plan_openai_family(void);
     extern void test_probe_plan_anthropic_suffixes(void);

@@ -1065,51 +1065,102 @@ pq_delete_provider(void* vctx, long id)
     return n > 0 ? 0 : -1;
 }
 
+#define FLUSH_USAGE_CHUNK 64
+
 static int
 pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
 {
-    struct pq_ctx*    px = vctx;
-    static const char q[] =
-        "INSERT INTO usage_daily(key_id, model_name, day, requests, prompt_tokens, "
-        "completion_tokens, errors, cached_prompt_tokens) "
-        "VALUES($1, $2, to_date($3, 'YYYY-MM-DD'), $4, $5, $6, $7, $8) "
-        "ON CONFLICT (key_id, model_name, day) DO UPDATE SET "
-        "requests = usage_daily.requests + EXCLUDED.requests, "
-        "prompt_tokens = usage_daily.prompt_tokens + EXCLUDED.prompt_tokens, "
-        "completion_tokens = usage_daily.completion_tokens + EXCLUDED.completion_tokens, "
-        "errors = usage_daily.errors + EXCLUDED.errors, "
-        "cached_prompt_tokens = usage_daily.cached_prompt_tokens + EXCLUDED.cached_prompt_tokens";
-    int rc = 0;
-
+    struct pq_ctx* px = vctx;
     if (n <= 0) {
         return 0;
     }
 
-    char        day[24], num[32], n_req[32], n_ptok[32], n_ctok[32], n_err[32], n_cptok[32];
-    const char* vals[8];
-    int         plens[8] = {0};
+    char        day[FLUSH_USAGE_CHUNK][24];
+    char        num[FLUSH_USAGE_CHUNK][32];
+    char        n_req[FLUSH_USAGE_CHUNK][32];
+    char        n_ptok[FLUSH_USAGE_CHUNK][32];
+    char        n_ctok[FLUSH_USAGE_CHUNK][32];
+    char        n_err[FLUSH_USAGE_CHUNK][32];
+    char        n_cptok[FLUSH_USAGE_CHUNK][32];
+    const char* vals[FLUSH_USAGE_CHUNK * 8];
+    char        sql[8192];
+    int         rc = 0;
 
     pq_lock(px);
     PQclear(PQexec(px->db, "BEGIN"));
-    for (int i = 0; i < n; i++) {
-        fmt_day(rows[i].day, day);
-        snprintf(num, sizeof num, "%ld", rows[i].key_id);
-        vals[0] = num;
-        vals[1] = rows[i].model_name;
-        vals[2] = day;
-        snprintf(n_req, sizeof n_req, "%ld", rows[i].requests);
-        vals[3] = n_req;
-        snprintf(n_ptok, sizeof n_ptok, "%ld", rows[i].prompt_tokens);
-        vals[4] = n_ptok;
-        snprintf(n_ctok, sizeof n_ctok, "%ld", rows[i].completion_tokens);
-        vals[5] = n_ctok;
-        snprintf(n_err, sizeof n_err, "%ld", rows[i].errors);
-        vals[6] = n_err;
-        snprintf(n_cptok, sizeof n_cptok, "%ld", rows[i].cached_prompt_tokens);
-        vals[7] = n_cptok;
-        PGresult* res = PQexecParams(px->db, q, 8, NULL, vals, plens, NULL, 0);
+
+    for (int off = 0; off < n; off += FLUSH_USAGE_CHUNK) {
+        int chunk_n = n - off;
+        if (chunk_n > FLUSH_USAGE_CHUNK) {
+            chunk_n = FLUSH_USAGE_CHUNK;
+        }
+
+        int sql_off = snprintf(sql,
+                               sizeof sql,
+                               "INSERT INTO usage_daily(key_id, model_name, day, requests, "
+                               "prompt_tokens, completion_tokens, errors, cached_prompt_tokens) "
+                               "VALUES ");
+        for (int i = 0; i < chunk_n; i++) {
+            const usage_row_t* r = &rows[off + i];
+            int                pbase = i * 8;
+            fmt_day(r->day, day[i]);
+            snprintf(num[i], sizeof num[i], "%ld", r->key_id);
+            snprintf(n_req[i], sizeof n_req[i], "%ld", r->requests);
+            snprintf(n_ptok[i], sizeof n_ptok[i], "%ld", r->prompt_tokens);
+            snprintf(n_ctok[i], sizeof n_ctok[i], "%ld", r->completion_tokens);
+            snprintf(n_err[i], sizeof n_err[i], "%ld", r->errors);
+            snprintf(n_cptok[i], sizeof n_cptok[i], "%ld", r->cached_prompt_tokens);
+
+            vals[pbase + 0] = num[i];
+            vals[pbase + 1] = r->model_name;
+            vals[pbase + 2] = day[i];
+            vals[pbase + 3] = n_req[i];
+            vals[pbase + 4] = n_ptok[i];
+            vals[pbase + 5] = n_ctok[i];
+            vals[pbase + 6] = n_err[i];
+            vals[pbase + 7] = n_cptok[i];
+
+            int w = snprintf(sql + sql_off,
+                             sizeof sql - (size_t)sql_off,
+                             "%s($%d,$%d,to_date($%d,'YYYY-MM-DD'),$%d,$%d,$%d,$%d,$%d)",
+                             i > 0 ? "," : "",
+                             pbase + 1,
+                             pbase + 2,
+                             pbase + 3,
+                             pbase + 4,
+                             pbase + 5,
+                             pbase + 6,
+                             pbase + 7,
+                             pbase + 8);
+            if (w < 0 || (size_t)w >= sizeof sql - (size_t)sql_off) {
+                rc = -1;
+                break;
+            }
+            sql_off += w;
+        }
+        if (rc != 0) {
+            PQclear(PQexec(px->db, "ROLLBACK"));
+            break;
+        }
+
+        static const char on_conflict[] =
+            " ON CONFLICT (key_id, model_name, day) DO UPDATE SET "
+            "requests = usage_daily.requests + EXCLUDED.requests, "
+            "prompt_tokens = usage_daily.prompt_tokens + EXCLUDED.prompt_tokens, "
+            "completion_tokens = usage_daily.completion_tokens + EXCLUDED.completion_tokens, "
+            "errors = usage_daily.errors + EXCLUDED.errors, "
+            "cached_prompt_tokens = usage_daily.cached_prompt_tokens + "
+            "EXCLUDED.cached_prompt_tokens";
+        int w = snprintf(sql + sql_off, sizeof sql - (size_t)sql_off, "%s", on_conflict);
+        if (w < 0 || (size_t)w >= sizeof sql - (size_t)sql_off) {
+            PQclear(PQexec(px->db, "ROLLBACK"));
+            rc = -1;
+            break;
+        }
+
+        PGresult* res = PQexecParams(px->db, sql, chunk_n * 8, NULL, vals, NULL, NULL, 0);
         if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
-            AIGATE_LOG_ERROR("pg flush_usage: %s",
+            AIGATE_LOG_ERROR("pg flush_usage batch: %s",
                              res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
             PQclear(res);
             PQclear(PQexec(px->db, "ROLLBACK"));
@@ -1118,7 +1169,10 @@ pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
         }
         PQclear(res);
     }
-    PQclear(PQexec(px->db, "COMMIT"));
+
+    if (rc == 0) {
+        PQclear(PQexec(px->db, "COMMIT"));
+    }
     pq_unlock(px);
     return rc;
 }
@@ -1181,46 +1235,89 @@ pq_query_usage(void*        vctx,
     return 0;
 }
 
+#define FLUSH_REQ_CHUNK 64
+
 static int
 pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
 {
-    struct pq_ctx*    px = vctx;
-    static const char q[] =
-        "INSERT INTO usage_requests(key_id, model_name, provider, http_status, "
-        "prompt_tokens, completion_tokens, cached_prompt_tokens, latency_ns, ts) "
-        "VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9)";
-    int rc = 0;
-
+    struct pq_ctx* px = vctx;
     if (n <= 0) {
         return 0;
     }
 
-    char        num[32], st[16], pt[32], ct[32], cpt[32], lat[32], tsb[32];
-    const char* vals[9];
-    int         plens[9] = {0};
+    char        num[FLUSH_REQ_CHUNK][32];
+    char        st[FLUSH_REQ_CHUNK][16];
+    char        pt[FLUSH_REQ_CHUNK][32];
+    char        ct[FLUSH_REQ_CHUNK][32];
+    char        cpt[FLUSH_REQ_CHUNK][32];
+    char        lat[FLUSH_REQ_CHUNK][32];
+    char        tsb[FLUSH_REQ_CHUNK][32];
+    const char* vals[FLUSH_REQ_CHUNK * 9];
+    char        sql[8192];
+    int         rc = 0;
 
     pq_lock(px);
     PQclear(PQexec(px->db, "BEGIN"));
-    for (int i = 0; i < n; i++) {
-        snprintf(num, sizeof num, "%ld", rows[i].key_id);
-        vals[0] = num;
-        vals[1] = rows[i].model_name;
-        vals[2] = rows[i].provider;
-        snprintf(st, sizeof st, "%d", rows[i].http_status);
-        vals[3] = st;
-        snprintf(pt, sizeof pt, "%ld", rows[i].prompt_tokens);
-        vals[4] = pt;
-        snprintf(ct, sizeof ct, "%ld", rows[i].completion_tokens);
-        vals[5] = ct;
-        snprintf(cpt, sizeof cpt, "%ld", rows[i].cached_prompt_tokens);
-        vals[6] = cpt;
-        snprintf(lat, sizeof lat, "%llu", (unsigned long long)rows[i].latency_ns);
-        vals[7] = lat;
-        snprintf(tsb, sizeof tsb, "%ld", (long)rows[i].ts);
-        vals[8] = tsb;
-        PGresult* res = PQexecParams(px->db, q, 9, NULL, vals, plens, NULL, 0);
+
+    for (int off = 0; off < n; off += FLUSH_REQ_CHUNK) {
+        int chunk_n = n - off;
+        if (chunk_n > FLUSH_REQ_CHUNK) {
+            chunk_n = FLUSH_REQ_CHUNK;
+        }
+
+        int sql_off = snprintf(sql,
+                               sizeof sql,
+                               "INSERT INTO usage_requests(key_id, model_name, provider, "
+                               "http_status, prompt_tokens, completion_tokens, "
+                               "cached_prompt_tokens, latency_ns, ts) VALUES ");
+        for (int i = 0; i < chunk_n; i++) {
+            const usage_request_row_t* r = &rows[off + i];
+            int                        pbase = i * 9;
+            snprintf(num[i], sizeof num[i], "%ld", r->key_id);
+            snprintf(st[i], sizeof st[i], "%d", r->http_status);
+            snprintf(pt[i], sizeof pt[i], "%ld", r->prompt_tokens);
+            snprintf(ct[i], sizeof ct[i], "%ld", r->completion_tokens);
+            snprintf(cpt[i], sizeof cpt[i], "%ld", r->cached_prompt_tokens);
+            snprintf(lat[i], sizeof lat[i], "%llu", (unsigned long long)r->latency_ns);
+            snprintf(tsb[i], sizeof tsb[i], "%ld", (long)r->ts);
+
+            vals[pbase + 0] = num[i];
+            vals[pbase + 1] = r->model_name;
+            vals[pbase + 2] = r->provider;
+            vals[pbase + 3] = st[i];
+            vals[pbase + 4] = pt[i];
+            vals[pbase + 5] = ct[i];
+            vals[pbase + 6] = cpt[i];
+            vals[pbase + 7] = lat[i];
+            vals[pbase + 8] = tsb[i];
+
+            int w = snprintf(sql + sql_off,
+                             sizeof sql - (size_t)sql_off,
+                             "%s($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+                             i > 0 ? "," : "",
+                             pbase + 1,
+                             pbase + 2,
+                             pbase + 3,
+                             pbase + 4,
+                             pbase + 5,
+                             pbase + 6,
+                             pbase + 7,
+                             pbase + 8,
+                             pbase + 9);
+            if (w < 0 || (size_t)w >= sizeof sql - (size_t)sql_off) {
+                rc = -1;
+                break;
+            }
+            sql_off += w;
+        }
+        if (rc != 0) {
+            PQclear(PQexec(px->db, "ROLLBACK"));
+            break;
+        }
+
+        PGresult* res = PQexecParams(px->db, sql, chunk_n * 9, NULL, vals, NULL, NULL, 0);
         if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
-            AIGATE_LOG_ERROR("pg flush_requests: %s",
+            AIGATE_LOG_ERROR("pg flush_requests batch: %s",
                              res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
             PQclear(res);
             PQclear(PQexec(px->db, "ROLLBACK"));
@@ -1229,7 +1326,10 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
         }
         PQclear(res);
     }
-    PQclear(PQexec(px->db, "COMMIT"));
+
+    if (rc == 0) {
+        PQclear(PQexec(px->db, "COMMIT"));
+    }
     pq_unlock(px);
     return rc;
 }

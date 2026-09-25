@@ -322,3 +322,42 @@ TEST_CASE(test_um_request_ring)
     usage_meter_free(um);
     pg_store_close(ps);
 }
+
+TEST_CASE(test_um_high_volume_drain)
+{
+    struct um_db db;
+    memset(&db, 0, sizeof db);
+    pg_store_t* ps = open_um_store(&db);
+    TEST_ASSERT(ps != NULL, "store open");
+    usage_meter_t* um = usage_meter_new(ps, NULL, 0);
+    TEST_ASSERT(um != NULL, "meter new");
+
+    /* Record 1200 requests (exceeding UM_REQ_BATCH=512) */
+    const int total_insert = 1200;
+    for (int i = 0; i < total_insert; i++) {
+        um_record(um, 100 + i, "gpt-4o", 200, 10, 20, 0, 50000000, "openai");
+    }
+    TEST_ASSERT(um_requests_dropped(um) == 0, "no rows dropped during 1200 records");
+
+    /* Drain in chunks of 512 (simulating worker loop) */
+    usage_request_row_t rreqs[512];
+    int                 total_drained = 0;
+    int                 batch_count = 0;
+    while (1) {
+        int rn = 0;
+        int rc = um_drain_requests(um, rreqs, 512, &rn);
+        TEST_ASSERT(rc == 0, "drain requests ok");
+        if (rn == 0) {
+            break;
+        }
+        total_drained += rn;
+        batch_count++;
+        TEST_ASSERT(um_release_requests(um, rn) == 0, "release requests ok");
+    }
+
+    TEST_ASSERT(total_drained == total_insert, "all 1200 rows drained (got %d)", total_drained);
+    TEST_ASSERT(batch_count == 3, "expected 3 batches (512 + 512 + 176), got %d", batch_count);
+
+    usage_meter_free(um);
+    pg_store_close(ps);
+}

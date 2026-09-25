@@ -98,24 +98,26 @@ prov_slot(usage_meter_t* um, const char* p)
 }
 
 /* Drain the audit ring (copy + advance) and flush one batch; re-queue the
- * batch on flush failure so rows are retried next tick. */
-static void
+ * batch on flush failure so rows are retried next tick. Returns rows flushed, or -1 on error. */
+static int
 um_flush_request_batch(usage_meter_t* um, usage_request_row_t* rreqs, int rcap)
 {
     if (um->ps == NULL || rreqs == NULL || um->req_ring == NULL) {
-        return;
+        return 0;
     }
     int rn = 0;
     if (um_drain_requests(um, rreqs, rcap, &rn) != 0 || rn == 0) {
-        return;
+        return 0;
     }
     const pg_ops_t* ops = pg_store_ops(um->ps);
     if (ops != NULL && ops->flush_usage_requests != NULL &&
         ops->flush_usage_requests(ops->ctx, rreqs, rn) == 0) {
         um_release_requests(um, rn);
+        return rn;
     } else {
         um_requeue_requests(um, rn);
         AIGATE_LOG_WARN("usage request flush failed; %d rows requeued", rn);
+        return -1;
     }
 }
 static void*
@@ -159,7 +161,12 @@ worker_main(void* arg)
             }
             AIGATE_LOG_WARN("usage flush failed, %d rows re-queued", n);
         }
-        um_flush_request_batch(um, rreqs, UM_REQ_BATCH);
+        while (!um->stop) {
+            int flushed = um_flush_request_batch(um, rreqs, UM_REQ_BATCH);
+            if (flushed < UM_REQ_BATCH) {
+                break;
+            }
+        }
     }
     free(rows);
     free(rreqs);
@@ -397,9 +404,11 @@ um_unflush(usage_meter_t* um, const usage_row_t* rows, int n)
     for (int i = 0; i < n; i++) {
         const usage_row_t* r = &rows[i];
         /* find-or-create the slot; an existing slot's day wins over the row's */
-        int found = 0;
+        int      found = 0;
+        uint64_t slot = acc_hash(r->key_id, r->model_name) & (UM_ACC_CAP - 1);
         for (int s = 0; s < UM_ACC_CAP; s++) {
-            um_acc_t* a = &um->accs[s];
+            int       idx = (int)((slot + (uint64_t)s) & (UM_ACC_CAP - 1));
+            um_acc_t* a = &um->accs[idx];
             if (a->in_use && a->key_id == r->key_id && strcmp(a->model, r->model_name) == 0) {
                 a->requests += r->requests;
                 a->prompt += r->prompt_tokens;
@@ -409,7 +418,7 @@ um_unflush(usage_meter_t* um, const usage_row_t* rows, int n)
                 found = 1;
                 break;
             }
-            if (!found && !a->in_use) {
+            if (!a->in_use) {
                 a->in_use = 1;
                 a->key_id = r->key_id;
                 snprintf(a->model, sizeof a->model, "%s", r->model_name);
