@@ -13,9 +13,13 @@
 
 /** @brief Rate limiter state; created once per process. */
 typedef struct ratelimit ratelimit_t;
+struct redis_pool;
 
 /** @brief New limiter with a default table; grows on demand. */
 ratelimit_t* ratelimit_new(void);
+
+/** @brief Configure shared Redis connection pool (enables distributed rate limiting). */
+void ratelimit_set_redis_pool(ratelimit_t* rl, struct redis_pool* pool);
 
 /** @brief Free the limiter and all buckets. */
 void ratelimit_free(ratelimit_t* rl);

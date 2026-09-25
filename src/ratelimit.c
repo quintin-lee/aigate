@@ -5,9 +5,13 @@
  *  with linear probing, sized to a power of two.
  */
 #include "ratelimit.h"
+#include "redis_client.h"
+#include "redis_pool.h"
+#include "redis_scripts.h"
 
 #include <pthread.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -27,6 +31,9 @@ struct ratelimit {
     struct bucket*  b;
     size_t          cap;
     size_t          count;
+    redis_pool_t*   pool;
+    char            sha_qps[48];
+    char            sha_quota[48];
 };
 
 static uint64_t
@@ -95,6 +102,25 @@ ratelimit_free(ratelimit_t* rl)
     free(rl);
 }
 
+void
+ratelimit_set_redis_pool(ratelimit_t* rl, redis_pool_t* pool)
+{
+    if (rl == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&rl->mtx);
+    rl->pool = pool;
+    if (pool != NULL) {
+        redisContext* c = redis_pool_acquire(pool);
+        if (c != NULL) {
+            redis_script_load(c, SCRIPT_QPS_TOKEN_BUCKET, rl->sha_qps);
+            redis_script_load(c, SCRIPT_DAILY_QUOTA_CONSUME, rl->sha_quota);
+            redis_pool_release(pool, c);
+        }
+    }
+    pthread_mutex_unlock(&rl->mtx);
+}
+
 /* @invariant caller holds rl->mtx. */
 static struct bucket*
 find_or_make(ratelimit_t* rl, long key_id)
@@ -142,6 +168,69 @@ find_or_make(ratelimit_t* rl, long key_id)
 int
 rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms)
 {
+    if (rl == NULL) {
+        if (retry_ms != NULL) {
+            *retry_ms = -1;
+        }
+        return -1;
+    }
+
+    if (rl->pool != NULL) {
+        if (qps <= 0) {
+            return 0;
+        }
+        redisContext* c = redis_pool_acquire(rl->pool);
+        if (c == NULL) {
+            if (retry_ms != NULL) {
+                *retry_ms = -1;
+            }
+            return -1;
+        }
+
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        uint64_t now_ms = (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
+
+        char key_buf[64];
+        snprintf(key_buf, sizeof(key_buf), "aigate:rl:qps:%ld", key_id);
+        const char* keys[1] = { key_buf };
+
+        char now_buf[32], qps_buf[32], cap_buf[32], ttl_buf[16];
+        snprintf(now_buf, sizeof(now_buf), "%llu", (unsigned long long)now_ms);
+        snprintf(qps_buf, sizeof(qps_buf), "%d", qps);
+        snprintf(cap_buf, sizeof(cap_buf), "%d", qps);
+        snprintf(ttl_buf, sizeof(ttl_buf), "3");
+
+        const char* argv[4] = { now_buf, qps_buf, cap_buf, ttl_buf };
+        redisReply* reply =
+            redis_eval_sha(c, rl->sha_qps, SCRIPT_QPS_TOKEN_BUCKET, 1, keys, argv, 4);
+        if (reply == NULL || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||
+            reply->element[0]->type != REDIS_REPLY_INTEGER ||
+            reply->element[1]->type != REDIS_REPLY_INTEGER) {
+            if (reply != NULL) {
+                freeReplyObject(reply);
+            }
+            redis_pool_release(rl->pool, c);
+            if (retry_ms != NULL) {
+                *retry_ms = -1;
+            }
+            return -1;
+        }
+
+        long status = reply->element[0]->integer;
+        long wait_ms = reply->element[1]->integer;
+        freeReplyObject(reply);
+        redis_pool_release(rl->pool, c);
+
+        if (status == 1) {
+            return 0;
+        }
+        if (retry_ms != NULL) {
+            *retry_ms = wait_ms;
+        }
+        return -1;
+    }
+
     struct bucket* bt;
     pthread_mutex_lock(&rl->mtx);
     bt = find_or_make(rl, key_id);
@@ -189,6 +278,50 @@ rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms)
 int
 rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
 {
+    if (rl == NULL) {
+        return -1;
+    }
+
+    if (rl->pool != NULL) {
+        if (daily_quota <= 0 && tokens <= 0) {
+            return 0;
+        }
+        redisContext* c = redis_pool_acquire(rl->pool);
+        if (c == NULL) {
+            return -1;
+        }
+
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        time_t day_epoch = ts.tv_sec - (ts.tv_sec % 86400);
+
+        char key_buf[64];
+        snprintf(key_buf, sizeof(key_buf), "aigate:quota:%ld:%ld", key_id, (long)day_epoch);
+        const char* keys[1] = { key_buf };
+
+        char tokens_buf[32], quota_buf[32], ttl_buf[16];
+        snprintf(tokens_buf, sizeof(tokens_buf), "%ld", tokens);
+        snprintf(quota_buf, sizeof(quota_buf), "%ld", daily_quota);
+        snprintf(ttl_buf, sizeof(ttl_buf), "172800");
+
+        const char* argv[3] = { tokens_buf, quota_buf, ttl_buf };
+        redisReply* reply =
+            redis_eval_sha(c, rl->sha_quota, SCRIPT_DAILY_QUOTA_CONSUME, 1, keys, argv, 3);
+        if (reply == NULL || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||
+            reply->element[0]->type != REDIS_REPLY_INTEGER) {
+            if (reply != NULL) {
+                freeReplyObject(reply);
+            }
+            redis_pool_release(rl->pool, c);
+            return -1;
+        }
+
+        long status = reply->element[0]->integer;
+        freeReplyObject(reply);
+        redis_pool_release(rl->pool, c);
+        return (status == 0) ? 0 : -1;
+    }
+
     struct bucket* bt;
     int            rc = 0;
     pthread_mutex_lock(&rl->mtx);
@@ -208,6 +341,45 @@ rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
 long
 rl_remaining_daily(ratelimit_t* rl, long key_id, long daily_quota)
 {
+    if (rl == NULL) {
+        return LONG_MIN;
+    }
+
+    if (rl->pool != NULL) {
+        if (daily_quota <= 0) {
+            return LONG_MAX;
+        }
+        redisContext* c = redis_pool_acquire(rl->pool);
+        if (c == NULL) {
+            return LONG_MIN;
+        }
+
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        time_t day_epoch = ts.tv_sec - (ts.tv_sec % 86400);
+
+        char key_buf[64];
+        snprintf(key_buf, sizeof(key_buf), "aigate:quota:%ld:%ld", key_id, (long)day_epoch);
+
+        redisReply* reply = (redisReply*)redisCommand(c, "GET %s", key_buf);
+        if (reply == NULL || reply->type == REDIS_REPLY_ERROR) {
+            if (reply != NULL) {
+                freeReplyObject(reply);
+            }
+            redis_pool_release(rl->pool, c);
+            return LONG_MIN;
+        }
+
+        long rem = daily_quota;
+        if (reply->type == REDIS_REPLY_STRING) {
+            long used = strtol(reply->str, NULL, 10);
+            rem = daily_quota - used;
+        }
+        freeReplyObject(reply);
+        redis_pool_release(rl->pool, c);
+        return rem;
+    }
+
     struct bucket* bt;
     long           rem;
     pthread_mutex_lock(&rl->mtx);

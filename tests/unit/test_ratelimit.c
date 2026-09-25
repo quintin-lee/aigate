@@ -2,6 +2,7 @@
  *  @brief Token-bucket QPS + daily quota tests, incl. concurrency. */
 #include "run_tests.h"
 #include "ratelimit.h"
+#include "redis_pool.h"
 #include <pthread.h>
 #include <unistd.h>
 
@@ -116,5 +117,31 @@ TEST_CASE(test_rl_concurrent_smoke)
     }
     /* no crash + buckets consistent: remaining daily is LONG_MAX (no quota) */
     TEST_ASSERT(rl_remaining_daily(rl, 1, 0) == LONG_MAX, "daily untouched");
+    ratelimit_free(rl);
+}
+
+TEST_CASE(test_rl_redis_fail_closed)
+{
+    ratelimit_t* rl = ratelimit_new();
+    TEST_ASSERT(rl != NULL, "new");
+
+    /* Create pool with invalid/offline endpoint */
+    redis_pool_t* pool = redis_pool_create("redis://127.0.0.1:65530", 2, 50);
+    if (pool != NULL) {
+        ratelimit_set_redis_pool(rl, pool);
+
+        long retry = 0;
+        int  rc = rl_allow_request(rl, 1, 10, &retry);
+        TEST_ASSERT(rc == -1, "rl_allow_request fail-closed on redis down");
+        TEST_ASSERT(retry == -1, "retry_ms is -1 on redis error");
+
+        long rem = rl_remaining_daily(rl, 1, 100);
+        TEST_ASSERT(rem == LONG_MIN, "rl_remaining_daily returns LONG_MIN on redis down");
+
+        int res = rl_reserve_tokens(rl, 1, 100, 10);
+        TEST_ASSERT(res == -1, "rl_reserve_tokens returns -1 on redis down");
+
+        redis_pool_destroy(pool);
+    }
     ratelimit_free(rl);
 }

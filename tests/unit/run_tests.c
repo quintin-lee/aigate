@@ -62,6 +62,7 @@ main(void)
     extern void test_rl_daily_quota(void);
     extern void test_rl_reset_day(void);
     extern void test_rl_concurrent_smoke(void);
+    extern void test_rl_redis_fail_closed(void);
     extern void test_model_router_env_key(void);
     extern void test_model_router_missing_env_key(void);
     extern void test_model_router_multi_target_keys(void);
@@ -119,6 +120,7 @@ main(void)
     test_register("rl_daily_quota", test_rl_daily_quota);
     test_register("rl_reset_day", test_rl_reset_day);
     test_register("rl_concurrent", test_rl_concurrent_smoke);
+    test_register("rl_redis_fail_closed", test_rl_redis_fail_closed);
     test_register("model_router_env", test_model_router_env_key);
     test_register("model_router_missing", test_model_router_missing_env_key);
     test_register("model_router_multi_target_keys", test_model_router_multi_target_keys);
