@@ -89,5 +89,19 @@ aigate_config_load(aigate_config* out)
         return -1;
     }
 
+    env_str("AIGATE_REDIS_URL", "", out->redis_url, sizeof out->redis_url);
+
+    env_str("AIGATE_REDIS_TIMEOUT_MS", "100", raw_key, sizeof raw_key);
+    out->redis_timeout_ms = atoi(raw_key);
+    if (out->redis_timeout_ms <= 0 || out->redis_timeout_ms > 60000) {
+        out->redis_timeout_ms = 100;
+    }
+
+    env_str("AIGATE_REDIS_POOL_SIZE", "32", raw_key, sizeof raw_key);
+    out->redis_pool_size = atoi(raw_key);
+    if (out->redis_pool_size <= 0 || out->redis_pool_size > 512) {
+        out->redis_pool_size = 32;
+    }
+
     return 0;
 }

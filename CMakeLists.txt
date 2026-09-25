@@ -11,6 +11,19 @@ find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBPQ REQUIRED libpq)
 pkg_check_modules(JANSSON REQUIRED jansson)
+pkg_check_modules(HIREDIS hiredis)
+if(NOT HIREDIS_FOUND)
+    FetchContent_Declare(
+        hiredis_dep
+        GIT_REPOSITORY https://github.com/redis/hiredis.git
+        GIT_TAG        v1.2.0
+    )
+    set(DISABLE_TESTS ON CACHE BOOL "" FORCE)
+    set(ENABLE_SSL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(hiredis_dep)
+    set(HIREDIS_LIBRARIES hiredis_static)
+    set(HIREDIS_INCLUDE_DIRS ${hiredis_dep_SOURCE_DIR})
+endif()
 
 include(FetchContent)
 if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/hdr_histogram-0.11.6.tar.gz")
@@ -68,9 +81,10 @@ if(AIGATE_SANITIZERS)
     target_compile_options(libaigate PRIVATE ${AIGATE_SAN_FLAGS})
     target_link_libraries(libaigate PUBLIC ${AIGATE_SAN_FLAGS})
 endif()
-target_include_directories(libaigate PUBLIC ${JANSSON_INCLUDE_DIRS} ${LIBPQ_INCLUDE_DIRS})
+target_include_directories(libaigate PUBLIC ${JANSSON_INCLUDE_DIRS} ${LIBPQ_INCLUDE_DIRS} ${HIREDIS_INCLUDE_DIRS})
 target_link_libraries(libaigate PUBLIC
   ${JANSSON_LIBRARIES}
+  ${HIREDIS_LIBRARIES}
   hdr_histogram_static
   civetweb-c-library
   CURL::libcurl ${LIBPQ_LIBRARIES} OpenSSL::Crypto ${CMAKE_THREAD_LIBS_INIT})
