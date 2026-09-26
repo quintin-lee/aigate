@@ -252,12 +252,16 @@ main(void)
     extern void test_anthropic_bridge_streaming(void);
     extern void test_anthropic_bridge_client_abort(void);
     extern void test_anthropic_pipeline_end_to_end(void);
+    extern void test_anthropic_sniff_usage_json(void);
+    extern void test_anthropic_sniff_streaming_sse(void);
     test_register("anthropic_build_system", test_anthropic_build_system_and_defaults);
     test_register("anthropic_build_params", test_anthropic_build_params);
     test_register("anthropic_resp_translation", test_anthropic_resp_translation);
     test_register("anthropic_bridge_streaming", test_anthropic_bridge_streaming);
     test_register("anthropic_bridge_client_abort", test_anthropic_bridge_client_abort);
     test_register("anthropic_pipeline_end_to_end", test_anthropic_pipeline_end_to_end);
+    test_register("anthropic_sniff_usage_json", test_anthropic_sniff_usage_json);
+    test_register("anthropic_sniff_streaming_sse", test_anthropic_sniff_streaming_sse);
 
     extern void admin_ui_content(void);
     test_register("admin_ui_content", admin_ui_content);

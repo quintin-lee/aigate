@@ -720,3 +720,146 @@ const provider_adapter_t g_provider_anthropic = {
     .build_embeddings = NULL,
     .parse_embeddings_response = NULL,
 };
+
+int
+anthropic_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok, long* out_cached)
+{
+    if (out_ptok) *out_ptok = 0;
+    if (out_ctok) *out_ctok = 0;
+    if (out_cached) *out_cached = 0;
+    if (json_str == NULL || json_str[0] == '\0') {
+        return -1;
+    }
+    json_error_t err;
+    json_t* root = json_loads(json_str, 0, &err);
+    if (root == NULL) {
+        return -1;
+    }
+    json_t* usage = json_object_get(root, "usage");
+    if (usage != NULL && json_is_object(usage)) {
+        json_t* ji = json_object_get(usage, "input_tokens");
+        json_t* jo = json_object_get(usage, "output_tokens");
+        json_t* jcr = json_object_get(usage, "cache_read_input_tokens");
+        if (out_ptok && ji && json_is_integer(ji)) {
+            *out_ptok = (long)json_integer_value(ji);
+        }
+        if (out_ctok && jo && json_is_integer(jo)) {
+            *out_ctok = (long)json_integer_value(jo);
+        }
+        long cached = 0;
+        if (jcr && json_is_integer(jcr)) {
+            cached = (long)json_integer_value(jcr);
+        }
+        if (out_cached) {
+            *out_cached = cached;
+        }
+    }
+    json_decref(root);
+    return 0;
+}
+
+void
+anthropic_sniffer_init(anthropic_sniffer_t* s)
+{
+    if (s == NULL) return;
+    memset(s, 0, sizeof(*s));
+}
+
+static void
+anthropic_sniffer_process_line(anthropic_sniffer_t* s, const char* line)
+{
+    if (line == NULL || line[0] == '\0') {
+        s->current_event[0] = '\0';
+        return;
+    }
+    if (strncmp(line, "event: ", 7) == 0) {
+        snprintf(s->current_event, sizeof(s->current_event), "%s", line + 7);
+        return;
+    }
+    if (strncmp(line, "data: ", 6) == 0) {
+        const char* payload = line + 6;
+        if (strcmp(payload, "[DONE]") == 0) {
+            return;
+        }
+        if (strcmp(s->current_event, "message_start") == 0) {
+            json_t* root = json_loads(payload, 0, NULL);
+            if (root != NULL) {
+                json_t* msg = json_object_get(root, "message");
+                if (msg != NULL) {
+                    json_t* usage = json_object_get(msg, "usage");
+                    if (usage != NULL) {
+                        json_t* ji = json_object_get(usage, "input_tokens");
+                        json_t* jcr = json_object_get(usage, "cache_read_input_tokens");
+                        if (ji && json_is_integer(ji)) {
+                            s->input_tokens = (long)json_integer_value(ji);
+                        }
+                        if (jcr && json_is_integer(jcr)) {
+                            s->cached_tokens = (long)json_integer_value(jcr);
+                        }
+                    }
+                }
+                json_decref(root);
+            }
+        } else if (strcmp(s->current_event, "message_delta") == 0) {
+            json_t* root = json_loads(payload, 0, NULL);
+            if (root != NULL) {
+                json_t* usage = json_object_get(root, "usage");
+                if (usage != NULL) {
+                    json_t* jo = json_object_get(usage, "output_tokens");
+                    if (jo && json_is_integer(jo)) {
+                        s->output_tokens = (long)json_integer_value(jo);
+                    }
+                }
+                json_decref(root);
+            }
+        }
+    }
+}
+
+int
+anthropic_sniffer_feed(anthropic_sniffer_t* s, const void* chunk, size_t len)
+{
+    if (s == NULL || chunk == NULL || len == 0) {
+        return 0;
+    }
+    const char* p = chunk;
+    const char* end = p + len;
+
+    while (p < end) {
+        const char* nl = memchr(p, '\n', (size_t)(end - p));
+        if (nl != NULL) {
+            size_t seg = (size_t)(nl - p);
+            if (s->line_len + seg < sizeof(s->line_buf)) {
+                memcpy(s->line_buf + s->line_len, p, seg);
+                s->line_len += seg;
+                if (s->line_len > 0 && s->line_buf[s->line_len - 1] == '\r') {
+                    s->line_len--;
+                }
+                s->line_buf[s->line_len] = '\0';
+                anthropic_sniffer_process_line(s, s->line_buf);
+            }
+            s->line_len = 0;
+            p = nl + 1;
+        } else {
+            size_t seg = (size_t)(end - p);
+            if (s->line_len + seg < sizeof(s->line_buf) - 1) {
+                memcpy(s->line_buf + s->line_len, p, seg);
+                s->line_len += seg;
+                s->line_buf[s->line_len] = '\0';
+            } else {
+                s->line_len = 0;
+            }
+            p = end;
+        }
+    }
+    return 0;
+}
+
+void
+anthropic_sniffer_get_tokens(const anthropic_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached)
+{
+    if (s == NULL) return;
+    if (out_ptok) *out_ptok = s->input_tokens;
+    if (out_ctok) *out_ctok = s->output_tokens;
+    if (out_cached) *out_cached = s->cached_tokens;
+}
