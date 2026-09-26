@@ -45,7 +45,7 @@
     .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.4); }
     .typewriter-cursor::after { content: "▋"; animation: blink 1s infinite; color: #6366f1; }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
-    .hidden { display: none !important; }
+    .hidden { display: none; }
 
     /* 视觉重设计色板 token */
     :root {
@@ -170,10 +170,17 @@
     #modelSearchInput, #keySearchInput, #usageDatePreset, #usageFromDate,
     #usageToDate, #usageModelFilter, #usageKeyFilter, #metricFilterInput { border-radius: 9999px !important; }
 
-    /* 连接徽标响应式：与 hidden sm:flex 同语义 */
+    /* 桌面端面包屑导航：仅在桌面端显示 */
+    .desktop-breadcrumb { display: none; }
+    @media (min-width: 768px) {
+      .desktop-breadcrumb { display: flex !important; }
+    }
+
+    /* 连接徽标响应式：未隐藏且 >=640px 时显示 */
     #connectionStatusBadge { display: none; }
+    #connectionStatusBadge.hidden { display: none !important; }
     @media (min-width: 640px) {
-      #connectionStatusBadge { display: flex !important; }
+      #connectionStatusBadge:not(.hidden) { display: flex !important; }
     }
 
     /* 汉堡按钮：移动端显示，桌面端隐藏 */
@@ -272,7 +279,7 @@
   </aside>
 
   <!-- 右侧主视口容器（顶部 Header + 主体内容 + 页脚） -->
-  <div class="flex-1 flex flex-col min-w-0 md:pl-64 app-layout-right">
+  <div class="flex-1 flex flex-col min-w-0 md:ml-64 app-layout-right">
     <!-- TOP NAVIGATION BAR -->
     <header class="sticky top-0 z-20 h-16 glass-panel border-b border-slate-800/80 px-4 sm:px-6 lg:px-8 flex items-center justify-between backdrop-blur-md">
       <!-- 移动端左侧：汉堡按钮 + 品牌 Logo -->
@@ -284,9 +291,9 @@
         </div>
 
         <!-- 桌面端面包屑导航 / 当前标签标题 -->
-        <div class="hidden md:flex items-center space-x-2.5 text-sm">
+        <div class="desktop-breadcrumb items-center space-x-2 text-sm">
           <span class="text-slate-400 font-medium">控制台</span>
-          <span class="text-slate-600">/</span>
+          <span class="text-slate-600 font-light">/</span>
           <h1 id="currentTabTitle" class="font-bold text-white tracking-tight text-base">总览</h1>
         </div>
 
@@ -323,7 +330,7 @@
     </header>
 
     <!-- 移动端水平快捷导航 -->
-    <div id="mobileNav" class="md:hidden flex overflow-x-auto custom-scroll bg-slate-900/90 border-b border-slate-800 p-2 space-x-2">
+    <div id="mobileNav" class="md:hidden sticky top-16 z-10 flex overflow-x-auto custom-scroll bg-slate-900/95 backdrop-blur-md border-b border-slate-800 p-2 space-x-2">
       <button data-tab="overview" onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-brand-600 font-medium whitespace-nowrap shadow-sm">📊 总览</button>
       <button data-tab="providers" onclick="switchTab('providers')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🏢 供应商</button>
       <button data-tab="models" onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🤖 模型</button>
