@@ -241,6 +241,12 @@
         <span>API 密钥</span>
       </button>
 
+      <div class="side-section-title pt-3">安全与合规</div>
+      <button data-tab="guardrails" onclick="switchTab('guardrails')" class="side-link" id="nav-guardrails-side">
+        <span class="text-base">🛡️</span>
+        <span>安全风控</span>
+      </button>
+
       <div class="side-section-title pt-3">组织与成本</div>
       <button data-tab="groups" onclick="switchTab('groups')" class="side-link">
         <span class="text-base">👥</span>
@@ -303,6 +309,7 @@
           <button id="nav-providers" onclick="switchTab('providers')" class="nav-tab">🏢 供应商</button>
           <button id="nav-models" onclick="switchTab('models')" class="nav-tab">🤖 模型</button>
           <button id="nav-keys" onclick="switchTab('keys')" class="nav-tab">🔑 API 密钥</button>
+          <button id="nav-guardrails" onclick="switchTab('guardrails')" class="nav-tab">🛡️ 安全风控</button>
           <button id="nav-groups" onclick="switchTab('groups')" class="nav-tab">👥 部门分组</button>
           <button id="nav-cost" onclick="switchTab('cost')" class="nav-tab">💰 成本归属</button>
           <button id="nav-usage" onclick="switchTab('usage')" class="nav-tab">📈 用量</button>
@@ -335,6 +342,7 @@
       <button data-tab="providers" onclick="switchTab('providers')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🏢 供应商</button>
       <button data-tab="models" onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🤖 模型</button>
       <button data-tab="keys" onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🔑 密钥</button>
+      <button data-tab="guardrails" onclick="switchTab('guardrails')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🛡️ 风控</button>
       <button data-tab="groups" onclick="switchTab('groups')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">👥 分组</button>
       <button data-tab="cost" onclick="switchTab('cost')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">💰 成本</button>
       <button data-tab="usage" onclick="switchTab('usage')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">📈 用量</button>
@@ -1345,6 +1353,7 @@
       models: [],
       keys: [],
       groups: [],
+      guardrails: [],
       costRows: [],
       usageRows: [],
       metricsText: "",
@@ -1352,6 +1361,7 @@
       editingKeyId: null,
       editingProviderId: null,
       editingGroupId: null,
+      editingGuardrailId: null,
       overviewChart: null,
       streamAbortController: null,
     };
@@ -1362,6 +1372,7 @@
       models: { page: 1, limit: 10, total: 0 },
       keys: { page: 1, limit: 10, total: 0 },
       groups: { page: 1, limit: 10, total: 0 },
+      guardrails: { page: 1, limit: 10, total: 0 },
       cost: { page: 1, limit: 10, total: 0 },
       usage: { page: 1, limit: 10, total: 0 },
     };
@@ -1405,6 +1416,8 @@
         filterKeysTable(false);
       } else if (key === "groups") {
         renderGroupsTable();
+      } else if (key === "guardrails") {
+        if (typeof filterGuardrailsTable === "function") filterGuardrailsTable(false);
       } else if (key === "cost") {
         const by = document.getElementById("costByDimension")?.value || "model";
         renderCostTable(state.costRows, by);
@@ -1606,6 +1619,7 @@
         providers: "模型供应商",
         models: "上游模型",
         keys: "API 密钥",
+        guardrails: "安全风控",
         groups: "部门分组",
         cost: "成本归属",
         usage: "用量统计",
@@ -1632,6 +1646,8 @@
         fetchModels();
       } else if (state.activeTab === "keys") {
         fetchKeys();
+      } else if (state.activeTab === "guardrails") {
+        if (typeof fetchGuardrails === "function") fetchGuardrails();
       } else if (state.activeTab === "groups") {
         fetchGroups();
       } else if (state.activeTab === "cost") {
