@@ -27,8 +27,18 @@
   </script>
   <style>
     /* Resilient baseline CSS if Tailwind CDN is not loaded */
-    body { margin: 0; font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    .glass-panel { background: rgba(17, 24, 39, 0.75); backdrop-filter: blur(12px); border: 1px solid rgba(255, 255, 255, 0.08); }
+    body {
+      margin: 0;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background-color: #020617;
+      color: #f8fafc;
+    }
+    .glass-panel {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
     .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
     .custom-scroll::-webkit-scrollbar-track { background: rgba(15, 23, 42, 0.6); }
     .custom-scroll::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.2); border-radius: 3px; }
@@ -36,47 +46,99 @@
     .typewriter-cursor::after { content: "▋"; animation: blink 1s infinite; color: #6366f1; }
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     .hidden { display: none !important; }
-    /* 导航兜底：Tailwind CDN 失败时仍按 hidden md:flex / md:hidden 逻辑显示菜单 */
-    #mainNav { display: none; }
-    #mobileNav { display: flex; }
-    @media (min-width: 768px) {
-      #mainNav { display: none !important; }
-      #mobileNav { display: none !important; }
-    }
+
     /* 视觉重设计色板 token */
     :root {
-      --bg-side: #0f172a; --bg-main: #1e293b; --bg-card: #0f172a;
-      --line: #334155; --brand: #6366f1; --ok: #22c55e; --amber: #f59e0b;
-      --blue: #3b82f6; --danger: #ef4444; --txt: #f1f5f9; --txt-dim: #94a3b8;
+      --bg-side: #0b0f19;
+      --bg-main: #020617;
+      --bg-card: #0f172a;
+      --line: rgba(255, 255, 255, 0.08);
+      --brand: #6366f1;
+      --brand-hover: #4f46e5;
+      --ok: #22c55e;
+      --amber: #f59e0b;
+      --blue: #3b82f6;
+      --danger: #ef4444;
+      --txt: #f8fafc;
+      --txt-dim: #94a3b8;
+      --txt-muted: #64748b;
     }
-    /* 侧边栏：定位/显隐纯 CSS 实现，有无 Tailwind 均一致 */
-    #sideNav { display: none; }
+
+    /* 侧边栏布局：纯 CSS 驱动，桌面端常驻 / 移动端平滑抽屉 */
+    #sideNav {
+      position: fixed;
+      top: 0;
+      bottom: 0;
+      left: 0;
+      width: 16rem;
+      background: var(--bg-side);
+      border-right: 1px solid var(--line);
+      z-index: 40;
+      display: flex;
+      flex-direction: column;
+      transform: translateX(-100%);
+      transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
     #sideNav.side-open {
-      display: flex; position: fixed; top: 0; bottom: 0; left: 0; width: 16rem;
-      flex-direction: column; background: var(--bg-side);
-      border-right: 1px solid var(--line); z-index: 50;
+      transform: translateX(0);
+    }
+    #sideBackdrop.side-open {
+      display: block !important;
+    }
+    .app-layout-right {
+      display: flex;
+      flex-direction: column;
+      flex: 1 1 0%;
+      min-width: 0;
+      margin-left: 0;
+      min-height: 100vh;
     }
     @media (min-width: 768px) {
       #sideNav {
-        display: flex; position: fixed; top: 0; bottom: 0; left: 0; width: 15rem;
-        flex-direction: column; background: var(--bg-side);
-        border-right: 1px solid var(--line); z-index: 40;
+        transform: translateX(0) !important;
+        z-index: 30;
       }
-      #mainNav { display: none !important; }
-      #pageMain { margin-left: 15rem; }
+      .app-layout-right {
+        margin-left: 16rem;
+      }
     }
-    /* 侧边导航链接 */
+
+    /* 侧边分组标题与导航链接 */
+    .side-section-title {
+      font-size: 0.65rem;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: var(--txt-muted);
+      padding: 0.75rem 0.75rem 0.25rem 0.75rem;
+    }
     .side-link {
-      display: flex; align-items: center; gap: .65rem; width: 100%;
-      text-align: left; padding: .6rem .9rem; border-radius: .75rem;
-      font-size: .875rem; color: var(--txt-dim);
-      border: 1px solid transparent; background: transparent; cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      width: 100%;
+      text-align: left;
+      padding: 0.55rem 0.85rem;
+      border-radius: 0.65rem;
+      font-size: 0.85rem;
+      font-weight: 500;
+      color: var(--txt-dim);
+      border: 1px solid transparent;
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
     }
-    .side-link:hover { color: var(--txt); background: rgba(148,163,184,.08); }
+    .side-link:hover {
+      color: var(--txt);
+      background: rgba(255, 255, 255, 0.05);
+    }
     .side-link-active {
-      color: #fff !important; background: var(--brand) !important;
-      box-shadow: 0 4px 14px rgba(99,102,241,.4);
+      color: #ffffff !important;
+      background: linear-gradient(135deg, rgba(99, 102, 241, 0.9), rgba(79, 70, 229, 0.95)) !important;
+      border-color: rgba(165, 180, 252, 0.3) !important;
+      box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
     }
+
     /* 统计卡图标 */
     .stat-ico {
       display: inline-flex; align-items: center; justify-content: center;
@@ -86,9 +148,11 @@
     .stat-ico.em { background: rgba(16,185,129,.12); border-color: rgba(16,185,129,.25); }
     .stat-ico.cy { background: rgba(34,211,238,.12); border-color: rgba(34,211,238,.25); }
     .stat-ico.pu { background: rgba(168,85,247,.12); border-color: rgba(168,85,247,.25); }
+
     /* 数据表格：宽松行高 + 粘性表头 */
     .data-tbl thead th { position: sticky; top: 0; background: #0f172a; z-index: 1; }
     .data-tbl tbody td { padding-top: 1.125rem; padding-bottom: 1.125rem; }
+
     /* 调试场聊天气泡 */
     .msg-user {
       max-width: 85%; margin: 0 0 .75rem auto; padding: .6rem .9rem;
@@ -101,137 +165,181 @@
       border: 1px solid var(--line); color: var(--txt);
       font-size: .75rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
     }
+
     /* 胶囊形筛选控件 */
     #modelSearchInput, #keySearchInput, #usageDatePreset, #usageFromDate,
     #usageToDate, #usageModelFilter, #usageKeyFilter, #metricFilterInput { border-radius: 9999px !important; }
-    /* 连接徽标响应式：与 hidden sm:flex 同语义，不受 JS 类名重写影响 */
+
+    /* 连接徽标响应式：与 hidden sm:flex 同语义 */
     #connectionStatusBadge { display: none; }
     @media (min-width: 640px) {
       #connectionStatusBadge { display: flex !important; }
     }
-    /* 汉堡按钮：仅移动端可见 */
+
+    /* 汉堡按钮：移动端显示，桌面端隐藏 */
     #navToggle {
-      display: inline-block; background: none; border: none; cursor: pointer;
-      color: var(--txt-dim); font-size: 1.25rem; line-height: 1; padding: .25rem;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: none; border: none; cursor: pointer;
+      color: var(--txt-dim); font-size: 1.35rem; line-height: 1; padding: .35rem;
+      border-radius: 0.5rem; transition: background 0.15s ease, color 0.15s ease;
+    }
+    #navToggle:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--txt);
     }
     @media (min-width: 768px) {
       #navToggle { display: none !important; }
     }
   </style>
 </head>
-<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col font-sans selection:bg-brand-500 selection:text-white">
+<body class="bg-slate-950 text-slate-100 min-h-screen flex font-sans selection:bg-brand-500 selection:text-white">
 
-  <!-- TOP NAVIGATION BAR -->
-  <header class="sticky top-0 z-40 glass-panel border-b border-slate-800/80 px-4 lg:px-8 py-3 flex items-center justify-between">
-    <div class="flex items-center space-x-6">
-      <button id="navToggle" onclick="document.getElementById('sideNav').classList.toggle('side-open')" aria-label="打开导航菜单">☰</button>
-      <div class="flex items-center space-x-3 cursor-pointer" onclick="switchTab('overview')">
-        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 font-black text-white text-lg">
-          ⚡
-        </div>
-        <div>
-          <div class="flex items-center space-x-2">
-            <span class="font-extrabold text-xl tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">aigate</span>
-            <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-brand-500/20 text-brand-300 border border-brand-500/30">v1.0 C17</span>
-          </div>
-          <div class="text-[11px] text-slate-400">高性能 LLM 网关</div>
-        </div>
-      </div>
+  <!-- 移动端侧边抽屉遮罩 (Backdrop) -->
+  <div id="sideBackdrop" onclick="toggleSideNav(false)" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-30 md:hidden hidden transition-opacity" aria-hidden="true"></div>
 
-      <!-- 导航标签页 -->
-      <nav id="mainNav" class="hidden md:flex items-center space-x-1 bg-slate-900/90 p-1 rounded-xl border border-slate-800">
-        <button id="nav-overview" onclick="switchTab('overview')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-white bg-slate-800 shadow-sm">
-          📊 总览
-        </button>
-        <button id="nav-providers" onclick="switchTab('providers')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          🏢 供应商
-        </button>
-        <button id="nav-models" onclick="switchTab('models')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          🤖 模型
-        </button>
-        <button id="nav-keys" onclick="switchTab('keys')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          🔑 API 密钥
-        </button>
-        <button id="nav-groups" onclick="switchTab('groups')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          👥 部门分组
-        </button>
-        <button id="nav-cost" onclick="switchTab('cost')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          💰 成本归属
-        </button>
-        <button id="nav-usage" onclick="switchTab('usage')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          📈 用量
-        </button>
-        <button id="nav-playground" onclick="switchTab('playground')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          ⚡ 调试场
-        </button>
-        <button id="nav-metrics" onclick="switchTab('metrics')" class="nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-800/50">
-          🛠️ 监控指标
-        </button>
-      </nav>
-    </div>
-
-    <!-- 右侧控制区：令牌、刷新、状态 -->
-    <div class="flex items-center space-x-3">
-      <div id="connectionStatusBadge" class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
-        <span class="w-2 h-2 rounded-full bg-slate-400"></span>
-        <span>连接检测中</span>
-      </div>
-
-      <button id="tokenBtn" onclick="openTokenModal()" class="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 transition">
-        <span id="tokenIcon">🔒</span>
-        <span id="tokenLabel">设置管理员令牌</span>
-      </button>
-
-      <button onclick="refreshCurrentTab()" title="刷新数据" class="p-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700 transition">
-        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-      </button>
-    </div>
-  </header>
-
-  <!-- 侧边导航（桌面端常驻 / 移动端抽屉） -->
+  <!-- 侧边导航（桌面端固定常驻 / 移动端平滑抽屉） -->
   <aside id="sideNav">
-    <div class="flex items-center gap-3 px-5 h-16 border-b border-slate-700/60">
-      <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 font-black text-white text-lg">⚡</div>
-      <div>
-        <div class="flex items-center gap-2">
-          <span class="font-extrabold text-lg tracking-tight text-white">aigate</span>
-          <span class="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v1.0 C17</span>
+    <div class="flex items-center justify-between px-5 h-16 border-b border-slate-800/80 flex-shrink-0">
+      <div class="flex items-center gap-3 cursor-pointer" onclick="switchTab('overview')">
+        <div class="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/20 font-black text-white text-lg">⚡</div>
+        <div>
+          <div class="flex items-center gap-1.5">
+            <span class="font-extrabold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">aigate</span>
+            <span class="text-[9px] uppercase font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">v1.0 C17</span>
+          </div>
+          <div class="text-[10px] text-slate-400">高性能 LLM 网关</div>
         </div>
-        <div class="text-[11px] text-slate-400">高性能 LLM 网关</div>
+      </div>
+      <!-- 移动端关闭按钮 -->
+      <button onclick="toggleSideNav(false)" class="md:hidden text-slate-400 hover:text-white p-1 text-base rounded-lg hover:bg-slate-800/60 transition" aria-label="关闭侧边栏">✕</button>
+    </div>
+
+    <!-- 侧边导航项 -->
+    <nav class="flex-1 overflow-y-auto custom-scroll p-3 space-y-1">
+      <div class="side-section-title">核心管理</div>
+      <button data-tab="overview" onclick="switchTab('overview')" class="side-link side-link-active">
+        <span class="text-base">📊</span>
+        <span>总览</span>
+      </button>
+      <button data-tab="providers" onclick="switchTab('providers')" class="side-link">
+        <span class="text-base">🏢</span>
+        <span>供应商</span>
+      </button>
+      <button data-tab="models" onclick="switchTab('models')" class="side-link">
+        <span class="text-base">🤖</span>
+        <span>模型</span>
+      </button>
+      <button data-tab="keys" onclick="switchTab('keys')" class="side-link">
+        <span class="text-base">🔑</span>
+        <span>API 密钥</span>
+      </button>
+
+      <div class="side-section-title pt-3">组织与成本</div>
+      <button data-tab="groups" onclick="switchTab('groups')" class="side-link">
+        <span class="text-base">👥</span>
+        <span>部门分组</span>
+      </button>
+      <button data-tab="cost" onclick="switchTab('cost')" class="side-link">
+        <span class="text-base">💰</span>
+        <span>成本归属</span>
+      </button>
+      <button data-tab="usage" onclick="switchTab('usage')" class="side-link">
+        <span class="text-base">📈</span>
+        <span>用量统计</span>
+      </button>
+
+      <div class="side-section-title pt-3">开发与监控</div>
+      <button data-tab="playground" onclick="switchTab('playground')" class="side-link">
+        <span class="text-base">⚡</span>
+        <span>调试场</span>
+      </button>
+      <button data-tab="metrics" onclick="switchTab('metrics')" class="side-link">
+        <span class="text-base">🛠️</span>
+        <span>监控指标</span>
+      </button>
+    </nav>
+
+    <!-- 侧边栏底部状态 -->
+    <div class="mt-auto p-4 border-t border-slate-800/80 flex-shrink-0 bg-slate-900/40">
+      <div class="flex items-center justify-between text-xs text-slate-400">
+        <span class="flex items-center gap-1.5">
+          <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>网关在线</span>
+        </span>
+        <span class="text-[10px] font-mono text-slate-500">C17 Core</span>
       </div>
     </div>
-    <nav class="flex flex-col gap-1 p-3">
-      <button data-tab="overview" onclick="switchTab('overview')" class="side-link side-link-active">📊 总览</button>
-      <button data-tab="providers" onclick="switchTab('providers')" class="side-link">🏢 供应商</button>
-      <button data-tab="models" onclick="switchTab('models')" class="side-link">🤖 模型</button>
-      <button data-tab="keys" onclick="switchTab('keys')" class="side-link">🔑 API 密钥</button>
-      <button data-tab="groups" onclick="switchTab('groups')" class="side-link">👥 部门分组</button>
-      <button data-tab="cost" onclick="switchTab('cost')" class="side-link">💰 成本归属</button>
-      <button data-tab="usage" onclick="switchTab('usage')" class="side-link">📈 用量</button>
-      <button data-tab="playground" onclick="switchTab('playground')" class="side-link">⚡ 调试场</button>
-      <button data-tab="metrics" onclick="switchTab('metrics')" class="side-link">🛠️ 监控指标</button>
-    </nav>
-    <div class="mt-auto px-5 py-4 text-[11px] text-slate-500 border-t border-slate-700/60">AI 网关控制台 · 单文件构建</div>
   </aside>
 
-  <!-- 移动端导航 -->
-  <div id="mobileNav" class="md:hidden flex overflow-x-auto custom-scroll bg-slate-900 border-b border-slate-800 p-2 space-x-2">
-    <button onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-slate-800 font-medium whitespace-nowrap">📊 总览</button>
-    <button onclick="switchTab('providers')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🏢 供应商</button>
-    <button onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🤖 模型</button>
-    <button onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🔑 API 密钥</button>
-    <button onclick="switchTab('groups')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">👥 部门分组</button>
-    <button onclick="switchTab('cost')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">💰 成本归属</button>
-    <button onclick="switchTab('usage')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">📈 用量</button>
-    <button onclick="switchTab('playground')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">⚡ 调试场</button>
-    <button onclick="switchTab('metrics')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 font-medium whitespace-nowrap">🛠️ 监控指标</button>
-  </div>
+  <!-- 右侧主视口容器（顶部 Header + 主体内容 + 页脚） -->
+  <div class="flex-1 flex flex-col min-w-0 md:pl-64 app-layout-right">
+    <!-- TOP NAVIGATION BAR -->
+    <header class="sticky top-0 z-20 h-16 glass-panel border-b border-slate-800/80 px-4 sm:px-6 lg:px-8 flex items-center justify-between backdrop-blur-md">
+      <!-- 移动端左侧：汉堡按钮 + 品牌 Logo -->
+      <div class="flex items-center space-x-3">
+        <button id="navToggle" onclick="toggleSideNav()" aria-label="打开导航菜单">☰</button>
+        <div class="flex items-center space-x-2.5 cursor-pointer md:hidden" onclick="switchTab('overview')">
+          <div class="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-500 via-purple-500 to-cyan-500 flex items-center justify-center shadow font-black text-white text-base">⚡</div>
+          <span class="font-extrabold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">aigate</span>
+        </div>
 
-  <!-- TOAST NOTIFICATIONS -->
-  <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+        <!-- 桌面端面包屑导航 / 当前标签标题 -->
+        <div class="hidden md:flex items-center space-x-2.5 text-sm">
+          <span class="text-slate-400 font-medium">控制台</span>
+          <span class="text-slate-600">/</span>
+          <h1 id="currentTabTitle" class="font-bold text-white tracking-tight text-base">总览</h1>
+        </div>
 
-  <!-- MAIN VIEWPORT CONTAINER -->
-  <main id="pageMain" class="flex-1 max-w-7xl w-full mx-auto p-4 lg:p-8 space-y-6">
+        <!-- 隐藏的旧导航保持向后兼容及测试断言支持 -->
+        <nav id="mainNav" class="hidden">
+          <button id="nav-overview" onclick="switchTab('overview')" class="nav-tab">📊 总览</button>
+          <button id="nav-providers" onclick="switchTab('providers')" class="nav-tab">🏢 供应商</button>
+          <button id="nav-models" onclick="switchTab('models')" class="nav-tab">🤖 模型</button>
+          <button id="nav-keys" onclick="switchTab('keys')" class="nav-tab">🔑 API 密钥</button>
+          <button id="nav-groups" onclick="switchTab('groups')" class="nav-tab">👥 部门分组</button>
+          <button id="nav-cost" onclick="switchTab('cost')" class="nav-tab">💰 成本归属</button>
+          <button id="nav-usage" onclick="switchTab('usage')" class="nav-tab">📈 用量</button>
+          <button id="nav-playground" onclick="switchTab('playground')" class="nav-tab">⚡ 调试场</button>
+          <button id="nav-metrics" onclick="switchTab('metrics')" class="nav-tab">🛠️ 监控指标</button>
+        </nav>
+      </div>
+
+      <!-- 右侧控制区：状态徽标、令牌管理、刷新 -->
+      <div class="flex items-center space-x-3">
+        <div id="connectionStatusBadge" class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
+          <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+          <span>连接检测中</span>
+        </div>
+
+        <button id="tokenBtn" onclick="openTokenModal()" class="flex items-center space-x-2 px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-700/80 hover:border-slate-600 transition shadow-sm">
+          <span id="tokenIcon">🔒</span>
+          <span id="tokenLabel">设置管理员令牌</span>
+        </button>
+
+        <button onclick="refreshCurrentTab()" title="刷新数据" class="p-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 text-slate-400 hover:text-white border border-slate-700/80 hover:border-slate-600 transition shadow-sm">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- 移动端水平快捷导航 -->
+    <div id="mobileNav" class="md:hidden flex overflow-x-auto custom-scroll bg-slate-900/90 border-b border-slate-800 p-2 space-x-2">
+      <button data-tab="overview" onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-brand-600 font-medium whitespace-nowrap shadow-sm">📊 总览</button>
+      <button data-tab="providers" onclick="switchTab('providers')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🏢 供应商</button>
+      <button data-tab="models" onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🤖 模型</button>
+      <button data-tab="keys" onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🔑 密钥</button>
+      <button data-tab="groups" onclick="switchTab('groups')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">👥 分组</button>
+      <button data-tab="cost" onclick="switchTab('cost')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">💰 成本</button>
+      <button data-tab="usage" onclick="switchTab('usage')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">📈 用量</button>
+      <button data-tab="playground" onclick="switchTab('playground')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">⚡ 调试场</button>
+      <button data-tab="metrics" onclick="switchTab('metrics')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🛠️ 指标</button>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div id="toastContainer" class="fixed bottom-5 right-5 z-50 flex flex-col space-y-2 pointer-events-none"></div>
+
+    <!-- MAIN VIEWPORT CONTAINER -->
+    <main id="pageMain" class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
     <!-- ==================== 标签页 1：总览 ==================== -->
     <div id="tab-overview" class="tab-content space-y-6">
@@ -248,7 +356,7 @@
             <div id="statTotalModelsBadge" class="text-xs px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">共 0 个</div>
           </div>
           <div class="mt-3 text-xs text-slate-400 flex items-center space-x-1">
-            <span>OpenAI 与 Anthropic 后端</span>
+            <span>OpenAI / Anthropic / Gemini 后端</span>
           </div>
         </div>
 
@@ -373,7 +481,7 @@
             </div>
             <div class="flex justify-between text-slate-400">
               <span>支持协议</span>
-              <span class="font-mono text-slate-200">OpenAI & Anthropic</span>
+              <span class="font-mono text-slate-200">OpenAI / Anthropic / Gemini</span>
             </div>
           </div>
         </div>
@@ -914,7 +1022,20 @@
 
   </main>
 
-  <!-- ==================== 弹窗 ==================== -->
+  <!-- 页脚 FOOTER -->
+  <footer class="border-t border-slate-800/60 py-4 px-4 sm:px-6 lg:px-8 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2 mt-auto">
+    <div class="flex items-center space-x-2">
+      <span>⚡ aigate 高性能 AI 网关</span>
+      <span class="text-slate-700">·</span>
+      <span class="text-slate-400">单文件轻量交付</span>
+    </div>
+    <div class="flex items-center space-x-3 text-slate-400">
+      <span>OpenAI / Anthropic / Gemini / DeepSeek 协议支持</span>
+    </div>
+  </footer>
+</div>
+
+<!-- ==================== 弹窗 ==================== -->
 
   <!-- 1. 管理员令牌弹窗 -->
   <div id="tokenModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
@@ -1323,7 +1444,7 @@
         }
       });
 
-      // ESC closes any open modal
+      // ESC closes any open modal or drawer
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
           ["tokenModal", "providerModal", "modelModal", "keyModal", "newKeySuccessModal", "groupModal"].forEach(id => {
@@ -1332,6 +1453,7 @@
           if (!document.getElementById("confirmModal").classList.contains("hidden")) {
             closeConfirmModal();
           }
+          toggleSideNav(false);
           state.editingModelName = null;
           state.editingProviderId = null;
           state.editingGroupId = null;
@@ -1419,6 +1541,27 @@
       }
     }
 
+    // --- Navigation & Drawer Helpers ---
+    function toggleSideNav(open) {
+      const sideNav = document.getElementById("sideNav");
+      const backdrop = document.getElementById("sideBackdrop");
+      if (!sideNav) return;
+      const willOpen = (typeof open === "boolean") ? open : !sideNav.classList.contains("side-open");
+      if (willOpen) {
+        sideNav.classList.add("side-open");
+        if (backdrop) {
+          backdrop.classList.add("side-open");
+          backdrop.classList.remove("hidden");
+        }
+      } else {
+        sideNav.classList.remove("side-open");
+        if (backdrop) {
+          backdrop.classList.remove("side-open");
+          backdrop.classList.add("hidden");
+        }
+      }
+    }
+
     // --- Tabs Switching ---
     function switchTab(tabId) {
       state.activeTab = tabId;
@@ -1439,8 +1582,36 @@
       document.querySelectorAll(".side-link").forEach(el => {
         el.classList.toggle("side-link-active", el.dataset.tab === tabId);
       });
+
+      // 同步移动端水平导航高亮
+      document.querySelectorAll(".nav-tab-m").forEach(el => {
+        const isAct = el.dataset.tab === tabId || (el.getAttribute("onclick") && el.getAttribute("onclick").includes(tabId));
+        if (isAct) {
+          el.className = "nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-brand-600 font-medium whitespace-nowrap shadow-sm";
+        } else {
+          el.className = "nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap";
+        }
+      });
+
+      // 更新顶部当前栏目标题
+      const tabTitles = {
+        overview: "总览",
+        providers: "模型供应商",
+        models: "上游模型",
+        keys: "API 密钥",
+        groups: "部门分组",
+        cost: "成本归属",
+        usage: "用量统计",
+        playground: "调试场",
+        metrics: "监控指标"
+      };
+      const titleEl = document.getElementById("currentTabTitle");
+      if (titleEl && tabTitles[tabId]) {
+        titleEl.textContent = tabTitles[tabId];
+      }
+
       // 移动端抽屉选中后自动收起
-      document.getElementById("sideNav").classList.remove("side-open");
+      toggleSideNav(false);
 
       refreshCurrentTab();
     }
