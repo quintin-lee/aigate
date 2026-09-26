@@ -2792,6 +2792,400 @@
       }
     }
 
+    // --- Security & Guardrails Management ---
+    function escapeHtml(str) {
+      if (str == null) return "";
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+    }
+
+    async function fetchGuardrails() {
+      const tbody = document.getElementById("guardrailsTableBody");
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载安全风控规则…</td></tr>`;
+      }
+      const resp = await apiCall("/admin/v1/guardrails?limit=1000");
+      if (!resp || !resp.ok) return;
+      const data = await resp.json();
+      state.guardrails = data.rules || [];
+      paginationState.guardrails.page = 1;
+      updateGuardrailStats();
+      filterGuardrailsTable(false);
+    }
+
+    function updateGuardrailStats() {
+      const totalEl = document.getElementById("grStatTotal");
+      const kwEl = document.getElementById("grStatKeyword");
+      const piiEl = document.getElementById("grStatPii");
+      const statusEl = document.getElementById("grStatStatus");
+
+      const rules = state.guardrails || [];
+      const enabledRules = rules.filter(r => r.enabled);
+      const kwBlock = enabledRules.filter(r => r.action === "block" || r.rule_type === "keyword").length;
+      const piiMask = enabledRules.filter(r => r.action === "mask" || r.rule_type === "pii").length;
+
+      if (totalEl) totalEl.innerText = enabledRules.length.toLocaleString();
+      if (kwEl) kwEl.innerText = kwBlock.toLocaleString();
+      if (piiEl) piiEl.innerText = piiMask.toLocaleString();
+      if (statusEl) {
+        statusEl.innerHTML = `
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+          <span>已就绪 (${enabledRules.length} 条生效)</span>
+        `;
+      }
+    }
+
+    function renderGuardrailsTable(list = state.guardrails) {
+      const tbody = document.getElementById("guardrailsTableBody");
+      const empty = document.getElementById("guardrailsEmptyState");
+      if (!tbody || !empty) return;
+      tbody.innerHTML = "";
+
+      if (!list || list.length === 0) {
+        empty.classList.remove("hidden");
+        getPageSlice("guardrails", []);
+        return;
+      }
+      empty.classList.add("hidden");
+
+      const pageItems = getPageSlice("guardrails", list);
+      pageItems.forEach(r => {
+        let typeBadge = "";
+        if (r.rule_type === "keyword") {
+          typeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">关键词 (keyword)</span>`;
+        } else if (r.rule_type === "pii") {
+          typeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">隐私脱敏 (pii)</span>`;
+        } else {
+          typeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-teal-500/10 text-teal-400 border border-teal-500/20">正则 (regex)</span>`;
+        }
+
+        const actionBadge = (r.action === "block")
+          ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/15 text-rose-400 border border-rose-500/30">🛑 阻断 (block)</span>`
+          : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30">🛡️ 脱敏 (mask)</span>`;
+
+        const statusBadge = r.enabled
+          ? `<button onclick="toggleGuardrailRule(${r.id}, false)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition">● 已启用</button>`
+          : `<button onclick="toggleGuardrailRule(${r.id}, true)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition">○ 已停用</button>`;
+
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-900/40 transition";
+        tr.innerHTML = `
+          <td class="py-3 px-4 font-mono text-slate-400">#${r.id}</td>
+          <td class="py-3 px-4 whitespace-nowrap">${typeBadge}</td>
+          <td class="py-3 px-4">
+            <code class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-amber-300 font-mono text-[11px] break-all select-all">${escapeHtml(r.pattern)}</code>
+          </td>
+          <td class="py-3 px-4 whitespace-nowrap">${actionBadge}</td>
+          <td class="py-3 px-4 font-sans text-slate-300">${r.category ? escapeHtml(r.category) : "<span class='text-slate-500'>—</span>"}</td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">${statusBadge}</td>
+          <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
+            <button onclick="editGuardrailRule(${r.id})" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
+            <button onclick="deleteGuardrailRule(${r.id})" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterGuardrailsTable(resetPage = false) {
+      if (resetPage) paginationState.guardrails.page = 1;
+      const q = (document.getElementById("grSearchInput")?.value || "").toLowerCase().trim();
+      const typeFilter = document.getElementById("grTypeFilter")?.value || "all";
+
+      const filtered = (state.guardrails || []).filter(r => {
+        if (typeFilter !== "all" && r.rule_type !== typeFilter) return false;
+        if (!q) return true;
+        const pat = (r.pattern || "").toLowerCase();
+        const cat = (r.category || "").toLowerCase();
+        const rt = (r.rule_type || "").toLowerCase();
+        return pat.includes(q) || cat.includes(q) || rt.includes(q) || String(r.id).includes(q);
+      });
+      renderGuardrailsTable(filtered);
+    }
+
+    function openGuardrailModal(rule = null) {
+      state.editingGuardrailId = rule ? rule.id : null;
+      document.getElementById("guardrailModalTitle").innerText = rule ? `编辑风控规则 #${rule.id}` : "新建风控规则";
+      document.getElementById("grFormId").value = rule ? rule.id : "";
+      document.getElementById("grFormType").value = rule ? rule.rule_type : "keyword";
+      document.getElementById("grFormPattern").value = rule ? rule.pattern : "";
+      document.getElementById("grFormAction").value = rule ? rule.action : "block";
+      document.getElementById("grFormCategory").value = rule ? (rule.category || "") : "";
+      document.getElementById("grFormEnabled").checked = rule ? !!rule.enabled : true;
+
+      onGuardrailTypeChange();
+      document.getElementById("guardrailModal").classList.remove("hidden");
+      setTimeout(() => document.getElementById("grFormPattern").focus(), 50);
+    }
+
+    function closeGuardrailModal() {
+      document.getElementById("guardrailModal").classList.add("hidden");
+      state.editingGuardrailId = null;
+    }
+
+    function onGuardrailTypeChange() {
+      const type = document.getElementById("grFormType").value;
+      const actionSelect = document.getElementById("grFormAction");
+      const hint = document.getElementById("grFormPatternHint");
+      const patternInput = document.getElementById("grFormPattern");
+
+      if (!state.editingGuardrailId) {
+        if (type === "pii") {
+          actionSelect.value = "mask";
+        } else if (type === "keyword") {
+          actionSelect.value = "block";
+        }
+      }
+
+      if (type === "keyword") {
+        if (hint) hint.innerText = "Aho-Corasick 高效敏感词，例如：DROP TABLE, 暴力, 政治敏感词...";
+        if (patternInput && !patternInput.value) patternInput.placeholder = "例如：DROP TABLE";
+      } else if (type === "pii") {
+        if (hint) hint.innerText = "内置 PII 标识：PHONE (手机号), ID_CARD (身份证), EMAIL (电子邮箱), API_KEY (API密钥)";
+        if (patternInput && !patternInput.value) patternInput.placeholder = "PHONE 或 ID_CARD 或 EMAIL 或 API_KEY";
+      } else if (type === "regex") {
+        if (hint) hint.innerText = "POSIX 扩展正则表达式，例如：1[3-9][0-9]{9}";
+        if (patternInput && !patternInput.value) patternInput.placeholder = "例如：[0-9]{11}";
+      }
+    }
+
+    function editGuardrailRule(id) {
+      const rule = (state.guardrails || []).find(r => r.id === id);
+      if (rule) {
+        openGuardrailModal(rule);
+      }
+    }
+
+    async function handleGuardrailSubmit(e) {
+      e.preventDefault();
+      const id = document.getElementById("grFormId").value;
+      const ruleType = document.getElementById("grFormType").value;
+      const pattern = document.getElementById("grFormPattern").value.trim();
+      const action = document.getElementById("grFormAction").value;
+      const category = document.getElementById("grFormCategory").value.trim();
+      const enabled = document.getElementById("grFormEnabled").checked;
+
+      if (!pattern) {
+        showToast("匹配模式 (Pattern) 不能为空", "warning");
+        return;
+      }
+
+      const payload = {
+        rule_type: ruleType,
+        pattern: pattern,
+        action: action,
+        category: category,
+        enabled: enabled
+      };
+
+      const isEdit = !!id;
+      const url = isEdit ? `/admin/v1/guardrails/${id}` : "/admin/v1/guardrails";
+      const method = isEdit ? "PATCH" : "POST";
+
+      const resp = await apiCall(url, { method, body: payload });
+      if (!resp || !resp.ok) {
+        const err = resp ? await resp.json().catch(() => ({})) : {};
+        showToast(`保存失败: ${err.error?.message || "未知错误"}`, "error");
+        return;
+      }
+
+      showToast(`风控规则 "${pattern}" 保存成功`, "success");
+      closeGuardrailModal();
+      fetchGuardrails();
+    }
+
+    async function toggleGuardrailRule(id, newEnabled) {
+      const resp = await apiCall(`/admin/v1/guardrails/${id}`, {
+        method: "PATCH",
+        body: { enabled: newEnabled }
+      });
+      if (resp && resp.ok) {
+        showToast(newEnabled ? "规则已启用" : "规则已停用", "success");
+        fetchGuardrails();
+      }
+    }
+
+    async function deleteGuardrailRule(id) {
+      const rule = (state.guardrails || []).find(r => r.id === id);
+      const pat = rule ? rule.pattern : `#${id}`;
+      const ok = await openConfirmModal(`确定要删除风控规则 "${pat}" 吗？此操作将立即在实时引擎中生效。`, "删除风控规则");
+      if (!ok) return;
+
+      const resp = await apiCall(`/admin/v1/guardrails/${id}`, { method: "DELETE" });
+      if (resp && resp.ok) {
+        showToast(`风控规则已删除`, "success");
+        fetchGuardrails();
+      }
+    }
+
+    async function reloadGuardrailsEngine() {
+      const resp = await apiCall("/admin/v1/guardrails/reload", { method: "POST" });
+      if (resp && resp.ok) {
+        showToast("安全风控引擎热重载成功，内存规则已全量同步", "success");
+        fetchGuardrails();
+      }
+    }
+
+    async function seedDefaultPiiRules() {
+      const presets = [
+        { rule_type: "pii", pattern: "PHONE", action: "mask", category: "privacy", enabled: true },
+        { rule_type: "pii", pattern: "ID_CARD", action: "mask", category: "privacy", enabled: true },
+        { rule_type: "pii", pattern: "EMAIL", action: "mask", category: "privacy", enabled: true },
+        { rule_type: "pii", pattern: "API_KEY", action: "mask", category: "security", enabled: true }
+      ];
+
+      let added = 0;
+      for (const p of presets) {
+        const exists = (state.guardrails || []).some(
+          r => r.rule_type === p.rule_type && r.pattern.toUpperCase() === p.pattern.toUpperCase()
+        );
+        if (!exists) {
+          const resp = await apiCall("/admin/v1/guardrails", { method: "POST", body: p });
+          if (resp && resp.ok) added++;
+        }
+      }
+
+      if (added > 0) {
+        showToast(`已成功预置并激活 ${added} 条常用 PII 脱敏规则`, "success");
+      } else {
+        showToast("常用 PII 脱敏规则已全部存在，无需重复添加", "info");
+      }
+      fetchGuardrails();
+    }
+
+    function testGuardrailsSandbox() {
+      const inputEl = document.getElementById("grSandboxInput");
+      const resultEl = document.getElementById("grSandboxResult");
+      if (!inputEl || !resultEl) return;
+
+      const text = inputEl.value.trim();
+      if (!text) {
+        showToast("请输入需要测试的文本", "warning");
+        inputEl.focus();
+        return;
+      }
+
+      resultEl.classList.remove("hidden");
+      const activeRules = (state.guardrails || []).filter(r => r.enabled);
+
+      // PII 正则定义与 C 引擎保持严格一致
+      const piiPatterns = {
+        PHONE: /1[3-9][0-9]{9}/g,
+        EMAIL: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
+        ID_CARD: /[1-9][0-9]{5}(?:18|19|20)[0-9]{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12][0-9]|3[01])[0-9]{3}[0-9Xx]/g,
+        API_KEY: /(?:sk-[a-zA-Z0-9]{20,}|aig_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,})/g
+      };
+
+      // 阶段 1：阻断检查 (Block Rules)
+      for (const r of activeRules) {
+        if (r.action === "block") {
+          let hit = false;
+          if (r.rule_type === "keyword") {
+            if (text.toLowerCase().includes(r.pattern.toLowerCase())) {
+              hit = true;
+            }
+          } else if (r.rule_type === "pii") {
+            const re = piiPatterns[r.pattern.toUpperCase()];
+            if (re && re.test(text)) {
+              hit = true;
+            }
+          } else if (r.rule_type === "regex") {
+            try {
+              const reg = new RegExp(r.pattern, "i");
+              if (reg.test(text)) hit = true;
+            } catch (err) {}
+          }
+
+          if (hit) {
+            resultEl.className = "mt-3 p-3.5 rounded-xl text-xs font-mono border bg-rose-500/10 border-rose-500/30 text-rose-300";
+            resultEl.innerHTML = `
+              <div class="flex items-center gap-1.5 font-bold text-rose-400 mb-1">
+                <span>🛑</span> <span>请求拦截 (HTTP 400 Bad Request)</span>
+              </div>
+              <div class="text-[11px] leading-relaxed text-slate-300">
+                触发阻断规则：<code class="px-1.5 py-0.5 rounded bg-slate-900 border border-rose-500/30 text-rose-300 font-bold">${escapeHtml(r.pattern)}</code>
+                <span class="text-slate-400">（类型: ${r.rule_type}，分类: ${r.category || "默认"}）</span>
+              </div>
+              <div class="mt-2 text-[10px] text-slate-400 border-t border-rose-500/20 pt-1.5">
+                客户端将收到：<code>{"error":{"type":"guardrail_blocked","code":400,"message":"content blocked by guardrail"}}</code>
+              </div>
+            `;
+            return;
+          }
+        }
+      }
+
+      // 阶段 2：脱敏替换检查 (Mask Rules)
+      let transformed = text;
+      let maskCount = 0;
+      const maskHits = [];
+
+      for (const r of activeRules) {
+        if (r.action === "mask") {
+          if (r.rule_type === "pii") {
+            const patKey = r.pattern.toUpperCase();
+            const re = piiPatterns[patKey];
+            if (re) {
+              const prev = transformed;
+              transformed = transformed.replace(re, `[${patKey}]`);
+              if (prev !== transformed) {
+                maskCount++;
+                maskHits.push(patKey);
+              }
+            }
+          } else if (r.rule_type === "keyword") {
+            if (r.pattern && transformed.toLowerCase().includes(r.pattern.toLowerCase())) {
+              const re = new RegExp(r.pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+              transformed = transformed.replace(re, '***');
+              maskCount++;
+              maskHits.push(r.pattern);
+            }
+          } else if (r.rule_type === "regex") {
+            try {
+              const reg = new RegExp(r.pattern, "gi");
+              const prev = transformed;
+              transformed = transformed.replace(reg, "[REDACTED]");
+              if (prev !== transformed) {
+                maskCount++;
+                maskHits.push(r.pattern);
+              }
+            } catch (err) {}
+          }
+        }
+      }
+
+      if (maskCount > 0) {
+        resultEl.className = "mt-3 p-3.5 rounded-xl text-xs font-mono border bg-amber-500/10 border-amber-500/30 text-amber-300";
+        resultEl.innerHTML = `
+          <div class="flex items-center gap-1.5 font-bold text-amber-400 mb-1">
+            <span>🛡️</span> <span>内容脱敏完成并放行 (Masked & Forwarded)</span>
+          </div>
+          <div class="text-[11px] leading-relaxed text-slate-300 mb-2">
+            已匹配并脱敏 ${maskCount} 处敏感隐私信息 (${maskHits.join(", ")})。
+          </div>
+          <div class="p-2.5 rounded-lg bg-slate-950 border border-amber-500/20 text-slate-200 break-all select-all font-mono">
+            ${escapeHtml(transformed)}
+          </div>
+        `;
+        return;
+      }
+
+      // 阶段 3：完全通过
+      resultEl.className = "mt-3 p-3.5 rounded-xl text-xs font-mono border bg-emerald-500/10 border-emerald-500/30 text-emerald-300";
+      resultEl.innerHTML = `
+        <div class="flex items-center gap-1.5 font-bold text-emerald-400 mb-1">
+          <span>✅</span> <span>安全合规检查通过</span>
+        </div>
+        <div class="text-[11px] text-slate-300">
+          未命中任何阻断或脱敏规则，请求内容将原样安全转发至下游 LLM 模型。
+        </div>
+      `;
+    }
+
     // --- Groups Management ---
     async function fetchGroups() {
       const tbody = document.getElementById("groupsTableBody");
