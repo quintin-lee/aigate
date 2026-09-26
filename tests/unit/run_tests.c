@@ -281,6 +281,8 @@ main(void)
     extern void test_gemini_streaming_bridge_chunks(void);
     extern void test_gemini_streaming_fragmented_tcp(void);
     extern void test_gemini_streaming_client_abort(void);
+    extern void test_gemini_sniff_usage_json(void);
+    extern void test_gemini_sniff_streaming_sse(void);
     test_register("gemini_build_system_and_contents", test_gemini_build_system_and_contents);
     test_register("gemini_build_generation_config", test_gemini_build_generation_config);
     test_register("gemini_resp_translation", test_gemini_resp_translation);
@@ -288,6 +290,8 @@ main(void)
     test_register("gemini_streaming_bridge_chunks", test_gemini_streaming_bridge_chunks);
     test_register("gemini_streaming_fragmented_tcp", test_gemini_streaming_fragmented_tcp);
     test_register("gemini_streaming_client_abort", test_gemini_streaming_client_abort);
+    test_register("gemini_sniff_usage_json", test_gemini_sniff_usage_json);
+    test_register("gemini_sniff_streaming_sse", test_gemini_sniff_streaming_sse);
 
     extern void test_openai_embeddings_build(void);
     extern void test_openai_embeddings_parse(void);
