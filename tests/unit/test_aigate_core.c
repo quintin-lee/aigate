@@ -755,3 +755,253 @@ TEST_CASE(test_responses_missing_model_400)
     freed_db(&db);
 }
 
+static const char*
+run_anthropic_messages(aigate_core* ac, const char* bearer, const char* body, struct cap* out)
+{
+    aigate_request_ctx rq;
+    memset(&rq, 0, sizeof rq);
+    rq.method = "POST";
+    rq.path = "/v1/messages";
+    rq.bearer = bearer;
+    rq.client_ip = "127.0.0.1";
+    rq.body = body;
+    rq.body_len = body ? strlen(body) : 0;
+
+    aigate_response_ctx rcc = cap_rc(out);
+    aigate_handle_request(ac, &rq, &rcc);
+    out->status = rcc.status;
+    return out->body;
+}
+
+static const char*
+run_gemini_generate(aigate_core* ac, const char* bearer, const char* path, const char* body, struct cap* out)
+{
+    aigate_request_ctx rq;
+    memset(&rq, 0, sizeof rq);
+    rq.method = "POST";
+    rq.path = path;
+    rq.bearer = bearer;
+    rq.client_ip = "127.0.0.1";
+    rq.body = body;
+    rq.body_len = body ? strlen(body) : 0;
+
+    aigate_response_ctx rcc = cap_rc(out);
+    aigate_handle_request(ac, &rq, &rcc);
+    out->status = rcc.status;
+    return out->body;
+}
+
+TEST_CASE(test_anthropic_native_pipeline_200)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "claude-3-5-sonnet");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "anthropic");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    const char* req_body = "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}";
+    run_anthropic_messages(&ac, "test-key", req_body, &c);
+    TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "msg_mock_123") != NULL, "contains msg_mock_123");
+    TEST_ASSERT(strstr(c.body, "Hello from Claude non-stream") != NULL, "contains claude text");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_anthropic_native_non_anthropic_400)
+{
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", "http://127.0.0.1:9999");
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    const char* req_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}";
+    run_anthropic_messages(&ac, "test-key", req_body, &c);
+    TEST_ASSERT(c.status == 400, "status 400 for non-anthropic, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "\"type\":\"error\"") != NULL, "contains type error");
+    TEST_ASSERT(strstr(c.body, "invalid_request_error") != NULL, "contains invalid_request_error");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+}
+
+TEST_CASE(test_anthropic_native_stream_pipeline_200)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "claude-3-5-sonnet");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "anthropic");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    const char* req_body = "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}";
+    run_anthropic_messages(&ac, "test-key", req_body, &c);
+    TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
+    TEST_ASSERT(strstr(c.hdrs, "text/event-stream") != NULL, "headers have text/event-stream");
+    TEST_ASSERT(strstr(c.body, "content_block_delta") != NULL, "contains content_block_delta");
+    TEST_ASSERT(strstr(c.body, "from Claude") != NULL, "contains from Claude");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_gemini_native_pipeline_200)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gemini-1.5-flash");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "gemini");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    const char* req_body = "{\"contents\":[{\"parts\":[{\"text\":\"Hello\"}]}]}";
+    run_gemini_generate(&ac, "test-key", "/v1beta/models/gemini-1.5-flash:generateContent", req_body, &c);
+    TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "Hello from Gemini") != NULL, "contains gemini text");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_gemini_native_non_gemini_400)
+{
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", "http://127.0.0.1:9999");
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    const char* req_body = "{\"contents\":[{\"parts\":[{\"text\":\"Hello\"}]}]}";
+    run_gemini_generate(&ac, "test-key", "/v1beta/models/gpt-4o:generateContent", req_body, &c);
+    TEST_ASSERT(c.status == 400, "status 400 for non-gemini, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "\"code\":400") != NULL, "contains code 400");
+    TEST_ASSERT(strstr(c.body, "INVALID_ARGUMENT") != NULL, "contains INVALID_ARGUMENT");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+}
+
+TEST_CASE(test_gemini_native_stream_pipeline_200)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gemini-1.5-flash");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "gemini");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    const char* req_body = "{\"contents\":[{\"parts\":[{\"text\":\"Hello\"}]}]}";
+    run_gemini_generate(&ac, "test-key", "/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse", req_body, &c);
+    TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
+    TEST_ASSERT(strstr(c.hdrs, "text/event-stream") != NULL, "headers have text/event-stream");
+    TEST_ASSERT(strstr(c.body, "from Gemini SSE") != NULL, "contains SSE text");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+

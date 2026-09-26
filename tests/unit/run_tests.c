@@ -158,6 +158,19 @@ main(void)
     test_register("responses_pipeline_200", test_responses_pipeline_200);
     test_register("responses_missing_model_400", test_responses_missing_model_400);
 
+    extern void test_anthropic_native_pipeline_200(void);
+    extern void test_anthropic_native_stream_pipeline_200(void);
+    extern void test_anthropic_native_non_anthropic_400(void);
+    extern void test_gemini_native_pipeline_200(void);
+    extern void test_gemini_native_non_gemini_400(void);
+    extern void test_gemini_native_stream_pipeline_200(void);
+    test_register("anthropic_native_pipeline_200", test_anthropic_native_pipeline_200);
+    test_register("anthropic_native_stream_pipeline_200", test_anthropic_native_stream_pipeline_200);
+    test_register("anthropic_native_non_anthropic_400", test_anthropic_native_non_anthropic_400);
+    test_register("gemini_native_pipeline_200", test_gemini_native_pipeline_200);
+    test_register("gemini_native_non_gemini_400", test_gemini_native_non_gemini_400);
+    test_register("gemini_native_stream_pipeline_200", test_gemini_native_stream_pipeline_200);
+
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
 

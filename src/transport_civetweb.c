@@ -400,6 +400,7 @@ transport_civetweb_start(aigate_core* ac,
     }
 
     mg_set_request_handler(cw->ctx, "/v1/", handle_v1, cw);
+    mg_set_request_handler(cw->ctx, "/v1beta/", handle_v1, cw);
     mg_set_request_handler(cw->ctx, "/admin/v1", handle_admin, cw);
     mg_set_request_handler(cw->ctx, "/admin", handle_admin_ui, cw);
     mg_set_request_handler(cw->ctx, "/metrics", handle_metrics, cw);
