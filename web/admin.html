@@ -674,6 +674,134 @@
       </div>
     </div>
 
+    <!-- ==================== 标签页：安全风控 ==================== -->
+    <div id="tab-guardrails" class="tab-content hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+            <span>🛡️</span>
+            <span>安全风控 (Guardrails)</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">基于 Aho-Corasick 敏感词过滤与正则脱敏引擎，提供毫秒级入站防护与隐私脱敏。</p>
+        </div>
+        <div class="flex items-center space-x-2 sm:space-x-3 flex-wrap gap-y-2">
+          <button onclick="reloadGuardrailsEngine()" title="重新加载引擎规则" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-slate-900 border border-slate-700/80 hover:bg-slate-800 text-slate-200 transition flex items-center space-x-1.5 shadow-sm">
+            <span>🔄</span>
+            <span>热重载引擎</span>
+          </button>
+          <button onclick="seedDefaultPiiRules()" title="一键注入手机、身份证、邮箱、API Key 脱敏规则" class="px-3.5 py-2 rounded-xl text-xs font-semibold bg-indigo-600/90 hover:bg-indigo-500 text-white transition flex items-center space-x-1.5 shadow-sm">
+            <span>⚡</span>
+            <span>一键预置 PII</span>
+          </button>
+          <button onclick="openGuardrailModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/20 transition flex items-center space-x-1.5">
+            <span>+</span>
+            <span>新建规则</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4 个统计指标卡 -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="glass-panel p-5 rounded-2xl border border-slate-800">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">有效规则总数</div>
+          <div id="grStatTotal" class="text-3xl font-extrabold text-sky-400 mt-2">0</div>
+          <div class="text-[11px] text-slate-500 mt-1">系统已注册风控规则</div>
+        </div>
+        <div class="glass-panel p-5 rounded-2xl border border-slate-800">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">敏感词阻断 (Block)</div>
+          <div id="grStatKeyword" class="text-3xl font-extrabold text-rose-400 mt-2">0</div>
+          <div class="text-[11px] text-slate-500 mt-1">Aho-Corasick 高性能阻断</div>
+        </div>
+        <div class="glass-panel p-5 rounded-2xl border border-slate-800">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">隐私脱敏 (Mask)</div>
+          <div id="grStatPii" class="text-3xl font-extrabold text-amber-400 mt-2">0</div>
+          <div class="text-[11px] text-slate-500 mt-1">PII 与正则掩码规则</div>
+        </div>
+        <div class="glass-panel p-5 rounded-2xl border border-slate-800">
+          <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">引擎运行状态</div>
+          <div id="grStatStatus" class="text-sm font-bold text-emerald-400 mt-2 flex items-center space-x-1.5">
+            <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span>已加载就绪</span>
+          </div>
+          <div class="text-[11px] text-slate-500 mt-1">毫秒级内存安全检查</div>
+        </div>
+      </div>
+
+      <!-- 实时规则测试沙箱 (Rule Sandbox) -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div class="text-sm font-bold text-slate-200 flex items-center gap-2">
+            <span>🧪</span>
+            <span>实时规则测试沙箱 (Rule Sandbox)</span>
+          </div>
+          <span class="text-[11px] text-slate-500">基于已加载规则本地内存仿真，不消耗调用配额</span>
+        </div>
+        <div class="flex flex-col sm:flex-row gap-2">
+          <input type="text" id="grSandboxInput" placeholder="输入测试语句，例如：联系电话 13812345678，请勿 DROP TABLE。" class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-brand-500 font-mono" />
+          <button onclick="testGuardrailsSandbox()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 transition flex items-center justify-center gap-1.5 shadow-sm">
+            <span>▶</span> <span>执行匹配测试</span>
+          </button>
+        </div>
+        <div id="grSandboxResult" class="hidden p-3 rounded-xl text-xs font-mono border"></div>
+      </div>
+
+      <!-- 规则表格与工具条 -->
+      <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
+        <div class="p-4 border-b border-slate-800 bg-slate-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div class="flex items-center space-x-2">
+            <span class="text-xs font-semibold text-slate-300">规则列表</span>
+          </div>
+          <div class="flex items-center space-x-3 flex-wrap gap-y-2">
+            <select id="grTypeFilter" onchange="filterGuardrailsTable(true)" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="all">所有规则类型</option>
+              <option value="keyword">敏感词 (keyword)</option>
+              <option value="pii">隐私脱敏 (pii)</option>
+              <option value="regex">正则表达式 (regex)</option>
+            </select>
+            <input type="text" id="grSearchInput" oninput="filterGuardrailsTable(true)" placeholder="搜索规则或模式..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-44">
+          </div>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll">
+          <table class="w-full text-left border-collapse text-xs data-tbl">
+            <thead>
+              <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 uppercase tracking-wider font-semibold">
+                <th class="py-3 px-4">ID</th>
+                <th class="py-3 px-4">规则类型</th>
+                <th class="py-3 px-4">匹配模式 (Pattern)</th>
+                <th class="py-3 px-4">处置动作</th>
+                <th class="py-3 px-4">分类</th>
+                <th class="py-3 px-4 text-center">状态</th>
+                <th class="py-3 px-4 text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="guardrailsTableBody" class="divide-y divide-slate-800/60 font-mono">
+              <!-- 动态插入行 -->
+            </tbody>
+          </table>
+        </div>
+        <div id="guardrailsEmptyState" class="hidden py-12 text-center text-slate-500 text-sm">
+          暂未配置安全风控规则，点击 <span class="text-brand-400 font-semibold cursor-pointer" onclick="openGuardrailModal()">+ 新建规则</span> 或 <span class="text-indigo-400 font-semibold cursor-pointer" onclick="seedDefaultPiiRules()">⚡ 一键预置 PII</span>。
+        </div>
+        <div id="guardrailsPagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="guardrailsTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="guardrailsPageSize" onchange="changePageSize('guardrails', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="guardrailsPrevBtn" onclick="prevPage('guardrails')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="guardrailsCurrentPage">1</span> / <span id="guardrailsTotalPages">1</span> 页</span>
+            <button id="guardrailsNextBtn" onclick="nextPage('guardrails')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ==================== 标签页：部门分组 ==================== -->
     <div id="tab-groups" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -1332,7 +1460,52 @@
     </div>
   </div>
 
-  <!-- 5. 通用确认弹窗 -->
+  <!-- 6. 创建/编辑安全风控规则弹窗 -->
+  <div id="guardrailModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 id="guardrailModalTitle" class="text-lg font-bold text-white">新建风控规则</h3>
+        <button onclick="closeGuardrailModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+      <form id="guardrailForm" onsubmit="handleGuardrailSubmit(event)" class="space-y-4 text-xs">
+        <input type="hidden" id="grFormId">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">规则类型 *</label>
+          <select id="grFormType" required onchange="onGuardrailTypeChange()" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500">
+            <option value="keyword">keyword (敏感词匹配 - Aho-Corasick)</option>
+            <option value="pii">pii (隐私脱敏预置类型)</option>
+            <option value="regex">regex (正则表达式规则)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">匹配模式 / 标识 (Pattern) *</label>
+          <input type="text" id="grFormPattern" required placeholder="例如：DROP TABLE 或 PHONE / EMAIL" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+          <p id="grFormPatternHint" class="text-[10px] text-slate-500 mt-1">敏感词模式支持多词高效匹配；PII 可使用 PHONE, ID_CARD, EMAIL, API_KEY。</p>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">处置动作 *</label>
+          <select id="grFormAction" required class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500">
+            <option value="block">🛑 阻断请求 (block - HTTP 400)</option>
+            <option value="mask">🛡️ 掩码脱敏 (mask - 替换占位符)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">规则分类 (Category)</label>
+          <input type="text" id="grFormCategory" placeholder="例如：security, privacy, compliance" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+        </div>
+        <div class="flex items-center space-x-2 pt-1">
+          <input type="checkbox" id="grFormEnabled" checked class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500">
+          <label for="grFormEnabled" class="text-slate-300 font-semibold cursor-pointer">立即启用该规则</label>
+        </div>
+        <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
+          <button type="button" onclick="closeGuardrailModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition">取消</button>
+          <button type="submit" class="px-4 py-2 rounded-xl font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">保存规则</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 7. 通用确认弹窗 -->
   <div id="confirmModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden" onclick="if(event.target===this)closeConfirmModal()">
     <div class="glass-panel max-w-sm w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <h3 id="confirmModalTitle" class="text-base font-bold text-white">请确认</h3>
@@ -1467,8 +1640,9 @@
       // ESC closes any open modal or drawer
       document.addEventListener("keydown", (e) => {
         if (e.key === "Escape") {
-          ["tokenModal", "providerModal", "modelModal", "keyModal", "newKeySuccessModal", "groupModal"].forEach(id => {
-            document.getElementById(id).classList.add("hidden");
+          ["tokenModal", "providerModal", "modelModal", "keyModal", "newKeySuccessModal", "groupModal", "guardrailModal"].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.classList.add("hidden");
           });
           if (!document.getElementById("confirmModal").classList.contains("hidden")) {
             closeConfirmModal();
@@ -1477,6 +1651,7 @@
           state.editingModelName = null;
           state.editingProviderId = null;
           state.editingGroupId = null;
+          state.editingGuardrailId = null;
         }
       });
     });
