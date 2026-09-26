@@ -46,6 +46,7 @@ main(void)
     extern void test_pg_fake_multi_target_model(void);
     extern void test_pg_fake_usage_flush_and_query(void);
     extern void test_pg_fake_request_flush_and_query(void);
+    extern void test_pg_fake_reasoning_tokens(void);
     extern void test_pg_migrate_noop_for_fake(void);
     extern void test_pg_real_roundtrip(void);
     extern void test_pg_real_provider_crud(void);
@@ -54,6 +55,7 @@ main(void)
     extern void test_secret_tamper_and_wrong_key(void);
     extern void test_secret_hex_to_bytes(void);
     extern void test_auth_key_resolve_normal(void);
+    extern void test_auth_key_flags(void);
     extern void test_auth_key_unknown_revoked_expired(void);
     extern void test_auth_key_unknown_neg_cache(void);
     extern void test_key_allows_model(void);
@@ -104,6 +106,8 @@ main(void)
     test_register("pg_fake_multi_target_model", test_pg_fake_multi_target_model);
     test_register("pg_fake_usage_flush_and_query", test_pg_fake_usage_flush_and_query);
     test_register("pg_fake_request_flush_and_query", test_pg_fake_request_flush_and_query);
+    test_register("pg_fake_reasoning_tokens", test_pg_fake_reasoning_tokens);
+
     test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
     test_register("pg_real_roundtrip", test_pg_real_roundtrip);
     test_register("pg_real_provider_crud", test_pg_real_provider_crud);

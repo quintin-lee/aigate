@@ -1858,6 +1858,7 @@ usage_requests_query(admin_ctx_t* adm, int* status, char** body, size_t* len, co
         json_object_set_new(o, "prompt_tokens", json_integer(rows[i].prompt_tokens));
         json_object_set_new(o, "completion_tokens", json_integer(rows[i].completion_tokens));
         json_object_set_new(o, "cached_prompt_tokens", json_integer(rows[i].cached_prompt_tokens));
+        json_object_set_new(o, "reasoning_tokens", json_integer(rows[i].reasoning_tokens));
         json_object_set_new(o, "latency_ms", json_real(rows[i].latency_ns / 1000000.0));
         json_object_set_new(o, "ts", json_string(ts_iso));
         json_array_append_new(arr, o);

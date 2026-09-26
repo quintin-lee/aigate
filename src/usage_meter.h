@@ -37,6 +37,17 @@ void um_record(usage_meter_t* um,
                uint64_t       latency_ns,
                const char*    provider);
 
+void um_record_ext(usage_meter_t* um,
+                   long           key_id,
+                   const char*    model,
+                   int            http_status,
+                   long           prompt_tokens,
+                   long           completion_tokens,
+                   long           cached_prompt_tokens,
+                   long           reasoning_tokens,
+                   uint64_t       latency_ns,
+                   const char*    provider);
+
 /** @brief Lifetime totals (for /metrics). */
 long um_total_requests(usage_meter_t* um);
 long um_total_errors(usage_meter_t* um);
