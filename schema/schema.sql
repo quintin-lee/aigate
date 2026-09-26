@@ -117,5 +117,30 @@ INSERT INTO schema_migrations(version) VALUES (7) ON CONFLICT (version) DO NOTHI
 ALTER TABLE usage_requests ADD COLUMN IF NOT EXISTS reasoning_tokens BIGINT NOT NULL DEFAULT 0;
 INSERT INTO schema_migrations(version) VALUES (8) ON CONFLICT (version) DO NOTHING;
 
+-- Migration v9: guardrails rules and budget limits
+CREATE TABLE IF NOT EXISTS guardrails_rules (
+  id          BIGSERIAL PRIMARY KEY,
+  rule_type   TEXT NOT NULL,
+  pattern     TEXT NOT NULL,
+  action      TEXT NOT NULL DEFAULT 'block',
+  category    TEXT NOT NULL DEFAULT 'general',
+  enabled     BOOLEAN NOT NULL DEFAULT true,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_guardrails_enabled ON guardrails_rules(enabled, rule_type);
+
+ALTER TABLE api_keys 
+  ADD COLUMN IF NOT EXISTS guardrails_enabled BOOLEAN NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS monthly_cost_budget NUMERIC(12, 4) NOT NULL DEFAULT 0.0000,
+  ADD COLUMN IF NOT EXISTS monthly_token_budget BIGINT NOT NULL DEFAULT 0;
+
+ALTER TABLE groups 
+  ADD COLUMN IF NOT EXISTS monthly_budget_usd NUMERIC(12, 4) NOT NULL DEFAULT 0.0000;
+
+ALTER TABLE usage_requests 
+  ADD COLUMN IF NOT EXISTS guardrail_action TEXT NOT NULL DEFAULT '';
+
+INSERT INTO schema_migrations(version) VALUES (9) ON CONFLICT (version) DO NOTHING;
+
 
 

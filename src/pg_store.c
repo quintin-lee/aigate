@@ -228,7 +228,8 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
     struct pq_ctx*    px = vctx;
     static const char q[] = "SELECT key_id, key_hash, name, array_to_string(allowed_models, '|'), "
                             "rate_qps, daily_token_quota, expires_at, revoked_at, "
-                            "COALESCE(group_id, 0) "
+                            "COALESCE(group_id, 0), COALESCE(guardrails_enabled, true), "
+                            "COALESCE(monthly_cost_budget, 0.0), COALESCE(monthly_token_budget, 0) "
                             "FROM api_keys WHERE key_hash = $1";
     const char*       val[1] = {key_hash};
     int               plen[1] = {0};
@@ -262,6 +263,20 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
             if (PQnfields(res) > 8) {
                 const char* gid = PQgetvalue(res, 0, 8);
                 out->group_id = (gid != NULL && gid[0] != '\0') ? atol(gid) : 0;
+            }
+            if (PQnfields(res) > 9) {
+                const char* ge = PQgetvalue(res, 0, 9);
+                out->guardrails_enabled = (ge == NULL || ge[0] == '\0' || strcmp(ge, "f") != 0);
+            } else {
+                out->guardrails_enabled = 1;
+            }
+            if (PQnfields(res) > 10) {
+                const char* mcb = PQgetvalue(res, 0, 10);
+                out->monthly_cost_budget = (mcb != NULL && mcb[0] != '\0') ? atof(mcb) : 0.0;
+            }
+            if (PQnfields(res) > 11) {
+                const char* mtb = PQgetvalue(res, 0, 11);
+                out->monthly_token_budget = (mtb != NULL && mtb[0] != '\0') ? atol(mtb) : 0;
             }
             rc = 0;
         } else {
@@ -299,6 +314,20 @@ fill_key_row(PGresult* res, int row, key_rec_t* out)
         const char* gid = PQgetvalue(res, row, 8);
         out->group_id = (gid != NULL && gid[0] != '\0') ? atol(gid) : 0;
     }
+    if (PQnfields(res) > 9) {
+        const char* ge = PQgetvalue(res, row, 9);
+        out->guardrails_enabled = (ge == NULL || ge[0] == '\0' || strcmp(ge, "f") != 0);
+    } else {
+        out->guardrails_enabled = 1;
+    }
+    if (PQnfields(res) > 10) {
+        const char* mcb = PQgetvalue(res, row, 10);
+        out->monthly_cost_budget = (mcb != NULL && mcb[0] != '\0') ? atof(mcb) : 0.0;
+    }
+    if (PQnfields(res) > 11) {
+        const char* mtb = PQgetvalue(res, row, 11);
+        out->monthly_token_budget = (mtb != NULL && mtb[0] != '\0') ? atol(mtb) : 0;
+    }
 }
 
 static int
@@ -307,7 +336,9 @@ pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
     struct pq_ctx*    px = vctx;
     static const char q[] = "SELECT key_id, key_hash, name, "
                             "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
-                            "expires_at, revoked_at, COALESCE(group_id, 0) "
+                            "expires_at, revoked_at, COALESCE(group_id, 0), "
+                            "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
+                            "COALESCE(monthly_token_budget, 0) "
                             "FROM api_keys ORDER BY key_id";
     *n = 0;
 
@@ -338,7 +369,9 @@ pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
     struct pq_ctx*    px = vctx;
     static const char q[] = "SELECT key_id, key_hash, name, "
                             "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
-                            "expires_at, revoked_at, COALESCE(group_id, 0) "
+                            "expires_at, revoked_at, COALESCE(group_id, 0), "
+                            "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
+                            "COALESCE(monthly_token_budget, 0) "
                             "FROM api_keys WHERE key_id = $1";
     char              id[32];
     const char*       val[1] = {0};
@@ -518,15 +551,16 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
-        "daily_token_quota, expires_at, group_id) "
+        "daily_token_quota, expires_at, group_id, guardrails_enabled, monthly_cost_budget, monthly_token_budget) "
         "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
         "ELSE string_to_array($3, '|') END, $4, $5, "
         "CASE WHEN $6 = 'null' THEN NULL "
         "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END, "
-        "CASE WHEN $7 = '0' THEN NULL ELSE ($7)::bigint END) RETURNING key_id";
-    char        joined[512], rate[16], quota[32], exp[32], gid_str[32];
-    const char* vals[7];
-    int         plens[7] = {0};
+        "CASE WHEN $7 = '0' THEN NULL ELSE ($7)::bigint END, $8, $9, $10) RETURNING key_id";
+    char        joined[512], rate[16], quota[32], exp[32], gid_str[32], mcb_str[32], mtb_str[32];
+    const char* ge_str = k->guardrails_enabled ? "true" : "false";
+    const char* vals[10];
+    int         plens[10] = {0};
     long        id = -1;
 
     if (join_model_list(k, joined, sizeof joined) != 0) {
@@ -540,6 +574,8 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
         strcpy(exp, "null");
     }
     snprintf(gid_str, sizeof gid_str, "%ld", k->group_id);
+    snprintf(mcb_str, sizeof mcb_str, "%.4f", k->monthly_cost_budget);
+    snprintf(mtb_str, sizeof mtb_str, "%ld", k->monthly_token_budget);
     vals[0] = k->key_hash;
     vals[1] = k->name;
     vals[2] = joined;
@@ -547,9 +583,12 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     vals[4] = quota;
     vals[5] = exp;
     vals[6] = gid_str;
+    vals[7] = ge_str;
+    vals[8] = mcb_str;
+    vals[9] = mtb_str;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 7, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 10, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
         id = atol(PQgetvalue(res, 0, 0));
@@ -576,8 +615,9 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
 {
     struct pq_ctx* px = vctx;
     char           sql[1024], joined[512], rate[16], quota[32], exp[32], id[32], gid_str[32];
-    const char*    vals[8];
-    int            plens[8] = {0};
+    char           mcb_str[32], mtb_str[32];
+    const char*    vals[12];
+    int            plens[12] = {0};
     int            nv = 0, off;
 
     if (mask == 0) {
@@ -595,6 +635,9 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
     }
     snprintf(id, sizeof id, "%ld", k->key_id);
     snprintf(gid_str, sizeof gid_str, "%ld", k->group_id);
+    snprintf(mcb_str, sizeof mcb_str, "%.4f", k->monthly_cost_budget);
+    snprintf(mtb_str, sizeof mtb_str, "%ld", k->monthly_token_budget);
+    const char* ge_str = k->guardrails_enabled ? "true" : "false";
 
     off = snprintf(sql, sizeof sql, "UPDATE api_keys SET ");
     if (mask & KMASK_RATE) {
@@ -642,6 +685,33 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
                         nv,
                         nv);
         vals[nv - 1] = gid_str;
+    }
+    if (mask & KMASK_GUARDRAILS) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sguardrails_enabled = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = ge_str;
+    }
+    if (mask & KMASK_MONTHLY_COST_BUDGET) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%smonthly_cost_budget = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = mcb_str;
+    }
+    if (mask & KMASK_MONTHLY_TOKEN_BUDGET) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%smonthly_token_budget = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = mtb_str;
     }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE key_id = $%d", nv);
@@ -1480,10 +1550,11 @@ pq_list_groups(void* vctx, group_rec_t* out, int cap, int* n)
 {
     struct pq_ctx*    px = vctx;
     static const char q[] =
-        "SELECT g.id, g.name, EXTRACT(EPOCH FROM g.created_at)::bigint, COUNT(k.key_id) "
+        "SELECT g.id, g.name, EXTRACT(EPOCH FROM g.created_at)::bigint, COUNT(k.key_id), "
+        "COALESCE(g.monthly_budget_usd, 0.0) "
         "FROM groups g "
         "LEFT JOIN api_keys k ON k.group_id = g.id "
-        "GROUP BY g.id, g.name, g.created_at "
+        "GROUP BY g.id, g.name, g.created_at, g.monthly_budget_usd "
         "ORDER BY g.id";
     *n = 0;
 
@@ -1505,6 +1576,8 @@ pq_list_groups(void* vctx, group_rec_t* out, int cap, int* n)
         copy_field(out[i].name, sizeof out[i].name, PQgetvalue(res, i, 1));
         out[i].created_at = (time_t)atol(PQgetvalue(res, i, 2));
         out[i].key_count = atol(PQgetvalue(res, i, 3));
+        out[i].monthly_budget_usd =
+            (PQnfields(res) > 4 && PQgetvalue(res, i, 4)[0] != '\0') ? atof(PQgetvalue(res, i, 4)) : 0.0;
     }
     *n = nt;
     PQclear(res);
@@ -1654,6 +1727,172 @@ pq_query_cost(void* vctx, long since_s, long until_s, cost_row_t* out, int cap, 
     return 0;
 }
 
+static int
+pq_patch_group_budget(void* vctx, long id, double budget)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "UPDATE groups SET monthly_budget_usd = $1 WHERE id = $2";
+    char              id_str[32], b_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", id);
+    snprintf(b_str, sizeof b_str, "%.4f", budget);
+    const char* vals[2] = {b_str, id_str};
+    int         plens[2] = {0, 0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 2, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg patch_group_budget: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg patch_group_budget: query alloc failed");
+    }
+    return -1;
+}
+
+static int
+pq_list_guardrails_rules(void* vctx, guardrail_rule_t* out, int cap, int* n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT id, rule_type, pattern, action, category, enabled, "
+        "EXTRACT(EPOCH FROM created_at)::bigint "
+        "FROM guardrails_rules ORDER BY id";
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_guardrails_rules: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        out[i].id = atol(PQgetvalue(res, i, 0));
+        copy_field(out[i].rule_type, sizeof out[i].rule_type, PQgetvalue(res, i, 1));
+        copy_field(out[i].pattern, sizeof out[i].pattern, PQgetvalue(res, i, 2));
+        copy_field(out[i].action, sizeof out[i].action, PQgetvalue(res, i, 3));
+        copy_field(out[i].category, sizeof out[i].category, PQgetvalue(res, i, 4));
+        out[i].enabled = strcmp(PQgetvalue(res, i, 5), "t") == 0;
+        out[i].created_at = (time_t)atol(PQgetvalue(res, i, 6));
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
+static int
+pq_create_guardrails_rule(void* vctx, const guardrail_rule_t* rule, long* out_id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO guardrails_rules(rule_type, pattern, action, category, enabled) "
+        "VALUES($1, $2, $3, $4, $5) RETURNING id";
+    const char* enabled_str = rule->enabled ? "true" : "false";
+    const char* vals[5] = {
+        rule->rule_type[0] != '\0' ? rule->rule_type : "keyword",
+        rule->pattern,
+        rule->action[0] != '\0' ? rule->action : "block",
+        rule->category[0] != '\0' ? rule->category : "general",
+        enabled_str
+    };
+    int plens[5] = {0, 0, 0, 0, 0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 5, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
+        long id = atol(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        if (out_id != NULL) {
+            *out_id = id;
+        }
+        return 0;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg create_guardrails_rule: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg create_guardrails_rule: query alloc failed");
+    }
+    return -1;
+}
+
+static int
+pq_update_guardrails_rule(void* vctx, const guardrail_rule_t* rule)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "UPDATE guardrails_rules SET rule_type = $1, pattern = $2, action = $3, "
+        "category = $4, enabled = $5 WHERE id = $6";
+    char id_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", rule->id);
+    const char* enabled_str = rule->enabled ? "true" : "false";
+    const char* vals[6] = {
+        rule->rule_type,
+        rule->pattern,
+        rule->action,
+        rule->category,
+        enabled_str,
+        id_str
+    };
+    int plens[6] = {0, 0, 0, 0, 0, 0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 6, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg update_guardrails_rule: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg update_guardrails_rule: query alloc failed");
+    }
+    return -1;
+}
+
+static int
+pq_delete_guardrails_rule(void* vctx, long id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "DELETE FROM guardrails_rules WHERE id = $1";
+    char              id_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", id);
+    const char* vals[1] = {id_str};
+    int         plens[1] = {0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg delete_guardrails_rule: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg delete_guardrails_rule: query alloc failed");
+    }
+    return -1;
+}
+
 /* ------------------------------------------------------- store lifecycle */
 
 pg_store_t*
@@ -1730,9 +1969,14 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.create_group = pq_create_group;
     ps->ops.list_groups = pq_list_groups;
     ps->ops.patch_group = pq_patch_group;
+    ps->ops.patch_group_budget = pq_patch_group_budget;
     ps->ops.delete_group = pq_delete_group;
     ps->ops.count_keys_in_group = pq_count_keys_in_group;
     ps->ops.query_cost = pq_query_cost;
+    ps->ops.list_guardrails_rules = pq_list_guardrails_rules;
+    ps->ops.create_guardrails_rule = pq_create_guardrails_rule;
+    ps->ops.update_guardrails_rule = pq_update_guardrails_rule;
+    ps->ops.delete_guardrails_rule = pq_delete_guardrails_rule;
     ps->ops.ctx = px;
     ps->ctx = px;
     ps->owns_ctx = 1;
@@ -1803,4 +2047,40 @@ const pg_ops_t*
 pg_store_ops(const pg_store_t* ps)
 {
     return ps != NULL ? &ps->ops : NULL;
+}
+
+int
+pg_store_list_guardrails_rules(const pg_store_t* ps, guardrail_rule_t* out, int cap, int* n)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->list_guardrails_rules != NULL)
+               ? ops->list_guardrails_rules(ops->ctx, out, cap, n)
+               : -1;
+}
+
+int
+pg_store_create_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule, long* out_id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->create_guardrails_rule != NULL)
+               ? ops->create_guardrails_rule(ops->ctx, rule, out_id)
+               : -1;
+}
+
+int
+pg_store_update_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->update_guardrails_rule != NULL)
+               ? ops->update_guardrails_rule(ops->ctx, rule)
+               : -1;
+}
+
+int
+pg_store_delete_guardrails_rule(const pg_store_t* ps, long id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->delete_guardrails_rule != NULL)
+               ? ops->delete_guardrails_rule(ops->ctx, id)
+               : -1;
 }

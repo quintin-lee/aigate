@@ -24,6 +24,9 @@ typedef struct key_rec {
     int    has_expiry;
     int    revoked;
     long   group_id; /* 0 = ungrouped */
+    int    guardrails_enabled;   /* 1 = enabled (default), 0 = disabled */
+    double monthly_cost_budget;  /* 0.0 = unlimited */
+    long   monthly_token_budget; /* 0 = unlimited */
 } key_rec_t;
 
 #define MAX_TARGETS_PER_MODEL 8
@@ -83,7 +86,19 @@ typedef struct group_rec {
     char   name[128];
     long   key_count;
     time_t created_at;
+    double monthly_budget_usd; /* 0.0 = unlimited */
 } group_rec_t;
+
+/** @brief Guardrail rule record (guardrails_rules row). */
+typedef struct guardrail_rule {
+    long   id;
+    char   rule_type[32];   /* "keyword" | "regex" | "pii" */
+    char   pattern[512];
+    char   action[32];      /* "block" | "mask" */
+    char   category[64];    /* "general" | "profanity" | "safety" etc. */
+    int    enabled;         /* 1 = true, 0 = false */
+    time_t created_at;
+} guardrail_rule_t;
 
 /** @brief One cost attribution row. */
 typedef struct cost_row {
@@ -102,6 +117,9 @@ typedef struct cost_row {
 #define KMASK_ALLOWLIST (1 << 2)
 #define KMASK_EXPIRY (1 << 3)
 #define KMASK_GROUP (1 << 4)
+#define KMASK_GUARDRAILS (1 << 5)
+#define KMASK_MONTHLY_COST_BUDGET (1 << 6)
+#define KMASK_MONTHLY_TOKEN_BUDGET (1 << 7)
 
 #define MMASK_ENDPOINT (1 << 0)
 #define MMASK_PARAMS (1 << 1)
@@ -177,9 +195,15 @@ typedef struct pg_ops {
     int (*create_group)(void* ctx, const char* name, long* out_id);
     int (*list_groups)(void* ctx, group_rec_t* out, int cap, int* n);
     int (*patch_group)(void* ctx, long id, const char* name);
+    int (*patch_group_budget)(void* ctx, long id, double budget);
     int (*delete_group)(void* ctx, long id);
     int (*count_keys_in_group)(void* ctx, long group_id, long* n);
     int (*query_cost)(void* ctx, long since_s, long until_s, cost_row_t* out, int cap, int* n);
+
+    int (*list_guardrails_rules)(void* ctx, guardrail_rule_t* out, int cap, int* n);
+    int (*create_guardrails_rule)(void* ctx, const guardrail_rule_t* rule, long* out_id);
+    int (*update_guardrails_rule)(void* ctx, const guardrail_rule_t* rule);
+    int (*delete_guardrails_rule)(void* ctx, long id);
 } pg_ops_t;
 
 typedef struct pg_store pg_store_t;
@@ -210,5 +234,10 @@ void model_rec_free(model_rec_t* m);
 
 /** @brief Free a provider_rec_t populated by list_providers or get_provider. */
 void provider_rec_free(provider_rec_t* p);
+
+int pg_store_list_guardrails_rules(const pg_store_t* ps, guardrail_rule_t* out, int cap, int* n);
+int pg_store_create_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule, long* out_id);
+int pg_store_update_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule);
+int pg_store_delete_guardrails_rule(const pg_store_t* ps, long id);
 
 #endif /* AIGATE_PG_STORE_H */

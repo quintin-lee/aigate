@@ -47,6 +47,9 @@ main(void)
     extern void test_pg_fake_usage_flush_and_query(void);
     extern void test_pg_fake_request_flush_and_query(void);
     extern void test_pg_fake_reasoning_tokens(void);
+    extern void test_pg_fake_guardrails_lifecycle(void);
+    extern void test_pg_fake_key_budget_fields(void);
+    extern void test_pg_fake_group_budget(void);
     extern void test_pg_migrate_noop_for_fake(void);
     extern void test_pg_real_roundtrip(void);
     extern void test_pg_real_provider_crud(void);
@@ -108,6 +111,9 @@ main(void)
     test_register("pg_fake_usage_flush_and_query", test_pg_fake_usage_flush_and_query);
     test_register("pg_fake_request_flush_and_query", test_pg_fake_request_flush_and_query);
     test_register("pg_fake_reasoning_tokens", test_pg_fake_reasoning_tokens);
+    test_register("pg_fake_guardrails_lifecycle", test_pg_fake_guardrails_lifecycle);
+    test_register("pg_fake_key_budget_fields", test_pg_fake_key_budget_fields);
+    test_register("pg_fake_group_budget", test_pg_fake_group_budget);
 
     test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
     test_register("pg_real_roundtrip", test_pg_real_roundtrip);

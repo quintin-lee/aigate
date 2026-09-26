@@ -23,12 +23,26 @@ struct fake_provider {
     provider_rec_t p;
 };
 
+struct fake_rule {
+    int              in_use;
+    guardrail_rule_t r;
+};
+
+struct fake_group {
+    int         in_use;
+    group_rec_t g;
+};
+
 struct fake_db {
     struct fake_key      keys[FAKE_CAP];
     model_rec_t          models[FAKE_CAP];
     int                  n_models;
     struct fake_provider providers[FAKE_CAP];
     long                 next_provider_id;
+    struct fake_rule     rules[FAKE_CAP];
+    long                 next_rule_id;
+    struct fake_group    groups[FAKE_CAP];
+    long                 next_group_id;
     usage_row_t          usage[FAKE_CAP];
     int                  n_usage;
     usage_request_row_t  reqs[FAKE_CAP];
@@ -238,6 +252,18 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
         if (mask & KMASK_EXPIRY) {
             fk->k.expires_at = k->expires_at;
             fk->k.has_expiry = k->has_expiry;
+        }
+        if (mask & KMASK_GROUP) {
+            fk->k.group_id = k->group_id;
+        }
+        if (mask & KMASK_GUARDRAILS) {
+            fk->k.guardrails_enabled = k->guardrails_enabled;
+        }
+        if (mask & KMASK_MONTHLY_COST_BUDGET) {
+            fk->k.monthly_cost_budget = k->monthly_cost_budget;
+        }
+        if (mask & KMASK_MONTHLY_TOKEN_BUDGET) {
+            fk->k.monthly_token_budget = k->monthly_token_budget;
         }
         return 0;
     }
@@ -526,6 +552,168 @@ fake_delete_provider(void* ctx, long id)
     return -1;
 }
 
+static int
+fake_create_group(void* ctx, const char* name, long* out_id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && strcmp(db->groups[i].g.name, name) == 0) {
+            return -2; /* duplicate */
+        }
+    }
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (!db->groups[i].in_use) {
+            db->groups[i].in_use = 1;
+            db->groups[i].g.id = ++db->next_group_id;
+            snprintf(db->groups[i].g.name, sizeof db->groups[i].g.name, "%s", name);
+            db->groups[i].g.created_at = time(NULL);
+            db->groups[i].g.monthly_budget_usd = 0.0;
+            db->groups[i].g.key_count = 0;
+            if (out_id) *out_id = db->groups[i].g.id;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_list_groups(void* ctx, group_rec_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        if (db->groups[i].in_use) {
+            out[*n] = db->groups[i].g;
+            long kc = 0;
+            for (int k = 0; k < FAKE_CAP; k++) {
+                if (db->keys[k].in_use && db->keys[k].k.group_id == db->groups[i].g.id) {
+                    kc++;
+                }
+            }
+            out[*n].key_count = kc;
+            (*n)++;
+        }
+    }
+    return 0;
+}
+
+static int
+fake_patch_group(void* ctx, long id, const char* name)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && db->groups[i].g.id == id) {
+            snprintf(db->groups[i].g.name, sizeof db->groups[i].g.name, "%s", name);
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+fake_patch_group_budget(void* ctx, long id, double budget)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && db->groups[i].g.id == id) {
+            db->groups[i].g.monthly_budget_usd = budget;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+fake_delete_group(void* ctx, long id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && db->groups[i].g.id == id) {
+            db->groups[i].in_use = 0;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+fake_count_keys_in_group(void* ctx, long group_id, long* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->keys[i].in_use && db->keys[i].k.group_id == group_id) {
+            (*n)++;
+        }
+    }
+    return 0;
+}
+
+static int
+fake_query_cost(void* ctx, long since_s, long until_s, cost_row_t* out, int cap, int* n)
+{
+    (void)ctx; (void)since_s; (void)until_s; (void)out; (void)cap;
+    *n = 0;
+    return 0;
+}
+
+static int
+fake_list_guardrails_rules(void* ctx, guardrail_rule_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        if (db->rules[i].in_use) {
+            out[*n] = db->rules[i].r;
+            (*n)++;
+        }
+    }
+    return 0;
+}
+
+static int
+fake_create_guardrails_rule(void* ctx, const guardrail_rule_t* rule, long* out_id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (!db->rules[i].in_use) {
+            db->rules[i].in_use = 1;
+            db->rules[i].r = *rule;
+            db->rules[i].r.id = ++db->next_rule_id;
+            db->rules[i].r.created_at = time(NULL);
+            if (out_id) *out_id = db->rules[i].r.id;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_update_guardrails_rule(void* ctx, const guardrail_rule_t* rule)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->rules[i].in_use && db->rules[i].r.id == rule->id) {
+            db->rules[i].r = *rule;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+fake_delete_guardrails_rule(void* ctx, long id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->rules[i].in_use && db->rules[i].r.id == id) {
+            db->rules[i].in_use = 0;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
 {
@@ -551,6 +739,17 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->query_usage = fake_query_usage;
     ops->flush_usage_requests = fake_flush_requests;
     ops->query_usage_requests = fake_query_requests;
+    ops->create_group = fake_create_group;
+    ops->list_groups = fake_list_groups;
+    ops->patch_group = fake_patch_group;
+    ops->patch_group_budget = fake_patch_group_budget;
+    ops->delete_group = fake_delete_group;
+    ops->count_keys_in_group = fake_count_keys_in_group;
+    ops->query_cost = fake_query_cost;
+    ops->list_guardrails_rules = fake_list_guardrails_rules;
+    ops->create_guardrails_rule = fake_create_guardrails_rule;
+    ops->update_guardrails_rule = fake_update_guardrails_rule;
+    ops->delete_guardrails_rule = fake_delete_guardrails_rule;
 }
 
 TEST_CASE(test_pg_fake_key_lifecycle)
@@ -848,6 +1047,128 @@ TEST_CASE(test_pg_fake_reasoning_tokens)
     pg_store_close(ps);
 }
 
+TEST_CASE(test_pg_fake_guardrails_lifecycle)
+{
+    struct fake_db   db;
+    pg_ops_t         ops;
+    pg_store_t*      ps;
+    guardrail_rule_t r, out[8];
+    long             r_id = 0;
+    int              n = 0;
+
+    memset(&db, 0, sizeof db);
+    build_fake_ops(&db, &ops);
+    ps = pg_store_open("unused", &ops);
+    TEST_ASSERT(ps != NULL, "fake store open");
+
+    memset(&r, 0, sizeof r);
+    strcpy(r.rule_type, "keyword");
+    strcpy(r.pattern, "forbidden_keyword");
+    strcpy(r.action, "block");
+    strcpy(r.category, "safety");
+    r.enabled = 1;
+
+    TEST_ASSERT(pg_store_create_guardrails_rule(ps, &r, &r_id) == 0, "create guardrail rule");
+    TEST_ASSERT(r_id > 0, "rule id allocated");
+
+    TEST_ASSERT(pg_store_list_guardrails_rules(ps, out, 8, &n) == 0, "list guardrails rules");
+    TEST_ASSERT(n == 1, "exactly 1 rule in list");
+    TEST_ASSERT(strcmp(out[0].pattern, "forbidden_keyword") == 0, "rule pattern matches");
+    TEST_ASSERT(out[0].enabled == 1, "rule enabled");
+
+    /* Update rule */
+    out[0].enabled = 0;
+    strcpy(out[0].action, "mask");
+    TEST_ASSERT(pg_store_update_guardrails_rule(ps, &out[0]) == 0, "update guardrail rule");
+
+    memset(out, 0, sizeof out);
+    TEST_ASSERT(pg_store_list_guardrails_rules(ps, out, 8, &n) == 0, "list after update");
+    TEST_ASSERT(out[0].enabled == 0, "rule disabled");
+    TEST_ASSERT(strcmp(out[0].action, "mask") == 0, "action updated to mask");
+
+    /* Delete rule */
+    TEST_ASSERT(pg_store_delete_guardrails_rule(ps, r_id) == 0, "delete rule");
+    TEST_ASSERT(pg_store_list_guardrails_rules(ps, out, 8, &n) == 0, "list after delete");
+    TEST_ASSERT(n == 0, "0 rules after delete");
+
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_pg_fake_key_budget_fields)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    key_rec_t      k, out;
+    long           kid = 0;
+
+    memset(&db, 0, sizeof db);
+    db.next_key_id = 1;
+    build_fake_ops(&db, &ops);
+    ps = pg_store_open("unused", &ops);
+    TEST_ASSERT(ps != NULL, "fake store open");
+
+    memset(&k, 0, sizeof k);
+    strcpy(k.key_hash, "testhash_budget_123");
+    strcpy(k.name, "budget_test_key");
+    k.guardrails_enabled = 1;
+    k.monthly_cost_budget = 100.50;
+    k.monthly_token_budget = 500000;
+
+    TEST_ASSERT(ops.create_key(ops.ctx, &k, &kid) == 0, "create key with budget");
+    TEST_ASSERT(kid > 0, "key id > 0");
+
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(ops.get_key_by_hash(ops.ctx, "testhash_budget_123", &out) == 0, "get key by hash");
+    TEST_ASSERT(out.guardrails_enabled == 1, "guardrails_enabled is 1");
+    TEST_ASSERT(out.monthly_cost_budget == 100.50, "monthly_cost_budget is 100.50");
+    TEST_ASSERT(out.monthly_token_budget == 500000, "monthly_token_budget is 500000");
+    key_rec_free(&out);
+
+    /* Update budget fields via KMASK */
+    k.key_id = kid;
+    k.guardrails_enabled = 0;
+    k.monthly_cost_budget = 250.75;
+    k.monthly_token_budget = 1000000;
+    TEST_ASSERT(ops.update_key(ops.ctx, &k, KMASK_GUARDRAILS | KMASK_MONTHLY_COST_BUDGET | KMASK_MONTHLY_TOKEN_BUDGET) == 0,
+                "update budget fields");
+
+    memset(&out, 0, sizeof out);
+    TEST_ASSERT(ops.get_key_by_id(ops.ctx, kid, &out) == 0, "get key by id");
+    TEST_ASSERT(out.guardrails_enabled == 0, "guardrails_enabled updated to 0");
+    TEST_ASSERT(out.monthly_cost_budget == 250.75, "monthly_cost_budget updated to 250.75");
+    TEST_ASSERT(out.monthly_token_budget == 1000000, "monthly_token_budget updated to 1000000");
+    key_rec_free(&out);
+
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_pg_fake_group_budget)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    group_rec_t    glist[4];
+    long           gid = 0;
+    int            n = 0;
+
+    memset(&db, 0, sizeof db);
+    build_fake_ops(&db, &ops);
+    ps = pg_store_open("unused", &ops);
+    TEST_ASSERT(ps != NULL, "fake store open");
+
+    TEST_ASSERT(ops.create_group(ops.ctx, "finance_dept", &gid) == 0, "create group");
+    TEST_ASSERT(gid > 0, "group id allocated");
+
+    TEST_ASSERT(ops.patch_group_budget(ops.ctx, gid, 1250.50) == 0, "patch group budget");
+
+    TEST_ASSERT(ops.list_groups(ops.ctx, glist, 4, &n) == 0, "list groups");
+    TEST_ASSERT(n == 1, "1 group found");
+    TEST_ASSERT(glist[0].id == gid, "group id matches");
+    TEST_ASSERT(glist[0].monthly_budget_usd == 1250.50, "monthly budget usd matches");
+
+    pg_store_close(ps);
+}
 
 TEST_CASE(test_pg_migrate_noop_for_fake)
 {
@@ -1111,7 +1432,37 @@ TEST_CASE(test_pg_real_groups_and_cost)
     TEST_ASSERT(ops->update_key(ops->ctx, &k, KMASK_GROUP) == 0, "update_key clear group_id");
     TEST_ASSERT(ops->count_keys_in_group(ops->ctx, group_id, &key_count) == 0, "count_keys is 0");
     TEST_ASSERT(key_count == 0, "key count is 0");
+
+    /* 9. Patch group budget & verify */
+    TEST_ASSERT(ops->patch_group_budget(ops->ctx, group_id, 888.50) == 0, "patch_group_budget");
+    TEST_ASSERT(ops->list_groups(ops->ctx, glist, 16, &n_groups) == 0, "list_groups after budget");
+    for (int i = 0; i < n_groups; i++) {
+        if (glist[i].id == group_id) {
+            TEST_ASSERT(glist[i].monthly_budget_usd == 888.50, "real group monthly budget matches");
+            break;
+        }
+    }
     TEST_ASSERT(ops->delete_group(ops->ctx, group_id) == 0, "delete_group succeeds");
+
+    /* 10. Guardrail rule roundtrip in real DB */
+    guardrail_rule_t r_rule;
+    memset(&r_rule, 0, sizeof r_rule);
+    strcpy(r_rule.rule_type, "keyword");
+    strcpy(r_rule.pattern, "real_db_test_forbidden");
+    strcpy(r_rule.action, "block");
+    strcpy(r_rule.category, "safety");
+    r_rule.enabled = 1;
+    long r_rule_id = 0;
+    TEST_ASSERT(ops->create_guardrails_rule(ops->ctx, &r_rule, &r_rule_id) == 0,
+                "real create_guardrails_rule");
+    TEST_ASSERT(r_rule_id > 0, "real guardrail rule id > 0");
+    guardrail_rule_t r_list[16];
+    int              n_rules = 0;
+    TEST_ASSERT(ops->list_guardrails_rules(ops->ctx, r_list, 16, &n_rules) == 0,
+                "real list_guardrails_rules");
+    TEST_ASSERT(n_rules >= 1, "at least 1 rule");
+    TEST_ASSERT(ops->delete_guardrails_rule(ops->ctx, r_rule_id) == 0,
+                "real delete_guardrails_rule");
 
     pg_store_close(ps);
 }
