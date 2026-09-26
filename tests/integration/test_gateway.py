@@ -2009,6 +2009,322 @@ def test_gemini_native_non_gemini_400(gateway):
     assert err["error"]["status"] == "INVALID_ARGUMENT"
 
 
+def test_guardrails_block_keyword_e2e(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "test-guardrails-block-model"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    # 1. Register keyword rule
+    resp = requests.post(
+        f"{base_url}/admin/v1/guardrails",
+        headers=admin_headers,
+        json={
+            "pattern": "DROP DATABASE",
+            "rule_type": "keyword",
+            "action": "block",
+            "category": "safety",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    rule_id = resp.json()["id"]
+
+    # 2. Create key with guardrails enabled
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "guardrail-key",
+            "allowed_models": [model_name],
+            "guardrails_enabled": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    client_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {client_key}",
+        "Content-Type": "application/json",
+    }
+
+    # 3. Send prompt containing blocked keyword
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "messages": [{"role": "user", "content": "Please run: DROP DATABASE production;"}],
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    err = resp.json()
+    assert err["error"]["type"] == "content_policy_violation"
+    assert "DROP DATABASE" in err["error"]["message"]
+
+    # 4. Safe prompt succeeds
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "messages": [{"role": "user", "content": "Hello world!"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 5. Clean up rule
+    resp = requests.delete(
+        f"{base_url}/admin/v1/guardrails/{rule_id}",
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+
+def test_guardrails_pii_masking_e2e(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "test-guardrails-mask-model"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    # 1. Create client key with guardrails_enabled=True
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "pii-masked-client",
+            "allowed_models": [model_name],
+            "guardrails_enabled": True,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    client_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {client_key}",
+        "Content-Type": "application/json",
+    }
+
+    # 2. Send request containing PII: phone and email
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "messages": [{"role": "user", "content": "Reach me at 13812345678 or user@corp.com."}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+    # 3. Check mock upstream received masked body
+    from mock_upstream import MockUpstreamHandler
+    reqs = [r for r in MockUpstreamHandler.recorded_requests if r.get("body", {}).get("model") == model_name]
+    assert len(reqs) > 0
+    upstream_body = reqs[-1]["body"]
+    msg_content = upstream_body["messages"][0]["content"]
+    assert "[PHONE]" in msg_content
+    assert "[EMAIL]" in msg_content
+    assert "13812345678" not in msg_content
+    assert "user@corp.com" not in msg_content
+
+    # 4. Create client key with guardrails_enabled=False and verify PII is NOT masked
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "pii-unmasked-client",
+            "allowed_models": [model_name],
+            "guardrails_enabled": False,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    unmasked_key = resp.json()["plaintext"]
+
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {unmasked_key}", "Content-Type": "application/json"},
+        json={
+            "model": model_name,
+            "messages": [{"role": "user", "content": "Reach me at 13987654321 or admin@corp.com."}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    reqs2 = [r for r in MockUpstreamHandler.recorded_requests if r.get("body", {}).get("model") == model_name]
+    upstream_body2 = reqs2[-1]["body"]
+    msg_content2 = upstream_body2["messages"][0]["content"]
+    assert "13987654321" in msg_content2
+    assert "admin@corp.com" in msg_content2
+
+
+def test_monthly_budget_enforce_e2e(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # Model with pricing ($1000/M input tokens, $2000/M output tokens)
+    model_name = "test-budget-model"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": mock_url,
+            "pricing": {
+                "in_mtok": 1000.0,
+                "out_mtok": 2000.0,
+                "cached_mtok_discount": 0.5,
+            },
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    # 1. Key cost budget: 0.001 USD (mock request costs ~0.029 USD)
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "cost-budget-client",
+            "allowed_models": [model_name],
+            "monthly_cost_budget": 0.001,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    cost_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {cost_key}",
+        "Content-Type": "application/json",
+    }
+
+    # First request: within budget -> 200 OK
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={"model": model_name, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Second request: budget exceeded -> 429
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers=client_headers,
+        json={"model": model_name, "messages": [{"role": "user", "content": "hi again"}]},
+    )
+    assert resp.status_code == 429, resp.text
+    err = resp.json()
+    assert err["error"]["type"] == "budget_exceeded"
+
+    # 2. Key token budget: 10 tokens (mock request uses 18 tokens)
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "token-budget-client",
+            "allowed_models": [model_name],
+            "monthly_token_budget": 10,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    token_key = resp.json()["plaintext"]
+
+    # First request -> 200 OK
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {token_key}", "Content-Type": "application/json"},
+        json={"model": model_name, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Second request -> 429 budget_exceeded
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {token_key}", "Content-Type": "application/json"},
+        json={"model": model_name, "messages": [{"role": "user", "content": "hi again"}]},
+    )
+    assert resp.status_code == 429, resp.text
+    err = resp.json()
+    assert err["error"]["type"] == "budget_exceeded"
+
+    # 3. Group monthly budget
+    resp = requests.post(
+        f"{base_url}/admin/v1/groups",
+        headers=admin_headers,
+        json={
+            "name": "budget-test-group",
+            "monthly_budget_usd": 0.001,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    group_id = resp.json()["id"]
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "group-budget-client",
+            "allowed_models": [model_name],
+            "group_id": group_id,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    grp_key = resp.json()["plaintext"]
+
+    # First request -> 200 OK
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {grp_key}", "Content-Type": "application/json"},
+        json={"model": model_name, "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200, resp.text
+
+    # Second request -> 429 budget_exceeded
+    resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {grp_key}", "Content-Type": "application/json"},
+        json={"model": model_name, "messages": [{"role": "user", "content": "hi again"}]},
+    )
+    assert resp.status_code == 429, resp.text
+    err = resp.json()
+    assert err["error"]["type"] == "budget_exceeded"
+
+
 def test_admin_lockout_429(gateway):
     """10 failed admin auth attempts from one IP lock that IP out (429).
 

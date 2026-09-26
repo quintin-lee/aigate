@@ -54,7 +54,7 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
 
     # Clean DB state for tests
     try:
-        subprocess.run(["psql", pg_dsn, "-c", "DELETE FROM models; DELETE FROM api_keys; DELETE FROM groups; DELETE FROM usage_requests; DELETE FROM usage_daily;"], capture_output=True)
+        subprocess.run(["psql", pg_dsn, "-c", "DELETE FROM models; DELETE FROM api_keys; DELETE FROM groups; DELETE FROM guardrails_rules; DELETE FROM usage_requests; DELETE FROM usage_daily;"], capture_output=True)
     except Exception:
         pass
 
