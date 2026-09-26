@@ -4,6 +4,7 @@
 #include "run_tests.h"
 #include "guardrails.h"
 #include <string.h>
+#include <stdlib.h>
 
 TEST_CASE(test_guardrails_ac_basic)
 {
@@ -90,3 +91,131 @@ TEST_CASE(test_guardrails_ac_edge_cases)
 
     ac_trie_destroy(trie);
 }
+
+TEST_CASE(test_guardrails_pii_masking)
+{
+    guardrails_ctx_t* ctx = guardrails_create();
+    TEST_ASSERT(ctx != NULL, "guardrails_create");
+
+    int changed = 0;
+
+    /* 1. Phone number masking */
+    const char* t_phone = "我的电话是13812345678";
+    char* res = guardrails_mask_pii_text(ctx, t_phone, strlen(t_phone), &changed);
+    TEST_ASSERT(changed == 1, "phone changed");
+    TEST_ASSERT(res != NULL, "phone res not null");
+    TEST_ASSERT(strcmp(res, "我的电话是[PHONE]") == 0, "phone masked");
+    free(res);
+
+    /* 2. ID card masking */
+    const char* t_id = "身份证110101199003072345号";
+    changed = 0;
+    res = guardrails_mask_pii_text(ctx, t_id, strlen(t_id), &changed);
+    TEST_ASSERT(changed == 1, "id changed");
+    TEST_ASSERT(res != NULL, "id res not null");
+    TEST_ASSERT(strcmp(res, "身份证[ID_CARD]号") == 0, "id card masked");
+    free(res);
+
+    /* 3. Email masking */
+    const char* t_email = "联系alice@example.com处理";
+    changed = 0;
+    res = guardrails_mask_pii_text(ctx, t_email, strlen(t_email), &changed);
+    TEST_ASSERT(changed == 1, "email changed");
+    TEST_ASSERT(res != NULL, "email res not null");
+    TEST_ASSERT(strcmp(res, "联系[EMAIL]处理") == 0, "email masked");
+    free(res);
+
+    /* 4. API Key masking */
+    const char* t_key = "API Key 是 sk-abc12345678901234567890";
+    changed = 0;
+    res = guardrails_mask_pii_text(ctx, t_key, strlen(t_key), &changed);
+    TEST_ASSERT(changed == 1, "key changed");
+    TEST_ASSERT(res != NULL, "key res not null");
+    TEST_ASSERT(strcmp(res, "API Key 是 [API_KEY]") == 0, "api key masked");
+    free(res);
+
+    /* 5. Combined PII */
+    const char* t_combo = "用户13800000000的邮箱是bob@corp.cn，密钥ghp_12345678901234567890";
+    changed = 0;
+    res = guardrails_mask_pii_text(ctx, t_combo, strlen(t_combo), &changed);
+    TEST_ASSERT(changed == 1, "combo changed");
+    TEST_ASSERT(res != NULL, "combo res not null");
+    TEST_ASSERT(strcmp(res, "用户[PHONE]的邮箱是[EMAIL]，密钥[API_KEY]") == 0, "combo masked");
+    free(res);
+
+    /* 6. Clean text unchanged */
+    const char* t_clean = "没有任何敏感信息的一句话";
+    changed = 0;
+    res = guardrails_mask_pii_text(ctx, t_clean, strlen(t_clean), &changed);
+    TEST_ASSERT(changed == 0, "clean unchanged");
+    TEST_ASSERT(res == NULL, "clean returns NULL");
+
+    guardrails_destroy(ctx);
+}
+
+TEST_CASE(test_guardrails_inbound_json_inspection)
+{
+    guardrails_ctx_t* ctx = guardrails_create();
+    TEST_ASSERT(ctx != NULL, "guardrails_create");
+
+    /* Load rules: 1 block rule, 1 exempt rule */
+    guardrail_rule_t rules[2];
+    memset(rules, 0, sizeof rules);
+    strcpy(rules[0].rule_type, "keyword");
+    strcpy(rules[0].pattern, "drop database");
+    strcpy(rules[0].action, "block");
+    rules[0].enabled = 1;
+
+    strcpy(rules[1].rule_type, "exempt");
+    strcpy(rules[1].pattern, "drop database tutorial");
+    strcpy(rules[1].action, "exempt");
+    rules[1].enabled = 1;
+
+    TEST_ASSERT(guardrails_load_rules(ctx, rules, 2) == 0, "load rules");
+
+    /* 1. Inbound JSON with PII */
+    const char* json_pii =
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"我的电话是13912345678\"}]}";
+    char*  sanitized = NULL;
+    size_t san_len = 0;
+    char   blocked_kw[64] = {0};
+
+    guardrails_action_t act = guardrails_inspect_inbound(
+        ctx, json_pii, strlen(json_pii), &sanitized, &san_len, blocked_kw, sizeof blocked_kw);
+    TEST_ASSERT(act == GUARDRAILS_MASKED, "PII in JSON masked");
+    TEST_ASSERT(sanitized != NULL && san_len > 0, "sanitized body non-empty");
+    TEST_ASSERT(strstr(sanitized, "[PHONE]") != NULL, "contains [PHONE]");
+    TEST_ASSERT(strstr(sanitized, "13912345678") == NULL, "original phone removed");
+    free(sanitized);
+
+    /* 2. Inbound JSON with forbidden keyword */
+    const char* json_blocked =
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"please drop database "
+        "now\"}]}";
+    sanitized = NULL;
+    san_len = 0;
+    act = guardrails_inspect_inbound(ctx,
+                                     json_blocked,
+                                     strlen(json_blocked),
+                                     &sanitized,
+                                     &san_len,
+                                     blocked_kw,
+                                     sizeof blocked_kw);
+    TEST_ASSERT(act == GUARDRAILS_BLOCKED, "keyword blocked");
+    TEST_ASSERT(strcmp(blocked_kw, "drop database") == 0, "blocked keyword reported");
+    TEST_ASSERT(sanitized == NULL, "no sanitized body when blocked");
+
+    /* 3. Inbound JSON with keyword but exempted */
+    const char* json_exempt =
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"read drop database "
+        "tutorial\"}]}";
+    sanitized = NULL;
+    san_len = 0;
+    act = guardrails_inspect_inbound(
+        ctx, json_exempt, strlen(json_exempt), &sanitized, &san_len, blocked_kw, sizeof blocked_kw);
+    TEST_ASSERT(act == GUARDRAILS_PASS, "exempted keyword passes");
+    TEST_ASSERT(sanitized == NULL, "no sanitized body when clean");
+
+    guardrails_destroy(ctx);
+}
+

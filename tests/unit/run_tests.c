@@ -53,6 +53,8 @@ main(void)
     extern void test_guardrails_ac_basic(void);
     extern void test_guardrails_ac_overlapping(void);
     extern void test_guardrails_ac_edge_cases(void);
+    extern void test_guardrails_pii_masking(void);
+    extern void test_guardrails_inbound_json_inspection(void);
     extern void test_pg_migrate_noop_for_fake(void);
     extern void test_pg_real_roundtrip(void);
     extern void test_pg_real_provider_crud(void);
@@ -120,6 +122,8 @@ main(void)
     test_register("guardrails_ac_basic", test_guardrails_ac_basic);
     test_register("guardrails_ac_overlapping", test_guardrails_ac_overlapping);
     test_register("guardrails_ac_edge_cases", test_guardrails_ac_edge_cases);
+    test_register("guardrails_pii_masking", test_guardrails_pii_masking);
+    test_register("guardrails_inbound_json_inspection", test_guardrails_inbound_json_inspection);
 
     test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
     test_register("pg_real_roundtrip", test_pg_real_roundtrip);

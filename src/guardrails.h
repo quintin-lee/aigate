@@ -53,4 +53,6 @@ guardrails_action_t guardrails_inspect_inbound(
     char*             blocked_keyword,
     size_t            blocked_keyword_sz);
 
+char* guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t len, int* changed);
+
 #endif /* AIGATE_GUARDRAILS_H */
