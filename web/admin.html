@@ -1051,6 +1051,66 @@
           </div>
         </div>
       </div>
+
+      <!-- 实时请求调用明细与审计 -->
+      <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800 space-y-0">
+        <div class="p-4 border-b border-slate-800 bg-slate-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <h3 class="text-sm font-bold text-white flex items-center gap-2">
+              <span>📜</span> <span>实时请求调用审计明细 (Recent Requests)</span>
+            </h3>
+            <p class="text-[11px] text-slate-400 mt-0.5">记录每一次入站请求的 HTTP 状态码、Token 开销、延迟及安全风控处置动作</p>
+          </div>
+          <div class="flex items-center space-x-3 flex-wrap gap-y-2">
+            <select id="reqGuardrailFilter" onchange="filterUsageRequestsTable(true)" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-1.5 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="all">风控处置: 全部</option>
+              <option value="blocked">🛑 仅拦截 (blocked)</option>
+              <option value="masked">🛡️ 仅脱敏 (masked)</option>
+              <option value="pass">正常透传 (pass)</option>
+            </select>
+            <input type="text" id="reqSearchInput" oninput="filterUsageRequestsTable(true)" placeholder="按模型或状态搜索..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-40">
+          </div>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll">
+          <table class="w-full text-left border-collapse text-xs data-tbl">
+            <thead>
+              <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 uppercase tracking-wider font-semibold">
+                <th class="py-3 px-4">请求时间 (UTC)</th>
+                <th class="py-3 px-4">模型</th>
+                <th class="py-3 px-4">密钥 ID</th>
+                <th class="py-3 px-4 text-center">状态码</th>
+                <th class="py-3 px-4 text-center">风控处置</th>
+                <th class="py-3 px-4 text-right">Prompt / Output</th>
+                <th class="py-3 px-4 text-right">总 Token</th>
+                <th class="py-3 px-4 text-right">延迟</th>
+              </tr>
+            </thead>
+            <tbody id="requestsTableBody" class="divide-y divide-slate-800/60 font-mono">
+              <!-- 动态插入行 -->
+            </tbody>
+          </table>
+        </div>
+        <div id="requestsEmptyState" class="hidden py-10 text-center text-slate-500 text-xs">
+          暂无匹配的请求明细记录。
+        </div>
+        <div id="requestsPagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="requestsTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="requestsPageSize" onchange="changePageSize('requests', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10" selected>10</option>
+              <option value="20">20</option>
+              <option value="50">50</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="requestsPrevBtn" onclick="prevPage('requests')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="requestsCurrentPage">1</span> / <span id="requestsTotalPages">1</span> 页</span>
+            <button id="requestsNextBtn" onclick="nextPage('requests')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
+        </div>
+      </div>
     </div>
 
     <!-- ==================== 标签页 5：调试场 ==================== -->
@@ -1555,6 +1615,7 @@
       guardrails: [],
       costRows: [],
       usageRows: [],
+      requestRows: [],
       metricsText: "",
       editingModelName: null,
       editingKeyId: null,
@@ -1574,6 +1635,7 @@
       guardrails: { page: 1, limit: 10, total: 0 },
       cost: { page: 1, limit: 10, total: 0 },
       usage: { page: 1, limit: 10, total: 0 },
+      requests: { page: 1, limit: 10, total: 0 },
     };
 
     function getPageSlice(key, fullList) {
@@ -1622,6 +1684,8 @@
         renderCostTable(state.costRows, by);
       } else if (key === "usage") {
         renderUsageTable();
+      } else if (key === "requests") {
+        if (typeof filterUsageRequestsTable === "function") filterUsageRequestsTable(false);
       }
     }
 
@@ -3540,17 +3604,38 @@
 
       const qs = queryParams.length > 0 ? "?" + queryParams.join("&") : "";
       const usageTbody = document.getElementById("usageTableBody");
-      usageTbody.innerHTML = `<tr><td colspan="8" class="py-8 px-4 text-center text-slate-500 text-xs">正在查询用量…</td></tr>`;
-      document.getElementById("usageEmptyState").classList.add("hidden");
-      const resp = await apiCall(`/admin/v1/usage${qs}`);
-      if (!resp || !resp.ok) return;
+      if (usageTbody) {
+        usageTbody.innerHTML = `<tr><td colspan="8" class="py-8 px-4 text-center text-slate-500 text-xs">正在查询用量…</td></tr>`;
+      }
+      const emptyEl = document.getElementById("usageEmptyState");
+      if (emptyEl) emptyEl.classList.add("hidden");
 
-      const data = await resp.json();
-      state.usageRows = data.usage || data.data || [];
-      paginationState.usage.page = 1;
-      renderUsageTable();
+      const reqTbody = document.getElementById("requestsTableBody");
+      if (reqTbody) {
+        reqTbody.innerHTML = `<tr><td colspan="8" class="py-6 px-4 text-center text-slate-500 text-xs">正在查询调用审计明细…</td></tr>`;
+      }
+
+      const reqPromise = apiCall(`/admin/v1/usage/requests?limit=100${kid ? `&key_id=${encodeURIComponent(kid)}` : ""}`);
+      const usagePromise = apiCall(`/admin/v1/usage${qs}`);
+
+      const [usageResp, reqResp] = await Promise.all([usagePromise, reqPromise]);
+
+      if (usageResp && usageResp.ok) {
+        const data = await usageResp.json();
+        state.usageRows = data.usage || data.data || [];
+        paginationState.usage.page = 1;
+        renderUsageTable();
+      }
+
+      if (reqResp && reqResp.ok) {
+        const reqData = await reqResp.json();
+        state.requestRows = reqData.requests || [];
+        paginationState.requests.page = 1;
+        filterUsageRequestsTable(false);
+      }
+
       if (!silent) {
-        showToast("用量查询已更新", "info");
+        showToast("用量与审计日志已更新", "info");
       }
     }
 
@@ -3580,6 +3665,79 @@
           <td class="py-3 px-4 text-right text-cyan-400">${(r.completion_tokens || 0).toLocaleString()}</td>
           <td class="py-3 px-4 text-right font-bold text-slate-100">${total.toLocaleString()}</td>
           <td class="py-3 px-4 text-right text-rose-400">${r.errors || 0}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterUsageRequestsTable(resetPage = false) {
+      if (resetPage) paginationState.requests.page = 1;
+      const q = (document.getElementById("reqSearchInput")?.value || "").toLowerCase().trim();
+      const actionFilter = document.getElementById("reqGuardrailFilter")?.value || "all";
+
+      const filtered = (state.requestRows || []).filter(r => {
+        const ga = (r.guardrail_action || "").toLowerCase();
+        if (actionFilter === "blocked" && ga !== "blocked") return false;
+        if (actionFilter === "masked" && ga !== "masked") return false;
+        if (actionFilter === "pass" && ga !== "" && ga !== "pass") return false;
+
+        if (!q) return true;
+        const mod = (r.model || "").toLowerCase();
+        const prov = (r.provider || "").toLowerCase();
+        const stat = String(r.http_status);
+        const kid = String(r.key_id);
+        return mod.includes(q) || prov.includes(q) || stat.includes(q) || kid.includes(q);
+      });
+      renderUsageRequestsTable(filtered);
+    }
+
+    function renderUsageRequestsTable(list = state.requestRows) {
+      const tbody = document.getElementById("requestsTableBody");
+      const empty = document.getElementById("requestsEmptyState");
+      if (!tbody || !empty) return;
+      tbody.innerHTML = "";
+
+      if (!list || list.length === 0) {
+        empty.classList.remove("hidden");
+        getPageSlice("requests", []);
+        return;
+      }
+      empty.classList.add("hidden");
+
+      const pageItems = getPageSlice("requests", list);
+      pageItems.forEach(r => {
+        const total = (r.prompt_tokens || 0) + (r.completion_tokens || 0);
+
+        let statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300">${r.http_status}</span>`;
+        if (r.http_status >= 200 && r.http_status < 300) {
+          statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">${r.http_status} OK</span>`;
+        } else if (r.http_status === 400 || r.http_status === 429) {
+          statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">${r.http_status}</span>`;
+        } else if (r.http_status >= 400) {
+          statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">${r.http_status} ERR</span>`;
+        }
+
+        let grBadge = `<span class="text-slate-500 text-[10px]">正常</span>`;
+        if (r.guardrail_action === "blocked") {
+          grBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">🛑 拦截</span>`;
+        } else if (r.guardrail_action === "masked") {
+          grBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">🛡️ 脱敏</span>`;
+        }
+
+        const dateStr = r.ts ? new Date(r.ts).toLocaleString() : "—";
+        const latency = (r.latency_ms != null) ? `${r.latency_ms.toFixed(1)}ms` : "—";
+
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-900/40 transition";
+        tr.innerHTML = `
+          <td class="py-3 px-4 text-slate-300 whitespace-nowrap">${dateStr}</td>
+          <td class="py-3 px-4 font-bold text-white whitespace-nowrap">${escapeHtml(r.model)}</td>
+          <td class="py-3 px-4 text-slate-400">#${r.key_id}</td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">${statusBadge}</td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">${grBadge}</td>
+          <td class="py-3 px-4 text-right text-slate-400 whitespace-nowrap">${(r.prompt_tokens || 0).toLocaleString()} / ${(r.completion_tokens || 0).toLocaleString()}</td>
+          <td class="py-3 px-4 text-right font-bold text-slate-100 whitespace-nowrap">${total.toLocaleString()}</td>
+          <td class="py-3 px-4 text-right text-slate-400 font-mono whitespace-nowrap">${latency}</td>
         `;
         tbody.appendChild(tr);
       });

@@ -1918,6 +1918,7 @@ usage_requests_query(admin_ctx_t* adm, int* status, char** body, size_t* len, co
         json_object_set_new(o, "reasoning_tokens", json_integer(rows[i].reasoning_tokens));
         json_object_set_new(o, "latency_ms", json_real(rows[i].latency_ns / 1000000.0));
         json_object_set_new(o, "ts", json_string(ts_iso));
+        json_object_set_new(o, "guardrail_action", json_string(rows[i].guardrail_action));
         json_array_append_new(arr, o);
     }
     free(rows);
