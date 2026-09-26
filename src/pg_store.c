@@ -181,6 +181,10 @@ parse_model_list(const char* joined, char*** out_vec, int* out_n)
 static int
 join_model_list(const key_rec_t* k, char* buf, size_t cap)
 {
+    if (buf == NULL || cap == 0) {
+        return -1;
+    }
+    buf[0] = '\0';
     int off = 0;
     for (int i = 0; i < k->n_allowed; i++) {
         int w =

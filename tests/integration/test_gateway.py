@@ -326,12 +326,110 @@ def test_admin_ui_endpoints(gateway):
     assert 'id="tab-overview"' in resp.text
     assert 'id="tab-models"' in resp.text
     assert 'id="tab-keys"' in resp.text
+    assert 'id="tab-guardrails"' in resp.text
     assert 'id="tab-playground"' in resp.text
 
     # 3. Access /admin/ with trailing slash
     resp = requests.get(f"{base_url}/admin/")
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("Content-Type", "")
+
+
+def test_admin_ui_guardrails_and_budgets_features(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Verify GET /admin delivers the updated UI bundle
+    resp = requests.get(f"{base_url}/admin")
+    assert resp.status_code == 200
+    html = resp.text
+    assert 'id="tab-guardrails"' in html
+    assert 'id="nav-guardrails"' in html
+    assert 'id="grSandboxInput"' in html
+    assert 'id="grTypeFilter"' in html
+    assert 'id="grStatTotal"' in html
+    assert 'id="guardrailModal"' in html
+    assert 'id="kFormMonthlyCostBudget"' in html
+    assert 'id="kFormMonthlyTokenBudget"' in html
+    assert 'id="kFormGuardrailsEnabled"' in html
+    assert 'id="gFormMonthlyBudget"' in html
+    assert 'id="reqGuardrailFilter"' in html
+
+    # 2. Test Guardrails API CRUD via the endpoints wired into the UI
+    # Create rule
+    resp = requests.post(
+        f"{base_url}/admin/v1/guardrails",
+        headers=admin_headers,
+        json={
+            "rule_type": "keyword",
+            "pattern": "ADMIN_TEST_KEYWORD",
+            "action": "block",
+            "category": "security",
+            "enabled": True,
+        },
+    )
+    assert resp.status_code == 201
+    rule_id = resp.json()["id"]
+
+    # List rules
+    resp = requests.get(f"{base_url}/admin/v1/guardrails", headers=admin_headers)
+    assert resp.status_code == 200
+    rules = resp.json()["rules"]
+    assert any(r["id"] == rule_id and r["pattern"] == "ADMIN_TEST_KEYWORD" for r in rules)
+
+    # Reload engine
+    resp = requests.post(f"{base_url}/admin/v1/guardrails/reload", headers=admin_headers)
+    assert resp.status_code == 200
+    assert resp.json().get("status") == "reloaded"
+
+    # Delete rule
+    resp = requests.delete(f"{base_url}/admin/v1/guardrails/{rule_id}", headers=admin_headers)
+    assert resp.status_code == 200
+
+    # 3. Test Keys API with monthly budgets and guardrail toggle
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "ui-test-key",
+            "rate_qps": 5,
+            "monthly_cost_budget": 50.0,
+            "monthly_token_budget": 100000,
+            "guardrails_enabled": True,
+        },
+    )
+    assert resp.status_code == 201
+    key_data = resp.json()
+    key_id = key_data["key_id"]
+    assert key_data.get("monthly_cost_budget") == 50.0
+    assert key_data.get("monthly_token_budget") == 100000
+    assert key_data.get("guardrails_enabled") is True
+
+    # 4. Test Groups API with monthly budget
+    resp = requests.post(
+        f"{base_url}/admin/v1/groups",
+        headers=admin_headers,
+        json={
+            "name": "ui-test-group",
+            "monthly_budget_usd": 150.0,
+        },
+    )
+    assert resp.status_code == 201
+    grp_id = resp.json()["id"]
+
+    # Verify group list
+    resp = requests.get(f"{base_url}/admin/v1/groups", headers=admin_headers)
+    assert resp.status_code == 200
+    grps = resp.json()["groups"]
+    assert any(g["id"] == grp_id and g.get("monthly_budget_usd") == 150.0 for g in grps)
+
+    # 5. Clean up
+    requests.delete(f"{base_url}/admin/v1/keys/{key_id}", headers=admin_headers)
+    requests.delete(f"{base_url}/admin/v1/groups/{grp_id}", headers=admin_headers)
 
 
 def test_gemini_chat_and_streaming(gateway):
