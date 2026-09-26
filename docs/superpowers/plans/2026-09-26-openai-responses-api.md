@@ -43,7 +43,7 @@
 - Modify: `tests/unit/test_pg_store.c`
 - Modify: `tests/unit/test_admin_api.c`
 
-- [ ] **Step 1: Write failing test in test_pg_store.c for reasoning_tokens**
+- [x] **Step 1: Write failing test in test_pg_store.c for reasoning_tokens**
 
 Add test case verifying `reasoning_tokens` in `usage_request_row_t` is recorded and queried:
 
@@ -78,12 +78,12 @@ TEST_CASE(test_pg_fake_reasoning_tokens)
 }
 ```
 
-- [ ] **Step 2: Run test to verify compilation/test failure**
+- [x] **Step 2: Run test to verify compilation/test failure**
 
 Run: `cmake --build .build -j && ctest --test-dir .build -R unit`
 Expected: Compile failure on `.reasoning_tokens` field not existing in `usage_request_row_t`.
 
-- [ ] **Step 3: Update schema.sql, schema_sql.h, and pg_store.h**
+- [x] **Step 3: Update schema.sql, schema_sql.h, and pg_store.h**
 
 In `schema/schema.sql` and `src/schema_sql.h`, add Migration v8:
 ```sql
@@ -108,7 +108,7 @@ typedef struct usage_request_row {
 } usage_request_row_t;
 ```
 
-- [ ] **Step 4: Update pg_store.c, usage_meter.h, usage_meter.c, and admin_api.c**
+- [x] **Step 4: Update pg_store.c, usage_meter.h, usage_meter.c, and admin_api.c**
 
 In `src/pg_store.c`:
 1. In `pq_flush_requests`: update SQL insert columns to include `reasoning_tokens` (10 parameters per row instead of 9):
@@ -153,12 +153,12 @@ json_object_set_new(o, "reasoning_tokens", json_integer(rows[i].reasoning_tokens
 In `tests/unit/test_pg_store.c` and `tests/unit/test_admin_api.c`:
 Update `fake_flush_requests` and `fake_query_requests` to copy `reasoning_tokens`. Register `test_pg_fake_reasoning_tokens` in `tests/unit/run_tests.c`.
 
-- [ ] **Step 5: Run tests and verify they pass**
+- [x] **Step 5: Run tests and verify they pass**
 
 Run: `cmake --build .build -j && ctest --test-dir .build --output-on-failure`
 Expected: 100% tests passed.
 
-- [ ] **Step 6: Commit Task 1**
+- [x] **Step 6: Commit Task 1**
 
 ```bash
 git add schema/schema.sql src/schema_sql.h src/pg_store.h src/pg_store.c src/usage_meter.h src/usage_meter.c src/admin_api.c tests/unit/test_pg_store.c tests/unit/test_admin_api.c tests/unit/run_tests.c
@@ -177,7 +177,7 @@ git commit -m "feat(store): ✨ add reasoning_tokens to usage_requests and migra
 - Modify: `tests/unit/test_provider_openai.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: Write KAT unit tests for build_responses and parse_responses_usage**
+- [x] **Step 1: Write KAT unit tests for build_responses and parse_responses_usage**
 
 In `tests/unit/test_provider_openai.c`:
 ```c
@@ -247,12 +247,12 @@ TEST_CASE(test_openai_responses_parse_usage_stream)
 }
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cmake --build .build -j && ctest --test-dir .build -R unit`
 Expected: Compile failure (symbols `provider_openai_build_responses` and `provider_openai_parse_responses_usage` undefined).
 
-- [ ] **Step 3: Implement build_responses and parse_responses_usage in provider_openai.c**
+- [x] **Step 3: Implement build_responses and parse_responses_usage in provider_openai.c**
 
 In `src/provider_openai.h`:
 Declare functions:
@@ -295,12 +295,12 @@ In `src/provider_adapter.h` & `src/provider_adapter.c`:
 
 Register new test cases in `tests/unit/run_tests.c`.
 
-- [ ] **Step 4: Run tests and verify they pass**
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `cmake --build .build -j && ctest --test-dir .build --output-on-failure`
 Expected: 100% tests passed.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```bash
 git add src/provider_openai.h src/provider_openai.c src/provider_adapter.h src/provider_adapter.c tests/unit/test_provider_openai.c tests/unit/run_tests.c
@@ -317,7 +317,7 @@ git commit -m "feat(provider): ✨ add build_responses and parse_responses_usage
 - Modify: `tests/unit/test_aigate_core.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: Write unit tests in test_aigate_core.c**
+- [x] **Step 1: Write unit tests in test_aigate_core.c**
 
 Add unit tests for `/v1/responses`:
 1. `test_responses_non_openai_400`:
@@ -332,12 +332,12 @@ Add unit tests for `/v1/responses`:
    - Send `POST /v1/responses` with body `{}`.
    - Assert response status is 400 `model_not_found`.
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cmake --build .build -j && ctest --test-dir .build -R unit`
 Expected: FAIL (path `/v1/responses` not handled, returns 404 or fails assertion).
 
-- [ ] **Step 3: Implement handle_responses in aigate_core.c & transport_civetweb.c**
+- [x] **Step 3: Implement handle_responses in aigate_core.c & transport_civetweb.c**
 
 In `src/aigate_core.c`:
 Implement `static int handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)`:
@@ -374,12 +374,12 @@ Implement `static int handle_responses(aigate_core* ac, aigate_request_ctx* rq, 
 In `src/transport_civetweb.c`:
 Ensure handler for `/v1/responses` maps to `aigate_handle_request`.
 
-- [ ] **Step 4: Run tests and verify they pass**
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `cmake --build .build -j && ctest --test-dir .build --output-on-failure`
 Expected: 100% tests passed.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```bash
 git add src/aigate_core.c src/transport_civetweb.c tests/unit/test_aigate_core.c tests/unit/run_tests.c
@@ -394,7 +394,7 @@ git commit -m "feat(core): ✨ add /v1/responses endpoint with strict openai val
 - Modify: `tests/integration/mock_upstream.py`
 - Modify: `tests/integration/test_gateway.py`
 
-- [ ] **Step 1: Add /v1/responses mock handler to mock_upstream.py**
+- [x] **Step 1: Add /v1/responses mock handler to mock_upstream.py**
 
 In `tests/integration/mock_upstream.py`:
 Add `/responses` path handler in `do_POST`:
@@ -426,7 +426,7 @@ Add `/responses` path handler in `do_POST`:
    }
    ```
 
-- [ ] **Step 2: Add test cases to test_gateway.py**
+- [x] **Step 2: Add test cases to test_gateway.py**
 
 In `tests/integration/test_gateway.py`:
 1. `test_responses_openai_passthrough`:
@@ -443,12 +443,12 @@ In `tests/integration/test_gateway.py`:
    - Send `POST /v1/responses`.
    - Verify HTTP 400 and error code `unsupported_endpoint`.
 
-- [ ] **Step 3: Run integration test and verify**
+- [x] **Step 3: Run integration test and verify**
 
 Run: `pytest tests/integration/test_gateway.py -k "responses" -v`
 Expected: All 3 tests PASS.
 
-- [ ] **Step 4: Run full unit + integration test suite**
+- [x] **Step 4: Run full unit + integration test suite**
 
 Run:
 ```bash
@@ -457,7 +457,7 @@ pytest tests/integration/test_gateway.py -v
 ```
 Expected: All tests PASS.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```bash
 git add tests/integration/mock_upstream.py tests/integration/test_gateway.py
