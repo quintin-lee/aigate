@@ -1376,7 +1376,7 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
     char        rt[FLUSH_REQ_CHUNK][32];
     char        lat[FLUSH_REQ_CHUNK][32];
     char        tsb[FLUSH_REQ_CHUNK][32];
-    const char* vals[FLUSH_REQ_CHUNK * 10];
+    const char* vals[FLUSH_REQ_CHUNK * 11];
     char        sql[8192];
     int         rc = 0;
 
@@ -1393,10 +1393,10 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
                                sizeof sql,
                                "INSERT INTO usage_requests(key_id, model_name, provider, "
                                "http_status, prompt_tokens, completion_tokens, "
-                               "cached_prompt_tokens, reasoning_tokens, latency_ns, ts) VALUES ");
+                               "cached_prompt_tokens, reasoning_tokens, latency_ns, ts, guardrail_action) VALUES ");
         for (int i = 0; i < chunk_n; i++) {
             const usage_request_row_t* r = &rows[off + i];
-            int                        pbase = i * 10;
+            int                        pbase = i * 11;
             snprintf(num[i], sizeof num[i], "%ld", r->key_id);
             snprintf(st[i], sizeof st[i], "%d", r->http_status);
             snprintf(pt[i], sizeof pt[i], "%ld", r->prompt_tokens);
@@ -1416,10 +1416,11 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
             vals[pbase + 7] = rt[i];
             vals[pbase + 8] = lat[i];
             vals[pbase + 9] = tsb[i];
+            vals[pbase + 10] = r->guardrail_action[0] != '\0' ? r->guardrail_action : "";
 
             int w = snprintf(sql + sql_off,
                              sizeof sql - (size_t)sql_off,
-                             "%s($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
+                             "%s($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
                              i > 0 ? "," : "",
                              pbase + 1,
                              pbase + 2,
@@ -1430,7 +1431,8 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
                              pbase + 7,
                              pbase + 8,
                              pbase + 9,
-                             pbase + 10);
+                             pbase + 10,
+                             pbase + 11);
             if (w < 0 || (size_t)w >= sizeof sql - (size_t)sql_off) {
                 rc = -1;
                 break;
@@ -1442,7 +1444,7 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
             break;
         }
 
-        PGresult* res = PQexecParams(px->db, sql, chunk_n * 10, NULL, vals, NULL, NULL, 0);
+        PGresult* res = PQexecParams(px->db, sql, chunk_n * 11, NULL, vals, NULL, NULL, 0);
         if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
             AIGATE_LOG_ERROR("pg flush_requests batch: %s",
                              res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
@@ -1466,7 +1468,8 @@ pq_query_requests(void* vctx, long key_id, time_t since, usage_request_row_t* ou
 {
     struct pq_ctx*    px = vctx;
     static const char q[] = "SELECT key_id, model_name, provider, http_status, prompt_tokens, "
-                            "completion_tokens, cached_prompt_tokens, reasoning_tokens, latency_ns, ts "
+                            "completion_tokens, cached_prompt_tokens, reasoning_tokens, latency_ns, ts, "
+                            "COALESCE(guardrail_action, '') "
                             "FROM usage_requests "
                             "WHERE ($1::bigint = 0 OR key_id = $1) AND ts >= $2 "
                             "ORDER BY ts DESC LIMIT $3";
@@ -1506,6 +1509,11 @@ pq_query_requests(void* vctx, long key_id, time_t since, usage_request_row_t* ou
         out[i].reasoning_tokens = PQnfields(res) > 7 ? atol(PQgetvalue(res, i, 7)) : 0;
         out[i].latency_ns = PQnfields(res) > 8 ? strtoull(PQgetvalue(res, i, 8), NULL, 10) : 0;
         out[i].ts = PQnfields(res) > 9 ? (time_t)atol(PQgetvalue(res, i, 9)) : 0;
+        if (PQnfields(res) > 10) {
+            copy_field(out[i].guardrail_action, sizeof out[i].guardrail_action, PQgetvalue(res, i, 10));
+        } else {
+            out[i].guardrail_action[0] = '\0';
+        }
     }
     *n = nt;
     PQclear(res);

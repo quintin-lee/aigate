@@ -20,6 +20,7 @@ typedef struct key_spend_node {
 typedef struct group_spend_node {
     int64_t                  group_id;
     double                   spent_cost;
+    double                   budget_usd;
     struct group_spend_node* next;
 } group_spend_node_t;
 
@@ -164,18 +165,19 @@ budget_enforce_check(
     }
 
     /* 2. Check Group limit */
-    if (group_id > 0 && group_cost_budget > 0.0) {
+    if (group_id > 0) {
         size_t h = hash_id(group_id);
         group_spend_node_t* curr = mgr->group_buckets[h];
         while (curr != NULL && curr->group_id != group_id) {
             curr = curr->next;
         }
         if (curr != NULL) {
-            if (curr->spent_cost >= group_cost_budget) {
+            double effective_budget = group_cost_budget > 0.0 ? group_cost_budget : curr->budget_usd;
+            if (effective_budget > 0.0 && curr->spent_cost >= effective_budget) {
                 if (err_msg != NULL && err_msg_sz > 0) {
                     snprintf(err_msg, err_msg_sz,
                              "Monthly budget of $%.2f exceeded for group %ld (spent: $%.2f)",
-                             group_cost_budget, (long)group_id, curr->spent_cost);
+                             effective_budget, (long)group_id, curr->spent_cost);
                 }
                 pthread_mutex_unlock(&mgr->mtx);
                 return -1;
@@ -299,6 +301,35 @@ budget_enforce_get_group_usage(
     return 0;
 }
 
+void
+budget_enforce_set_group_budget(
+    budget_enforce_mgr_t* mgr,
+    int64_t               group_id,
+    double                budget_usd)
+{
+    if (mgr == NULL || group_id <= 0) {
+        return;
+    }
+    pthread_mutex_lock(&mgr->mtx);
+    size_t h = hash_id(group_id);
+    group_spend_node_t* curr = mgr->group_buckets[h];
+    while (curr != NULL && curr->group_id != group_id) {
+        curr = curr->next;
+    }
+    if (curr == NULL) {
+        curr = calloc(1, sizeof(*curr));
+        if (curr != NULL) {
+            curr->group_id = group_id;
+            curr->budget_usd = budget_usd;
+            curr->next = mgr->group_buckets[h];
+            mgr->group_buckets[h] = curr;
+        }
+    } else {
+        curr->budget_usd = budget_usd;
+    }
+    pthread_mutex_unlock(&mgr->mtx);
+}
+
 int
 budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
 {
@@ -306,7 +337,21 @@ budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
         return 0;
     }
     const pg_ops_t* ops = pg_store_ops(mgr->store);
-    if (ops == NULL || ops->query_cost == NULL) {
+    if (ops == NULL) {
+        return 0;
+    }
+
+    if (ops->list_groups != NULL) {
+        group_rec_t glist[256];
+        int gn = 0;
+        if (ops->list_groups(ops->ctx, glist, 256, &gn) == 0) {
+            for (int i = 0; i < gn; i++) {
+                budget_enforce_set_group_budget(mgr, glist[i].id, glist[i].monthly_budget_usd);
+            }
+        }
+    }
+
+    if (ops->query_cost == NULL) {
         return 0;
     }
 

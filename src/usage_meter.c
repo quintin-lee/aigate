@@ -261,7 +261,7 @@ usage_meter_free(usage_meter_t* um)
 }
 
 void
-um_record_ext(usage_meter_t* um,
+um_record_full(usage_meter_t* um,
                long           key_id,
                const char*    model,
                int            http_status,
@@ -270,7 +270,8 @@ um_record_ext(usage_meter_t* um,
                long           cached_prompt_tokens,
                long           reasoning_tokens,
                uint64_t       latency_ns,
-               const char*    provider)
+               const char*    provider,
+               const char*    guardrail_action)
 {
     atomic_fetch_add(&um->reqs, 1);
     long toks = prompt_tokens + completion_tokens;
@@ -339,6 +340,10 @@ um_record_ext(usage_meter_t* um,
         rr->reasoning_tokens = reasoning_tokens;
         rr->latency_ns = latency_ns;
         rr->ts = time(NULL);
+        rr->guardrail_action[0] = '\0';
+        if (guardrail_action != NULL && guardrail_action[0] != '\0') {
+            snprintf(rr->guardrail_action, sizeof rr->guardrail_action, "%s", guardrail_action);
+        }
         um->req_tail++;
         if (um->req_tail - um->req_head > UM_REQ_CAP) {
             /* ring full: backpressure on a brand-new slot would evict an
@@ -350,6 +355,31 @@ um_record_ext(usage_meter_t* um,
         }
     }
     pthread_mutex_unlock(&um->mtx);
+}
+
+void
+um_record_ext(usage_meter_t* um,
+              long           key_id,
+              const char*    model,
+              int            http_status,
+              long           prompt_tokens,
+              long           completion_tokens,
+              long           cached_prompt_tokens,
+              long           reasoning_tokens,
+              uint64_t       latency_ns,
+              const char*    provider)
+{
+    um_record_full(um,
+                   key_id,
+                   model,
+                   http_status,
+                   prompt_tokens,
+                   completion_tokens,
+                   cached_prompt_tokens,
+                   reasoning_tokens,
+                   latency_ns,
+                   provider,
+                   "");
 }
 
 void

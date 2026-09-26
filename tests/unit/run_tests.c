@@ -102,6 +102,9 @@ main(void)
     extern void test_core_models_rate_limited(void);
     extern void test_core_models_list_failure_503(void);
     extern void test_core_upstream_400_passthrough(void);
+    extern void test_core_guardrail_block(void);
+    extern void test_core_guardrail_pii_masking(void);
+    extern void test_core_monthly_budget_cost_limit(void);
     extern void test_provider_azure_build(void);
     extern void test_provider_default_params_merge(void);
     test_register("log_smoke", test_log_smoke);
@@ -176,6 +179,9 @@ main(void)
     test_register("core_models_rate_limited", test_core_models_rate_limited);
     test_register("core_models_503", test_core_models_list_failure_503);
     test_register("core_upstream_400_passthrough", test_core_upstream_400_passthrough);
+    test_register("core_guardrail_block", test_core_guardrail_block);
+    test_register("core_guardrail_pii_masking", test_core_guardrail_pii_masking);
+    test_register("core_monthly_budget_cost_limit", test_core_monthly_budget_cost_limit);
 
     extern void test_responses_non_openai_400(void);
     extern void test_responses_pipeline_200(void);

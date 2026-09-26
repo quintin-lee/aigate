@@ -60,4 +60,10 @@ int budget_enforce_get_group_usage(
     int64_t               group_id,
     double*               out_cost);
 
+/** @brief Set/update monthly budget limit for a group. */
+void budget_enforce_set_group_budget(
+    budget_enforce_mgr_t* mgr,
+    int64_t               group_id,
+    double                budget_usd);
+
 #endif /* AIGATE_BUDGET_ENFORCE_H */

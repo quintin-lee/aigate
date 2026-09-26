@@ -78,6 +78,7 @@ typedef struct usage_request_row {
     long     reasoning_tokens;
     uint64_t latency_ns;
     time_t   ts;
+    char     guardrail_action[16];
 } usage_request_row_t;
 
 /** @brief Group record (groups row + key count). */

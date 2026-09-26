@@ -38,13 +38,15 @@ struct fkey {
 };
 
 struct fdb {
-    struct fkey keys[FKEYS];
-    model_rec_t models[FMODELS];
-    int         n_models;
-    int         fail_list; /* when nonzero, list_models returns -1 */
-    usage_row_t usage[FUSAGE];
-    int         n_usage;
-    int         flush_calls;
+    struct fkey      keys[FKEYS];
+    model_rec_t      models[FMODELS];
+    int              n_models;
+    int              fail_list; /* when nonzero, list_models returns -1 */
+    usage_row_t      usage[FUSAGE];
+    int              n_usage;
+    int              flush_calls;
+    guardrail_rule_t guardrails[8];
+    int              n_guardrails;
 };
 
 static int
@@ -141,6 +143,19 @@ f_list_models(void* ctx, model_rec_t* out, int cap, int* n)
     return 0;
 }
 
+static int
+f_list_guardrails(void* ctx, guardrail_rule_t* out, int cap, int* n)
+{
+    struct fdb* db = ctx;
+    int cnt = db->n_guardrails;
+    if (cnt > cap) cnt = cap;
+    for (int i = 0; i < cnt; i++) {
+        out[i] = db->guardrails[i];
+    }
+    *n = cnt;
+    return 0;
+}
+
 static void
 fbuild_ops(struct fdb* db, pg_ops_t* ops)
 {
@@ -149,6 +164,7 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
     ops->get_key_by_hash = fget_key;
     ops->get_model = fget_model;
     ops->list_models = f_list_models;
+    ops->list_guardrails_rules = f_list_guardrails;
     ops->flush_usage = f_flush_rows;
     ops->flush_usage_requests = (int (*)(void*, const usage_request_row_t*, int))f_req_stub;
     ops->query_usage_requests =
@@ -180,6 +196,19 @@ fkey_add(struct fdb* db,
         fk->k.allowed_models[1] = NULL;
         fk->k.n_allowed = 1;
     }
+}
+
+static void
+fkey_set_guardrails(struct fdb* db, int slot, bool enabled)
+{
+    db->keys[slot].k.guardrails_enabled = enabled;
+}
+
+static void
+fkey_set_budget(struct fdb* db, int slot, double cost_budget, long token_budget)
+{
+    db->keys[slot].k.monthly_cost_budget = cost_budget;
+    db->keys[slot].k.monthly_token_budget = token_budget;
 }
 /** @brief Free allowlists allocated by fkey_add (called at test teardown). */
 static void
@@ -261,6 +290,24 @@ run(aigate_core* ac, const char* bearer, const char* model, struct cap* out)
              model);
     rq.body = full_body;
     rq.body_len = strlen(full_body);
+
+    aigate_response_ctx rcc = cap_rc(out);
+    aigate_handle_request(ac, &rq, &rcc);
+    out->status = rcc.status;
+    return out->body;
+}
+
+static const char*
+run_with_body(aigate_core* ac, const char* bearer, const char* body, struct cap* out)
+{
+    aigate_request_ctx rq;
+    memset(&rq, 0, sizeof rq);
+    rq.method = "POST";
+    rq.path = "/v1/chat/completions";
+    rq.bearer = bearer;
+    rq.client_ip = "127.0.0.1";
+    rq.body = body;
+    rq.body_len = strlen(body);
 
     aigate_response_ctx rcc = cap_rc(out);
     aigate_handle_request(ac, &rq, &rcc);
@@ -1004,4 +1051,140 @@ TEST_CASE(test_gemini_native_stream_pipeline_200)
     freed_db(&db);
     mock_upstream_stop(mu);
 }
+
+TEST_CASE(test_core_guardrail_block)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+    fkey_set_guardrails(&db, 0, true);
+
+    db.guardrails[0].id = 101;
+    strcpy(db.guardrails[0].rule_type, "keyword");
+    strcpy(db.guardrails[0].pattern, "badword");
+    strcpy(db.guardrails[0].action, "block");
+    strcpy(db.guardrails[0].category, "safety");
+    db.guardrails[0].enabled = 1;
+    db.n_guardrails = 1;
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    const char* bad_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hello badword here\"}]}";
+    run_with_body(&ac, "test-key", bad_body, &c);
+    TEST_ASSERT(c.status == 400, "status 400 on blocked keyword, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "content_policy_violation") != NULL, "has content_policy_violation in error");
+    TEST_ASSERT(strstr(c.body, "badword") != NULL, "mentions badword");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_core_guardrail_pii_masking)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+    fkey_set_guardrails(&db, 0, true);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    const char* pii_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"reach me at 13800138000 or user@test.com\"}]}";
+    run_with_body(&ac, "test-key", pii_body, &c);
+    TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
+
+    const char* up_body = mock_upstream_last_body(mu);
+    TEST_ASSERT(up_body != NULL, "upstream got request body");
+    TEST_ASSERT(strstr(up_body, "[PHONE]") != NULL, "upstream body has [PHONE]");
+    TEST_ASSERT(strstr(up_body, "[EMAIL]") != NULL, "upstream body has [EMAIL]");
+    TEST_ASSERT(strstr(up_body, "13800138000") == NULL, "upstream did not get raw phone");
+    TEST_ASSERT(strstr(up_body, "user@test.com") == NULL, "upstream did not get raw email");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_core_monthly_budget_cost_limit)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+    fkey_set_budget(&db, 0, 10.0, 0);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    /* 1. Request allowed when under budget */
+    struct cap c1;
+    memset(&c1, 0, sizeof c1);
+    run(&ac, "test-key", "gpt-4o", &c1);
+    TEST_ASSERT(c1.status == 200, "status 200 under budget, got %d", c1.status);
+
+    /* 2. Record spend exceeding monthly budget */
+    budget_enforce_record(ac.be, 1, 0, 15.0, 0);
+
+    /* 3. Next request rejected with 429 budget_exceeded */
+    struct cap c2;
+    memset(&c2, 0, sizeof c2);
+    run(&ac, "test-key", "gpt-4o", &c2);
+    TEST_ASSERT(c2.status == 429, "status 429 over budget, got %d", c2.status);
+    TEST_ASSERT(strstr(c2.body, "budget_exceeded") != NULL, "has budget_exceeded error type");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
 

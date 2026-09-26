@@ -15,6 +15,8 @@
 #include <stdint.h>
 #include "auth_key.h"
 #include "circuit_breaker.h"
+#include "guardrails.h"
+#include "budget_enforce.h"
 #include "model_router.h"
 #include "ratelimit.h"
 #include "usage_meter.h"
@@ -37,13 +39,15 @@ typedef struct aigate_response_ctx {
 } aigate_response_ctx;
 
 typedef struct aigate_core {
-    auth_key_cache     keys;
-    ratelimit_t*       rl;
-    model_router_t*    router;
-    usage_meter_t*     um;
-    circuit_breaker_t* cb;
-    pg_store_t*        ps;
-    int                default_timeout_ms;
+    auth_key_cache        keys;
+    ratelimit_t*          rl;
+    model_router_t*       router;
+    usage_meter_t*        um;
+    circuit_breaker_t*    cb;
+    pg_store_t*           ps;
+    int                   default_timeout_ms;
+    guardrails_ctx_t*     gr;
+    budget_enforce_mgr_t* be;
 } aigate_core;
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */
@@ -55,6 +59,9 @@ int aigate_core_init(aigate_core*   ac,
 
 /** @brief Release the pipeline (flushes usage). */
 void aigate_core_shutdown(aigate_core* ac);
+
+/** @brief Reload guardrails rules from DB into memory. */
+int aigate_core_reload_guardrails(aigate_core* ac);
 
 /** @brief Run the full pipeline. @return 0 when a response body (success
  *  or error) has been written. */
