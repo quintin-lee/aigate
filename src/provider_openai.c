@@ -373,6 +373,29 @@ openai_bridge_get_tokens(stream_bridge_t* b, long* out_ptok, long* out_ctok, lon
     }
 }
 
+void
+provider_openai_bridge_get_tokens(stream_bridge_t* b,
+                                  long*            out_ptok,
+                                  long*            out_ctok,
+                                  long*            out_cached_tok,
+                                  long*            out_reasoning_tok)
+{
+    openai_bridge_t* acc = (openai_bridge_t*)b;
+    if (out_ptok) {
+        *out_ptok = acc->prompt_tokens;
+    }
+    if (out_ctok) {
+        *out_ctok = acc->completion_tokens;
+    }
+    if (out_cached_tok) {
+        *out_cached_tok = acc->cached_tokens;
+    }
+    if (out_reasoning_tok) {
+        *out_reasoning_tok = acc->reasoning_tokens;
+    }
+}
+
+
 static void
 openai_bridge_free(stream_bridge_t* b)
 {

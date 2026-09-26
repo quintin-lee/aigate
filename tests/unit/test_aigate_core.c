@@ -645,3 +645,113 @@ TEST_CASE(test_core_daily_quota_429)
     freed_db(&db);
     mock_upstream_stop(mu);
 }
+
+static const char*
+run_responses(aigate_core* ac, const char* bearer, const char* body, struct cap* out)
+{
+    aigate_request_ctx rq;
+    memset(&rq, 0, sizeof rq);
+    rq.method = "POST";
+    rq.path = "/v1/responses";
+    rq.bearer = bearer;
+    rq.client_ip = "127.0.0.1";
+    rq.body = body;
+    rq.body_len = body ? strlen(body) : 0;
+
+    aigate_response_ctx rcc = cap_rc(out);
+    aigate_handle_request(ac, &rq, &rcc);
+    out->status = rcc.status;
+    return out->body;
+}
+
+TEST_CASE(test_responses_non_openai_400)
+{
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "claude-3");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "anthropic");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", "http://127.0.0.1:9999");
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    run_responses(&ac, "test-key", "{\"model\":\"claude-3\"}", &c);
+    TEST_ASSERT(c.status == 400, "status 400, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "unsupported_endpoint") != NULL, "error code unsupported_endpoint");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+}
+
+TEST_CASE(test_responses_pipeline_200)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    run_responses(&ac, "test-key", "{\"model\":\"gpt-4o\",\"input\":\"Hello\"}", &c);
+    TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "resp_mock_unit_1") != NULL, "body contains resp_mock_unit_1");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_responses_missing_model_400)
+{
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    run_responses(&ac, "test-key", "{}", &c);
+    TEST_ASSERT(c.status == 400, "status 400 for missing model, got %d", c.status);
+    TEST_ASSERT(strstr(c.body, "model_not_found") != NULL, "error code model_not_found");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+}
+

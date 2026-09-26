@@ -148,6 +148,14 @@ main(void)
     test_register("core_models_rate_limited", test_core_models_rate_limited);
     test_register("core_models_503", test_core_models_list_failure_503);
     test_register("core_upstream_400_passthrough", test_core_upstream_400_passthrough);
+
+    extern void test_responses_non_openai_400(void);
+    extern void test_responses_pipeline_200(void);
+    extern void test_responses_missing_model_400(void);
+    test_register("responses_non_openai_400", test_responses_non_openai_400);
+    test_register("responses_pipeline_200", test_responses_pipeline_200);
+    test_register("responses_missing_model_400", test_responses_missing_model_400);
+
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
 
