@@ -106,14 +106,12 @@ cw_write(void* impl, const void* buf, size_t len, bool fin)
 static const char*
 extract_bearer(struct mg_connection* conn)
 {
-    const char* auth = mg_get_header(conn, "Authorization");
-    if (auth == NULL) {
-        return "";
-    }
-    if (strncmp(auth, "Bearer ", 7) == 0) {
-        return auth + 7;
-    }
-    return auth;
+    const char*                   auth = mg_get_header(conn, "Authorization");
+    const char*                   x_api_key = mg_get_header(conn, "x-api-key");
+    const char*                   x_goog_key = mg_get_header(conn, "x-goog-api-key");
+    const struct mg_request_info* ri = mg_get_request_info(conn);
+    const char*                   qs = ri != NULL ? ri->query_string : NULL;
+    return extract_credential_from_headers(auth, x_api_key, x_goog_key, qs);
 }
 
 /* Content-Length based body reader. Transfer-Encoding: chunked requests

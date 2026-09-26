@@ -59,6 +59,7 @@ main(void)
     extern void test_auth_key_unknown_revoked_expired(void);
     extern void test_auth_key_unknown_neg_cache(void);
     extern void test_key_allows_model(void);
+    extern void test_credential_extraction_variants(void);
     extern void test_rl_qps_boundary(void);
     extern void test_rl_unlimited(void);
     extern void test_rl_daily_quota(void);
@@ -119,6 +120,7 @@ main(void)
     test_register("auth_key_flags", test_auth_key_unknown_revoked_expired);
     test_register("auth_key_neg_cache", test_auth_key_unknown_neg_cache);
     test_register("key_allows_model", test_key_allows_model);
+    test_register("credential_extraction_variants", test_credential_extraction_variants);
     test_register("rl_qps_boundary", test_rl_qps_boundary);
     test_register("rl_unlimited", test_rl_unlimited);
     test_register("rl_daily_quota", test_rl_daily_quota);

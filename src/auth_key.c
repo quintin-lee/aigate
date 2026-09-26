@@ -195,3 +195,57 @@ key_allows_model(const key_rec_t* k, const char* model)
     }
     return 0;
 }
+
+const char*
+extract_credential_from_headers(const char* auth_header,
+                                const char* x_api_key,
+                                const char* x_goog_api_key,
+                                const char* query_string)
+{
+    /* 1. Authorization: Bearer <key> or plain <key> */
+    if (auth_header != NULL && auth_header[0] != '\0') {
+        if (strncmp(auth_header, "Bearer ", 7) == 0) {
+            const char* p = auth_header + 7;
+            while (*p == ' ') {
+                p++;
+            }
+            if (*p != '\0') {
+                return p;
+            }
+        } else {
+            return auth_header;
+        }
+    }
+
+    /* 2. x-api-key: <key> (Anthropic) */
+    if (x_api_key != NULL && x_api_key[0] != '\0') {
+        return x_api_key;
+    }
+
+    /* 3. x-goog-api-key: <key> (Gemini) */
+    if (x_goog_api_key != NULL && x_goog_api_key[0] != '\0') {
+        return x_goog_api_key;
+    }
+
+    /* 4. Query string ?key=<key> (Gemini) */
+    if (query_string != NULL && query_string[0] != '\0') {
+        const char* p = strstr(query_string, "key=");
+        while (p != NULL) {
+            if (p == query_string || *(p - 1) == '&' || *(p - 1) == '?') {
+                p += 4;
+                _Thread_local static char s_qk[256];
+                size_t len = 0;
+                while (*p != '\0' && *p != '&' && len < sizeof(s_qk) - 1) {
+                    s_qk[len++] = *p++;
+                }
+                s_qk[len] = '\0';
+                if (len > 0) {
+                    return s_qk;
+                }
+            }
+            p = strstr(p + 1, "key=");
+        }
+    }
+
+    return "";
+}
