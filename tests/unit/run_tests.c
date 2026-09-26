@@ -46,6 +46,7 @@ main(void)
     extern void test_pg_fake_multi_target_model(void);
     extern void test_pg_fake_usage_flush_and_query(void);
     extern void test_pg_fake_request_flush_and_query(void);
+    extern void test_pg_fake_reasoning_tokens(void);
     extern void test_pg_migrate_noop_for_fake(void);
     extern void test_pg_real_roundtrip(void);
     extern void test_pg_real_provider_crud(void);
@@ -54,6 +55,7 @@ main(void)
     extern void test_secret_tamper_and_wrong_key(void);
     extern void test_secret_hex_to_bytes(void);
     extern void test_auth_key_resolve_normal(void);
+    extern void test_auth_key_flags(void);
     extern void test_auth_key_unknown_revoked_expired(void);
     extern void test_auth_key_unknown_neg_cache(void);
     extern void test_key_allows_model(void);
@@ -104,6 +106,8 @@ main(void)
     test_register("pg_fake_multi_target_model", test_pg_fake_multi_target_model);
     test_register("pg_fake_usage_flush_and_query", test_pg_fake_usage_flush_and_query);
     test_register("pg_fake_request_flush_and_query", test_pg_fake_request_flush_and_query);
+    test_register("pg_fake_reasoning_tokens", test_pg_fake_reasoning_tokens);
+
     test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
     test_register("pg_real_roundtrip", test_pg_real_roundtrip);
     test_register("pg_real_provider_crud", test_pg_real_provider_crud);
@@ -144,8 +148,23 @@ main(void)
     test_register("core_models_rate_limited", test_core_models_rate_limited);
     test_register("core_models_503", test_core_models_list_failure_503);
     test_register("core_upstream_400_passthrough", test_core_upstream_400_passthrough);
+
+    extern void test_responses_non_openai_400(void);
+    extern void test_responses_pipeline_200(void);
+    extern void test_responses_missing_model_400(void);
+    test_register("responses_non_openai_400", test_responses_non_openai_400);
+    test_register("responses_pipeline_200", test_responses_pipeline_200);
+    test_register("responses_missing_model_400", test_responses_missing_model_400);
+
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
+
+    extern void test_openai_responses_build(void);
+    extern void test_openai_responses_parse_usage_nonstream(void);
+    extern void test_openai_responses_parse_usage_stream(void);
+    test_register("openai_responses_build", test_openai_responses_build);
+    test_register("openai_responses_parse_usage_nonstream", test_openai_responses_parse_usage_nonstream);
+    test_register("openai_responses_parse_usage_stream", test_openai_responses_parse_usage_stream);
 
     extern void test_probe_plan_openai_family(void);
     extern void test_probe_plan_anthropic_suffixes(void);

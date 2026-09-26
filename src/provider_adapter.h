@@ -78,6 +78,24 @@ typedef struct provider_adapter {
                                      char**      out_body,
                                      size_t*     out_len,
                                      long*       out_ptok);
+
+    /** @brief Build upstream request for /v1/responses (NULL if unsupported). */
+    int (*build_responses)(const model_rec_t* route,
+                           const char*        in_body,
+                           char*              url_out,
+                           size_t             url_cap,
+                           const char*        extra_headers[4][2],
+                           int*               n_extra_headers,
+                           char**             out_body,
+                           size_t*            out_body_len);
+
+    /** @brief Parse responses response and extract usage tokens (NULL if unsupported). */
+    int (*parse_responses_response)(const char* body,
+                                    size_t      len,
+                                    long*       out_input_tokens,
+                                    long*       out_output_tokens,
+                                    long*       out_cached_tokens,
+                                    long*       out_reasoning_tokens);
 } provider_adapter_t;
 
 /** @brief Look up the provider adapter by provider name; returns NULL if unsupported. */

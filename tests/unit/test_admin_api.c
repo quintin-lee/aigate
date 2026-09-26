@@ -1238,6 +1238,7 @@ TEST_CASE(test_admin_usage_requests_query)
     rr.prompt_tokens = 500;
     rr.completion_tokens = 200;
     rr.cached_prompt_tokens = 10;
+    rr.reasoning_tokens = 45;
     rr.latency_ns = 123000000;
     rr.ts = 1726704000; /* 2024-09-19 00:00 UTC */
     fake_flush_requests(&db, &rr, 1);
@@ -1267,6 +1268,7 @@ TEST_CASE(test_admin_usage_requests_query)
     TEST_ASSERT(json_integer_value(json_object_get(r0, "http_status")) == 200, "http_status 200");
     TEST_ASSERT(strcmp(json_string_value(json_object_get(r0, "model")), "gpt-4o") == 0, "model");
     TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 500, "prompt_tokens");
+    TEST_ASSERT(json_integer_value(json_object_get(r0, "reasoning_tokens")) == 45, "reasoning_tokens");
     TEST_ASSERT(fabs(json_real_value(json_object_get(r0, "latency_ms")) - 123.0) < 0.01,
                 "latency_ms 123");
     json_decref(j);

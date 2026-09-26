@@ -1472,6 +1472,201 @@ def test_list_pagination(gateway):
     assert data["limit"] == 2
 
 
+def test_responses_openai_passthrough(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "test-responses-gpt"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "responses-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 1000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    key_data = resp.json()
+    key_id = key_data["key_id"]
+    api_key = key_data["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(
+        f"{base_url}/v1/responses",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "input": "Hello",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["status"] == "completed"
+    assert data["id"] == "resp_mock_sync_1"
+
+    # Wait for flush to PG
+    reqs = []
+    for _ in range(15):
+        time.sleep(0.5)
+        r = requests.get(
+            f"{base_url}/admin/v1/usage/requests?key_id={key_id}",
+            headers=admin_headers,
+        )
+        if r.status_code == 200:
+            matched = [rq for rq in r.json().get("requests", []) if rq["model"] == model_name]
+            if matched:
+                reqs = matched
+                break
+    assert len(reqs) >= 1, "Expected flushed usage request"
+    last_req = reqs[0]
+    assert last_req["prompt_tokens"] == 12
+    assert last_req["completion_tokens"] == 18
+    assert last_req["reasoning_tokens"] == 6
+
+
+def test_responses_streaming_sse(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "test-responses-stream-gpt"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "responses-stream-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 1000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(
+        f"{base_url}/v1/responses",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "input": "Hello stream",
+            "stream": True,
+        },
+        stream=True,
+    )
+    assert resp.status_code == 200, resp.text
+    assert "text/event-stream" in resp.headers.get("Content-Type", "")
+
+    events = []
+    for line in resp.iter_lines(decode_unicode=True):
+        if line and line.startswith("event:"):
+            events.append(line.split(":", 1)[1].strip())
+
+    assert "response.created" in events
+    assert "response.output_text.delta" in events
+    assert "response.completed" in events
+    created_idx = events.index("response.created")
+    delta_idx = events.index("response.output_text.delta")
+    completed_idx = events.index("response.completed")
+    assert created_idx < delta_idx < completed_idx
+
+
+def test_responses_non_openai_400(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "test-responses-claude"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "anthropic",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "responses-non-openai-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 1000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(
+        f"{base_url}/v1/responses",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "input": "Hello",
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    err = resp.json().get("error", {})
+    assert err.get("type") == "unsupported_endpoint"
+
+
 def test_admin_lockout_429(gateway):
     """10 failed admin auth attempts from one IP lock that IP out (429).
 

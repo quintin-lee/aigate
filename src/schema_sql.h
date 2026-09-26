@@ -118,6 +118,10 @@ ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS group_id BIGINT
   REFERENCES groups(id) ON DELETE SET NULL;
 ALTER TABLE models ADD COLUMN IF NOT EXISTS pricing JSONB NOT NULL DEFAULT '{}';
 INSERT INTO schema_migrations(version) VALUES (7) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v8: reasoning tokens for OpenAI Responses API / CoT models
+ALTER TABLE usage_requests ADD COLUMN IF NOT EXISTS reasoning_tokens BIGINT NOT NULL DEFAULT 0;
+INSERT INTO schema_migrations(version) VALUES (8) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

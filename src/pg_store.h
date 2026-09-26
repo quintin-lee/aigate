@@ -72,6 +72,7 @@ typedef struct usage_request_row {
     long     prompt_tokens;
     long     completion_tokens;
     long     cached_prompt_tokens;
+    long     reasoning_tokens;
     uint64_t latency_ns;
     time_t   ts;
 } usage_request_row_t;

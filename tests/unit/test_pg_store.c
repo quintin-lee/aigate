@@ -815,6 +815,40 @@ TEST_CASE(test_pg_fake_request_flush_and_query)
     pg_store_close(ps);
 }
 
+TEST_CASE(test_pg_fake_reasoning_tokens)
+{
+    struct fake_db      db;
+    pg_ops_t            ops;
+    pg_store_t*         ps;
+    usage_request_row_t rr, out[4];
+    int                 n = 0;
+
+    memset(&db, 0, sizeof db);
+    build_fake_ops(&db, &ops);
+    ps = pg_store_open("unused", &ops);
+    TEST_ASSERT(ps != NULL, "fake store open");
+
+    memset(&rr, 0, sizeof rr);
+    rr.key_id = 1;
+    strcpy(rr.model_name, "o3-mini");
+    strcpy(rr.provider, "openai");
+    rr.http_status = 200;
+    rr.prompt_tokens = 20;
+    rr.completion_tokens = 30;
+    rr.cached_prompt_tokens = 10;
+    rr.reasoning_tokens = 15;
+    rr.latency_ns = 50000000;
+    rr.ts = 1700000000;
+    TEST_ASSERT(pg_store_ops(ps)->flush_usage_requests(&db, &rr, 1) == 0, "flush reasoning row");
+
+    TEST_ASSERT(pg_store_ops(ps)->query_usage_requests(&db, 1, 0, out, 4, &n) == 0, "query");
+    TEST_ASSERT(n == 1, "found 1 row");
+    TEST_ASSERT(out[0].reasoning_tokens == 15, "reasoning_tokens preserved");
+
+    pg_store_close(ps);
+}
+
+
 TEST_CASE(test_pg_migrate_noop_for_fake)
 {
     struct fake_db db;

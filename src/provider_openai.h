@@ -59,4 +59,29 @@ int provider_openai_parse_embeddings(const char* raw_body,
                                      size_t*     out_len,
                                      long*       out_ptok);
 
+/** @brief Build upstream request for OpenAI Responses API. */
+int provider_openai_build_responses(const model_rec_t* route,
+                                    const char*        in_body,
+                                    char*              url_out,
+                                    size_t             url_cap,
+                                    const char*        extra_headers[4][2],
+                                    int*               n_extra_headers,
+                                    char**             out_body,
+                                    size_t*            out_body_len);
+
+/** @brief Parse OpenAI responses response (JSON or SSE) and extract token usage. */
+int provider_openai_parse_responses_usage(const char* body,
+                                          size_t      len,
+                                          long*       out_input_tokens,
+                                          long*       out_output_tokens,
+                                          long*       out_cached_tokens,
+                                          long*       out_reasoning_tokens);
+
+/** @brief Extract accumulated token counts including reasoning tokens from OpenAI stream bridge. */
+void provider_openai_bridge_get_tokens(stream_bridge_t* b,
+                                       long*            out_ptok,
+                                       long*            out_ctok,
+                                       long*            out_cached_tok,
+                                       long*            out_reasoning_tok);
+
 #endif /* AIGATE_PROVIDER_OPENAI_H */

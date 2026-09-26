@@ -242,7 +242,74 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(resp_bytes)))
             self.end_headers()
             self.wfile.write(resp_bytes)
-            return
+        if "/responses" in self.path:
+            if body_json and body_json.get("stream") is True:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-cache")
+                self.send_header("Connection", "close")
+                self.end_headers()
+
+                # Event 1: response.created
+                ev1 = {
+                    "type": "response.created",
+                    "response": {"id": "resp_mock_1"}
+                }
+                self.wfile.write(f"event: response.created\ndata: {json.dumps(ev1)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.01)
+
+                # Event 2: response.output_text.delta
+                ev2 = {
+                    "type": "response.output_text.delta",
+                    "delta": "Hello from Responses API!"
+                }
+                self.wfile.write(f"event: response.output_text.delta\ndata: {json.dumps(ev2)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                time.sleep(0.01)
+
+                # Event 3: response.completed
+                ev3 = {
+                    "type": "response.completed",
+                    "response": {
+                        "id": "resp_mock_1",
+                        "usage": {
+                            "input_tokens": 10,
+                            "output_tokens": 15,
+                            "input_tokens_details": {"cached_tokens": 3},
+                            "output_tokens_details": {"reasoning_tokens": 5}
+                        }
+                    }
+                }
+                self.wfile.write(f"event: response.completed\ndata: {json.dumps(ev3)}\n\n".encode("utf-8"))
+                self.wfile.flush()
+                return
+            else:
+                response = {
+                    "id": "resp_mock_sync_1",
+                    "object": "response",
+                    "status": "completed",
+                    "output": [
+                        {
+                            "type": "message",
+                            "role": "assistant",
+                            "content": [{"type": "text", "text": "Hello from mock responses!"}]
+                        }
+                    ],
+                    "usage": {
+                        "input_tokens": 12,
+                        "output_tokens": 18,
+                        "input_tokens_details": {"cached_tokens": 4},
+                        "output_tokens_details": {"reasoning_tokens": 6}
+                    }
+                }
+                resp_bytes = json.dumps(response).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(resp_bytes)))
+                self.end_headers()
+                self.wfile.write(resp_bytes)
+                return
 
         if "/chat/completions" in self.path:
             req_model = body_json.get("model", "mock-model") if body_json else "mock-model"

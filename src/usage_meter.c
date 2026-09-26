@@ -261,15 +261,16 @@ usage_meter_free(usage_meter_t* um)
 }
 
 void
-um_record(usage_meter_t* um,
-          long           key_id,
-          const char*    model,
-          int            http_status,
-          long           prompt_tokens,
-          long           completion_tokens,
-          long           cached_prompt_tokens,
-          uint64_t       latency_ns,
-          const char*    provider)
+um_record_ext(usage_meter_t* um,
+               long           key_id,
+               const char*    model,
+               int            http_status,
+               long           prompt_tokens,
+               long           completion_tokens,
+               long           cached_prompt_tokens,
+               long           reasoning_tokens,
+               uint64_t       latency_ns,
+               const char*    provider)
 {
     atomic_fetch_add(&um->reqs, 1);
     long toks = prompt_tokens + completion_tokens;
@@ -335,6 +336,7 @@ um_record(usage_meter_t* um,
         rr->prompt_tokens = prompt_tokens;
         rr->completion_tokens = completion_tokens;
         rr->cached_prompt_tokens = cached_prompt_tokens;
+        rr->reasoning_tokens = reasoning_tokens;
         rr->latency_ns = latency_ns;
         rr->ts = time(NULL);
         um->req_tail++;
@@ -348,6 +350,29 @@ um_record(usage_meter_t* um,
         }
     }
     pthread_mutex_unlock(&um->mtx);
+}
+
+void
+um_record(usage_meter_t* um,
+          long           key_id,
+          const char*    model,
+          int            http_status,
+          long           prompt_tokens,
+          long           completion_tokens,
+          long           cached_prompt_tokens,
+          uint64_t       latency_ns,
+          const char*    provider)
+{
+    um_record_ext(um,
+                  key_id,
+                  model,
+                  http_status,
+                  prompt_tokens,
+                  completion_tokens,
+                  cached_prompt_tokens,
+                  0,
+                  latency_ns,
+                  provider);
 }
 
 int
