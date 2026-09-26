@@ -199,6 +199,7 @@ typedef struct {
     long   prompt_tokens;
     long   completion_tokens;
     long   cached_tokens;
+    long   reasoning_tokens;
 } openai_bridge_t;
 
 static stream_bridge_t*
@@ -233,9 +234,21 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
         return;
     }
     json_t* jusage = json_object_get(root, "usage");
+    if (jusage == NULL) {
+        json_t* jresp = json_object_get(root, "response");
+        if (jresp != NULL && json_is_object(jresp)) {
+            jusage = json_object_get(jresp, "usage");
+        }
+    }
     if (jusage != NULL && json_is_object(jusage)) {
         json_t* jp = json_object_get(jusage, "prompt_tokens");
+        if (jp == NULL) {
+            jp = json_object_get(jusage, "input_tokens");
+        }
         json_t* jc = json_object_get(jusage, "completion_tokens");
+        if (jc == NULL) {
+            jc = json_object_get(jusage, "output_tokens");
+        }
         if (json_is_integer(jp)) {
             acc->prompt_tokens = json_integer_value(jp);
         }
@@ -248,11 +261,25 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
             acc->cached_tokens = json_integer_value(jch);
         } else {
             json_t* jdet = json_object_get(jusage, "prompt_tokens_details");
+            if (jdet == NULL) {
+                jdet = json_object_get(jusage, "input_tokens_details");
+            }
             if (jdet != NULL && json_is_object(jdet)) {
                 json_t* jcd = json_object_get(jdet, "cached_tokens");
                 if (json_is_integer(jcd)) {
                     acc->cached_tokens = json_integer_value(jcd);
                 }
+            }
+        }
+
+        json_t* jout_det = json_object_get(jusage, "completion_tokens_details");
+        if (jout_det == NULL) {
+            jout_det = json_object_get(jusage, "output_tokens_details");
+        }
+        if (jout_det != NULL && json_is_object(jout_det)) {
+            json_t* jr = json_object_get(jout_det, "reasoning_tokens");
+            if (json_is_integer(jr)) {
+                acc->reasoning_tokens = json_integer_value(jr);
             }
         }
     }
@@ -424,6 +451,173 @@ provider_openai_parse_embeddings(const char* raw_body,
     return 0;
 }
 
+static _Thread_local char s_responses_bearer_auth[2048];
+
+int
+provider_openai_build_responses(const model_rec_t* route,
+                                const char*        in_body,
+                                char*              url_out,
+                                size_t             url_cap,
+                                const char*        extra_headers[4][2],
+                                int*               n_extra_headers,
+                                char**             out_body,
+                                size_t*            out_body_len)
+{
+    const char* up_path = "/responses";
+    size_t      elen = strlen(route->endpoint);
+    bool        has_v1 = (strstr(route->endpoint, "/v1") != NULL);
+    if (!has_v1) {
+        up_path = "/v1/responses";
+    }
+    if (elen > 0 && route->endpoint[elen - 1] == '/') {
+        if (up_path[0] == '/') {
+            up_path++;
+        }
+    }
+    snprintf(url_out, url_cap, "%s%s", route->endpoint, up_path);
+
+    int n_hdrs = 0;
+    if (route->upstream_key[0] != '\0') {
+        snprintf(s_responses_bearer_auth, sizeof(s_responses_bearer_auth), "Bearer %s", route->upstream_key);
+        extra_headers[n_hdrs][0] = "Authorization";
+        extra_headers[n_hdrs][1] = s_responses_bearer_auth;
+        n_hdrs++;
+    }
+    extra_headers[n_hdrs][0] = "Content-Type";
+    extra_headers[n_hdrs][1] = "application/json";
+    n_hdrs++;
+    *n_extra_headers = n_hdrs;
+
+    *out_body = strdup(in_body ? in_body : "");
+    if (*out_body == NULL) {
+        return -1;
+    }
+    if (out_body_len != NULL) {
+        *out_body_len = strlen(*out_body);
+    }
+    return 0;
+}
+
+static void
+extract_responses_usage_from_json(json_t* root,
+                                  long*   out_input_tokens,
+                                  long*   out_output_tokens,
+                                  long*   out_cached_tokens,
+                                  long*   out_reasoning_tokens)
+{
+    if (root == NULL || !json_is_object(root)) {
+        return;
+    }
+    json_t* jusage = json_object_get(root, "usage");
+    if (jusage == NULL || !json_is_object(jusage)) {
+        json_t* jresp = json_object_get(root, "response");
+        if (jresp != NULL && json_is_object(jresp)) {
+            jusage = json_object_get(jresp, "usage");
+        }
+    }
+    if (jusage != NULL && json_is_object(jusage)) {
+        json_t* jin = json_object_get(jusage, "input_tokens");
+        if (jin == NULL) {
+            jin = json_object_get(jusage, "prompt_tokens");
+        }
+        if (json_is_integer(jin) && out_input_tokens) {
+            *out_input_tokens = json_integer_value(jin);
+        }
+
+        json_t* jout = json_object_get(jusage, "output_tokens");
+        if (jout == NULL) {
+            jout = json_object_get(jusage, "completion_tokens");
+        }
+        if (json_is_integer(jout) && out_output_tokens) {
+            *out_output_tokens = json_integer_value(jout);
+        }
+
+        /* cached tokens */
+        json_t* jin_det = json_object_get(jusage, "input_tokens_details");
+        if (jin_det == NULL) {
+            jin_det = json_object_get(jusage, "prompt_tokens_details");
+        }
+        if (jin_det != NULL && json_is_object(jin_det)) {
+            json_t* jcached = json_object_get(jin_det, "cached_tokens");
+            if (json_is_integer(jcached) && out_cached_tokens) {
+                *out_cached_tokens = json_integer_value(jcached);
+            }
+        }
+
+        /* reasoning tokens */
+        json_t* jout_det = json_object_get(jusage, "output_tokens_details");
+        if (jout_det == NULL) {
+            jout_det = json_object_get(jusage, "completion_tokens_details");
+        }
+        if (jout_det != NULL && json_is_object(jout_det)) {
+            json_t* jreasoning = json_object_get(jout_det, "reasoning_tokens");
+            if (json_is_integer(jreasoning) && out_reasoning_tokens) {
+                *out_reasoning_tokens = json_integer_value(jreasoning);
+            }
+        }
+    }
+}
+
+int
+provider_openai_parse_responses_usage(const char* body,
+                                      size_t      len,
+                                      long*       out_input_tokens,
+                                      long*       out_output_tokens,
+                                      long*       out_cached_tokens,
+                                      long*       out_reasoning_tokens)
+{
+    if (out_input_tokens) *out_input_tokens = 0;
+    if (out_output_tokens) *out_output_tokens = 0;
+    if (out_cached_tokens) *out_cached_tokens = 0;
+    if (out_reasoning_tokens) *out_reasoning_tokens = 0;
+
+    if (body == NULL || len == 0) {
+        return 0;
+    }
+
+    /* Check if SSE stream */
+    if (strstr(body, "event:") != NULL || strstr(body, "data:") != NULL) {
+        const char* p = body;
+        const char* end = body + len;
+        while (p < end) {
+            const char* nl = memchr(p, '\n', (size_t)(end - p));
+            size_t line_len = nl ? (size_t)(nl - p) : (size_t)(end - p);
+            if (line_len > 5 && strncmp(p, "data:", 5) == 0) {
+                const char* jstart = memchr(p, '{', line_len);
+                if (jstart != NULL) {
+                    size_t jlen = line_len - (size_t)(jstart - p);
+                    json_error_t err;
+                    json_t* root = json_loadb(jstart, jlen, 0, &err);
+                    if (root != NULL) {
+                        extract_responses_usage_from_json(root,
+                                                          out_input_tokens,
+                                                          out_output_tokens,
+                                                          out_cached_tokens,
+                                                          out_reasoning_tokens);
+                        json_decref(root);
+                    }
+                }
+            }
+            p = nl ? nl + 1 : end;
+        }
+        return 0;
+    }
+
+    /* Non-streaming */
+    json_error_t err;
+    json_t* root = json_loadb(body, len, 0, &err);
+    if (root != NULL) {
+        extract_responses_usage_from_json(root,
+                                          out_input_tokens,
+                                          out_output_tokens,
+                                          out_cached_tokens,
+                                          out_reasoning_tokens);
+        json_decref(root);
+        return 0;
+    }
+    return 0;
+}
+
 const provider_adapter_t g_provider_openai = {
     .name = "openai",
     .supports = adapter_openai_supports,
@@ -437,4 +631,6 @@ const provider_adapter_t g_provider_openai = {
     .stream_bridge_free = openai_bridge_free,
     .build_embeddings = provider_openai_build_embeddings,
     .parse_embeddings_response = provider_openai_parse_embeddings,
+    .build_responses = provider_openai_build_responses,
+    .parse_responses_response = provider_openai_parse_responses_usage,
 };

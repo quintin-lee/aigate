@@ -151,6 +151,13 @@ main(void)
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
 
+    extern void test_openai_responses_build(void);
+    extern void test_openai_responses_parse_usage_nonstream(void);
+    extern void test_openai_responses_parse_usage_stream(void);
+    test_register("openai_responses_build", test_openai_responses_build);
+    test_register("openai_responses_parse_usage_nonstream", test_openai_responses_parse_usage_nonstream);
+    test_register("openai_responses_parse_usage_stream", test_openai_responses_parse_usage_stream);
+
     extern void test_probe_plan_openai_family(void);
     extern void test_probe_plan_anthropic_suffixes(void);
     extern void test_probe_plan_gemini(void);
