@@ -12,7 +12,9 @@
 #include "admin_api.h"
 #include "aigate_log.h"
 #include "auth_key.h"
+#include "budget_enforce.h"
 #include "circuit_breaker.h"
+#include "guardrails.h"
 #include "model_router.h"
 #include "provider_adapter.h"
 #include "redis_client.h"
@@ -521,6 +523,19 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     if (jgroup != NULL && json_is_integer(jgroup)) {
         k.group_id = json_integer_value(jgroup);
     }
+    k.guardrails_enabled = 1;
+    json_t* jgr = json_object_get(jbody, "guardrails_enabled");
+    if (jgr != NULL && json_is_boolean(jgr)) {
+        k.guardrails_enabled = json_is_true(jgr) ? 1 : 0;
+    }
+    json_t* jcost_b = json_object_get(jbody, "monthly_cost_budget");
+    if (jcost_b != NULL && json_is_number(jcost_b)) {
+        k.monthly_cost_budget = json_number_value(jcost_b);
+    }
+    json_t* jtok_b = json_object_get(jbody, "monthly_token_budget");
+    if (jtok_b != NULL && json_is_integer(jtok_b)) {
+        k.monthly_token_budget = json_integer_value(jtok_b);
+    }
 
     char plain[48], hash[65];
     if (gen_key_plaintext(plain, hash) != 0) {
@@ -551,6 +566,9 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     json_object_set_new(out, "plaintext", json_string(plain));
     json_object_set_new(out, "name", json_string(k.name));
     json_object_set_new(out, "group_id", k.group_id > 0 ? json_integer(k.group_id) : json_null());
+    json_object_set_new(out, "guardrails_enabled", json_boolean(k.guardrails_enabled));
+    json_object_set_new(out, "monthly_cost_budget", json_real(k.monthly_cost_budget));
+    json_object_set_new(out, "monthly_token_budget", json_integer(k.monthly_token_budget));
     return finish_json(status, body, len, 201, out);
 }
 
@@ -598,6 +616,9 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* qu
         }
         json_object_set_new(
             o, "group_id", recs[i].group_id > 0 ? json_integer(recs[i].group_id) : json_null());
+        json_object_set_new(o, "guardrails_enabled", json_boolean(recs[i].guardrails_enabled));
+        json_object_set_new(o, "monthly_cost_budget", json_real(recs[i].monthly_cost_budget));
+        json_object_set_new(o, "monthly_token_budget", json_integer(recs[i].monthly_token_budget));
         json_array_append_new(arr, o);
         key_rec_free(&recs[i]);
     }
@@ -730,6 +751,42 @@ key_patch(
             json_decref(jbody);
             return finish_error(
                 status, body, len, 400, "bad_request", "group_id must be integer or null");
+        }
+    }
+    v = json_object_get(jbody, "guardrails_enabled");
+    if (v != NULL) {
+        if (json_is_boolean(v)) {
+            k.guardrails_enabled = json_is_true(v) ? 1 : 0;
+            mask |= KMASK_GUARDRAILS;
+        } else {
+            key_rec_free(&k);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "guardrails_enabled must be boolean");
+        }
+    }
+    v = json_object_get(jbody, "monthly_cost_budget");
+    if (v != NULL) {
+        if (json_is_number(v)) {
+            k.monthly_cost_budget = json_number_value(v);
+            mask |= KMASK_MONTHLY_COST_BUDGET;
+        } else {
+            key_rec_free(&k);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "monthly_cost_budget must be a number");
+        }
+    }
+    v = json_object_get(jbody, "monthly_token_budget");
+    if (v != NULL) {
+        if (json_is_integer(v)) {
+            k.monthly_token_budget = json_integer_value(v);
+            mask |= KMASK_MONTHLY_TOKEN_BUDGET;
+        } else {
+            key_rec_free(&k);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "monthly_token_budget must be integer");
         }
     }
     json_decref(jbody);
@@ -1895,6 +1952,17 @@ group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
         json_decref(jbody);
         return finish_error(status, body, len, 400, "bad_request", "name too long (max 64 chars)");
     }
+    double monthly_budget_usd = 0.0;
+    json_t* jmb = json_object_get(jbody, "monthly_budget_usd");
+    if (jmb != NULL) {
+        if (json_is_number(jmb)) {
+            monthly_budget_usd = json_number_value(jmb);
+        } else {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "monthly_budget_usd must be a number");
+        }
+    }
     char group_name[128];
     snprintf(group_name, sizeof group_name, "%s", name);
     long            id = 0;
@@ -1907,9 +1975,16 @@ group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     if (rc != 0) {
         return finish_error(status, body, len, 500, "internal_error", "group create failed");
     }
+    if (monthly_budget_usd > 0.0) {
+        ops->patch_group_budget(ops->ctx, id, monthly_budget_usd);
+        if (adm->ac != NULL && adm->ac->be != NULL) {
+            budget_enforce_set_group_budget(adm->ac->be, id, monthly_budget_usd);
+        }
+    }
     json_t* out = json_object();
     json_object_set_new(out, "id", json_integer(id));
     json_object_set_new(out, "name", json_string(group_name));
+    json_object_set_new(out, "monthly_budget_usd", json_real(monthly_budget_usd));
     return finish_json(status, body, len, 201, out);
 }
 
@@ -1942,6 +2017,7 @@ group_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
         json_object_set_new(o, "id", json_integer(recs[i].id));
         json_object_set_new(o, "name", json_string(recs[i].name));
         json_object_set_new(o, "key_count", json_integer(recs[i].key_count));
+        json_object_set_new(o, "monthly_budget_usd", json_real(recs[i].monthly_budget_usd));
         if (recs[i].created_at > 0) {
             char      ts_iso[32];
             struct tm tmv;
@@ -1978,31 +2054,66 @@ group_patch(
         return finish_error(status, body, len, 400, "bad_request", "invalid json body");
     }
     const char* name = jstring(jbody, "name", NULL);
-    if (name == NULL || name[0] == '\0') {
+    json_t* jbudget = json_object_get(jbody, "monthly_budget_usd");
+    if ((name == NULL || name[0] == '\0') && jbudget == NULL) {
         json_decref(jbody);
-        return finish_error(status, body, len, 400, "bad_request", "name is required");
+        return finish_error(
+            status, body, len, 400, "bad_request", "name or monthly_budget_usd is required");
     }
-    if (strlen(name) > 64) {
-        json_decref(jbody);
-        return finish_error(status, body, len, 400, "bad_request", "name too long (max 64 chars)");
-    }
-    char group_name[128];
-    snprintf(group_name, sizeof group_name, "%s", name);
+    char group_name[128] = { 0 };
     const pg_ops_t* ops = pg_store_ops(adm->ps);
-    int             rc = ops->patch_group(ops->ctx, id, group_name);
+    if (name != NULL && name[0] != '\0') {
+        if (strlen(name) > 64) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "name too long (max 64 chars)");
+        }
+        snprintf(group_name, sizeof group_name, "%s", name);
+        int rc = ops->patch_group(ops->ctx, id, group_name);
+        if (rc == -2) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 409, "group_exists", "group name already exists");
+        }
+        if (rc == 1) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 404, "group_not_found", "group not found");
+        }
+        if (rc != 0) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 500, "internal_error", "group patch failed");
+        }
+    }
+    if (jbudget != NULL) {
+        if (!json_is_number(jbudget)) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "monthly_budget_usd must be a number");
+        }
+        double budget = json_number_value(jbudget);
+        if (budget < 0.0) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "monthly_budget_usd must be non-negative");
+        }
+        int rc = ops->patch_group_budget(ops->ctx, id, budget);
+        if (rc == 1) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 404, "group_not_found", "group not found");
+        }
+        if (rc != 0) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 500, "internal_error", "group budget patch failed");
+        }
+        if (adm->ac != NULL && adm->ac->be != NULL) {
+            budget_enforce_set_group_budget(adm->ac->be, id, budget);
+        }
+    }
     json_decref(jbody);
-    if (rc == -2) {
-        return finish_error(status, body, len, 409, "group_exists", "group name already exists");
-    }
-    if (rc == 1) {
-        return finish_error(status, body, len, 404, "group_not_found", "group not found");
-    }
-    if (rc != 0) {
-        return finish_error(status, body, len, 500, "internal_error", "group patch failed");
-    }
     json_t* out = json_object();
     json_object_set_new(out, "id", json_integer(id));
-    json_object_set_new(out, "name", json_string(group_name));
+    if (group_name[0] != '\0') {
+        json_object_set_new(out, "name", json_string(group_name));
+    }
     json_object_set_new(out, "updated", json_true());
     return finish_json(status, body, len, 200, out);
 }
@@ -2378,6 +2489,287 @@ cost_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
     return 0;
 }
 
+/* ------------------------------------------------------------ guardrails */
+
+static int
+guardrails_rule_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* pattern = jstring(jbody, "pattern", NULL);
+    if (pattern == NULL || pattern[0] == '\0') {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "pattern is required");
+    }
+    if (strlen(pattern) >= 512) {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "pattern too long (max 511 chars)");
+    }
+
+    const char* rule_type = jstring(jbody, "rule_type", "keyword");
+    if (strcmp(rule_type, "keyword") != 0 &&
+        strcmp(rule_type, "regex") != 0 &&
+        strcmp(rule_type, "pii") != 0) {
+        json_decref(jbody);
+        return finish_error(
+            status, body, len, 400, "bad_request", "rule_type must be keyword, regex, or pii");
+    }
+
+    const char* action = jstring(jbody, "action", "block");
+    if (strcmp(action, "block") != 0 && strcmp(action, "mask") != 0) {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "action must be block or mask");
+    }
+
+    const char* category = jstring(jbody, "category", "general");
+    if (strlen(category) >= 64) {
+        json_decref(jbody);
+        return finish_error(
+            status, body, len, 400, "bad_request", "category too long (max 63 chars)");
+    }
+
+    int enabled = 1;
+    json_t* jen = json_object_get(jbody, "enabled");
+    if (jen != NULL) {
+        if (json_is_boolean(jen)) {
+            enabled = json_is_true(jen) ? 1 : 0;
+        } else if (json_is_integer(jen)) {
+            enabled = json_integer_value(jen) ? 1 : 0;
+        }
+    }
+
+    guardrail_rule_t rule;
+    memset(&rule, 0, sizeof rule);
+    snprintf(rule.rule_type, sizeof rule.rule_type, "%s", rule_type);
+    snprintf(rule.pattern, sizeof rule.pattern, "%s", pattern);
+    snprintf(rule.action, sizeof rule.action, "%s", action);
+    snprintf(rule.category, sizeof rule.category, "%s", category);
+    rule.enabled = enabled;
+
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    long            new_id = 0;
+    int             rc = ops->create_guardrails_rule(ops->ctx, &rule, &new_id);
+    json_decref(jbody);
+    if (rc != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "guardrails rule create failed");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_guardrails(adm->ac);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(new_id));
+    json_object_set_new(out, "rule_type", json_string(rule.rule_type));
+    json_object_set_new(out, "pattern", json_string(rule.pattern));
+    json_object_set_new(out, "action", json_string(rule.action));
+    json_object_set_new(out, "category", json_string(rule.category));
+    json_object_set_new(out, "enabled", json_boolean(rule.enabled));
+    return finish_json(status, body, len, 201, out);
+}
+
+static int
+guardrails_rule_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
+{
+    int page = 1, limit = 0;
+    parse_pagination_params(query, &page, &limit);
+
+    int req_cap = 256;
+    if (limit > 0 && page > 0) {
+        int needed = page * limit;
+        if (needed > req_cap) {
+            req_cap = needed <= 4096 ? needed : 4096;
+        }
+    }
+
+    guardrail_rule_t* recs = calloc((size_t)req_cap, sizeof *recs);
+    if (recs == NULL) {
+        return -1;
+    }
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    int             n = 0;
+    if (ops->list_guardrails_rules(ops->ctx, recs, req_cap, &n) != 0) {
+        free(recs);
+        return finish_error(status, body, len, 500, "internal_error", "guardrails list failed");
+    }
+
+    json_t* arr = json_array();
+    for (int i = 0; i < n; i++) {
+        json_t* o = json_object();
+        json_object_set_new(o, "id", json_integer(recs[i].id));
+        json_object_set_new(o, "rule_type", json_string(recs[i].rule_type));
+        json_object_set_new(o, "pattern", json_string(recs[i].pattern));
+        json_object_set_new(o, "action", json_string(recs[i].action));
+        json_object_set_new(o, "category", json_string(recs[i].category));
+        json_object_set_new(o, "enabled", json_boolean(recs[i].enabled));
+        if (recs[i].created_at > 0) {
+            char      ts_iso[32];
+            struct tm tmv;
+            if (gmtime_r(&recs[i].created_at, &tmv) != NULL) {
+                strftime(ts_iso, sizeof ts_iso, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+            } else {
+                snprintf(ts_iso, sizeof ts_iso, "1970-01-01T00:00:00Z");
+            }
+            json_object_set_new(o, "created_at", json_string(ts_iso));
+        }
+        json_array_append_new(arr, o);
+    }
+    free(recs);
+
+    size_t total = 0;
+    arr = paginate_json_array(arr, page, limit, &total);
+
+    json_t* root = json_object();
+    json_object_set_new(root, "rules", arr);
+    add_pagination_meta(root, total, page, limit);
+    return finish_json(status, body, len, 200, root);
+}
+
+static int
+guardrails_rule_update(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
+{
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid rule id");
+    }
+
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    guardrail_rule_t existing;
+    memset(&existing, 0, sizeof existing);
+    int              found = 0;
+    guardrail_rule_t buf[256];
+    int              n = 0;
+    if (ops->list_guardrails_rules(ops->ctx, buf, 256, &n) == 0) {
+        for (int i = 0; i < n; i++) {
+            if (buf[i].id == id) {
+                existing = buf[i];
+                found = 1;
+                break;
+            }
+        }
+    }
+    if (!found) {
+        return finish_error(status, body, len, 404, "rule_not_found", "rule not found");
+    }
+
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* rt = jstring(jbody, "rule_type", NULL);
+    if (rt != NULL) {
+        if (strcmp(rt, "keyword") != 0 && strcmp(rt, "regex") != 0 && strcmp(rt, "pii") != 0) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "rule_type must be keyword, regex, or pii");
+        }
+        snprintf(existing.rule_type, sizeof existing.rule_type, "%s", rt);
+    }
+
+    const char* pat = jstring(jbody, "pattern", NULL);
+    if (pat != NULL) {
+        if (pat[0] == '\0' || strlen(pat) >= 512) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "pattern invalid (1-511 chars)");
+        }
+        snprintf(existing.pattern, sizeof existing.pattern, "%s", pat);
+    }
+
+    const char* act = jstring(jbody, "action", NULL);
+    if (act != NULL) {
+        if (strcmp(act, "block") != 0 && strcmp(act, "mask") != 0) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "action must be block or mask");
+        }
+        snprintf(existing.action, sizeof existing.action, "%s", act);
+    }
+
+    const char* cat = jstring(jbody, "category", NULL);
+    if (cat != NULL) {
+        if (strlen(cat) >= 64) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "category too long (max 63 chars)");
+        }
+        snprintf(existing.category, sizeof existing.category, "%s", cat);
+    }
+
+    json_t* jen = json_object_get(jbody, "enabled");
+    if (jen != NULL) {
+        if (json_is_boolean(jen)) {
+            existing.enabled = json_is_true(jen) ? 1 : 0;
+        } else if (json_is_integer(jen)) {
+            existing.enabled = json_integer_value(jen) ? 1 : 0;
+        }
+    }
+    json_decref(jbody);
+
+    int rc = ops->update_guardrails_rule(ops->ctx, &existing);
+    if (rc == 1) {
+        return finish_error(status, body, len, 404, "rule_not_found", "rule not found");
+    }
+    if (rc != 0) {
+        return finish_error(status, body, len, 500, "internal_error", "rule update failed");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_guardrails(adm->ac);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(id));
+    json_object_set_new(out, "rule_type", json_string(existing.rule_type));
+    json_object_set_new(out, "pattern", json_string(existing.pattern));
+    json_object_set_new(out, "action", json_string(existing.action));
+    json_object_set_new(out, "category", json_string(existing.category));
+    json_object_set_new(out, "enabled", json_boolean(existing.enabled));
+    json_object_set_new(out, "updated", json_true());
+    return finish_json(status, body, len, 200, out);
+}
+
+static int
+guardrails_rule_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
+{
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid rule id");
+    }
+    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    int             rc = ops->delete_guardrails_rule(ops->ctx, id);
+    if (rc == 1) {
+        return finish_error(status, body, len, 404, "rule_not_found", "rule not found");
+    }
+    if (rc != 0) {
+        return finish_error(status, body, len, 500, "internal_error", "rule delete failed");
+    }
+    if (adm->ac != NULL) {
+        aigate_core_reload_guardrails(adm->ac);
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "id", json_integer(id));
+    json_object_set_new(out, "deleted", json_true());
+    return finish_json(status, body, len, 200, out);
+}
+
+static int
+guardrails_reload(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    if (adm->ac != NULL) {
+        aigate_core_reload_guardrails(adm->ac);
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "status", json_string("reloaded"));
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -2513,6 +2905,28 @@ admin_dispatch(admin_ctx_t* adm,
         return usage_requests_query(adm, out_status, out_body, out_len, query);
     } else if (strcmp(rest, "usage") == 0 && strcmp(method, "GET") == 0) {
         return usage_query(adm, out_status, out_body, out_len, query);
+    } else if (strncmp(rest, "guardrails", 10) == 0) {
+        if (strcmp(rest, "guardrails") == 0) {
+            if (strcmp(method, "POST") == 0) {
+                return guardrails_rule_create(adm, out_status, out_body, out_len, body);
+            }
+            if (strcmp(method, "GET") == 0) {
+                return guardrails_rule_list(adm, out_status, out_body, out_len, query);
+            }
+        }
+        if (strcmp(rest, "guardrails/reload") == 0) {
+            if (strcmp(method, "POST") == 0) {
+                return guardrails_reload(adm, out_status, out_body, out_len);
+            }
+        }
+        if (rest[10] == '/') {
+            if (strcmp(method, "PATCH") == 0 || strcmp(method, "PUT") == 0) {
+                return guardrails_rule_update(adm, out_status, out_body, out_len, rest + 11, body);
+            }
+            if (strcmp(method, "DELETE") == 0) {
+                return guardrails_rule_delete(adm, out_status, out_body, out_len, rest + 11);
+            }
+        }
     }
 
     return finish_error(out_status, out_body, out_len, 404, "not_found", "no such admin endpoint");

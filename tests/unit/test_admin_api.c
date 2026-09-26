@@ -31,6 +31,11 @@ struct fake_group {
     group_rec_t g;
 };
 
+struct fake_rule {
+    int              in_use;
+    guardrail_rule_t r;
+};
+
 struct fake_db {
     struct fake_key      keys[FAKE_CAP];
     model_rec_t          models[FAKE_CAP];
@@ -40,6 +45,8 @@ struct fake_db {
     long                 next_provider_id;
     struct fake_group    groups[FAKE_CAP];
     long                 next_group_id;
+    struct fake_rule     rules[FAKE_CAP];
+    long                 next_rule_id;
     usage_row_t          usage[FAKE_CAP];
     int                  n_usage;
     long                 next_key_id;
@@ -227,6 +234,15 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
                     }
                 }
                 fk->k.group_id = k->group_id;
+            }
+            if (mask & KMASK_GUARDRAILS) {
+                fk->k.guardrails_enabled = k->guardrails_enabled;
+            }
+            if (mask & KMASK_MONTHLY_COST_BUDGET) {
+                fk->k.monthly_cost_budget = k->monthly_cost_budget;
+            }
+            if (mask & KMASK_MONTHLY_TOKEN_BUDGET) {
+                fk->k.monthly_token_budget = k->monthly_token_budget;
             }
             return 0;
         }
@@ -647,6 +663,78 @@ fake_query_cost(void* ctx, long since_s, long until_s, cost_row_t* out, int cap,
     return 0;
 }
 
+static int
+fake_patch_group_budget(void* ctx, long id, double budget)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && db->groups[i].g.id == id) {
+            db->groups[i].g.monthly_budget_usd = budget;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+fake_list_guardrails_rules(void* ctx, guardrail_rule_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        if (db->rules[i].in_use) {
+            out[(*n)++] = db->rules[i].r;
+        }
+    }
+    return 0;
+}
+
+static int
+fake_create_guardrails_rule(void* ctx, const guardrail_rule_t* rule, long* out_id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_rule* fr = &db->rules[i];
+        if (!fr->in_use) {
+            fr->in_use = 1;
+            fr->r = *rule;
+            fr->r.id = ++db->next_rule_id;
+            fr->r.created_at = time(NULL);
+            *out_id = fr->r.id;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int
+fake_update_guardrails_rule(void* ctx, const guardrail_rule_t* rule)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_rule* fr = &db->rules[i];
+        if (fr->in_use && fr->r.id == rule->id) {
+            fr->r = *rule;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+static int
+fake_delete_guardrails_rule(void* ctx, long id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_rule* fr = &db->rules[i];
+        if (fr->in_use && fr->r.id == id) {
+            fr->in_use = 0;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
 {
@@ -675,9 +763,14 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->create_group = fake_create_group;
     ops->list_groups = fake_list_groups;
     ops->patch_group = fake_patch_group;
+    ops->patch_group_budget = fake_patch_group_budget;
     ops->delete_group = fake_delete_group;
     ops->count_keys_in_group = fake_count_keys_in_group;
     ops->query_cost = fake_query_cost;
+    ops->list_guardrails_rules = fake_list_guardrails_rules;
+    ops->create_guardrails_rule = fake_create_guardrails_rule;
+    ops->update_guardrails_rule = fake_update_guardrails_rule;
+    ops->delete_guardrails_rule = fake_delete_guardrails_rule;
 }
 
 static void
@@ -692,6 +785,7 @@ setup_admin(struct fake_db* db,
     db->next_key_id = 1;
     db->next_provider_id = 0; /* first created provider gets id 1 */
     db->next_group_id = 1;
+    db->next_rule_id = 0;
     build_fake_ops(db, ops);
     *out_ps = pg_store_open("unused", ops);
 
@@ -2660,6 +2754,421 @@ TEST_CASE(test_admin_pagination)
     TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 2, "cost page 1 size 2");
     json_decref(j);
     free(cost_paged);
+
+    teardown_admin(ps, &core, &db);
+}
+
+void
+test_admin_key_budgets_and_guardrails(void)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. Create key with guardrails_enabled=false, monthly_cost_budget=15.5, monthly_token_budget=100000 */
+    const char* post_body =
+        "{\"name\":\"budget-key\",\"guardrails_enabled\":false,\"monthly_cost_budget\":15.5,\"monthly_token_budget\":100000}";
+    admin_dispatch(&adm,
+                   "/admin/v1/keys",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   post_body,
+                   strlen(post_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "key create -> 201");
+    json_error_t jerr;
+    json_t*      j = json_loads(body, 0, &jerr);
+    TEST_ASSERT(j != NULL, "valid json out");
+    long key_id = (long)json_integer_value(json_object_get(j, "key_id"));
+    TEST_ASSERT(key_id > 0, "key_id > 0");
+    TEST_ASSERT(json_is_false(json_object_get(j, "guardrails_enabled")), "guardrails_enabled false");
+    TEST_ASSERT(fabs(json_real_value(json_object_get(j, "monthly_cost_budget")) - 15.5) < 1e-6,
+                "monthly_cost_budget 15.5");
+    TEST_ASSERT(json_integer_value(json_object_get(j, "monthly_token_budget")) == 100000,
+                "monthly_token_budget 100000");
+    json_decref(j);
+    free(body);
+
+    /* 2. List keys and verify fields */
+    admin_dispatch(&adm,
+                   "/admin/v1/keys",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "key list -> 200");
+    j = json_loads(body, 0, &jerr);
+    json_t* arr = json_object_get(j, "keys");
+    TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 1, "keys count 1");
+    json_t* k0 = json_array_get(arr, 0);
+    TEST_ASSERT(json_is_false(json_object_get(k0, "guardrails_enabled")),
+                "list guardrails_enabled false");
+    TEST_ASSERT(fabs(json_real_value(json_object_get(k0, "monthly_cost_budget")) - 15.5) < 1e-6,
+                "list cost budget 15.5");
+    TEST_ASSERT(json_integer_value(json_object_get(k0, "monthly_token_budget")) == 100000,
+                "list token budget 100000");
+    json_decref(j);
+    free(body);
+
+    /* 3. Patch key: update budgets and toggle guardrails */
+    char patch_uri[64];
+    snprintf(patch_uri, sizeof patch_uri, "/admin/v1/keys/%ld", key_id);
+    const char* patch_body =
+        "{\"guardrails_enabled\":true,\"monthly_cost_budget\":25.0,\"monthly_token_budget\":200000}";
+    admin_dispatch(&adm,
+                   patch_uri,
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   patch_body,
+                   strlen(patch_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "key patch -> 200");
+    free(body);
+
+    /* 4. List keys again: verify updated values */
+    admin_dispatch(&adm,
+                   "/admin/v1/keys",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "key list -> 200");
+    j = json_loads(body, 0, &jerr);
+    arr = json_object_get(j, "keys");
+    k0 = json_array_get(arr, 0);
+    TEST_ASSERT(json_is_true(json_object_get(k0, "guardrails_enabled")),
+                "list guardrails_enabled true after patch");
+    TEST_ASSERT(fabs(json_real_value(json_object_get(k0, "monthly_cost_budget")) - 25.0) < 1e-6,
+                "list cost budget 25.0");
+    TEST_ASSERT(json_integer_value(json_object_get(k0, "monthly_token_budget")) == 200000,
+                "list token budget 200000");
+    json_decref(j);
+    free(body);
+
+    teardown_admin(ps, &core, &db);
+}
+
+void
+test_admin_group_budget(void)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. Create group with monthly_budget_usd */
+    const char* post_body = "{\"name\":\"team-ai\",\"monthly_budget_usd\":50.0}";
+    admin_dispatch(&adm,
+                   "/admin/v1/groups",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   post_body,
+                   strlen(post_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "group create -> 201");
+    json_error_t jerr;
+    json_t*      j = json_loads(body, 0, &jerr);
+    TEST_ASSERT(j != NULL, "valid json out");
+    long group_id = (long)json_integer_value(json_object_get(j, "id"));
+    TEST_ASSERT(group_id > 0, "group_id > 0");
+    TEST_ASSERT(fabs(json_real_value(json_object_get(j, "monthly_budget_usd")) - 50.0) < 1e-6,
+                "monthly_budget_usd 50.0");
+    json_decref(j);
+    free(body);
+
+    /* 2. List groups: verify monthly_budget_usd */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "group list -> 200");
+    j = json_loads(body, 0, &jerr);
+    json_t* arr = json_object_get(j, "groups");
+    TEST_ASSERT(json_is_array(arr) && json_array_size(arr) == 1, "groups size 1");
+    json_t* g0 = json_array_get(arr, 0);
+    TEST_ASSERT(fabs(json_real_value(json_object_get(g0, "monthly_budget_usd")) - 50.0) < 1e-6,
+                "list monthly_budget_usd 50.0");
+    json_decref(j);
+    free(body);
+
+    /* 3. Patch group: update monthly_budget_usd */
+    char patch_uri[64];
+    snprintf(patch_uri, sizeof patch_uri, "/admin/v1/groups/%ld", group_id);
+    const char* patch_body = "{\"monthly_budget_usd\":75.5}";
+    admin_dispatch(&adm,
+                   patch_uri,
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   patch_body,
+                   strlen(patch_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "group patch -> 200");
+    free(body);
+
+    /* 4. List groups: verify updated budget */
+    admin_dispatch(&adm,
+                   "/admin/v1/groups",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "group list -> 200");
+    j = json_loads(body, 0, &jerr);
+    arr = json_object_get(j, "groups");
+    g0 = json_array_get(arr, 0);
+    TEST_ASSERT(fabs(json_real_value(json_object_get(g0, "monthly_budget_usd")) - 75.5) < 1e-6,
+                "list updated budget 75.5");
+    json_decref(j);
+    free(body);
+
+    teardown_admin(ps, &core, &db);
+}
+
+void
+test_admin_guardrails_crud_and_reload(void)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. Validation error: pattern missing */
+    const char* bad_body = "{\"rule_type\":\"keyword\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   bad_body,
+                   strlen(bad_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 400, "guardrail missing pattern -> 400");
+    free(body);
+
+    /* 2. Validation error: invalid rule_type */
+    const char* bad_rt = "{\"pattern\":\"foo\",\"rule_type\":\"invalid\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   bad_rt,
+                   strlen(bad_rt),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 400, "guardrail invalid rule_type -> 400");
+    free(body);
+
+    /* 3. Create rule 1: keyword block */
+    const char* r1_body =
+        "{\"pattern\":\"leak_secret\",\"rule_type\":\"keyword\",\"action\":\"block\",\"category\":\"safety\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   r1_body,
+                   strlen(r1_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "guardrail rule 1 create -> 201");
+    json_error_t jerr;
+    json_t*      j1 = json_loads(body, 0, &jerr);
+    TEST_ASSERT(j1 != NULL, "valid json");
+    long r1_id = (long)json_integer_value(json_object_get(j1, "id"));
+    TEST_ASSERT(r1_id > 0, "r1_id > 0");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(j1, "pattern")), "leak_secret") == 0,
+                "pattern leak_secret");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(j1, "rule_type")), "keyword") == 0,
+                "rule_type keyword");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(j1, "action")), "block") == 0,
+                "action block");
+    TEST_ASSERT(json_is_true(json_object_get(j1, "enabled")), "enabled true");
+    json_decref(j1);
+    free(body);
+
+    /* 4. Create rule 2: pii mask */
+    const char* r2_body =
+        "{\"pattern\":\"[PHONE]\",\"rule_type\":\"pii\",\"action\":\"mask\",\"category\":\"privacy\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   r2_body,
+                   strlen(r2_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "guardrail rule 2 create -> 201");
+    json_t* j2 = json_loads(body, 0, &jerr);
+    long    r2_id = (long)json_integer_value(json_object_get(j2, "id"));
+    TEST_ASSERT(r2_id > 0, "r2_id > 0");
+    json_decref(j2);
+    free(body);
+
+    /* 5. List rules */
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "guardrails list -> 200");
+    json_t* jlist = json_loads(body, 0, &jerr);
+    json_t* rarr = json_object_get(jlist, "rules");
+    TEST_ASSERT(json_is_array(rarr) && json_array_size(rarr) == 2, "rules count 2");
+    json_decref(jlist);
+    free(body);
+
+    /* 6. Update rule 1: disable it and change action to mask */
+    char patch_uri[64];
+    snprintf(patch_uri, sizeof patch_uri, "/admin/v1/guardrails/%ld", r1_id);
+    const char* update_body = "{\"enabled\":false,\"action\":\"mask\"}";
+    admin_dispatch(&adm,
+                   patch_uri,
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   update_body,
+                   strlen(update_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "guardrail update -> 200");
+    json_t* jup = json_loads(body, 0, &jerr);
+    TEST_ASSERT(json_is_false(json_object_get(jup, "enabled")), "updated enabled false");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jup, "action")), "mask") == 0,
+                "updated action mask");
+    json_decref(jup);
+    free(body);
+
+    /* 7. Reload endpoint */
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails/reload",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "guardrails reload -> 200");
+    json_t* jrel = json_loads(body, 0, &jerr);
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jrel, "status")), "reloaded") == 0,
+                "status reloaded");
+    json_decref(jrel);
+    free(body);
+
+    /* 8. Delete rule 1 */
+    admin_dispatch(&adm,
+                   patch_uri,
+                   "DELETE",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "guardrail delete -> 200");
+    json_t* jdel = json_loads(body, 0, &jerr);
+    TEST_ASSERT(json_is_true(json_object_get(jdel, "deleted")), "deleted true");
+    json_decref(jdel);
+    free(body);
+
+    /* 9. Delete non-existent rule 1 -> 404 */
+    admin_dispatch(&adm,
+                   patch_uri,
+                   "DELETE",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 404, "guardrail delete 404");
+    free(body);
+
+    /* 10. List rules: only rule 2 remains */
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "guardrails list -> 200");
+    jlist = json_loads(body, 0, &jerr);
+    rarr = json_object_get(jlist, "rules");
+    TEST_ASSERT(json_is_array(rarr) && json_array_size(rarr) == 1, "rules count 1");
+    json_decref(jlist);
+    free(body);
 
     teardown_admin(ps, &core, &db);
 }
