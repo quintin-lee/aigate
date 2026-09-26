@@ -55,6 +55,11 @@ main(void)
     extern void test_guardrails_ac_edge_cases(void);
     extern void test_guardrails_pii_masking(void);
     extern void test_guardrails_inbound_json_inspection(void);
+    extern void test_budget_enforce_unlimited(void);
+    extern void test_budget_enforce_key_cost_limit(void);
+    extern void test_budget_enforce_key_token_limit(void);
+    extern void test_budget_enforce_group_cost_limit(void);
+    extern void test_budget_enforce_rollover_and_reset(void);
     extern void test_pg_migrate_noop_for_fake(void);
     extern void test_pg_real_roundtrip(void);
     extern void test_pg_real_provider_crud(void);
@@ -124,6 +129,11 @@ main(void)
     test_register("guardrails_ac_edge_cases", test_guardrails_ac_edge_cases);
     test_register("guardrails_pii_masking", test_guardrails_pii_masking);
     test_register("guardrails_inbound_json_inspection", test_guardrails_inbound_json_inspection);
+    test_register("budget_enforce_unlimited", test_budget_enforce_unlimited);
+    test_register("budget_enforce_key_cost_limit", test_budget_enforce_key_cost_limit);
+    test_register("budget_enforce_key_token_limit", test_budget_enforce_key_token_limit);
+    test_register("budget_enforce_group_cost_limit", test_budget_enforce_group_cost_limit);
+    test_register("budget_enforce_rollover_and_reset", test_budget_enforce_rollover_and_reset);
 
     test_register("pg_migrate_noop_for_fake", test_pg_migrate_noop_for_fake);
     test_register("pg_real_roundtrip", test_pg_real_roundtrip);
