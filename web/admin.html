@@ -641,7 +641,9 @@
                 <th class="py-3 px-4">ID / 名称</th>
                 <th class="py-3 px-4">允许的模型</th>
                 <th class="py-3 px-4">限流</th>
-                <th class="py-3 px-4">每日 Token 配额</th>
+                <th class="py-3 px-4">每日配额</th>
+                <th class="py-3 px-4">月度预算</th>
+                <th class="py-3 px-4 text-center">安全风控</th>
                 <th class="py-3 px-4">过期时间</th>
                 <th class="py-3 px-4 text-center">状态</th>
                 <th class="py-3 px-4 text-right">操作</th>
@@ -825,6 +827,7 @@
                 <th class="py-3 px-4">分组 ID</th>
                 <th class="py-3 px-4">分组名称</th>
                 <th class="py-3 px-4">关联密钥数</th>
+                <th class="py-3 px-4">月度费用预算</th>
                 <th class="py-3 px-4 text-right">操作</th>
               </tr>
             </thead>
@@ -1402,6 +1405,24 @@
           </div>
         </div>
 
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">月度费用预算 ($ USD)</label>
+            <input type="number" id="kFormMonthlyCostBudget" step="0.01" min="0" value="0.0" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+            <p class="text-[10px] text-slate-500 mt-0.5">0.0 = 不限金额</p>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">月度 Token 预算</label>
+            <input type="number" id="kFormMonthlyTokenBudget" min="0" value="0" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+            <p class="text-[10px] text-slate-500 mt-0.5">0 = 不限 Token</p>
+          </div>
+        </div>
+
+        <div class="flex items-center space-x-2 pt-1">
+          <input type="checkbox" id="kFormGuardrailsEnabled" checked class="w-4 h-4 rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500">
+          <label for="kFormGuardrailsEnabled" class="text-slate-300 font-semibold cursor-pointer">为此密钥启用安全风控检查 (Guardrails)</label>
+        </div>
+
         <div>
           <label class="block font-semibold text-slate-300 mb-1">过期时间（可选）</label>
           <input type="datetime-local" id="kFormExpiry" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
@@ -1451,6 +1472,11 @@
         <div>
           <label class="block font-semibold text-slate-300 mb-1">分组名称 *</label>
           <input type="text" id="gFormName" required placeholder="例如：研发部、算法组、数据中心" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">月度费用预算 ($ USD)</label>
+          <input type="number" id="gFormMonthlyBudget" step="0.01" min="0" value="0.0" placeholder="0.00 (0 表示不限)" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+          <p class="text-[10px] text-slate-500 mt-0.5">当月全组 API 密钥累计消费达到该限额后触发阻断 (429 额度超限)。0 表示不限额。</p>
         </div>
         <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
           <button type="button" onclick="closeGroupModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition">取消</button>
@@ -2654,6 +2680,18 @@
           ? `<div class="mt-1"><span class="px-1.5 py-0.5 rounded text-[10px] bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">👥 ${groupObj.name}</span></div>`
           : "";
 
+        let budgetInfo = "<span class='text-slate-500'>不限</span>";
+        if ((k.monthly_cost_budget && k.monthly_cost_budget > 0) || (k.monthly_token_budget && k.monthly_token_budget > 0)) {
+          const parts = [];
+          if (k.monthly_cost_budget && k.monthly_cost_budget > 0) parts.push(`$${Number(k.monthly_cost_budget).toFixed(2)}`);
+          if (k.monthly_token_budget && k.monthly_token_budget > 0) parts.push(`${Number(k.monthly_token_budget).toLocaleString()} Tok`);
+          budgetInfo = `<span class="font-mono text-emerald-400 font-semibold">${parts.join(" / ")}</span><div class="text-[10px] text-slate-500">/ 月</div>`;
+        }
+
+        const grBadge = (k.guardrails_enabled !== false && k.guardrails_enabled !== 0)
+          ? `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">🛡️ 开启</span>`
+          : `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700">✕ 关闭</span>`;
+
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
         tr.innerHTML = `
@@ -2665,6 +2703,8 @@
           <td class="py-3 px-4">${allowed}</td>
           <td class="py-3 px-4 font-mono">${k.rate_qps > 0 ? `${k.rate_qps} QPS` : "<span class='text-slate-500'>不限</span>"}</td>
           <td class="py-3 px-4 font-mono">${k.daily_token_quota > 0 ? `${k.daily_token_quota.toLocaleString()} / 天` : "<span class='text-slate-500'>不限</span>"}</td>
+          <td class="py-3 px-4 whitespace-nowrap">${budgetInfo}</td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">${grBadge}</td>
           <td class="py-3 px-4 font-mono text-slate-400">${expiryStr}</td>
           <td class="py-3 px-4 text-center">${statusBadge}</td>
           <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
@@ -2689,6 +2729,9 @@
       document.getElementById("kFormName").value = "";
       document.getElementById("kFormRateQps").value = "10";
       document.getElementById("kFormQuota").value = "100000";
+      document.getElementById("kFormMonthlyCostBudget").value = "0.0";
+      document.getElementById("kFormMonthlyTokenBudget").value = "0";
+      document.getElementById("kFormGuardrailsEnabled").checked = true;
       document.getElementById("kFormExpiry").value = "";
 
       const gSelect = document.getElementById("kFormGroup");
@@ -2727,6 +2770,9 @@
       const name = document.getElementById("kFormName").value.trim();
       const rateQps = parseInt(document.getElementById("kFormRateQps").value, 10) || 0;
       const quota = parseInt(document.getElementById("kFormQuota").value, 10) || 0;
+      const monthlyCost = parseFloat(document.getElementById("kFormMonthlyCostBudget").value) || 0.0;
+      const monthlyToken = parseInt(document.getElementById("kFormMonthlyTokenBudget").value, 10) || 0;
+      const guardrailsEnabled = document.getElementById("kFormGuardrailsEnabled").checked;
       const expiryVal = document.getElementById("kFormExpiry").value;
 
       const checkedModels = [];
@@ -2743,6 +2789,9 @@
         allowed_models: checkedModels,
         rate_qps: rateQps,
         daily_token_quota: quota,
+        monthly_cost_budget: monthlyCost,
+        monthly_token_budget: monthlyToken,
+        guardrails_enabled: guardrailsEnabled,
         expires_at: expiresAt
       };
       if (grpVal) {
@@ -3216,6 +3265,10 @@
 
       const pageItems = getPageSlice("groups", list);
       pageItems.forEach(g => {
+        const mb = (g.monthly_budget_usd && g.monthly_budget_usd > 0)
+          ? `<span class="font-mono text-emerald-400 font-semibold">$${Number(g.monthly_budget_usd).toFixed(2)}</span> <span class="text-[10px] text-slate-500">/ 月</span>`
+          : `<span class="text-slate-500">不限</span>`;
+
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
         tr.innerHTML = `
@@ -3224,18 +3277,20 @@
           <td class="py-3 px-4 font-mono">
             <span class="px-2 py-0.5 rounded-full text-[10px] bg-slate-800 text-slate-300 font-semibold">${g.key_count ?? 0} 个密钥</span>
           </td>
+          <td class="py-3 px-4 whitespace-nowrap">${mb}</td>
           <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
-            <button onclick="openGroupModal(${g.id}, '${g.name}')" class="text-xs text-slate-400 hover:text-white transition">改名</button>
-            <button onclick="deleteGroup(${g.id}, '${g.name}')" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
+            <button onclick="openGroupModal(${g.id}, '${escapeHtml(g.name)}', ${g.monthly_budget_usd || 0})" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
+            <button onclick="deleteGroup(${g.id}, '${escapeHtml(g.name)}')" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
           </td>
         `;
         tbody.appendChild(tr);
       });
     }
 
-    function openGroupModal(id = null, name = "") {
+    function openGroupModal(id = null, name = "", monthlyBudget = 0) {
       document.getElementById("gFormId").value = id || "";
       document.getElementById("gFormName").value = name || "";
+      document.getElementById("gFormMonthlyBudget").value = (monthlyBudget && monthlyBudget > 0) ? monthlyBudget : "0.0";
       document.getElementById("groupModalTitle").innerText = id ? "编辑部门分组" : "新建部门分组";
       document.getElementById("groupModal").classList.remove("hidden");
       setTimeout(() => document.getElementById("gFormName").focus(), 50);
@@ -3249,24 +3304,29 @@
       e.preventDefault();
       const id = document.getElementById("gFormId").value;
       const name = document.getElementById("gFormName").value.trim();
+      const monthlyBudget = parseFloat(document.getElementById("gFormMonthlyBudget").value) || 0.0;
       if (!name) {
         showToast("分组名称不能为空", "error");
         return;
       }
+      const payload = {
+        name,
+        monthly_budget_usd: monthlyBudget
+      };
       if (id) {
         const resp = await apiCall(`/admin/v1/groups/${id}`, {
           method: "PATCH",
-          body: { name }
+          body: payload
         });
         if (resp && resp.ok) {
-          showToast(`分组 "${name}" 已重命名`, "success");
+          showToast(`分组 "${name}" 已保存`, "success");
           closeGroupModal();
           fetchGroups();
         }
       } else {
         const resp = await apiCall("/admin/v1/groups", {
           method: "POST",
-          body: { name }
+          body: payload
         });
         if (resp && resp.ok) {
           showToast(`部门分组 "${name}" 创建成功`, "success");
