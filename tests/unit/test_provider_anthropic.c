@@ -453,3 +453,48 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
     pg_store_close(ps);
     mock_upstream_stop(mu);
 }
+
+TEST_CASE(test_anthropic_sniff_usage_json)
+{
+    const char* json_resp =
+        "{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\","
+        "\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}],"
+        "\"usage\":{\"input_tokens\":25,\"output_tokens\":40,"
+        "\"cache_creation_input_tokens\":10,\"cache_read_input_tokens\":5}}";
+
+    long ptok = 0, ctok = 0, cached = 0;
+    int rc = anthropic_sniff_usage_json(json_resp, &ptok, &ctok, &cached);
+    TEST_ASSERT(rc == 0, "sniff json ok");
+    TEST_ASSERT(ptok == 25, "ptok 25");
+    TEST_ASSERT(ctok == 40, "ctok 40");
+    TEST_ASSERT(cached == 5, "cached 5");
+}
+
+TEST_CASE(test_anthropic_sniff_streaming_sse)
+{
+    anthropic_sniffer_t sniffer;
+    anthropic_sniffer_init(&sniffer);
+
+    const char* chunk1 =
+        "event: message_start\n"
+        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\",\"usage\":{\"input_tokens\":30,\"cache_read_input_tokens\":12}}}\n\n";
+
+    const char* chunk2 =
+        "event: content_block_delta\n"
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hi\"}}\n\n";
+
+    const char* chunk3 =
+        "event: message_delta\n"
+        "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":15}}\n\n"
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+
+    anthropic_sniffer_feed(&sniffer, chunk1, strlen(chunk1));
+    anthropic_sniffer_feed(&sniffer, chunk2, strlen(chunk2));
+    anthropic_sniffer_feed(&sniffer, chunk3, strlen(chunk3));
+
+    long ptok = 0, ctok = 0, cached = 0;
+    anthropic_sniffer_get_tokens(&sniffer, &ptok, &ctok, &cached);
+    TEST_ASSERT(ptok == 30, "stream ptok 30");
+    TEST_ASSERT(ctok == 15, "stream ctok 15");
+    TEST_ASSERT(cached == 12, "stream cached 12");
+}

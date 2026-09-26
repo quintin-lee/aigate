@@ -69,4 +69,16 @@ int aigate_write_json(aigate_response_ctx* rc, int status, const char* body, siz
 int
 aigate_write_error(aigate_response_ctx* rc, int http_status, const char* type, const char* message);
 
+/** @brief Write Anthropic error JSON ({"type": "error", "error": {"type": ..., "message": ...}}). */
+int aigate_write_anthropic_error(aigate_response_ctx* rc,
+                                 int                  http_status,
+                                 const char*          type,
+                                 const char*          message);
+
+/** @brief Write Gemini error JSON ({"error": {"code": ..., "message": ..., "status": ...}}). */
+int aigate_write_gemini_error(aigate_response_ctx* rc,
+                              int                  http_status,
+                              const char*          status_str,
+                              const char*          message);
+
 #endif /* AIGATE_CORE_H */

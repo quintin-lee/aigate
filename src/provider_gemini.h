@@ -53,4 +53,20 @@ int provider_gemini_parse_embeddings(const char* raw_body,
                                      size_t*     out_len,
                                      long*       out_ptok);
 
+/** @brief Parse token usage from non-streaming Gemini response JSON. */
+int gemini_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok, long* out_cached);
+
+/** @brief Lightweight passive line-buffered sniffer for Gemini SSE streams. */
+typedef struct gemini_sniffer {
+    char   line_buf[8192];
+    size_t line_len;
+    long   prompt_tokens;
+    long   candidates_tokens;
+    long   cached_tokens;
+} gemini_sniffer_t;
+
+void gemini_sniffer_init(gemini_sniffer_t* s);
+int  gemini_sniffer_feed(gemini_sniffer_t* s, const void* chunk, size_t len);
+void gemini_sniffer_get_tokens(const gemini_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached);
+
 #endif /* AIGATE_PROVIDER_GEMINI_H */

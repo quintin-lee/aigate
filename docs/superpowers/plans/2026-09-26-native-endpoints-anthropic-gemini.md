@@ -17,7 +17,7 @@
 - Modify: `tests/unit/test_auth_key.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: Write unit tests in test_auth_key.c for credential extraction**
+- [x] **Step 1: Write unit tests in test_auth_key.c for credential extraction**
 
 Add unit tests verifying credential extraction from Bearer tokens, `x-api-key`, `x-goog-api-key`, and URL query string `key=...`:
 
@@ -49,12 +49,12 @@ TEST_CASE(test_credential_extraction_variants)
 }
 ```
 
-- [ ] **Step 2: Run test to verify compilation/test failure**
+- [x] **Step 2: Run test to verify compilation/test failure**
 
 Run: `cmake --build .build -j && ctest --test-dir .build -R unit`
 Expected: Compile failure (`extract_credential_from_headers` undefined).
 
-- [ ] **Step 3: Implement credential extraction in transport_civetweb.c and declare in auth_key.h**
+- [x] **Step 3: Implement credential extraction in transport_civetweb.c and declare in auth_key.h**
 
 In `src/auth_key.h`:
 ```c
@@ -85,12 +85,12 @@ extract_bearer(struct mg_connection* conn)
 }
 ```
 
-- [ ] **Step 4: Run tests and verify they pass**
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `cmake --build .build -j && ctest --test-dir .build --output-on-failure`
 Expected: 100% tests passed.
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
 
 ```bash
 git add src/auth_key.h src/auth_key.c src/transport_civetweb.c tests/unit/test_auth_key.c tests/unit/run_tests.c
@@ -107,7 +107,7 @@ git commit -m "feat(auth): ✨ add multi-credential authentication support for a
 - Modify: `tests/unit/test_provider_anthropic.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: Write KAT unit tests for Anthropic usage sniffing**
+- [x] **Step 1: Write KAT unit tests for Anthropic usage sniffing**
 
 In `tests/unit/test_provider_anthropic.c`:
 ```c
@@ -157,12 +157,12 @@ TEST_CASE(test_anthropic_sniff_streaming_sse)
 }
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run: `cmake --build .build -j && ctest --test-dir .build -R unit`
 Expected: Compile failure (`anthropic_sniff_usage_json`, `anthropic_sniffer_t` undefined).
 
-- [ ] **Step 3: Implement Anthropic passive usage sniffer in provider_anthropic.c**
+- [x] **Step 3: Implement Anthropic passive usage sniffer in provider_anthropic.c**
 
 In `src/provider_anthropic.h`:
 ```c
@@ -186,12 +186,12 @@ In `src/provider_anthropic.c`:
 Implement `anthropic_sniff_usage_json`, `anthropic_sniffer_init`, `anthropic_sniffer_feed`, and `anthropic_sniffer_get_tokens`.
 Register test cases in `tests/unit/run_tests.c`.
 
-- [ ] **Step 4: Run tests and verify they pass**
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `cmake --build .build -j && ctest --test-dir .build --output-on-failure`
 Expected: 100% tests passed.
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
 
 ```bash
 git add src/provider_anthropic.h src/provider_anthropic.c tests/unit/test_provider_anthropic.c tests/unit/run_tests.c
@@ -208,7 +208,7 @@ git commit -m "feat(provider): ✨ add passive usage sniffer for anthropic messa
 - Modify: `tests/unit/test_provider_gemini.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: Write KAT unit tests for Gemini usage sniffing**
+- [x] **Step 1: Write KAT unit tests for Gemini usage sniffing**
 
 In `tests/unit/test_provider_gemini.c`:
 ```c
@@ -249,12 +249,12 @@ TEST_CASE(test_gemini_sniff_streaming_sse)
 }
 ```
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run: `cmake --build .build -j && ctest --test-dir .build -R unit`
 Expected: Compile failure (`gemini_sniff_usage_json`, `gemini_sniffer_t` undefined).
 
-- [ ] **Step 3: Implement Gemini passive usage sniffer in provider_gemini.c**
+- [x] **Step 3: Implement Gemini passive usage sniffer in provider_gemini.c**
 
 In `src/provider_gemini.h`:
 ```c
@@ -277,12 +277,12 @@ In `src/provider_gemini.c`:
 Implement `gemini_sniff_usage_json`, `gemini_sniffer_init`, `gemini_sniffer_feed`, and `gemini_sniffer_get_tokens`.
 Register test cases in `tests/unit/run_tests.c`.
 
-- [ ] **Step 4: Run tests and verify they pass**
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `cmake --build .build -j && ctest --test-dir .build --output-on-failure`
 Expected: 100% tests passed.
 
-- [ ] **Step 5: Commit Task 3**
+- [x] **Step 5: Commit Task 3**
 
 ```bash
 git add src/provider_gemini.h src/provider_gemini.c tests/unit/test_provider_gemini.c tests/unit/run_tests.c
@@ -301,7 +301,7 @@ git commit -m "feat(provider): ✨ add passive usage sniffer for gemini generate
 - Modify: `tests/unit/test_aigate_core.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: Write unit tests in test_aigate_core.c for native endpoints**
+- [x] **Step 1: Write unit tests in test_aigate_core.c for native endpoints**
 
 Add unit tests:
 1. `test_anthropic_native_pipeline_200`:
@@ -317,12 +317,12 @@ Add unit tests:
    - Send `POST /v1beta/models/gpt-4o:generateContent`.
    - Assert response status is 400, body contains `"error":{"code":400,"status":"INVALID_ARGUMENT"}`.
 
-- [ ] **Step 2: Run test to verify failure**
+- [x] **Step 2: Run test to verify failure**
 
 Run: `cmake --build .build -j && ctest --test-dir .build -R unit`
 Expected: Test failures (paths `/v1/messages` and `/v1beta/models/*` return 404 or unhandled).
 
-- [ ] **Step 3: Implement handle_anthropic_messages and handle_gemini_generate**
+- [x] **Step 3: Implement handle_anthropic_messages and handle_gemini_generate**
 
 In `src/aigate_core.c`:
 1. Implement error formatters:
@@ -360,12 +360,12 @@ In `src/aigate_core.c`:
 6. In `tests/unit/mock_upstream.c`:
    - Support mock endpoints for `/messages`, `/v1/messages`, and `/v1beta/models/*`.
 
-- [ ] **Step 4: Run tests and verify they pass**
+- [x] **Step 4: Run tests and verify they pass**
 
 Run: `cmake --build .build -j && ctest --test-dir .build --output-on-failure`
 Expected: 100% tests passed.
 
-- [ ] **Step 5: Commit Task 4**
+- [x] **Step 5: Commit Task 4**
 
 ```bash
 git add src/aigate_core.h src/aigate_core.c src/transport_civetweb.c tests/unit/mock_upstream.c tests/unit/test_aigate_core.c tests/unit/run_tests.c
@@ -380,7 +380,7 @@ git commit -m "feat(core): ✨ add native anthropic and gemini endpoints with st
 - Modify: `tests/integration/mock_upstream.py`
 - Modify: `tests/integration/test_gateway.py`
 
-- [ ] **Step 1: Add native mock handlers to mock_upstream.py**
+- [x] **Step 1: Add native mock handlers to mock_upstream.py**
 
 In `tests/integration/mock_upstream.py`:
 1. In `do_POST`:
@@ -391,7 +391,7 @@ In `tests/integration/mock_upstream.py`:
      - If `:streamGenerateContent`: stream Gemini SSE chunks with `usageMetadata` on the final chunk.
      - Else: return Gemini generateContent JSON with `usageMetadata`.
 
-- [ ] **Step 2: Add integration tests in test_gateway.py**
+- [x] **Step 2: Add integration tests in test_gateway.py**
 
 In `tests/integration/test_gateway.py` (before `test_admin_lockout_429`):
 1. `test_anthropic_native_passthrough`:
@@ -419,12 +419,12 @@ In `tests/integration/test_gateway.py` (before `test_admin_lockout_429`):
    - Send `POST /v1beta/models/gpt-4o:generateContent`.
    - Assert HTTP 400 and Gemini error format `{"error": {"code": 400, "status": "INVALID_ARGUMENT"}}`.
 
-- [ ] **Step 3: Run integration tests**
+- [x] **Step 3: Run integration tests**
 
 Run: `pytest tests/integration/test_gateway.py -k "native" -v`
 Expected: All native endpoint tests PASS.
 
-- [ ] **Step 4: Run full unit + integration test suite**
+- [x] **Step 4: Run full unit + integration test suite**
 
 Run:
 ```bash
@@ -433,7 +433,7 @@ pytest tests/integration/test_gateway.py -v
 ```
 Expected: 100% tests PASS across both suites.
 
-- [ ] **Step 5: Commit Task 5**
+- [x] **Step 5: Commit Task 5**
 
 ```bash
 git add tests/integration/mock_upstream.py tests/integration/test_gateway.py

@@ -76,4 +76,21 @@ int anthropic_bridge_feed(anthropic_bridge_t* b, const void* chunk, size_t len);
 /** @brief Finalize bridge stream (emits [DONE] if not yet emitted). */
 int anthropic_bridge_finish(anthropic_bridge_t* b);
 
+/** @brief Parse token usage from non-streaming Anthropic response JSON. */
+int anthropic_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok, long* out_cached);
+
+/** @brief Lightweight passive line-buffered sniffer for Anthropic SSE streams. */
+typedef struct anthropic_sniffer {
+    char   line_buf[8192];
+    size_t line_len;
+    char   current_event[64];
+    long   input_tokens;
+    long   output_tokens;
+    long   cached_tokens;
+} anthropic_sniffer_t;
+
+void anthropic_sniffer_init(anthropic_sniffer_t* s);
+int  anthropic_sniffer_feed(anthropic_sniffer_t* s, const void* chunk, size_t len);
+void anthropic_sniffer_get_tokens(const anthropic_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached);
+
 #endif /* AIGATE_PROVIDER_ANTHROPIC_H */

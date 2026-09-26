@@ -228,3 +228,32 @@ TEST_CASE(test_key_allows_model)
     TEST_ASSERT(key_allows_model(&k, "llama") == 0, "disallowed model");
     TEST_ASSERT(key_allows_model(NULL, "gpt-4o") == 0, "NULL record");
 }
+
+TEST_CASE(test_credential_extraction_variants)
+{
+    /* 1. Bearer token in Authorization header */
+    const char* b1 = "Bearer my-secret-key-123";
+    const char* k1 = extract_credential_from_headers(b1, NULL, NULL, NULL);
+    TEST_ASSERT(k1 != NULL && strcmp(k1, "my-secret-key-123") == 0, "extract Bearer token");
+
+    /* 2. Plain token in Authorization header without prefix */
+    const char* b2 = "my-secret-key-plain";
+    const char* k2 = extract_credential_from_headers(b2, NULL, NULL, NULL);
+    TEST_ASSERT(k2 != NULL && strcmp(k2, "my-secret-key-plain") == 0, "extract plain Authorization header");
+
+    /* 3. x-api-key header (Anthropic) */
+    const char* k3 = extract_credential_from_headers(NULL, "sk-ant-test-456", NULL, NULL);
+    TEST_ASSERT(k3 != NULL && strcmp(k3, "sk-ant-test-456") == 0, "extract x-api-key");
+
+    /* 4. x-goog-api-key header (Gemini) */
+    const char* k4 = extract_credential_from_headers(NULL, NULL, "AIzaSyTest789", NULL);
+    TEST_ASSERT(k4 != NULL && strcmp(k4, "AIzaSyTest789") == 0, "extract x-goog-api-key");
+
+    /* 5. Query string key= (Gemini) */
+    const char* k5 = extract_credential_from_headers(NULL, NULL, NULL, "alt=sse&key=AIzaSyQuery999&pretty=true");
+    TEST_ASSERT(k5 != NULL && strcmp(k5, "AIzaSyQuery999") == 0, "extract key from query string");
+
+    /* 6. Empty / missing fallback */
+    const char* k6 = extract_credential_from_headers(NULL, NULL, NULL, NULL);
+    TEST_ASSERT(k6 != NULL && k6[0] == '\0', "empty fallback");
+}

@@ -59,6 +59,7 @@ main(void)
     extern void test_auth_key_unknown_revoked_expired(void);
     extern void test_auth_key_unknown_neg_cache(void);
     extern void test_key_allows_model(void);
+    extern void test_credential_extraction_variants(void);
     extern void test_rl_qps_boundary(void);
     extern void test_rl_unlimited(void);
     extern void test_rl_daily_quota(void);
@@ -119,6 +120,7 @@ main(void)
     test_register("auth_key_flags", test_auth_key_unknown_revoked_expired);
     test_register("auth_key_neg_cache", test_auth_key_unknown_neg_cache);
     test_register("key_allows_model", test_key_allows_model);
+    test_register("credential_extraction_variants", test_credential_extraction_variants);
     test_register("rl_qps_boundary", test_rl_qps_boundary);
     test_register("rl_unlimited", test_rl_unlimited);
     test_register("rl_daily_quota", test_rl_daily_quota);
@@ -155,6 +157,19 @@ main(void)
     test_register("responses_non_openai_400", test_responses_non_openai_400);
     test_register("responses_pipeline_200", test_responses_pipeline_200);
     test_register("responses_missing_model_400", test_responses_missing_model_400);
+
+    extern void test_anthropic_native_pipeline_200(void);
+    extern void test_anthropic_native_stream_pipeline_200(void);
+    extern void test_anthropic_native_non_anthropic_400(void);
+    extern void test_gemini_native_pipeline_200(void);
+    extern void test_gemini_native_non_gemini_400(void);
+    extern void test_gemini_native_stream_pipeline_200(void);
+    test_register("anthropic_native_pipeline_200", test_anthropic_native_pipeline_200);
+    test_register("anthropic_native_stream_pipeline_200", test_anthropic_native_stream_pipeline_200);
+    test_register("anthropic_native_non_anthropic_400", test_anthropic_native_non_anthropic_400);
+    test_register("gemini_native_pipeline_200", test_gemini_native_pipeline_200);
+    test_register("gemini_native_non_gemini_400", test_gemini_native_non_gemini_400);
+    test_register("gemini_native_stream_pipeline_200", test_gemini_native_stream_pipeline_200);
 
     test_register("provider_azure_build", test_provider_azure_build);
     test_register("provider_merge_params", test_provider_default_params_merge);
@@ -250,12 +265,16 @@ main(void)
     extern void test_anthropic_bridge_streaming(void);
     extern void test_anthropic_bridge_client_abort(void);
     extern void test_anthropic_pipeline_end_to_end(void);
+    extern void test_anthropic_sniff_usage_json(void);
+    extern void test_anthropic_sniff_streaming_sse(void);
     test_register("anthropic_build_system", test_anthropic_build_system_and_defaults);
     test_register("anthropic_build_params", test_anthropic_build_params);
     test_register("anthropic_resp_translation", test_anthropic_resp_translation);
     test_register("anthropic_bridge_streaming", test_anthropic_bridge_streaming);
     test_register("anthropic_bridge_client_abort", test_anthropic_bridge_client_abort);
     test_register("anthropic_pipeline_end_to_end", test_anthropic_pipeline_end_to_end);
+    test_register("anthropic_sniff_usage_json", test_anthropic_sniff_usage_json);
+    test_register("anthropic_sniff_streaming_sse", test_anthropic_sniff_streaming_sse);
 
     extern void admin_ui_content(void);
     test_register("admin_ui_content", admin_ui_content);
@@ -275,6 +294,8 @@ main(void)
     extern void test_gemini_streaming_bridge_chunks(void);
     extern void test_gemini_streaming_fragmented_tcp(void);
     extern void test_gemini_streaming_client_abort(void);
+    extern void test_gemini_sniff_usage_json(void);
+    extern void test_gemini_sniff_streaming_sse(void);
     test_register("gemini_build_system_and_contents", test_gemini_build_system_and_contents);
     test_register("gemini_build_generation_config", test_gemini_build_generation_config);
     test_register("gemini_resp_translation", test_gemini_resp_translation);
@@ -282,6 +303,8 @@ main(void)
     test_register("gemini_streaming_bridge_chunks", test_gemini_streaming_bridge_chunks);
     test_register("gemini_streaming_fragmented_tcp", test_gemini_streaming_fragmented_tcp);
     test_register("gemini_streaming_client_abort", test_gemini_streaming_client_abort);
+    test_register("gemini_sniff_usage_json", test_gemini_sniff_usage_json);
+    test_register("gemini_sniff_streaming_sse", test_gemini_sniff_streaming_sse);
 
     extern void test_openai_embeddings_build(void);
     extern void test_openai_embeddings_parse(void);

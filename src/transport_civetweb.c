@@ -106,14 +106,12 @@ cw_write(void* impl, const void* buf, size_t len, bool fin)
 static const char*
 extract_bearer(struct mg_connection* conn)
 {
-    const char* auth = mg_get_header(conn, "Authorization");
-    if (auth == NULL) {
-        return "";
-    }
-    if (strncmp(auth, "Bearer ", 7) == 0) {
-        return auth + 7;
-    }
-    return auth;
+    const char*                   auth = mg_get_header(conn, "Authorization");
+    const char*                   x_api_key = mg_get_header(conn, "x-api-key");
+    const char*                   x_goog_key = mg_get_header(conn, "x-goog-api-key");
+    const struct mg_request_info* ri = mg_get_request_info(conn);
+    const char*                   qs = ri != NULL ? ri->query_string : NULL;
+    return extract_credential_from_headers(auth, x_api_key, x_goog_key, qs);
 }
 
 /* Content-Length based body reader. Transfer-Encoding: chunked requests
@@ -402,6 +400,7 @@ transport_civetweb_start(aigate_core* ac,
     }
 
     mg_set_request_handler(cw->ctx, "/v1/", handle_v1, cw);
+    mg_set_request_handler(cw->ctx, "/v1beta/", handle_v1, cw);
     mg_set_request_handler(cw->ctx, "/admin/v1", handle_admin, cw);
     mg_set_request_handler(cw->ctx, "/admin", handle_admin_ui, cw);
     mg_set_request_handler(cw->ctx, "/metrics", handle_metrics, cw);

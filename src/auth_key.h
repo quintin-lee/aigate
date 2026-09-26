@@ -42,4 +42,12 @@ void auth_key_invalidate(auth_key_cache* akc, const char* key_hash);
 /** @brief 1 if @p k permits @p model (empty allowlist = all models). */
 int key_allows_model(const key_rec_t* k, const char* model);
 
+/** @brief Extract client key from HTTP headers and query string.
+ * Checks Authorization (Bearer), x-api-key, x-goog-api-key, and ?key=... in order.
+ * @return non-null token string (empty string "" if none found). */
+const char* extract_credential_from_headers(const char* auth_header,
+                                            const char* x_api_key,
+                                            const char* x_goog_api_key,
+                                            const char* query_string);
+
 #endif /* AIGATE_AUTH_KEY_H */
