@@ -1667,6 +1667,348 @@ def test_responses_non_openai_400(gateway):
     assert err.get("type") == "unsupported_endpoint"
 
 
+def test_anthropic_native_passthrough(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "native-claude-3-5-sonnet"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "anthropic",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "anthropic-native-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 5000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    # Native Anthropic header x-api-key
+    client_headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(
+        f"{base_url}/v1/messages",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["type"] == "message"
+    assert data["role"] == "assistant"
+    assert data["content"][0]["text"] == "Hello from Anthropic mock!"
+    assert data["usage"]["input_tokens"] == 14
+    assert data["usage"]["output_tokens"] == 26
+
+
+def test_anthropic_native_streaming_sse(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "native-claude-stream"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "anthropic",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "anthropic-native-stream-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 5000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "x-api-key": api_key,
+        "anthropic-version": "2023-06-01",
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(
+        f"{base_url}/v1/messages",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "stream": True,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+        stream=True,
+    )
+    assert resp.status_code == 200, resp.text
+    assert "text/event-stream" in resp.headers.get("Content-Type", "")
+
+    events = []
+    lines = []
+    for line in resp.iter_lines(decode_unicode=True):
+        if line:
+            lines.append(line)
+            if line.startswith("event:"):
+                events.append(line.split(":", 1)[1].strip())
+
+    assert "message_start" in events
+    assert "content_block_delta" in events
+    assert "message_delta" in events
+    assert "message_stop" in events
+    assert any("Anthropic Claude!" in l for l in lines)
+
+
+def test_anthropic_native_non_anthropic_400(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "native-anthropic-reject-openai"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "anthropic-native-400-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 5000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    client_headers = {
+        "x-api-key": api_key,
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(
+        f"{base_url}/v1/messages",
+        headers=client_headers,
+        json={
+            "model": model_name,
+            "messages": [{"role": "user", "content": "hi"}],
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    err = resp.json()
+    assert err.get("type") == "error"
+    assert err.get("error", {}).get("type") == "invalid_request_error"
+
+
+def test_gemini_native_passthrough(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "gemini-1.5-flash-native"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "gemini",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "gemini-native-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 5000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    # Native Google header x-goog-api-key
+    client_headers = {
+        "x-goog-api-key": api_key,
+        "Content-Type": "application/json",
+    }
+
+    resp = requests.post(
+        f"{base_url}/v1beta/models/{model_name}:generateContent",
+        headers=client_headers,
+        json={
+            "contents": [{"parts": [{"text": "Hello"}]}],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert "candidates" in data
+    assert data["candidates"][0]["content"]["parts"][0]["text"] == "Hello from Gemini non-stream!"
+    assert data["usageMetadata"]["promptTokenCount"] == 9
+    assert data["usageMetadata"]["candidatesTokenCount"] == 5
+
+
+def test_gemini_native_streaming_sse(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "gemini-1.5-pro-native-stream"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "gemini",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "gemini-native-stream-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 5000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    # Test ?key= URL query parameter auth with alt=sse
+    resp = requests.post(
+        f"{base_url}/v1beta/models/{model_name}:streamGenerateContent?alt=sse&key={api_key}",
+        headers={"Content-Type": "application/json"},
+        json={
+            "contents": [{"parts": [{"text": "Hello"}]}],
+        },
+        stream=True,
+    )
+    assert resp.status_code == 200, resp.text
+    assert "text/event-stream" in resp.headers.get("Content-Type", "")
+
+    lines = [line for line in resp.iter_lines(decode_unicode=True) if line]
+    assert any("Hello from Gemini " in l for l in lines)
+    assert any("stream!" in l for l in lines)
+
+
+def test_gemini_native_non_gemini_400(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    model_name = "gemini-reject-openai"
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": model_name,
+            "provider": "openai",
+            "endpoint": mock_url,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "gemini-native-400-client",
+            "allowed_models": [model_name],
+            "rate_qps": 10,
+            "daily_token_quota": 5000,
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    api_key = resp.json()["plaintext"]
+
+    resp = requests.post(
+        f"{base_url}/v1beta/models/{model_name}:generateContent",
+        headers={
+            "x-goog-api-key": api_key,
+            "Content-Type": "application/json",
+        },
+        json={
+            "contents": [{"parts": [{"text": "Hello"}]}],
+        },
+    )
+    assert resp.status_code == 400, resp.text
+    err = resp.json()
+    assert "error" in err
+    assert err["error"]["code"] == 400
+    assert err["error"]["status"] == "INVALID_ARGUMENT"
+
+
 def test_admin_lockout_429(gateway):
     """10 failed admin auth attempts from one IP lock that IP out (429).
 
