@@ -34,6 +34,7 @@
 
 static volatile sig_atomic_t g_stop = 0;
 
+/** @brief SIGINT/SIGTERM 处理器：置 g_stop 触发主循环退出走优雅停机（仅做异步信号安全操作）。 */
 static void
 sig_handler(int sig)
 {

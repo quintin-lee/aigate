@@ -101,6 +101,7 @@ done:
     return rc;
 }
 
+/** @brief 单个十六进制字符转 0–15；非法字符返回 -1。 */
 static int
 hexval(char c)
 {

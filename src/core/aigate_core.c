@@ -19,6 +19,8 @@
 #include <string.h>
 #include <time.h>
 
+/** @brief 单调时钟当前时刻（纳秒），用于延迟计量，不受系统时间跳变影响。
+ *  @return CLOCK_MONOTONIC 自某起点至今的纳秒数。 */
 static uint64_t
 mono_ns(void)
 {
@@ -55,6 +57,11 @@ aigate_core_reload_guardrails(aigate_core* ac)
     return 0;
 }
 
+/** @brief 按路由定价（pricing_json 的 in_mtok/out_mtok 每 MTok 单价）估算请求费用。
+ *  @param route      命中的路由记录；NULL 或无定价视为免费。
+ *  @param prompt     输入 token 总数；@param completion 输出 token 数。
+ *  @param cached     其中缓存命中 token 数，按 cached_mtok_discount 折扣计价（缺省 1.0）。
+ *  @return 费用 = (未命中输入×进价 + 命中输入×进价×折扣 + 输出×出价) / 1e6；定价缺失/非法返回 0.0。 */
 static double
 calc_req_cost(const model_rec_t* route, long prompt, long completion, long cached)
 {
@@ -88,6 +95,8 @@ calc_req_cost(const model_rec_t* route, long prompt, long completion, long cache
            1000000.0;
 }
 
+/** @brief 记录一次请求：用量计（um_record_full）+ 请求事件（event_bus_publish_request）。
+ *  @param ac 核心实例；NULL 直接返回。其余参数为 key/模型/状态/token 计数/延迟/费用。 */
 static void
 record_usage_and_event(aigate_core* ac,
                        long         key_id,
@@ -350,6 +359,8 @@ typedef struct stream_cache_acc {
     bool                 overflow;
 } stream_cache_acc_t;
 
+/** @brief 流式缓存累加器的 set_header 垫片：强制 status=200 后透传给真实响应。
+ *  @return 下层 set_header 返回值；无下层时返回 0。 */
 static int
 stream_cache_acc_set_header(void* impl, const char* name, const char* value)
 {
@@ -363,6 +374,11 @@ stream_cache_acc_set_header(void* impl, const char* name, const char* value)
     return 0;
 }
 
+/** @brief 流式缓存累加器的 write 垫片：透传分片给客户端，同时解析 SSE 行。
+ *
+ *  逐行提取 `data:` JSON 的 id/created 与 choices[0].delta.content 并拼接到累加
+ *  缓冲（上限 512KiB，超限/分配失败置 overflow 后只透传不再累加），供回填缓存。
+ *  @return 下层 write 返回值；acc 或 orig_rc 为 NULL 返回 -1。 */
 static int
 stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
 {
@@ -464,6 +480,8 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
     return rv;
 }
 
+/** @brief 以 SSE 形式重放一条缓存命中：写 X-Cache:HIT/Age 头并按 OpenAI 分片格式推送。
+ *  @return 0 成功（顺带扣减 key 配额）；缓存体非法等失败返回非 0 由调用方走上游。 */
 static int
 cache_stream_replay(aigate_core*         ac,
                     aigate_response_ctx* rc,
@@ -633,6 +651,8 @@ cache_stream_replay(aigate_core*         ac,
     return 0;
 }
 
+/** @brief OpenAI /responses 端到端管线：鉴权 → 限流 → 日配额 → 护栏 → 缓存 → 上游 → 回写。
+ *  @return 恒返回 0；各类错误已直接写回 @p rc（OpenAI 形错误体）。 */
 static int
 handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)
 {
@@ -1178,6 +1198,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
  * Native Anthropic Messages Pipeline (POST /v1/messages)
  * ------------------------------------------------------------------------- */
 
+/** @brief 拼接 Anthropic 上游 URL：空 endpoint 用 api.anthropic.com；去尾斜杠；已有 /v1 后缀直接加 /messages 否则补 /v1/messages。 */
 static void
 build_anthropic_url(const char* endpoint, char* url_out, size_t url_cap)
 {
@@ -1204,6 +1225,8 @@ typedef struct {
     anthropic_sniffer_t  sniffer;
 } anthropic_stream_ctx_t;
 
+/** @brief Anthropic 流式上游回调：首分片先写 SSE 头，再透传分片并喂 usage 嗅探器。
+ *  @return 0 继续；下层 write 失败返回 -1 中止上游。 */
 static int
 anthropic_stream_chunk_cb(void* user_data, const void* chunk, size_t len)
 {
@@ -1227,6 +1250,8 @@ anthropic_stream_chunk_cb(void* user_data, const void* chunk, size_t len)
     return 0;
 }
 
+/** @brief Anthropic /v1/messages 端到端管线（阶段同 handle_responses，错误体为 Anthropic 形）。
+ *  @return 恒返回 0；错误已直接写回 @p rc。 */
 static int
 handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)
 {
@@ -1650,6 +1675,8 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
  * Native Google Gemini Pipeline (POST /v1beta/models/{model}:generateContent etc)
  * ------------------------------------------------------------------------- */
 
+/** @brief 从请求 path 的 `/models/<name>[:action][?..]` 片段提取 Gemini 模型名。
+ *  @return 0 成功并 NUL 结尾写入 @p model_buf；path 无 /models/、名空或超长返回 -1。 */
 static int
 extract_gemini_model(const char* path, char* model_buf, size_t cap)
 {
@@ -1674,6 +1701,7 @@ extract_gemini_model(const char* path, char* model_buf, size_t cap)
     return 0;
 }
 
+/** @brief 拼接 Gemini 上游 URL：空 endpoint 用 generativelanguage；剥离末端 /v1beta|/v1；流式用 `:streamGenerateContent?alt=sse`，否则 `:generateContent`。 */
 static void
 build_gemini_url(const char* endpoint, const char* model, bool is_streaming, char* url_out, size_t url_cap)
 {
@@ -1706,6 +1734,8 @@ typedef struct {
     gemini_sniffer_t     sniffer;
 } gemini_stream_ctx_t;
 
+/** @brief Gemini 流式上游回调：首分片先写 SSE 头，再透传分片并喂 usage 嗅探器。
+ *  @return 0 继续；下层 write 失败返回 -1 中止上游。 */
 static int
 gemini_stream_chunk_cb(void* user_data, const void* chunk, size_t len)
 {
@@ -1729,6 +1759,8 @@ gemini_stream_chunk_cb(void* user_data, const void* chunk, size_t len)
     return 0;
 }
 
+/** @brief Gemini generate 端到端管线（阶段同 handle_responses，错误为 Google RPC 形 status）。
+ *  @return 恒返回 0；错误已直接写回 @p rc。 */
 static int
 handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)
 {

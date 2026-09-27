@@ -8,6 +8,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** @brief 读环境变量（未设/空串则用缺省）并截断写入 @p out。
+ *  @return 恒 0。 */
 static int
 env_str(const char* name, const char* defval, char* out, size_t cap)
 {
