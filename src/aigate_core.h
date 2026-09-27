@@ -38,6 +38,9 @@ typedef struct aigate_response_ctx {
     int (*write)(void* impl, const void* buf, size_t len, bool fin);
 } aigate_response_ctx;
 
+struct health_prober;
+struct event_bus;
+
 typedef struct aigate_core {
     auth_key_cache        keys;
     ratelimit_t*          rl;
@@ -48,6 +51,8 @@ typedef struct aigate_core {
     int                   default_timeout_ms;
     guardrails_ctx_t*     gr;
     budget_enforce_mgr_t* be;
+    struct health_prober* hp;
+    struct event_bus*     eb;
 } aigate_core;
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */

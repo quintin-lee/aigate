@@ -7,6 +7,7 @@
 #include "pg_store.h"
 #include "sha256.h"
 #include "mock_upstream.h"
+#include "health_prober.h"
 
 #include <jansson.h>
 #include <math.h>
@@ -782,6 +783,7 @@ setup_admin(struct fake_db* db,
             char            admin_hash[65])
 {
     memset(db, 0, sizeof *db);
+    memset(out_adm, 0, sizeof *out_adm);
     db->next_key_id = 1;
     db->next_provider_id = 0; /* first created provider gets id 1 */
     db->next_group_id = 1;
@@ -3170,5 +3172,64 @@ test_admin_guardrails_crud_and_reload(void)
     json_decref(jlist);
     free(body);
 
+    teardown_admin(ps, &core, &db);
+}
+
+void
+test_admin_provider_health_and_probe(void)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    health_prober_t* hp = health_prober_new(ps, NULL, NULL, 60);
+    adm.hp = hp;
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. GET /admin/v1/providers/health */
+    admin_dispatch(&adm,
+                   "/admin/v1/providers/health",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "providers/health -> 200");
+    json_error_t jerr;
+    json_t*      jh = json_loads(body, 0, &jerr);
+    TEST_ASSERT(jh != NULL, "json parse failed");
+    TEST_ASSERT(json_is_array(json_object_get(jh, "providers")), "providers array");
+    json_decref(jh);
+    free(body);
+
+    /* 2. POST /admin/v1/providers/probe */
+    admin_dispatch(&adm,
+                   "/admin/v1/providers/probe",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "providers/probe -> 200");
+    json_t* jp = json_loads(body, 0, &jerr);
+    TEST_ASSERT(jp != NULL, "json parse probe failed");
+    TEST_ASSERT(json_is_integer(json_object_get(jp, "total")), "total is integer");
+    json_decref(jp);
+    free(body);
+
+    health_prober_free(hp);
     teardown_admin(ps, &core, &db);
 }

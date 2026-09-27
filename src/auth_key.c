@@ -227,23 +227,28 @@ extract_credential_from_headers(const char* auth_header,
         return x_goog_api_key;
     }
 
-    /* 4. Query string ?key=<key> (Gemini) */
+    /* 4. Query string ?key=<key> or ?token=<token> */
     if (query_string != NULL && query_string[0] != '\0') {
-        const char* p = strstr(query_string, "key=");
-        while (p != NULL) {
-            if (p == query_string || *(p - 1) == '&' || *(p - 1) == '?') {
-                p += 4;
-                _Thread_local static char s_qk[256];
-                size_t len = 0;
-                while (*p != '\0' && *p != '&' && len < sizeof(s_qk) - 1) {
-                    s_qk[len++] = *p++;
+        const char* const prefixes[] = {"key=", "token="};
+        for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); i++) {
+            const char* pref = prefixes[i];
+            size_t      plen = strlen(pref);
+            const char* p = strstr(query_string, pref);
+            while (p != NULL) {
+                if (p == query_string || *(p - 1) == '&' || *(p - 1) == '?') {
+                    p += plen;
+                    _Thread_local static char s_qk[256];
+                    size_t len = 0;
+                    while (*p != '\0' && *p != '&' && len < sizeof(s_qk) - 1) {
+                        s_qk[len++] = *p++;
+                    }
+                    s_qk[len] = '\0';
+                    if (len > 0) {
+                        return s_qk;
+                    }
                 }
-                s_qk[len] = '\0';
-                if (len > 0) {
-                    return s_qk;
-                }
+                p = strstr(p + 1, pref);
             }
-            p = strstr(p + 1, "key=");
         }
     }
 

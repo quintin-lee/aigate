@@ -9,12 +9,14 @@
 #include "admin_ui.h"
 #include "aigate_log.h"
 #include "metrics.h"
+#include "event_bus.h"
 
 #include <civetweb.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 struct transport_civetweb {
     struct mg_context* ctx;
@@ -220,6 +222,77 @@ handle_admin(struct mg_connection* conn, void* cbdata)
         return 0;
     }
 
+    if (strcmp(ri->local_uri, "/admin/v1/events") == 0) {
+        if (strcmp(ri->request_method, "GET") != 0 && strcmp(ri->request_method, "HEAD") != 0) {
+            mg_send_http_error(conn, 405, "Method Not Allowed");
+            return 1;
+        }
+        const char* bearer = extract_bearer(conn);
+        if (!admin_auth_ok(&cw->adm, bearer)) {
+            mg_send_http_error(conn, 401, "Unauthorized: invalid admin token");
+            return 1;
+        }
+        if (cw->adm.eb == NULL) {
+            mg_send_http_error(conn, 503, "Event bus unavailable");
+            return 1;
+        }
+        int sub_id = event_bus_subscribe(cw->adm.eb);
+        if (sub_id <= 0) {
+            mg_send_http_error(conn, 503, "Too many event stream subscribers");
+            return 1;
+        }
+
+        mg_printf(conn,
+                  "HTTP/1.1 200 OK\r\n"
+                  "Content-Type: text/event-stream\r\n"
+                  "Cache-Control: no-cache, no-transform\r\n"
+                  "Connection: keep-alive\r\n"
+                  "Access-Control-Allow-Origin: *\r\n\r\n");
+
+        if (strcmp(ri->request_method, "HEAD") == 0) {
+            event_bus_unsubscribe(cw->adm.eb, sub_id);
+            return 1;
+        }
+
+        char init_ping[128];
+        snprintf(init_ping, sizeof init_ping, "event: ping\ndata: {\"ts\":%ld}\n\n", (long)time(NULL));
+        if (mg_write(conn, init_ping, strlen(init_ping)) < 0) {
+            event_bus_unsubscribe(cw->adm.eb, sub_id);
+            return 1;
+        }
+
+        while (1) {
+            event_item_t item;
+            int prc = event_bus_pop(cw->adm.eb, sub_id, &item, 15000);
+            if (prc < 0) {
+                break;
+            }
+            if (prc == 0) {
+                char ping_buf[64];
+                snprintf(ping_buf, sizeof ping_buf, ": ping\n\n");
+                if (mg_write(conn, ping_buf, strlen(ping_buf)) < 0) {
+                    break;
+                }
+                continue;
+            }
+
+            char sse_msg[EVENT_MAX_PAYLOAD + 128];
+            int n = snprintf(sse_msg,
+                             sizeof sse_msg,
+                             "event: %s\ndata: %s\n\n",
+                             item.event_name,
+                             item.payload);
+            if (n > 0) {
+                if (mg_write(conn, sse_msg, (size_t)n) < 0) {
+                    break;
+                }
+            }
+        }
+
+        event_bus_unsubscribe(cw->adm.eb, sub_id);
+        return 1;
+    }
+
     /* Enforce body size cap */
     if (ri->content_length > cw->max_body_bytes) {
         AIGATE_LOG_WARN("request body too large (%lld bytes, cap %ld) from %s",
@@ -371,6 +444,10 @@ transport_civetweb_start(aigate_core* ac,
     cw->adm.admin_token_hash = cw->admin_token_hash;
     const char* apk = getenv("AIGATE_ALLOW_PLAINTEXT_KEYS");
     cw->adm.allow_plaintext_keys = (apk != NULL && atoi(apk) == 1);
+    if (ac != NULL) {
+        cw->adm.hp = ac->hp;
+        cw->adm.eb = ac->eb;
+    }
 
     /* Admin lockout policy: out-of-range values keep the defaults. */
     const char* lf = getenv("AIGATE_LOCKOUT_MAX_FAILS");

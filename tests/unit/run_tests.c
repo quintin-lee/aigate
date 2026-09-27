@@ -404,6 +404,9 @@ main(void)
     test_register("health_prober_state_transitions", test_health_prober_state_transitions);
     test_register("health_prober_json_serialization", test_health_prober_json_serialization);
 
+    extern void test_admin_provider_health_and_probe(void);
+    test_register("admin_provider_health_and_probe", test_admin_provider_health_and_probe);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

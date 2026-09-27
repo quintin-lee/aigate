@@ -23,6 +23,8 @@
 #include "secrets.h"
 #include "sha256.h"
 #include "upstream_client.h"
+#include "health_prober.h"
+#include "event_bus.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -59,7 +61,7 @@ copy_field(char* dst, size_t cap, const char* src)
     dst[len] = '\0';
 }
 
-static int
+int
 admin_auth_ok(admin_ctx_t* adm, const char* bearer)
 {
     if (bearer == NULL || bearer[0] == '\0') {
@@ -1744,8 +1746,54 @@ provider_test(admin_ctx_t* adm, int* status, char** body, size_t* len, const cha
     json_object_set_new(o, "status", json_integer(us));
     json_object_set_new(o, "verdict", json_string(verdict));
     json_object_set_new(o, "latency_ms", json_real((double)lat_ns / 1000000.0));
+    if (adm->hp != NULL) {
+        health_prober_record_result(adm->hp,
+                                    id,
+                                    rec.name,
+                                    rec.endpoint,
+                                    rec.provider_type,
+                                    us,
+                                    (long)(lat_ns / 1000000L),
+                                    rc);
+    }
     provider_rec_free(&rec);
     return finish_json(status, body, len, 200, o);
+}
+
+static int
+provider_health_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    if (adm->hp == NULL) {
+        *status = 200;
+        *body = strdup("{\"providers\":[],\"total\":0,\"healthy\":0,\"degraded\":0,\"down\":0,\"paused\":0,\"checked_at\":0}");
+        *len = *body ? strlen(*body) : 0;
+        return 0;
+    }
+    char* json_str = health_prober_to_json(adm->hp);
+    if (json_str == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "health serialization failed");
+    }
+    *status = 200;
+    *body = json_str;
+    *len = strlen(json_str);
+    return 0;
+}
+
+static int
+provider_probe_trigger(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    if (adm->hp == NULL) {
+        return finish_error(status, body, len, 503, "unavailable", "health prober not initialized");
+    }
+    health_prober_probe_all(adm->hp);
+    char* json_str = health_prober_to_json(adm->hp);
+    if (json_str == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "health serialization failed");
+    }
+    *status = 200;
+    *body = json_str;
+    *len = strlen(json_str);
+    return 0;
 }
 
 /* ------------------------------------------------------------ usage */
@@ -2888,6 +2936,12 @@ admin_dispatch(admin_ctx_t* adm,
             if (strcmp(method, "GET") == 0) {
                 return provider_list(adm, out_status, out_body, out_len, query);
             }
+        }
+        if (strcmp(rest, "providers/health") == 0 && strcmp(method, "GET") == 0) {
+            return provider_health_get(adm, out_status, out_body, out_len);
+        }
+        if (strcmp(rest, "providers/probe") == 0 && strcmp(method, "POST") == 0) {
+            return provider_probe_trigger(adm, out_status, out_body, out_len);
         }
         if (rest[9] == '/') {
             if (strcmp(method, "PATCH") == 0 || strcmp(method, "PUT") == 0) {
