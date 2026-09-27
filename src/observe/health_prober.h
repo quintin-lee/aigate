@@ -23,6 +23,9 @@ typedef enum {
     HEALTH_STATUS_PAUSED     /* ⚪ disabled or missing key */
 } health_status_t;
 
+/** @brief 探针状态枚举转可读字符串。
+ *  @param st  探针状态。
+ *  @return 状态名字符串（静态存储，调用方勿释放）。 */
 const char* health_status_str(health_status_t st);
 
 typedef struct {

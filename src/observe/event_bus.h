@@ -112,6 +112,8 @@ void event_bus_publish_budget(event_bus_t* eb,
                               double       current_usd,
                               double       budget_usd);
 
+/** @brief 发布一次 ping 心跳事件（保活/自检用）。
+ *  @param eb  事件总线。 */
 void event_bus_publish_ping(event_bus_t* eb);
 
 #endif /* AIGATE_EVENT_BUS_H */
