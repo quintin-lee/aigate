@@ -397,6 +397,13 @@ main(void)
     test_register("event_bus_overflow_drop", test_event_bus_overflow_drop);
     test_register("event_bus_helpers", test_event_bus_helpers);
 
+    extern void test_health_prober_lifecycle(void);
+    extern void test_health_prober_state_transitions(void);
+    extern void test_health_prober_json_serialization(void);
+    test_register("health_prober_lifecycle", test_health_prober_lifecycle);
+    test_register("health_prober_state_transitions", test_health_prober_state_transitions);
+    test_register("health_prober_json_serialization", test_health_prober_json_serialization);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
