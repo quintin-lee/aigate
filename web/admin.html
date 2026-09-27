@@ -275,6 +275,10 @@
           <span class="text-[9px] uppercase tracking-wider font-extrabold px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">LIVE</span>
         </span>
       </button>
+      <button data-tab="cache" onclick="switchTab('cache')" class="side-link" id="nav-cache-side">
+        <span class="text-base">💾</span>
+        <span>响应缓存</span>
+      </button>
       <button data-tab="playground" onclick="switchTab('playground')" class="side-link">
         <span class="text-base">⚡</span>
         <span>调试场</span>
@@ -327,6 +331,7 @@
           <button id="nav-cost" onclick="switchTab('cost')" class="nav-tab">💰 成本归属</button>
           <button id="nav-usage" onclick="switchTab('usage')" class="nav-tab">📈 用量</button>
           <button id="nav-live" onclick="switchTab('live')" class="nav-tab">🛰️ 实时大屏</button>
+          <button id="nav-cache" onclick="switchTab('cache')" class="nav-tab">💾 响应缓存</button>
           <button id="nav-playground" onclick="switchTab('playground')" class="nav-tab">⚡ 调试场</button>
           <button id="nav-metrics" onclick="switchTab('metrics')" class="nav-tab">🛠️ 监控指标</button>
         </nav>
@@ -354,6 +359,7 @@
     <div id="mobileNav" class="md:hidden sticky top-16 z-10 flex overflow-x-auto custom-scroll bg-slate-900/95 backdrop-blur-md border-b border-slate-800 p-2 space-x-2">
       <button data-tab="overview" onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-brand-600 font-medium whitespace-nowrap shadow-sm">📊 总览</button>
       <button data-tab="live" onclick="switchTab('live')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🛰️ 实时大屏</button>
+      <button data-tab="cache" onclick="switchTab('cache')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">💾 响应缓存</button>
       <button data-tab="providers" onclick="switchTab('providers')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🏢 供应商</button>
       <button data-tab="models" onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🤖 模型</button>
       <button data-tab="keys" onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🔑 密钥</button>
@@ -1292,8 +1298,8 @@
         </div>
       </div>
 
-      <!-- 4 张实时指标卡片 -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- 5 张实时指标卡片 -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <!-- QPS -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
@@ -1344,6 +1350,19 @@
             <div class="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">安全守护</div>
           </div>
           <div class="mt-3 text-xs text-slate-400">会话期间 Guardrail 命中拦截统计</div>
+        </div>
+
+        <!-- 响应缓存命中 -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">响应缓存命中</div>
+            <span class="stat-ico" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">⚡</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="liveStatCacheHitRate" class="text-3xl font-extrabold text-amber-400 font-mono">0.0<span class="text-base font-normal text-slate-400 ml-1">%</span></div>
+            <div id="liveStatCacheSavedCost" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">$0.0000</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">零延迟直出与节省成本</div>
         </div>
       </div>
 
@@ -1423,6 +1442,211 @@
               暂无系统告警事件，链路运行正常
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ==================== 标签页 12：响应缓存 ==================== -->
+    <div id="tab-cache" class="tab-content hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+            <span>💾</span>
+            <span>高性能响应缓存 (Exact & Streaming Cache)</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">16 分片内存 LRU 队列 • 请求特征 SHA-256 规范化 • 流式与非流式双向缓存互通 • 零延迟瞬时命中</p>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button onclick="fetchCacheStats()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:text-white hover:border-slate-700 transition flex items-center space-x-1.5">
+            <span>🔄</span>
+            <span>刷新数据</span>
+          </button>
+          <button onclick="triggerCachePurge()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-rose-600/90 hover:bg-rose-500 text-white shadow-lg shadow-rose-600/20 transition flex items-center space-x-1.5">
+            <span>🧹</span>
+            <span>清空所有缓存</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 5 张缓存核心指标卡片 -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+        <!-- 内存占用 -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">内存占用</div>
+            <span class="stat-ico cy">💾</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheStatMemoryUsed" class="text-3xl font-extrabold text-cyan-400 font-mono">0.0<span class="text-base font-normal text-slate-400 ml-1">MB</span></div>
+            <div id="cacheStatMemoryMax" class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono">上限 128 MB</div>
+          </div>
+          <div class="mt-3">
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+              <div id="cacheStatMemoryBar" class="bg-cyan-500 h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 缓存条目数 -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">缓存条目总数</div>
+            <span class="stat-ico em">📦</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheStatEntries" class="text-3xl font-extrabold text-emerald-400 font-mono">0</div>
+            <div id="cacheStatEntriesMax" class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">容量 10,000</div>
+          </div>
+          <div class="mt-3">
+            <div class="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden">
+              <div id="cacheStatEntriesBar" class="bg-emerald-500 h-1.5 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 命中率 -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">全域命中率</div>
+            <span class="stat-ico" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">⚡</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheStatHitRate" class="text-3xl font-extrabold text-amber-400 font-mono">0.0<span class="text-base font-normal text-slate-400 ml-1">%</span></div>
+            <div id="cacheStatHitsMisses" class="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">0 命中 / 0 未命中</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">零开销毫秒级命中</div>
+        </div>
+
+        <!-- 节省 Tokens -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">节约 Tokens</div>
+            <span class="stat-ico">🚀</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheStatSavedTokens" class="text-3xl font-extrabold text-indigo-400 font-mono">0</div>
+            <div id="cacheStatSavedTokensDetail" class="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 font-mono">0 提示 / 0 补全</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">避免向上游重复消耗</div>
+        </div>
+
+        <!-- 节约成本 -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">累计节省成本</div>
+            <span class="stat-ico pu">💰</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheStatSavedCost" class="text-3xl font-extrabold text-purple-400 font-mono">$0.0000</div>
+            <div class="text-[10px] px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20 font-mono">按价目表核算</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">已为团队节省上游费用</div>
+        </div>
+      </div>
+
+      <!-- 控制面板与架构特性 -->
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <!-- 缓存精细化清理 -->
+        <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>🧹</span>
+              <span>精准缓存清理 (Purge Target)</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">支持指定特定模型名称进行缓存释放，或一键重置全部分片</p>
+          </div>
+          <div class="space-y-3">
+            <div>
+              <label class="block text-xs font-semibold text-slate-300 mb-1">指定模型标识 (可选)</label>
+              <input type="text" id="cachePurgeModelInput" placeholder="例如 gpt-4o、deepseek-chat (留空为全部)" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+            </div>
+            <div class="flex items-center gap-2 pt-1">
+              <button onclick="triggerCachePurgeByInput()" class="flex-1 py-2 rounded-xl text-xs font-semibold bg-amber-600 hover:bg-amber-500 text-white transition">按模型清除</button>
+              <button onclick="triggerCachePurge()" class="py-2 px-4 rounded-xl text-xs font-semibold bg-rose-600/90 hover:bg-rose-500 text-white transition">清空全部</button>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400 space-y-1">
+              <div class="font-semibold text-slate-300">💡 客户端旁路提示:</div>
+              <div>客户端可在请求头加入 <code class="text-cyan-300 font-mono">Cache-Control: no-cache</code> 或 <code class="text-cyan-300 font-mono">x-skip-cache: 1</code> 单次跳过缓存并强制刷新。</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 架构与核心特性 -->
+        <div class="lg:col-span-2 glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>⚡</span>
+              <span>高并发核心引擎架构</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">纯 C17 原生单可执行体实现，零外部依赖，极速缓存存取与流式重放</p>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+            <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+              <div class="font-bold text-emerald-400 flex items-center gap-1.5">
+                <span>🔒</span>
+                <span>16 独立并发分片 (Sharding)</span>
+              </div>
+              <p class="text-slate-400 text-[11px]">按指纹高位拆分为 16 个互不阻塞的分片，各拥独立 POSIX 互斥锁，多核多线程无竞争读写。</p>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+              <div class="font-bold text-cyan-400 flex items-center gap-1.5">
+                <span>🌊</span>
+                <span>流式与非流式双向互通</span>
+              </div>
+              <p class="text-slate-400 text-[11px]">流式请求流式重放 (SSE chunks)；首次流式响应由 Accumulator 透明聚合入库，下次非流式请求直接毫秒命中。</p>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+              <div class="font-bold text-indigo-400 flex items-center gap-1.5">
+                <span>🎯</span>
+                <span>规范化请求指纹 (Canonical SHA-256)</span>
+              </div>
+              <p class="text-slate-400 text-[11px]">对 JSON 键、空白符做规范化去敏，去除 stream/temperature 随机波动，确保确定性请求完全一致命中。</p>
+            </div>
+            <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1">
+              <div class="font-bold text-purple-400 flex items-center gap-1.5">
+                <span>⏱️</span>
+                <span>双向链表 LRU & TTL 智能淘汰</span>
+              </div>
+              <p class="text-slate-400 text-[11px]">O(1) 访问频率更新与最久未访问条目淘汰；双重内存上限与条目上限守卫，杜绝内存膨胀。</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 16 分片实时分布表 -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>📊</span>
+              <span>16 内存分片负载与命中明细 (Shard Breakdown)</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">监控各个并发分片的条目分布、内存占比、命中与未命中偏斜度</p>
+          </div>
+          <span id="cacheShardsCountBadge" class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">16 Shards</span>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll rounded-xl border border-slate-800/80">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/90 text-slate-400 uppercase font-semibold border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3 whitespace-nowrap">分片 ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">条目数</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">内存占用</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">命中次数</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">未命中次数</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">分片命中率</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">负载进度</th>
+              </tr>
+            </thead>
+            <tbody id="cacheShardsTbody" class="divide-y divide-slate-800/50 font-mono text-[11px]">
+              <tr>
+                <td colspan="7" class="py-8 text-center text-xs text-slate-500 font-sans">
+                  正在加载缓存分片明细...
+                </td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -2112,6 +2336,7 @@
       const tabTitles = {
         overview: "总览",
         live: "实时运维大屏",
+        cache: "响应缓存",
         providers: "模型供应商",
         models: "上游模型",
         keys: "API 密钥",
@@ -2138,6 +2363,8 @@
         fetchOverviewData();
       } else if (state.activeTab === "live") {
         initLiveDashboard();
+      } else if (state.activeTab === "cache") {
+        fetchCacheStats();
       } else if (state.activeTab === "providers") {
         fetchProviders();
       } else if (state.activeTab === "models") {
@@ -4234,6 +4461,9 @@ ${errText}`;
         connectLiveStream();
       }
       fetchProviderHealth();
+      if (typeof updateLiveCacheKPI === "function") {
+        updateLiveCacheKPI();
+      }
     }
 
     function connectLiveStream() {
@@ -4362,15 +4592,28 @@ ${errText}`;
         state.liveBlockedCount = (state.liveBlockedCount || 0) + 1;
       }
 
+      state.liveTotalReqCount = (state.liveTotalReqCount || 0) + 1;
+      if (req.cached === true || req.provider === "cache") {
+        state.liveCacheHitCount = (state.liveCacheHitCount || 0) + 1;
+        state.liveCacheSavedCost = (state.liveCacheSavedCost || 0) + (req.cost_usd || 0);
+      }
+      const cacheHitRate = state.liveTotalReqCount > 0
+        ? ((state.liveCacheHitCount || 0) / state.liveTotalReqCount * 100).toFixed(1)
+        : "0.0";
+
       const qpsEl = document.getElementById("liveStatQps");
       const latEl = document.getElementById("liveStatLat");
       const toksEl = document.getElementById("liveStatToks");
       const grEl = document.getElementById("liveStatGuardrails");
+      const cacheHitEl = document.getElementById("liveStatCacheHitRate");
+      const cacheCostEl = document.getElementById("liveStatCacheSavedCost");
 
       if (qpsEl) qpsEl.innerText = qps;
       if (latEl) latEl.innerHTML = `${avgLat}<span class="text-base font-normal text-slate-400 ml-1">ms</span>`;
       if (toksEl) toksEl.innerText = toksPerSec.toLocaleString();
       if (grEl) grEl.innerText = state.liveBlockedCount || 0;
+      if (cacheHitEl) cacheHitEl.innerHTML = `${cacheHitRate}<span class="text-base font-normal text-slate-400 ml-1">%</span>`;
+      if (cacheCostEl) cacheCostEl.innerText = `$${(state.liveCacheSavedCost || 0).toFixed(4)}`;
 
       // Add to waterfall if not paused
       if (!state.liveStreamingPaused) {
@@ -4412,6 +4655,17 @@ ${errText}`;
           `<span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30">${escapeHtml(req.guardrail_action)}</span>` :
           `<span class="text-slate-600">-</span>`;
 
+        const isCached = (req.cached === true || req.provider === "cache");
+        const cacheHitBadge = isCached ?
+          `<span class="ml-1.5 px-1.5 py-0.2 rounded text-[9px] uppercase font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40">CACHE HIT</span>` :
+          "";
+        const providerHtml = isCached ?
+          `<span class="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-sans font-semibold">⚡ cache</span>` :
+          `<span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-sans">${escapeHtml(req.provider || "-")}</span>`;
+        const latHtml = isCached ?
+          `<span class="text-amber-300 font-bold font-mono">&lt;1ms</span>` :
+          `<span class="text-slate-300">${Math.round(req.latency_ms)}ms</span>`;
+
         const timeStr = new Date(req.ts).toLocaleTimeString();
         const ptok = req.prompt_tokens || 0;
         const ctok = req.completion_tokens || 0;
@@ -4420,9 +4674,9 @@ ${errText}`;
           <td class="py-2.5 px-3 text-slate-400 whitespace-nowrap">${timeStr}</td>
           <td class="py-2.5 px-3 text-slate-300 font-mono">#${req.key_id}</td>
           <td class="py-2.5 px-3 font-bold text-white whitespace-nowrap">${escapeHtml(req.model || "-")}</td>
-          <td class="py-2.5 px-3 whitespace-nowrap"><span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700 font-sans">${escapeHtml(req.provider || "-")}</span></td>
-          <td class="py-2.5 px-3 whitespace-nowrap"><span class="px-2 py-0.5 rounded font-bold ${stClass}">${req.status}</span></td>
-          <td class="py-2.5 px-3 text-slate-300 whitespace-nowrap">${Math.round(req.latency_ms)}ms</td>
+          <td class="py-2.5 px-3 whitespace-nowrap">${providerHtml}</td>
+          <td class="py-2.5 px-3 whitespace-nowrap"><span class="px-2 py-0.5 rounded font-bold ${stClass}">${req.status}</span>${cacheHitBadge}</td>
+          <td class="py-2.5 px-3 whitespace-nowrap">${latHtml}</td>
           <td class="py-2.5 px-3 text-slate-400 whitespace-nowrap">${ptok} / ${ctok}</td>
           <td class="py-2.5 px-3 text-emerald-400/90 whitespace-nowrap">${cost}</td>
           <td class="py-2.5 px-3 whitespace-nowrap font-sans">${gr}</td>
@@ -4727,6 +4981,158 @@ ${errText}`;
         toast.classList.add("opacity-0", "translate-y-2");
         setTimeout(() => toast.remove(), 300);
       }, 3500);
+    }
+
+    // --- Response Cache Management Logic ---
+    async function updateLiveCacheKPI() {
+      try {
+        const resp = await apiCall("/admin/v1/cache/stats");
+        if (resp && resp.ok) {
+          const stats = await resp.json();
+          const cacheHitEl = document.getElementById("liveStatCacheHitRate");
+          const cacheCostEl = document.getElementById("liveStatCacheSavedCost");
+          if (cacheHitEl && stats) {
+            cacheHitEl.innerHTML = `${(stats.hit_rate_percent || 0).toFixed(1)}<span class="text-base font-normal text-slate-400 ml-1">%</span>`;
+          }
+          if (cacheCostEl && stats) {
+            cacheCostEl.innerText = `$${(stats.saved_cost_usd || 0).toFixed(4)}`;
+          }
+        }
+      } catch (e) {
+        console.error("updateLiveCacheKPI error:", e);
+      }
+    }
+
+    async function fetchCacheStats() {
+      try {
+        const resp = await apiCall("/admin/v1/cache/stats");
+        if (!resp || !resp.ok) return;
+        const data = await resp.json();
+
+        // 内存占用
+        const usedMB = ((data.bytes_used || 0) / (1024 * 1024)).toFixed(2);
+        const maxMB = ((data.bytes_max || 0) / (1024 * 1024)).toFixed(0);
+        const memPct = data.bytes_max > 0 ? Math.min(100, (data.bytes_used / data.bytes_max * 100)).toFixed(1) : 0;
+        const memEl = document.getElementById("cacheStatMemoryUsed");
+        const memMaxEl = document.getElementById("cacheStatMemoryMax");
+        const memBar = document.getElementById("cacheStatMemoryBar");
+        if (memEl) memEl.innerHTML = `${usedMB}<span class="text-base font-normal text-slate-400 ml-1">MB</span>`;
+        if (memMaxEl) memMaxEl.innerText = `上限 ${maxMB} MB`;
+        if (memBar) memBar.style.width = `${memPct}%`;
+
+        // 条目数
+        const count = data.entries_count || 0;
+        const maxEntries = data.max_entries || 10000;
+        const entriesPct = maxEntries > 0 ? Math.min(100, (count / maxEntries * 100)).toFixed(1) : 0;
+        const entriesEl = document.getElementById("cacheStatEntries");
+        const entriesMaxEl = document.getElementById("cacheStatEntriesMax");
+        const entriesBar = document.getElementById("cacheStatEntriesBar");
+        if (entriesEl) entriesEl.innerText = count.toLocaleString();
+        if (entriesMaxEl) entriesMaxEl.innerText = `容量 ${maxEntries.toLocaleString()}`;
+        if (entriesBar) entriesBar.style.width = `${entriesPct}%`;
+
+        // 命中率
+        const hitRate = (data.hit_rate_percent || 0).toFixed(1);
+        const hits = data.hits_total || 0;
+        const misses = data.misses_total || 0;
+        const hitRateEl = document.getElementById("cacheStatHitRate");
+        const hitsMissesEl = document.getElementById("cacheStatHitsMisses");
+        if (hitRateEl) hitRateEl.innerHTML = `${hitRate}<span class="text-base font-normal text-slate-400 ml-1">%</span>`;
+        if (hitsMissesEl) hitsMissesEl.innerText = `${hits.toLocaleString()} 命中 / ${misses.toLocaleString()} 未命中`;
+
+        // 节约 Tokens
+        const savedPrompt = data.saved_prompt_tokens || 0;
+        const savedComp = data.saved_completion_tokens || 0;
+        const savedTokensTotal = savedPrompt + savedComp;
+        const savedTokensEl = document.getElementById("cacheStatSavedTokens");
+        const savedTokensDetail = document.getElementById("cacheStatSavedTokensDetail");
+        if (savedTokensEl) savedTokensEl.innerText = savedTokensTotal.toLocaleString();
+        if (savedTokensDetail) savedTokensDetail.innerText = `${savedPrompt.toLocaleString()} 提示 / ${savedComp.toLocaleString()} 补全`;
+
+        // 节约成本
+        const savedCost = (data.saved_cost_usd || 0).toFixed(4);
+        const savedCostEl = document.getElementById("cacheStatSavedCost");
+        if (savedCostEl) savedCostEl.innerText = `$${savedCost}`;
+
+        // 同步 Live 大屏卡片
+        const liveHitEl = document.getElementById("liveStatCacheHitRate");
+        const liveCostEl = document.getElementById("liveStatCacheSavedCost");
+        if (liveHitEl) liveHitEl.innerHTML = `${hitRate}<span class="text-base font-normal text-slate-400 ml-1">%</span>`;
+        if (liveCostEl) liveCostEl.innerText = `$${savedCost}`;
+
+        // 16 Shards Table
+        renderCacheShardsTable(data.shards_detail || []);
+      } catch (err) {
+        console.error("fetchCacheStats error:", err);
+      }
+    }
+
+    function renderCacheShardsTable(shards) {
+      const tbody = document.getElementById("cacheShardsTbody");
+      if (!tbody) return;
+
+      if (!shards || shards.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-8 text-center text-xs text-slate-500 font-sans">暂无分片统计信息</td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = shards.map(s => {
+        const kb = ((s.bytes_used || 0) / 1024).toFixed(1);
+        const hits = s.hits || 0;
+        const misses = s.misses || 0;
+        const total = hits + misses;
+        const rate = total > 0 ? ((hits / total) * 100).toFixed(1) : "0.0";
+        const ratePct = Number(rate);
+
+        let rateColor = "text-slate-400";
+        if (ratePct > 50) rateColor = "text-emerald-400 font-bold";
+        else if (ratePct > 0) rateColor = "text-amber-400 font-semibold";
+
+        const loadPct = Math.min(100, Math.max(2, (s.entries || 0) * 10));
+
+        return `<tr class="hover:bg-slate-800/40 transition">
+          <td class="py-2.5 px-3 font-mono font-bold text-cyan-300">Shard #${s.shard_id}</td>
+          <td class="py-2.5 px-3 text-slate-200">${(s.entries || 0).toLocaleString()}</td>
+          <td class="py-2.5 px-3 text-slate-300 font-mono">${kb} KB</td>
+          <td class="py-2.5 px-3 text-emerald-400">${hits.toLocaleString()}</td>
+          <td class="py-2.5 px-3 text-slate-400">${misses.toLocaleString()}</td>
+          <td class="py-2.5 px-3 ${rateColor} font-mono">${rate}%</td>
+          <td class="py-2.5 px-3">
+            <div class="w-24 bg-slate-800 h-1.5 rounded-full overflow-hidden">
+              <div class="bg-cyan-500 h-1.5 rounded-full" style="width: ${loadPct}%"></div>
+            </div>
+          </td>
+        </tr>`;
+      }).join("");
+    }
+
+    async function triggerCachePurge(model) {
+      const targetDesc = model ? `模型 "${model}" 的缓存` : "所有缓存条目";
+      const confirmed = await openConfirmModal(`确定要清空 ${targetDesc} 吗？此操作将立即释放对应的内存缓存。`, "确认清空缓存");
+      if (!confirmed) return;
+
+      try {
+        const body = model ? { model: model } : {};
+        const resp = await apiCall("/admin/v1/cache/purge", {
+          method: "POST",
+          body: body
+        });
+        if (resp && resp.ok) {
+          const res = await resp.json();
+          showToast(`✅ 缓存清理成功: 清理了 ${res.purged_entries || 0} 条记录，释放 ${((res.freed_bytes || 0) / 1024).toFixed(1)} KB 内存`, "success");
+          fetchCacheStats();
+        } else {
+          showToast("❌ 缓存清理失败", "error");
+        }
+      } catch (err) {
+        showToast("❌ 缓存清理异常: " + err.message, "error");
+      }
+    }
+
+    function triggerCachePurgeByInput() {
+      const input = document.getElementById("cachePurgeModelInput");
+      const model = input ? input.value.trim() : "";
+      triggerCachePurge(model || undefined);
     }
   </script>
 </body>

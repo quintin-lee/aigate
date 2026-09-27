@@ -568,6 +568,7 @@ response_cache_get_stats_json(response_cache_t* rc)
     uint64_t total_hits = 0;
     uint64_t total_misses = 0;
 
+    json_t* shards_arr = json_array();
     for (int i = 0; i < CACHE_SHARDS_COUNT; i++) {
         cache_shard_t* shard = &rc->shards[i];
         pthread_mutex_lock(&shard->lock);
@@ -575,6 +576,14 @@ response_cache_get_stats_json(response_cache_t* rc)
         total_bytes += shard->bytes_used;
         total_hits += shard->hits;
         total_misses += shard->misses;
+
+        json_t* sj = json_object();
+        json_object_set_new(sj, "shard_id", json_integer(i));
+        json_object_set_new(sj, "entries", json_integer((json_int_t)shard->count));
+        json_object_set_new(sj, "bytes_used", json_integer((json_int_t)shard->bytes_used));
+        json_object_set_new(sj, "hits", json_integer((json_int_t)shard->hits));
+        json_object_set_new(sj, "misses", json_integer((json_int_t)shard->misses));
+        json_array_append_new(shards_arr, sj);
         pthread_mutex_unlock(&shard->lock);
     }
 
@@ -602,6 +611,7 @@ response_cache_get_stats_json(response_cache_t* rc)
     json_object_set_new(root, "saved_prompt_tokens", json_integer(saved_prompt));
     json_object_set_new(root, "saved_completion_tokens", json_integer(saved_comp));
     json_object_set_new(root, "saved_cost_usd", json_real(saved_cost));
+    json_object_set_new(root, "shards_detail", shards_arr);
 
     char* out = json_dumps(root, JSON_COMPACT);
     json_decref(root);
