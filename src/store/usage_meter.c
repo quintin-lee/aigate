@@ -49,6 +49,7 @@ struct usage_meter {
     atomic_int           req_dropped;
 };
 
+/** @brief 今日 UTC 零点（用量累加桶的日期分界）。 */
 static time_t
 utc_midnight_now(void)
 {
@@ -56,6 +57,7 @@ utc_midnight_now(void)
     return (time_t)(now - ((uint64_t)now % 86400));
 }
 
+/** @brief key_id+model 混合哈希，映射到用量累加槽。 */
 static uint64_t
 acc_hash(long key_id, const char* model)
 {
@@ -120,6 +122,8 @@ um_flush_request_batch(usage_meter_t* um, usage_request_row_t* rreqs, int rcap)
         return -1;
     }
 }
+/** @brief 后台刷盘线程：定时 rollover 并把累加桶/审计环批量写入 PG，stop 置位后退出。
+ *  @return 恒 NULL。 */
 static void*
 
 worker_main(void* arg)

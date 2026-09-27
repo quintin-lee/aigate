@@ -236,9 +236,23 @@ void model_rec_free(model_rec_t* m);
 /** @brief Free a provider_rec_t populated by list_providers or get_provider. */
 void provider_rec_free(provider_rec_t* p);
 
+/** @brief 列出 guardrails 规则。
+ *  @param ps   存储句柄。
+ *  @param out  调用方提供的数组，容量 ≥ @p cap。
+ *  @param cap  @p out 最大容纳条数。
+ *  @param n    接收实际写入条数。
+ *  @return 0 成功；-1 存储错误。 */
 int pg_store_list_guardrails_rules(const pg_store_t* ps, guardrail_rule_t* out, int cap, int* n);
+/** @brief 新建 guardrails 规则。
+ *  @param rule 规则内容（id 字段忽略）。
+ *  @param out_id 接收新规则 id。
+ *  @return 0 成功；-1 存储错误。 */
 int pg_store_create_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule, long* out_id);
+/** @brief 按 id 全字段更新 guardrails 规则。
+ *  @return 0 成功；-1 存储错误。 */
 int pg_store_update_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule);
+/** @brief 按 id 删除 guardrails 规则。
+ *  @return 0 成功；-1 存储错误。 */
 int pg_store_delete_guardrails_rule(const pg_store_t* ps, long id);
 
 #endif /* AIGATE_PG_STORE_H */

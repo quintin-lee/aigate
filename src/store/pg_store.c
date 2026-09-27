@@ -72,6 +72,8 @@ provider_rec_free(provider_rec_t* p)
     p->n_models = 0;
 }
 
+/** @brief provider 模型清单 join 成 `|` 分隔串（落库用）。
+ *  @return 0 成功；-1 缓冲区不足/参数非法。 */
 static int
 join_provider_models(const provider_rec_t* p, char* buf, size_t cap)
 {
@@ -89,6 +91,7 @@ join_provider_models(const provider_rec_t* p, char* buf, size_t cap)
     return 0;
 }
 
+/** @brief 安全截断拷贝：cap 为 0 直接返回；src 为 NULL 置空串；超长截断并 NUL 结尾。 */
 static void
 copy_field(char* dst, size_t cap, const char* src)
 {
@@ -199,6 +202,7 @@ join_model_list(const key_rec_t* k, char* buf, size_t cap)
 
 /* ------------------------------------------------------------ libpq ops */
 
+/** @brief 连接断开时重连（调用方须持锁；重连失败仅记日志，不断言）。 */
 static void
 pq_ensure_conn(struct pq_ctx* px)
 {
@@ -213,6 +217,7 @@ pq_ensure_conn(struct pq_ctx* px)
     }
 }
 
+/** @brief 加连接互斥锁并顺带确保连接可用。 */
 static void
 pq_lock(struct pq_ctx* px)
 {
@@ -220,12 +225,14 @@ pq_lock(struct pq_ctx* px)
     pq_ensure_conn(px);
 }
 
+/** @brief 解连接互斥锁。 */
 static void
 pq_unlock(struct pq_ctx* px)
 {
     pthread_mutex_unlock(&px->mtx);
 }
 
+/** @brief pg_ops.get_key_by_hash 的 libpq 实现：0 命中，1 确缺，-1 存储错误。 */
 static int
 pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
 {
@@ -334,6 +341,7 @@ fill_key_row(PGresult* res, int row, key_rec_t* out)
     }
 }
 
+/** @brief pg_ops.list_keys 的 libpq 实现：0 成功，-1 错误（@p n 恒写实际条数）。 */
 static int
 pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
 {
@@ -367,6 +375,7 @@ pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief pg_ops.get_key_by_id 的 libpq 实现：0 命中，-1 错误/不存在。 */
 static int
 pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
 {
@@ -403,6 +412,7 @@ pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
     return rc; /* 0 found, -1 unknown/error */
 }
 
+/** @brief 把 models 查询行填进 model_rec_t（含 targets JSON 反序列化）。 */
 static int
 fill_model_row(PGresult* res, int row, model_rec_t* out)
 {
@@ -486,6 +496,7 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
     return 0;
 }
 
+/** @brief pg_ops.get_model 的 libpq 实现：0 命中，-1 错误/不存在。 */
 static int
 pq_get_model(void* vctx, const char* name, model_rec_t* out)
 {
@@ -517,6 +528,7 @@ pq_get_model(void* vctx, const char* name, model_rec_t* out)
     return rc;
 }
 
+/** @brief pg_ops.list_models 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
 {
@@ -549,6 +561,7 @@ pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief pg_ops.create_key 的 libpq 实现：0 成功并回填 id，-1 错误。 */
 static int
 pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
 {
@@ -614,6 +627,7 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     return err;
 }
 
+/** @brief pg_ops.update_key 的 libpq 实现：按掩码更新指定字段，0 成功，-1 错误。 */
 static int
 pq_update_key(void* vctx, const key_rec_t* k, int mask)
 {
@@ -742,6 +756,7 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
     return err;
 }
 
+/** @brief pg_ops.revoke_key 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_revoke_key(void* vctx, long key_id)
 {
@@ -769,6 +784,8 @@ pq_revoke_key(void* vctx, long key_id)
     return n > 0 ? 0 : -1;
 }
 
+/** @brief 模型多目标落库序列化：无 targets 但有 endpoint 时包一层默认目标。
+ *  @return JSON 数组串（调用方 free）；OOM 返回 NULL。 */
 static char*
 serialize_targets_json(const model_rec_t* m)
 {
@@ -815,6 +832,7 @@ serialize_targets_json(const model_rec_t* m)
     return s;
 }
 
+/** @brief pg_ops.create_model 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_create_model(void* vctx, const model_rec_t* m)
 {
@@ -865,6 +883,7 @@ pq_create_model(void* vctx, const model_rec_t* m)
     return 0;
 }
 
+/** @brief pg_ops.update_model 的 libpq 实现：按掩码更新指定字段，0 成功，-1 错误。 */
 static int
 pq_update_model(void* vctx, const model_rec_t* m, int mask)
 {
@@ -951,6 +970,7 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
     return ok ? 0 : -1;
 }
 
+/** @brief pg_ops.delete_model 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_delete_model(void* vctx, const char* name)
 {
@@ -973,6 +993,7 @@ pq_delete_model(void* vctx, const char* name)
     return n > 0 ? 0 : -1;
 }
 
+/** @brief 把 providers 查询行填进 provider_rec_t（含模型清单反序列化）。 */
 static int
 fill_provider_row(PGresult* res, int row, provider_rec_t* out)
 {
@@ -994,6 +1015,7 @@ fill_provider_row(PGresult* res, int row, provider_rec_t* out)
     return 0;
 }
 
+/** @brief pg_ops.list_providers 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_list_providers(void* vctx, provider_rec_t* out, int cap, int* n)
 {
@@ -1025,6 +1047,7 @@ pq_list_providers(void* vctx, provider_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief pg_ops.get_provider 的 libpq 实现：0 命中，-1 错误/不存在。 */
 static int
 pq_get_provider(void* vctx, long id, provider_rec_t* out)
 {
@@ -1057,6 +1080,7 @@ pq_get_provider(void* vctx, long id, provider_rec_t* out)
     return rc;
 }
 
+/** @brief pg_ops.create_provider 的 libpq 实现：0 成功并回填 id，-1 错误。 */
 static int
 pq_create_provider(void* vctx, const provider_rec_t* p, long* out_id)
 {
@@ -1100,6 +1124,7 @@ pq_create_provider(void* vctx, const provider_rec_t* p, long* out_id)
     return 0;
 }
 
+/** @brief pg_ops.update_provider 的 libpq 实现：按掩码更新指定字段，0 成功，-1 错误。 */
 static int
 pq_update_provider(void* vctx, const provider_rec_t* p, int mask)
 {
@@ -1168,6 +1193,7 @@ pq_update_provider(void* vctx, const provider_rec_t* p, int mask)
     return ok ? 0 : -1;
 }
 
+/** @brief pg_ops.delete_provider 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_delete_provider(void* vctx, long id)
 {
@@ -1194,6 +1220,7 @@ pq_delete_provider(void* vctx, long id)
 
 #define FLUSH_USAGE_CHUNK 64
 
+/** @brief pg_ops.flush_usage 的 libpq 实现：批量 upsert 日用量行，0 成功，-1 错误。 */
 static int
 pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
 {
@@ -1304,6 +1331,7 @@ pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
     return rc;
 }
 
+/** @brief pg_ops.query_usage 的 libpq 实现：按键/模型/时间窗查日用量，0 成功，-1 错误。 */
 static int
 pq_query_usage(void*        vctx,
                long         key_id,
@@ -1364,6 +1392,7 @@ pq_query_usage(void*        vctx,
 
 #define FLUSH_REQ_CHUNK 64
 
+/** @brief pg_ops.flush_usage_requests 的 libpq 实现：批量插入请求审计行，0 成功，-1 错误。 */
 static int
 pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
 {
@@ -1467,6 +1496,7 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
     return rc;
 }
 
+/** @brief pg_ops.query_usage_requests 的 libpq 实现：按键查 since 后的审计行，0 成功，-1 错误。 */
 static int
 pq_query_requests(void* vctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n)
 {
@@ -1524,6 +1554,7 @@ pq_query_requests(void* vctx, long key_id, time_t since, usage_request_row_t* ou
     return 0;
 }
 
+/** @brief pg_ops.create_group 的 libpq 实现：0 成功并回填 id，-1 错误。 */
 static int
 pq_create_group(void* vctx, const char* name, long* out_id)
 {
@@ -1557,6 +1588,7 @@ pq_create_group(void* vctx, const char* name, long* out_id)
     return err;
 }
 
+/** @brief pg_ops.list_groups 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_list_groups(void* vctx, group_rec_t* out, int cap, int* n)
 {
@@ -1596,6 +1628,7 @@ pq_list_groups(void* vctx, group_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief pg_ops.patch_group 的 libpq 实现：按 id 改组名，0 成功，-1 错误。 */
 static int
 pq_patch_group(void* vctx, long id, const char* name)
 {
@@ -1628,6 +1661,7 @@ pq_patch_group(void* vctx, long id, const char* name)
     return err;
 }
 
+/** @brief pg_ops.delete_group 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_delete_group(void* vctx, long id)
 {
@@ -1660,6 +1694,7 @@ pq_delete_group(void* vctx, long id)
     return err;
 }
 
+/** @brief pg_ops.count_keys_in_group 的 libpq 实现：0 成功并回填数，-1 错误。 */
 static int
 pq_count_keys_in_group(void* vctx, long group_id, long* n)
 {
@@ -1688,6 +1723,7 @@ pq_count_keys_in_group(void* vctx, long group_id, long* n)
     return -1;
 }
 
+/** @brief pg_ops.query_cost 的 libpq 实现：按时间窗查费用归因行，0 成功，-1 错误。 */
 static int
 pq_query_cost(void* vctx, long since_s, long until_s, cost_row_t* out, int cap, int* n)
 {
@@ -1739,6 +1775,7 @@ pq_query_cost(void* vctx, long since_s, long until_s, cost_row_t* out, int cap, 
     return 0;
 }
 
+/** @brief pg_ops.patch_group_budget 的 libpq 实现：按 id 改月预算，0 成功，-1 错误。 */
 static int
 pq_patch_group_budget(void* vctx, long id, double budget)
 {
@@ -1767,6 +1804,7 @@ pq_patch_group_budget(void* vctx, long id, double budget)
     return -1;
 }
 
+/** @brief pg_ops.list_guardrails_rules 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_list_guardrails_rules(void* vctx, guardrail_rule_t* out, int cap, int* n)
 {
@@ -1804,6 +1842,7 @@ pq_list_guardrails_rules(void* vctx, guardrail_rule_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief pg_ops.create_guardrails_rule 的 libpq 实现：0 成功并回填 id，-1 错误。 */
 static int
 pq_create_guardrails_rule(void* vctx, const guardrail_rule_t* rule, long* out_id)
 {
@@ -1841,6 +1880,7 @@ pq_create_guardrails_rule(void* vctx, const guardrail_rule_t* rule, long* out_id
     return -1;
 }
 
+/** @brief pg_ops.update_guardrails_rule 的 libpq 实现：按 id 全字段更新，0 成功，-1 错误。 */
 static int
 pq_update_guardrails_rule(void* vctx, const guardrail_rule_t* rule)
 {
@@ -1878,6 +1918,7 @@ pq_update_guardrails_rule(void* vctx, const guardrail_rule_t* rule)
     return -1;
 }
 
+/** @brief pg_ops.delete_guardrails_rule 的 libpq 实现：0 成功，-1 错误。 */
 static int
 pq_delete_guardrails_rule(void* vctx, long id)
 {

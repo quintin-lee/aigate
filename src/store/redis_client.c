@@ -8,6 +8,8 @@
 #include <string.h>
 #include <sys/time.h>
 
+/** @brief 解析 redis://[[user:]pass@]host[:port][/db]，缺省端口 6379、db 0（输出串恒 NUL 结尾）。
+ *  @return 0 成功。 */
 static int
 parse_redis_url(
     const char* url, char* host, size_t host_cap, int* port, char* pass, size_t pass_cap, int* db)
