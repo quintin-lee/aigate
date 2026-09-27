@@ -66,4 +66,8 @@ void budget_enforce_set_group_budget(
     int64_t               group_id,
     double                budget_usd);
 
+struct event_bus;
+/** @brief Attach event bus for publishing budget warning events. */
+void budget_enforce_set_event_bus(budget_enforce_mgr_t* mgr, struct event_bus* eb);
+
 #endif /* AIGATE_BUDGET_ENFORCE_H */

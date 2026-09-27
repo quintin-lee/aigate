@@ -18,6 +18,7 @@
 #include "admin_api.h"
 #include "circuit_breaker.h"
 #include "config.h"
+#include "health_prober.h"
 #include <openssl/evp.h>
 #include "redis_pool.h"
 #include "ratelimit.h"
@@ -83,6 +84,10 @@ main(void)
         OPENSSL_cleanse(master, sizeof master);
         pg_store_close(ps);
         return 1;
+    }
+
+    if (core.hp != NULL) {
+        health_prober_start(core.hp);
     }
 
     /* 4b. Optional Redis clustering: inject shared pool into rate limiter,

@@ -2,6 +2,7 @@
  *  @brief In-memory and Redis monthly budget limit enforcer implementation.
  */
 #include "budget_enforce.h"
+#include "event_bus.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -29,6 +30,7 @@ struct budget_enforce_mgr {
     redis_pool_t*       redis;
     pthread_mutex_t     mtx;
     int                 current_ym;
+    event_bus_t*        eb;
     key_spend_node_t*   key_buckets[BUCKET_COUNT];
     group_spend_node_t* group_buckets[BUCKET_COUNT];
 };
@@ -149,6 +151,9 @@ budget_enforce_check(
                              "Monthly cost budget of $%.2f exceeded for API key (spent: $%.2f)",
                              key_cost_budget, curr->spent_cost);
                 }
+                if (mgr->eb != NULL) {
+                    event_bus_publish_budget(mgr->eb, "key", key_id, "", 100.0, curr->spent_cost, key_cost_budget);
+                }
                 pthread_mutex_unlock(&mgr->mtx);
                 return -1;
             }
@@ -157,6 +162,9 @@ budget_enforce_check(
                     snprintf(err_msg, err_msg_sz,
                              "Monthly token budget of %ld tokens exceeded for API key (spent: %ld)",
                              (long)key_token_budget, (long)curr->spent_tokens);
+                }
+                if (mgr->eb != NULL) {
+                    event_bus_publish_budget(mgr->eb, "key", key_id, "", 100.0, (double)curr->spent_tokens, (double)key_token_budget);
                 }
                 pthread_mutex_unlock(&mgr->mtx);
                 return -1;
@@ -178,6 +186,9 @@ budget_enforce_check(
                     snprintf(err_msg, err_msg_sz,
                              "Monthly budget of $%.2f exceeded for group %ld (spent: $%.2f)",
                              effective_budget, (long)group_id, curr->spent_cost);
+                }
+                if (mgr->eb != NULL) {
+                    event_bus_publish_budget(mgr->eb, "group", group_id, "", 100.0, curr->spent_cost, effective_budget);
                 }
                 pthread_mutex_unlock(&mgr->mtx);
                 return -1;
@@ -372,4 +383,15 @@ budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
         }
     }
     return 0;
+}
+
+void
+budget_enforce_set_event_bus(budget_enforce_mgr_t* mgr, struct event_bus* eb)
+{
+    if (mgr == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&mgr->mtx);
+    mgr->eb = eb;
+    pthread_mutex_unlock(&mgr->mtx);
 }

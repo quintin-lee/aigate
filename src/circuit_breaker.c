@@ -6,6 +6,7 @@
 #include "redis_client.h"
 #include "redis_pool.h"
 #include "redis_scripts.h"
+#include "event_bus.h"
 
 #include <pthread.h>
 #include <stdint.h>
@@ -33,6 +34,7 @@ struct circuit_breaker {
     cb_time_fn      time_fn;
     redis_pool_t*   pool;
     char            sha_cb[48];
+    event_bus_t*    eb;
     cb_entry_t*     buckets[CB_BUCKETS];
 };
 
@@ -102,14 +104,28 @@ get_or_create_entry_locked(circuit_breaker_t* cb, const char* model, const char*
 }
 
 static void
-update_state_on_time_locked(cb_entry_t* e, time_t now)
+update_state_on_time_locked(circuit_breaker_t* cb, cb_entry_t* e, time_t now)
 {
     if (e->state == CB_OPEN && now >= e->open_until) {
         e->state = CB_HALF_OPEN;
         e->half_open_probe_active = 0;
         AIGATE_LOG_INFO(
             "circuit breaker for %s:%s transitioned to HALF_OPEN", e->model, e->endpoint);
+        if (cb != NULL && cb->eb != NULL) {
+            event_bus_publish_cb(cb->eb, e->endpoint, e->model, "OPEN", "HALF_OPEN", "cooloff expired");
+        }
     }
+}
+
+void
+cb_set_event_bus(circuit_breaker_t* cb, struct event_bus* eb)
+{
+    if (cb == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&cb->mtx);
+    cb->eb = eb;
+    pthread_mutex_unlock(&cb->mtx);
 }
 
 circuit_breaker_t*
@@ -123,6 +139,7 @@ cb_create(void)
     cb->failure_threshold = CB_DEFAULT_FAILURE_THRESHOLD;
     cb->cooloff_sec = CB_DEFAULT_COOLOFF_SEC;
     cb->time_fn = NULL;
+    cb->eb = NULL;
     return cb;
 }
 
@@ -214,7 +231,7 @@ cb_get_state(circuit_breaker_t* cb, const char* model, const char* endpoint)
         return CB_CLOSED;
     }
     time_t now = get_now(cb);
-    update_state_on_time_locked(e, now);
+    update_state_on_time_locked(cb, e, now);
     cb_state_t st = e->state;
     pthread_mutex_unlock(&cb->mtx);
     return st;
@@ -233,7 +250,7 @@ cb_get_open_until(circuit_breaker_t* cb, const char* model, const char* endpoint
         return 0;
     }
     time_t now = get_now(cb);
-    update_state_on_time_locked(e, now);
+    update_state_on_time_locked(cb, e, now);
     time_t until = (e->state == CB_OPEN) ? e->open_until : 0;
     pthread_mutex_unlock(&cb->mtx);
     return until;
@@ -323,7 +340,7 @@ cb_allow_request(circuit_breaker_t* cb, const char* model, const char* endpoint)
         return true;
     }
     time_t now = get_now(cb);
-    update_state_on_time_locked(e, now);
+    update_state_on_time_locked(cb, e, now);
 
     bool allowed = false;
     if (e->state == CB_CLOSED) {
@@ -380,6 +397,9 @@ cb_record_success(circuit_breaker_t* cb, const char* model, const char* endpoint
             AIGATE_LOG_INFO("circuit breaker for %s:%s probe succeeded, transitioned to CLOSED",
                             e->model,
                             e->endpoint);
+            if (cb->eb != NULL) {
+                event_bus_publish_cb(cb->eb, e->endpoint, e->model, "HALF_OPEN", "CLOSED", "probe succeeded");
+            }
         }
         e->state = CB_CLOSED;
         e->consecutive_failures = 0;
@@ -421,7 +441,7 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
         cb_entry_t* e = get_or_create_entry_locked(cb, model, endpoint);
         if (e != NULL) {
             time_t now = get_now(cb);
-            update_state_on_time_locked(e, now);
+            update_state_on_time_locked(cb, e, now);
             if (e->state == CB_HALF_OPEN) {
                 e->state = CB_OPEN;
                 e->open_until = now + cb->cooloff_sec;
@@ -446,7 +466,7 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
         return;
     }
     time_t now = get_now(cb);
-    update_state_on_time_locked(e, now);
+    update_state_on_time_locked(cb, e, now);
 
     if (e->state == CB_HALF_OPEN) {
         /* Probe failed: trip immediately back to OPEN for another cool-off window */
@@ -459,6 +479,9 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
             e->endpoint,
             http_status,
             (long)e->open_until);
+        if (cb->eb != NULL) {
+            event_bus_publish_cb(cb->eb, e->endpoint, e->model, "HALF_OPEN", "OPEN", "probe failed");
+        }
     } else if (e->state == CB_CLOSED) {
         e->consecutive_failures++;
         if (e->consecutive_failures >= cb->failure_threshold) {
@@ -472,6 +495,9 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
                             e->consecutive_failures,
                             http_status,
                             (long)e->open_until);
+            if (cb->eb != NULL) {
+                event_bus_publish_cb(cb->eb, e->endpoint, e->model, "CLOSED", "OPEN", "failures reached threshold");
+            }
         }
     } else {
         /* Already OPEN: keep the original cool-off window. Refreshing

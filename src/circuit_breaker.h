@@ -20,6 +20,7 @@ typedef enum {
 typedef struct circuit_breaker circuit_breaker_t;
 typedef time_t (*cb_time_fn)(void);
 struct redis_pool;
+struct event_bus;
 
 #define CB_DEFAULT_FAILURE_THRESHOLD 3
 #define CB_DEFAULT_COOLOFF_SEC 30
@@ -38,6 +39,7 @@ void cb_set_time_fn(circuit_breaker_t* cb, cb_time_fn fn);
 
 /** @brief Configure shared Redis connection pool (enables distributed circuit breaking). */
 void cb_set_redis_pool(circuit_breaker_t* cb, struct redis_pool* pool);
+void cb_set_event_bus(circuit_breaker_t* cb, struct event_bus* eb);
 
 /** @brief Get current circuit state for a model endpoint ("closed", "open", "half_open"). */
 cb_state_t cb_get_state(circuit_breaker_t* cb, const char* model, const char* endpoint);

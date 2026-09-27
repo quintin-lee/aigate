@@ -9,6 +9,8 @@
 #include "provider_gemini.h"
 #include "provider_openai.h"
 #include "upstream_client.h"
+#include "health_prober.h"
+#include "event_bus.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -85,6 +87,50 @@ calc_req_cost(const model_rec_t* route, long prompt, long completion, long cache
            1000000.0;
 }
 
+static void
+record_usage_and_event(aigate_core* ac,
+                       long         key_id,
+                       const char*  model,
+                       int          status,
+                       long         ptok,
+                       long         ctok,
+                       long         cached_tok,
+                       long         reasoning_tok,
+                       uint64_t     lat_ns,
+                       const char*  provider,
+                       const char*  guardrail_act,
+                       double       req_cost)
+{
+    if (ac == NULL) {
+        return;
+    }
+    if (ac->um != NULL) {
+        um_record_full(ac->um,
+                       key_id,
+                       model,
+                       status,
+                       ptok,
+                       ctok,
+                       cached_tok,
+                       reasoning_tok,
+                       lat_ns,
+                       provider,
+                       guardrail_act);
+    }
+    if (ac->eb != NULL) {
+        event_bus_publish_request(ac->eb,
+                                  key_id,
+                                  model,
+                                  provider,
+                                  status,
+                                  lat_ns,
+                                  ptok,
+                                  ctok,
+                                  req_cost,
+                                  guardrail_act);
+    }
+}
+
 int
 aigate_core_init(aigate_core*   ac,
                  pg_store_t*    ps,
@@ -107,9 +153,24 @@ aigate_core_init(aigate_core*   ac,
     if (ac->be != NULL) {
         budget_enforce_init_from_db(ac->be);
     }
+    ac->eb = event_bus_new();
+    if (ac->cb != NULL && ac->eb != NULL) {
+        cb_set_event_bus(ac->cb, ac->eb);
+    }
+    if (ac->be != NULL && ac->eb != NULL) {
+        budget_enforce_set_event_bus(ac->be, ac->eb);
+    }
+    ac->hp = health_prober_new(ps, master32, ac->eb, 60);
+
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
         /* Roll back any partially built sub-objects; the router teardown
          * also cleanses its master-key copy. */
+        if (ac->hp != NULL) {
+            health_prober_free(ac->hp);
+        }
+        if (ac->eb != NULL) {
+            event_bus_free(ac->eb);
+        }
         if (ac->cb != NULL) {
             cb_destroy(ac->cb);
         }
@@ -138,6 +199,14 @@ aigate_core_init(aigate_core*   ac,
 void
 aigate_core_shutdown(aigate_core* ac)
 {
+    if (ac->hp != NULL) {
+        health_prober_free(ac->hp);
+        ac->hp = NULL;
+    }
+    if (ac->eb != NULL) {
+        event_bus_free(ac->eb);
+        ac->eb = NULL;
+    }
     if (ac->cb != NULL) {
         cb_destroy(ac->cb);
         ac->cb = NULL;
@@ -479,7 +548,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
                 if (!is_failover && status >= 400) {
                     if (sbody != NULL && urc == 0) {
-                        um_record_ext(ac->um, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider);
+                        record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
                         int rv = aigate_write_json(rc, status, sbody, slen);
                         free(sbody);
                         json_decref(jbody);
@@ -513,7 +582,11 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                 if (rc->write != NULL) {
                     rc->write(rc->impl, sse_err, strlen(sse_err), true);
                 }
-                um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider);
+                double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+                record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider, NULL, req_cost);
+                if (ac->be != NULL) {
+                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+                }
                 if (ptok + ctok > 0) {
                     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
                 }
@@ -525,7 +598,11 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
             cb_record_success(ac->cb, model, target->endpoint);
             adapter->stream_bridge_finish(bridge);
-            um_record_ext(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider);
+            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            record_usage_and_event(ac, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider, NULL, req_cost);
+            if (ac->be != NULL) {
+                budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+            }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
             adapter->stream_bridge_free(bridge);
 
@@ -538,7 +615,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
         }
         aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-        um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider);
+        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
@@ -621,8 +698,12 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             adapter->parse_responses_response(ubody ? ubody : "", ulen,
                                               &ptok, &ctok, &cached_tok, &reasoning_tok);
 
-            um_record_ext(ac->um, krec.key_id, model, status,
-                          ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider);
+            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            record_usage_and_event(ac, krec.key_id, model, status,
+                                   ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider, NULL, req_cost);
+            if (ac->be != NULL) {
+                budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+            }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
             int rv = aigate_write_json(rc, status, ubody ? ubody : "", ulen);
@@ -636,7 +717,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
         if (!is_failover && status >= 400) {
             if (ubody != NULL && urc == 0) {
-                um_record_ext(ac->um, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider);
+                record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
                 int rv = aigate_write_json(rc, status, ubody, ulen);
                 free(ubody);
                 json_decref(jbody);
@@ -659,7 +740,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
         rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
     aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-    um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider);
+    record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
     json_decref(jbody);
     key_rec_free(&krec);
     return 0;
@@ -934,7 +1015,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 
                 if (!is_failover && status >= 400) {
                     if (sbody != NULL && urc == 0) {
-                        um_record_ext(ac->um, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider);
+                        record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
                         int rv = aigate_write_json(rc, status, sbody, slen);
                         free(sbody);
                         json_decref(jbody);
@@ -968,7 +1049,11 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
                 if (rc->write != NULL) {
                     rc->write(rc->impl, sse_err, strlen(sse_err), true);
                 }
-                um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, 0, total_lat, target->provider);
+                double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+                record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, 0, total_lat, target->provider, NULL, req_cost);
+                if (ac->be != NULL) {
+                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+                }
                 if (ptok + ctok > 0) {
                     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
                 }
@@ -981,7 +1066,11 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
             if (rc->write != NULL) {
                 rc->write(rc->impl, "", 0, true);
             }
-            um_record_ext(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, 0, total_lat, target->provider);
+            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            record_usage_and_event(ac, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, 0, total_lat, target->provider, NULL, req_cost);
+            if (ac->be != NULL) {
+                budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+            }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
             json_decref(jbody);
@@ -993,7 +1082,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
             rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
         }
         aigate_write_anthropic_error(rc, 502, "api_error", "upstream request failed");
-        um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider);
+        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
@@ -1065,16 +1154,22 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
             long ptok = 0, ctok = 0, cached_tok = 0;
             anthropic_sniff_usage_json(ubody ? ubody : "", &ptok, &ctok, &cached_tok);
 
-            um_record_ext(ac->um,
-                          krec.key_id,
-                          model,
-                          status,
-                          ptok,
-                          ctok,
-                          cached_tok,
-                          0,
-                          total_lat,
-                          target->provider);
+            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            record_usage_and_event(ac,
+                                   krec.key_id,
+                                   model,
+                                   status,
+                                   ptok,
+                                   ctok,
+                                   cached_tok,
+                                   0,
+                                   total_lat,
+                                   target->provider,
+                                   NULL,
+                                   req_cost);
+            if (ac->be != NULL) {
+                budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+            }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
             if (rc->set_header != NULL) {
@@ -1091,7 +1186,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 
         if (!is_failover && status >= 400) {
             if (ubody != NULL && urc == 0) {
-                um_record_ext(ac->um, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider);
+                record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
                 if (rc->set_header != NULL) {
                     rc->set_header(rc->impl, "X-Upstream-Provider", target->provider);
                 }
@@ -1117,7 +1212,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
         rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
     aigate_write_anthropic_error(rc, 502, "api_error", "upstream request failed");
-    um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider);
+    record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
     json_decref(jbody);
     key_rec_free(&krec);
     return 0;
@@ -1400,7 +1495,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 
                 if (!is_failover && status >= 400) {
                     if (sbody != NULL && urc == 0) {
-                        um_record_ext(ac->um, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider);
+                        record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
                         int rv = aigate_write_json(rc, status, sbody, slen);
                         free(sbody);
                         key_rec_free(&krec);
@@ -1433,7 +1528,11 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
                 if (rc->write != NULL) {
                     rc->write(rc->impl, sse_err, strlen(sse_err), true);
                 }
-                um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, 0, total_lat, target->provider);
+                double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+                record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, 0, total_lat, target->provider, NULL, req_cost);
+                if (ac->be != NULL) {
+                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+                }
                 if (ptok + ctok > 0) {
                     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
                 }
@@ -1445,7 +1544,11 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
             if (rc->write != NULL) {
                 rc->write(rc->impl, "", 0, true);
             }
-            um_record_ext(ac->um, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, 0, total_lat, target->provider);
+            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            record_usage_and_event(ac, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, 0, total_lat, target->provider, NULL, req_cost);
+            if (ac->be != NULL) {
+                budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+            }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
             key_rec_free(&krec);
@@ -1456,7 +1559,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
             rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
         }
         aigate_write_gemini_error(rc, 502, "UNAVAILABLE", "upstream request failed");
-        um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider);
+        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
         key_rec_free(&krec);
         return 0;
     }
@@ -1524,16 +1627,22 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
             long ptok = 0, ctok = 0, cached_tok = 0;
             gemini_sniff_usage_json(ubody ? ubody : "", &ptok, &ctok, &cached_tok);
 
-            um_record_ext(ac->um,
-                          krec.key_id,
-                          model,
-                          status,
-                          ptok,
-                          ctok,
-                          cached_tok,
-                          0,
-                          total_lat,
-                          target->provider);
+            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            record_usage_and_event(ac,
+                                   krec.key_id,
+                                   model,
+                                   status,
+                                   ptok,
+                                   ctok,
+                                   cached_tok,
+                                   0,
+                                   total_lat,
+                                   target->provider,
+                                   NULL,
+                                   req_cost);
+            if (ac->be != NULL) {
+                budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+            }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
             if (rc->set_header != NULL) {
@@ -1549,7 +1658,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 
         if (!is_failover && status >= 400) {
             if (ubody != NULL && urc == 0) {
-                um_record_ext(ac->um, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider);
+                record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
                 if (rc->set_header != NULL) {
                     rc->set_header(rc->impl, "X-Upstream-Provider", target->provider);
                 }
@@ -1574,7 +1683,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
         rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
     aigate_write_gemini_error(rc, 502, "UNAVAILABLE", "upstream request failed");
-    um_record_ext(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider);
+    record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
     key_rec_free(&krec);
     return 0;
 }
@@ -1772,9 +1881,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                      "Blocked by safety guardrail rule: %s",
                      matched_rule[0] ? matched_rule : "blocked content");
             aigate_write_error(rc, 400, "content_policy_violation", block_msg);
-            if (ac->um != NULL) {
-                um_record_full(ac->um, krec.key_id, model, 400, 0, 0, 0, 0, 0, NULL, "blocked");
-            }
+            record_usage_and_event(ac, krec.key_id, model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
             json_decref(jbody);
             key_rec_free(&krec);
             return 0;
@@ -1910,19 +2017,20 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 }
                 free(ubody);
 
-                um_record_full(ac->um,
-                               krec.key_id,
-                               model,
-                               parsed_status,
-                               ptok,
-                               0,
-                               0,
-                               0,
-                               total_lat,
-                               target->provider,
-                               guardrail_act);
+                double req_cost = calc_req_cost(&route, ptok, 0, 0);
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       parsed_status,
+                                       ptok,
+                                       0,
+                                       0,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       guardrail_act,
+                                       req_cost);
                 if (ac->be != NULL) {
-                    double req_cost = calc_req_cost(&route, ptok, 0, 0);
                     budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok);
                 }
                 if (ptok > 0) {
@@ -1942,8 +2050,8 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
 
             if (!is_failover && status >= 400) {
                 if (ubody != NULL && urc == 0) {
-                    um_record_full(
-                        ac->um, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, guardrail_act);
+                    record_usage_and_event(
+                        ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, guardrail_act, 0.0);
                     int rv = aigate_write_json(rc, status, ubody, ulen);
                     free(ubody);
                     json_decref(jbody);
@@ -1976,7 +2084,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         }
         aigate_write_error(
             rc, PIPE_UPSTREAM, "upstream_error", "upstream embeddings request failed");
-        um_record_full(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act);
+        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act, 0.0);
         json_decref(jbody);
         key_rec_free(&krec);
         free(sanitized_body);
@@ -2111,17 +2219,18 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                      * (mirrors the non-streaming passthrough). Only when a
                      * body was actually received (urc == 0). */
                     if (sbody != NULL && urc == 0) {
-                        um_record_full(ac->um,
-                                       krec.key_id,
-                                       model,
-                                       status,
-                                       0,
-                                       0,
-                                       0,
-                                       0,
-                                       total_lat,
-                                       target->provider,
-                                       guardrail_act);
+                        record_usage_and_event(ac,
+                                               krec.key_id,
+                                               model,
+                                               status,
+                                               0,
+                                               0,
+                                               0,
+                                               0,
+                                               total_lat,
+                                               target->provider,
+                                               guardrail_act,
+                                               0.0);
                         int rv = aigate_write_json(rc, status, sbody, slen);
                         free(sbody);
                         json_decref(jbody);
@@ -2168,19 +2277,20 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 if (rc->write != NULL) {
                     rc->write(rc->impl, sse_err, strlen(sse_err), true);
                 }
-                um_record_full(ac->um,
-                               krec.key_id,
-                               model,
-                               PIPE_UPSTREAM,
-                               ptok,
-                               ctok,
-                               cached_tok,
-                               0,
-                               total_lat,
-                               target->provider,
-                               guardrail_act);
+                double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       PIPE_UPSTREAM,
+                                       ptok,
+                                       ctok,
+                                       cached_tok,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       guardrail_act,
+                                       req_cost);
                 if (ac->be != NULL) {
-                    double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
                     budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
                 }
                 if (ptok + ctok > 0) {
@@ -2195,19 +2305,20 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
 
             cb_record_success(ac->cb, model, target->endpoint);
             adapter->stream_bridge_finish(bridge);
-            um_record_full(ac->um,
-                           krec.key_id,
-                           model,
-                           status > 0 ? status : 200,
-                           ptok,
-                           ctok,
-                           cached_tok,
-                           0,
-                           total_lat,
-                           target->provider,
-                           guardrail_act);
+            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            record_usage_and_event(ac,
+                                   krec.key_id,
+                                   model,
+                                   status > 0 ? status : 200,
+                                   ptok,
+                                   ctok,
+                                   cached_tok,
+                                   0,
+                                   total_lat,
+                                   target->provider,
+                                   guardrail_act,
+                                   req_cost);
             if (ac->be != NULL) {
-                double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
@@ -2223,7 +2334,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
         }
         aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-        um_record_full(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act);
+        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act, 0.0);
         json_decref(jbody);
         key_rec_free(&krec);
         free(sanitized_body);
@@ -2338,19 +2449,20 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             }
             free(ubody);
 
-            um_record_full(ac->um,
-                           krec.key_id,
-                           model,
-                           parsed_status,
-                           ptok,
-                           ctok,
-                           cached_tok,
-                           0,
-                           total_lat,
-                           target->provider,
-                           guardrail_act);
+            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            record_usage_and_event(ac,
+                                   krec.key_id,
+                                   model,
+                                   parsed_status,
+                                   ptok,
+                                   ctok,
+                                   cached_tok,
+                                   0,
+                                   total_lat,
+                                   target->provider,
+                                   guardrail_act,
+                                   req_cost);
             if (ac->be != NULL) {
-                double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
@@ -2371,7 +2483,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
              * client (e.g. OpenAI "invalid request") instead of a generic 502.
              * Only when we actually received a body (urc == 0). */
             if (ubody != NULL && urc == 0) {
-                um_record_full(ac->um, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, guardrail_act);
+                record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, guardrail_act, 0.0);
                 int rv = aigate_write_json(rc, status, ubody, ulen);
                 free(ubody);
                 json_decref(jbody);
@@ -2403,7 +2515,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
     aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-    um_record_full(ac->um, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act);
+    record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act, 0.0);
     json_decref(jbody);
     key_rec_free(&krec);
     free(sanitized_body);
