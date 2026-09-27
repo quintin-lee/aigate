@@ -44,6 +44,7 @@
 
 /* ------------------------------------------------------------ helpers */
 
+/** @brief 安全截断拷贝：cap 为 0 直接返回；src 为 NULL 置空串；超长截断并 NUL 结尾。 */
 static void
 copy_field(char* dst, size_t cap, const char* src)
 {
@@ -100,6 +101,7 @@ typedef struct {
 static lockout_slot_t  g_lockout[LOCKOUT_SLOTS];
 static pthread_mutex_t g_lockout_mtx = PTHREAD_MUTEX_INITIALIZER;
 
+/** @brief IP 字符串的 FNV-1a 哈希对锁槽数取模（本地熔断表分片定位）。 */
 static unsigned
 lockout_slot_for(const char* ip)
 {
@@ -151,6 +153,7 @@ lockout_hit(const char* ip)
     return hit;
 }
 
+/** @brief 记录一次管理口鉴权失败：Redis 分布式计数与本地槽计数双记（窗口滚动清零）。 */
 static void
 lockout_fail(const char* ip)
 {
@@ -199,6 +202,7 @@ local_fail:;
     pthread_mutex_unlock(&g_lockout_mtx);
 }
 
+/** @brief 清除该 IP 的本地失败计数（鉴权成功后调用）。 */
 static void
 lockout_clear(const char* ip)
 {
@@ -275,6 +279,8 @@ finish_json(int* status, char** body, size_t* len, int http, json_t* j)
     return 0;
 }
 
+/** @brief 按 OpenAI 形 `{"error":{"message","type","code"}}` 包错误体，走 finish_json。
+ *  @return finish_json 结果。 */
 static int
 finish_error(int* status, char** body, size_t* len, int http, const char* type, const char* message)
 {
@@ -304,6 +310,7 @@ parse_body(const void* body, size_t body_len)
     return j;
 }
 
+/** @brief 取 JSON 对象字符串字段值；缺失/非字符串返回 @p fallback（借用指针，勿释放）。 */
 static const char*
 jstring(const json_t* obj, const char* field, const char* fallback)
 {
@@ -343,6 +350,8 @@ query_param(const char* query, const char* field, char* out, size_t cap)
     return 0;
 }
 
+/** @brief 解析查询串分页参数：page（缺省 1）、limit（别名 page_size/size，钳 [1,1000]，缺省 0 表不分页）、offset（无 page 时折算）。
+ *  @param out_page/out_limit 输出；恒写入。 */
 static void
 parse_pagination_params(const char* query, int* out_page, int* out_limit)
 {
@@ -390,6 +399,8 @@ parse_pagination_params(const char* query, int* out_page, int* out_limit)
     *out_limit = limit;
 }
 
+/** @brief 对 JSON 数组切页：limit≤0 直接返回原数组；否则返回新建页数组并 decref 输入。
+ *  @param out_total 可选，恒写总数。@return 页数组（调用方负责 decref）。 */
 static json_t*
 paginate_json_array(json_t* all_items, int page, int limit, size_t* out_total)
 {
@@ -418,6 +429,7 @@ paginate_json_array(json_t* all_items, int page, int limit, size_t* out_total)
     return paged;
 }
 
+/** @brief 给列表响应根对象写 total；分页时追加 page/limit。 */
 static void
 add_pagination_meta(json_t* root, size_t total, int page, int limit)
 {
@@ -451,6 +463,8 @@ gen_key_plaintext(char plain[KEY_PLAIN_CAP], char hash_out[KEY_HASH_CAP])
     return 0;
 }
 
+/** @brief POST /admin/v1/keys：建 API key，明文仅本次返回（落库只存哈希）。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
 {
@@ -575,6 +589,8 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     return finish_json(status, body, len, 201, out);
 }
 
+/** @brief GET /admin/v1/keys：分页列出 API key（不含明文）。
+ *  @return 0 已填 status/body；-1 仅内存/序列化失败。 */
 static int
 key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -649,6 +665,8 @@ path_key_id(const char* rest, long* key_id)
     return 0;
 }
 
+/** @brief PATCH/PUT /admin/v1/keys/<id>：按数字 id 更新 key（名/配额/开关等）。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 key_patch(
     admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
@@ -810,6 +828,8 @@ key_patch(
     return finish_json(status, body, len, 200, out);
 }
 
+/** @brief DELETE /admin/v1/keys/<id>：吊销 API key。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 key_revoke(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
 {
@@ -886,6 +906,8 @@ parse_targets_array(json_t* jtargets, upstream_target_t* targets, int max_target
     return 0;
 }
 
+/** @brief POST /admin/v1/models：建模型路由记录。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
 {
@@ -986,6 +1008,8 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     return finish_json(status, body, len, 201, out);
 }
 
+/** @brief GET /admin/v1/models：分页列出模型路由。
+ *  @return 0 已填 status/body；-1 仅内存/序列化失败。 */
 static int
 model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -1072,6 +1096,8 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
     return finish_json(status, body, len, 200, root);
 }
 
+/** @brief PATCH/PUT /admin/v1/models/<name>：按模型名更新路由（端点/密钥引用/开关等）。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 model_patch(
     admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
@@ -1180,6 +1206,8 @@ model_patch(
     return finish_json(status, body, len, 200, out);
 }
 
+/** @brief DELETE /admin/v1/models/<name>：按模型名删除路由。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 model_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
 {
@@ -1233,6 +1261,8 @@ mask_api_key(
     snprintf(out, out_cap, "%s••••%s", prefix, suffix);
 }
 
+/** @brief 上游密钥落库规范化：`env:`/`pg:` 引用原样存；明文优先加密成 `pg:`；无 master 时明文仅在 allow_plaintext_keys 下接受。
+ *  @return 0 已写 @p out_key；-1 拒绝落库（out 置空）。 */
 static int
 process_api_key_for_storage(admin_ctx_t* adm, const char* input_key, char* out_key, size_t out_sz)
 {
@@ -1264,6 +1294,8 @@ process_api_key_for_storage(admin_ctx_t* adm, const char* input_key, char* out_k
     return 0;
 }
 
+/** @brief JSON 字符串数组转 strdup 字符串数组（跳过空串；调用方逐项 free 再 free 数组）。
+ *  @return 0 成功（非数组/空视为 0 项）；超 256 项或分配失败返回 -1。 */
 static int
 parse_provider_models_json(const json_t* jarr, char*** out_models, int* out_n)
 {
@@ -1308,6 +1340,8 @@ parse_provider_models_json(const json_t* jarr, char*** out_models, int* out_n)
     return 0;
 }
 
+/** @brief 把 provider 的模型清单同步进 models 表：已存在更新端点/密钥/开关，不存在按 priority 策略创建，并刷路由缓存。
+ *  @return 同步失败的模型数（0 表全成）。 */
 static int
 sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
 {
@@ -1372,6 +1406,8 @@ sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
     return failed;
 }
 
+/** @brief POST /admin/v1/providers：建上游供应商，并同步其模型清单。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 provider_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
 {
@@ -1440,6 +1476,8 @@ provider_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const v
     return finish_json(status, body, len, 201, out);
 }
 
+/** @brief GET /admin/v1/providers：分页列出上游供应商。
+ *  @return 0 已填 status/body；-1 仅内存/序列化失败。 */
 static int
 provider_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -1507,6 +1545,8 @@ provider_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const cha
     return finish_json(status, body, len, 200, root);
 }
 
+/** @brief PATCH/PUT /admin/v1/providers/<id>：按数字 id 更新供应商（改模型清单会触发同步）。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 provider_patch(
     admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
@@ -1761,6 +1801,8 @@ provider_test(admin_ctx_t* adm, int* status, char** body, size_t* len, const cha
     return finish_json(status, body, len, 200, o);
 }
 
+/** @brief GET /admin/v1/providers/health：探针全量快照；探针未初始化返回空 providers。
+ *  @return 0 已填 status/body；-1 仅序列化失败。 */
 static int
 provider_health_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
 {
@@ -1780,6 +1822,8 @@ provider_health_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
     return 0;
 }
 
+/** @brief POST /admin/v1/providers/probe：立即触发一次全量探针并返回快照（无探针 503）。
+ *  @return 0 已填 status/body；-1 仅序列化失败。 */
 static int
 provider_probe_trigger(admin_ctx_t* adm, int* status, char** body, size_t* len)
 {
@@ -1818,6 +1862,8 @@ parse_day(const char* s, time_t* out)
     return 0;
 }
 
+/** @brief GET /admin/v1/usage?key=&model=&from=&to=：按 key/模型/日期范围查聚合用量（日期走 parse_day）。
+ *  @return 0 已填 status/body；-1 仅内存/序列化失败。 */
 static int
 usage_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -2038,6 +2084,8 @@ group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     return finish_json(status, body, len, 201, out);
 }
 
+/** @brief GET /admin/v1/groups：分页列出 key 分组。
+ *  @return 0 已填 status/body；-1 仅内存/序列化失败。 */
 static int
 group_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -2091,6 +2139,8 @@ group_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
     return finish_json(status, body, len, 200, root);
 }
 
+/** @brief PATCH/PUT /admin/v1/groups/<id>：按数字 id 改组名/月预算（至少给一项）。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 group_patch(
     admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
@@ -2168,6 +2218,8 @@ group_patch(
     return finish_json(status, body, len, 200, out);
 }
 
+/** @brief DELETE /admin/v1/groups/<id>：删分组；仍挂 key 时 409 拒绝。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 group_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
 {
@@ -2200,6 +2252,7 @@ group_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char
 
 /* ------------------------------------------------------------ cost attribution */
 
+/** @brief group_id 查组名：0 返回 "(ungrouped)"，查无返回 "(unknown)"（借用指针，勿释放）。 */
 static const char*
 lookup_group_name(long group_id, const group_rec_t* groups, int n_groups)
 {
@@ -2214,6 +2267,8 @@ lookup_group_name(long group_id, const group_rec_t* groups, int n_groups)
     return "(unknown)";
 }
 
+/** @brief 按模型定价（in/out_mtok 单价，缓存折扣）把 token 折算成美分。
+ *  @return 1 命中定价并写 @p out_cents；0 未命中/定价非法（out 不动）。 */
 static int
 calculate_model_cost(const char*        model_name,
                      const model_rec_t* models,
@@ -2415,6 +2470,8 @@ cost_from_rows(const cost_row_t*  rows,
         rows, n_rows, models, n_models, groups, n_groups, group_filter, by_model, truncated, 1, 0);
 }
 
+/** @brief GET /admin/v1/cost?group=&from=&to=&by=：费用归因查询（按组/日期过滤，按 by 分组）。
+ *  @return 0 已填 status/body；-1 仅内存/序列化失败。 */
 static int
 cost_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -2622,6 +2679,8 @@ guardrails_rule_create(admin_ctx_t* adm, int* status, char** body, size_t* len, 
     return finish_json(status, body, len, 201, out);
 }
 
+/** @brief GET /admin/v1/guardrails：分页列出护栏规则。
+ *  @return 0 已填 status/body；-1 仅内存/序列化失败。 */
 static int
 guardrails_rule_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -2679,6 +2738,8 @@ guardrails_rule_list(admin_ctx_t* adm, int* status, char** body, size_t* len, co
     return finish_json(status, body, len, 200, root);
 }
 
+/** @brief PATCH/PUT /admin/v1/guardrails/<id>：按数字 id 更新护栏规则。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 guardrails_rule_update(
     admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
@@ -2785,6 +2846,8 @@ guardrails_rule_update(
     return finish_json(status, body, len, 200, out);
 }
 
+/** @brief DELETE /admin/v1/guardrails/<id>：删规则并热加载管线护栏。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 guardrails_rule_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
 {
@@ -2809,6 +2872,8 @@ guardrails_rule_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, 
     return finish_json(status, body, len, 200, out);
 }
 
+/** @brief POST /admin/v1/guardrails/reload：从 store 重载管线护栏规则。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 guardrails_reload(admin_ctx_t* adm, int* status, char** body, size_t* len)
 {
@@ -2838,6 +2903,8 @@ cache_stats_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
     return 0;
 }
 
+/** @brief POST /admin/v1/cache/purge：按请求体 model 清响应缓存（缺省全清），返回条数/字节。
+ *  @return 0 已填 status/body；-1 仅 JSON 序列化失败。 */
 static int
 cache_purge_trigger(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* req_body)
 {

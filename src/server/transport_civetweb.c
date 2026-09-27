@@ -37,6 +37,7 @@ struct cw_response_state {
     aigate_response_ctx*  rc;
 };
 
+/** @brief HTTP 状态码转原因短语；未收录返回 "Response"。 */
 static const char*
 http_reason(int status)
 {
@@ -70,6 +71,8 @@ http_reason(int status)
     }
 }
 
+/** @brief response_ctx set_header 适配：头未发出时追加进 header_buf（超容静默丢弃），已发出则丢弃。
+ *  @return 恒 0。 */
 static int
 cw_set_header(void* impl, const char* name, const char* value)
 {
@@ -85,6 +88,9 @@ cw_set_header(void* impl, const char* name, const char* value)
     return 0;
 }
 
+/** @brief response_ctx write 适配：首写先刷状态行+累积头，再 mg_write 分片。
+ *  @param fin 本传输忽略（CivetWeb 无需显式终结标记）。
+ *  @return 0 成功；mg_write 失败返回 -1。 */
 static int
 cw_write(void* impl, const void* buf, size_t len, bool fin)
 {
@@ -105,6 +111,8 @@ cw_write(void* impl, const void* buf, size_t len, bool fin)
     return 0;
 }
 
+/** @brief 从 Authorization / x-api-key / x-goog-api-key / 查询串提取调用凭证（委托 extract_credential_from_headers）。
+ *  @return 凭证字符串（借用，勿释放）；无则 NULL。 */
 static const char*
 extract_bearer(struct mg_connection* conn)
 {
@@ -144,6 +152,8 @@ read_body(struct mg_connection* conn, long long cl, size_t* out_len)
     return buf;
 }
 
+/** @brief 直接回写一个 JSON 错误响应（自带 Content-Length，Connection: close）。
+ *  @return 恒 1（CivetWeb 已处理标记）。 */
 static int
 send_http_error_json(struct mg_connection* conn, int status, const char* body, size_t len)
 {
@@ -161,6 +171,8 @@ send_http_error_json(struct mg_connection* conn, int status, const char* body, s
     return 1;
 }
 
+/** @brief 推理面入口：超体限 413 → 读体 → 组装请求/响应上下文 → aigate_handle_request。
+ *  @return 恒 1；ri 缺失返回 0 交 CivetWeb 默认处理。 */
 static int
 handle_v1(struct mg_connection* conn, void* cbdata)
 {
@@ -218,6 +230,8 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     return 1;
 }
 
+/** @brief /admin/v1 入口：/admin/v1/events 为鉴权 SSE 事件订阅流；其余经 admin_dispatch 分发并回写 JSON。
+ *  @return 恒 1；ri 缺失返回 0。 */
 static int
 handle_admin(struct mg_connection* conn, void* cbdata)
 {
@@ -355,6 +369,8 @@ handle_admin(struct mg_connection* conn, void* cbdata)
     return 1;
 }
 
+/** @brief /metrics 入口：IP ACL 不过 403，否则渲染 Prometheus 文本（version 0.0.4）回写。
+ *  @return 恒 1；ri 缺失返回 0。 */
 static int
 handle_metrics(struct mg_connection* conn, void* cbdata)
 {
@@ -391,6 +407,8 @@ handle_metrics(struct mg_connection* conn, void* cbdata)
     return 1;
 }
 
+/** @brief /admin 静态页入口：仅 GET/HEAD 交 admin_ui_serve，否则 405。
+ *  @return 恒 1；ri 缺失返回 0。 */
 static int
 handle_admin_ui(struct mg_connection* conn, void* cbdata)
 {
@@ -406,6 +424,8 @@ handle_admin_ui(struct mg_connection* conn, void* cbdata)
     return admin_ui_serve(conn);
 }
 
+/** @brief 根路径入口：`/` 302 跳 /admin，其余返回 0 交后续 handler。
+ *  @return 1 已处理重定向；0 未处理。 */
 static int
 handle_root(struct mg_connection* conn, void* cbdata)
 {
