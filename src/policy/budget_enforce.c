@@ -35,6 +35,7 @@ struct budget_enforce_mgr {
     group_spend_node_t* group_buckets[BUCKET_COUNT];
 };
 
+/** @brief 当前 UTC 年月（YYYYMM 整数，供月度桶滚动比较）。 */
 static int
 get_current_year_month(void)
 {
@@ -44,6 +45,7 @@ get_current_year_month(void)
     return (tm_buf.tm_year + 1900) * 100 + (tm_buf.tm_mon + 1);
 }
 
+/** @brief splitmix64 风格整型哈希，映射 id 到支出桶分片。 */
 static inline size_t
 hash_id(int64_t id)
 {
@@ -54,6 +56,7 @@ hash_id(int64_t id)
     return (size_t)(x % BUCKET_COUNT);
 }
 
+/** @brief 释放全部 key/分组支出桶节点并清指针（不碰 Redis）。 */
 static void
 clear_buckets(budget_enforce_mgr_t* mgr)
 {

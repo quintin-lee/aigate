@@ -249,6 +249,9 @@ guardrails_load_rules(guardrails_ctx_t* ctx, const guardrail_rule_t* rules, size
     return 0;
 }
 
+/** @brief 正则全局替换：数字边界检查为真时跳过两侧紧邻数字的命中（如身份证/电话）。
+ *  @param out_changed 可选，恒写是否发生替换。
+ *  @return 新串（调用方 free）；src 为 NULL 返回 NULL，OOM 回退返回 src 拷贝。 */
 static char*
 replace_regex(const regex_t* re, const char* src, const char* repl, int check_digit_boundary, int* out_changed)
 {

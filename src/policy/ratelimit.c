@@ -36,6 +36,7 @@ struct ratelimit {
     char            sha_quota[48];
 };
 
+/** @brief 单调时钟纳秒（令牌桶/QPS 时间基准，不受 wall clock 跳变影响）。 */
 static uint64_t
 mono_ns(void)
 {
@@ -44,6 +45,7 @@ mono_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
+/** @brief 取当日 UTC 零点（日配额桶的日期分界）。 */
 static time_t
 utc_midnight(time_t t)
 {
@@ -53,6 +55,7 @@ utc_midnight(time_t t)
     return timegm(&tmv);
 }
 
+/** @brief 上取整到 2 的幂（最小 16，哈希表扩容用）。 */
 static size_t
 next_pow2(size_t n)
 {
@@ -63,6 +66,7 @@ next_pow2(size_t n)
     return p;
 }
 
+/** @brief key_id 雪崩哈希（开放寻址桶表索引用）。 */
 static size_t
 hash_id(long key_id)
 {
@@ -122,6 +126,8 @@ ratelimit_set_redis_pool(ratelimit_t* rl, redis_pool_t* pool)
 }
 
 /* @invariant caller holds rl->mtx. */
+/** @brief 按 key 查桶，不存在则建（负载超 3/4 时先 2 倍 rehash）。
+ *  @return 桶指针；rehash OOM 返回 NULL。 */
 static struct bucket*
 find_or_make(ratelimit_t* rl, long key_id)
 {

@@ -38,6 +38,7 @@ struct circuit_breaker {
     cb_entry_t*     buckets[CB_BUCKETS];
 };
 
+/** @brief 当前时间：测试注入优先，否则 time()。 */
 static time_t
 get_now(const circuit_breaker_t* cb)
 {
@@ -47,6 +48,7 @@ get_now(const circuit_breaker_t* cb)
     return time(NULL);
 }
 
+/** @brief model:endpoint 的 djb2 哈希对桶数取模（条目分片定位）。 */
 static unsigned int
 hash_key(const char* model, const char* endpoint)
 {
@@ -66,6 +68,8 @@ hash_key(const char* model, const char* endpoint)
     return h % CB_BUCKETS;
 }
 
+/** @brief 哈希桶链中精确查找 model+endpoint 条目（调用方须持锁）。
+ *  @return 条目指针；不存在返回 NULL。 */
 static cb_entry_t*
 find_entry_locked(circuit_breaker_t* cb, const char* model, const char* endpoint)
 {
@@ -80,6 +84,8 @@ find_entry_locked(circuit_breaker_t* cb, const char* model, const char* endpoint
     return NULL;
 }
 
+/** @brief 查或建条目：不存在则 calloc 新建为 CLOSED 态挂链头（调用方须持锁）。
+ *  @return 条目指针；OOM 返回 NULL。 */
 static cb_entry_t*
 get_or_create_entry_locked(circuit_breaker_t* cb, const char* model, const char* endpoint)
 {
@@ -103,6 +109,7 @@ get_or_create_entry_locked(circuit_breaker_t* cb, const char* model, const char*
     return e;
 }
 
+/** @brief 时间驱动状态推进：OPEN 且冷却到期 → HALF_OPEN（清探测标记，发事件）。调用方须持锁。 */
 static void
 update_state_on_time_locked(circuit_breaker_t* cb, cb_entry_t* e, time_t now)
 {
@@ -259,6 +266,7 @@ cb_get_open_until(circuit_breaker_t* cb, const char* model, const char* endpoint
 /* --- Redis helper ---------------------------------------------------- */
 
 /* Builds the Redis key: aigate:cb:{djb2(model:endpoint) hex8} */
+/** @brief 组装分布式熔断 Redis 键：`aigate:cb:{djb2(model:endpoint) hex8}`。 */
 static void
 cb_redis_key(const char* model, const char* endpoint, char* out, size_t cap)
 {

@@ -10,6 +10,7 @@
 #include <openssl/sha.h>
 #include <jansson.h>
 
+/** @brief 取指纹键前两 hex 字符定分片（非 hex/短键归 0 号分片）。 */
 static inline int
 shard_index(const char* key)
 {
@@ -30,6 +31,7 @@ shard_index(const char* key)
     return (int)(v % CACHE_SHARDS_COUNT);
 }
 
+/** @brief 键的 djb2 哈希对分片内桶数取模（哈希链定位）。 */
 static inline unsigned int
 bucket_index(const char* key)
 {
@@ -41,6 +43,7 @@ bucket_index(const char* key)
     return hash % CACHE_BUCKETS_PER_SHARD;
 }
 
+/** @brief 从分片 LRU 双链表摘除条目（前后指针清零，不释放）。 */
 static void
 lru_remove(cache_shard_t* shard, cache_entry_t* entry)
 {
@@ -58,6 +61,7 @@ lru_remove(cache_shard_t* shard, cache_entry_t* entry)
     entry->next = NULL;
 }
 
+/** @brief 条目推到分片 LRU 链表头（空链表时同步 tail）。 */
 static void
 lru_push_head(cache_shard_t* shard, cache_entry_t* entry)
 {
@@ -72,6 +76,7 @@ lru_push_head(cache_shard_t* shard, cache_entry_t* entry)
     }
 }
 
+/** @brief 销毁条目：无引用者释放内存体；仍有读者时仅打 status=-1 墓碑（读者 release 时释放）。 */
 static void
 destroy_entry_internal(cache_entry_t* entry)
 {
@@ -90,6 +95,7 @@ destroy_entry_internal(cache_entry_t* entry)
     }
 }
 
+/** @brief 淘汰分片 LRU 尾受害者（空分片直接返回）。调用方须持分片锁。 */
 static void
 evict_one_lru_locked(cache_shard_t* shard)
 {

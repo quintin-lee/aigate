@@ -10,6 +10,7 @@
 #include <string.h>
 #include <time.h>
 
+/** @brief LRU 值析构回调：释放 key 记录及堆结构体。 */
 static void
 free_rec_cb(void* val)
 {

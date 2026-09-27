@@ -39,6 +39,7 @@ void cb_set_time_fn(circuit_breaker_t* cb, cb_time_fn fn);
 
 /** @brief Configure shared Redis connection pool (enables distributed circuit breaking). */
 void cb_set_redis_pool(circuit_breaker_t* cb, struct redis_pool* pool);
+/** @brief Attach event bus for publishing circuit state transition events. */
 void cb_set_event_bus(circuit_breaker_t* cb, struct event_bus* eb);
 
 /** @brief Get current circuit state for a model endpoint ("closed", "open", "half_open"). */
