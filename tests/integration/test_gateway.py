@@ -764,11 +764,11 @@ def test_multi_upstream_failover_and_circuit_breaker(gateway):
     assert f'model="{model_name}"' in resp.text
 
     # 5. Fire 2 more requests to reach 3 consecutive failures for Target 1 -> trip Circuit Breaker to OPEN
-    for _ in range(2):
+    for i in range(2):
         r = requests.post(
             f"{base_url}/v1/chat/completions",
-            headers=client_headers,
-            json={"model": model_name, "messages": [{"role": "user", "content": "ping"}]},
+            headers={**client_headers, "Cache-Control": "no-cache"},
+            json={"model": model_name, "messages": [{"role": "user", "content": f"ping-{i}"}]},
         )
         assert r.status_code == 200
 
@@ -2542,6 +2542,193 @@ def test_provider_health_probe_endpoints(gateway):
     assert h_data2["total"] >= 1
     found = any(p["name"] == f"mock-health-{uid}" for p in h_data2["providers"])
     assert found
+
+
+def test_response_cache_exact_hit_and_bypass(gateway):
+    """Test exact non-streaming response cache lookup, HIT header, and bypass header."""
+    import uuid
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"}
+    uid = uuid.uuid4().hex[:6]
+    model_name = f"cache-model-{uid}"
+
+    # Register model
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={"name": model_name, "provider": "openai", "endpoint": mock_url},
+    )
+    assert resp.status_code == 201
+
+    # Create client key
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={"name": f"client-{uid}", "allowed_models": [model_name]},
+    )
+    assert resp.status_code == 201
+    api_key = resp.json()["plaintext"]
+    client_headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    # 1. Purge cache first
+    purge_resp = requests.post(f"{base_url}/admin/v1/cache/purge", headers=admin_headers, json={})
+    assert purge_resp.status_code == 200
+
+    prompt = f"What is 2 + 2? (uuid={uid})"
+    req_body = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+    }
+
+    # 2. First request -> MISS
+    r1 = requests.post(f"{base_url}/v1/chat/completions", headers=client_headers, json=req_body)
+    assert r1.status_code == 200
+    assert r1.headers.get("X-Cache") == "MISS"
+    data1 = r1.json()
+
+    # 3. Second identical request -> HIT (instant return, X-Cache: HIT, Age: >=0)
+    r2 = requests.post(f"{base_url}/v1/chat/completions", headers=client_headers, json=req_body)
+    assert r2.status_code == 200
+    assert r2.headers.get("X-Cache") == "HIT"
+    assert "Age" in r2.headers
+    data2 = r2.json()
+    assert data1["choices"][0]["message"]["content"] == data2["choices"][0]["message"]["content"]
+
+    # 4. Request with Cache-Control: no-cache -> MISS (bypasses cache)
+    bypass_headers = dict(client_headers)
+    bypass_headers["Cache-Control"] = "no-cache"
+    r3 = requests.post(f"{base_url}/v1/chat/completions", headers=bypass_headers, json=req_body)
+    assert r3.status_code == 200
+    assert r3.headers.get("X-Cache") == "MISS"
+
+    # 5. Request with x-skip-cache: 1 -> MISS (bypasses cache)
+    skip_headers = dict(client_headers)
+    skip_headers["x-skip-cache"] = "1"
+    r4 = requests.post(f"{base_url}/v1/chat/completions", headers=skip_headers, json=req_body)
+    assert r4.status_code == 200
+    assert r4.headers.get("X-Cache") == "MISS"
+
+
+def test_response_cache_streaming_dual_replay(gateway):
+    """Test streaming chunk accumulator and SSE stream replay interoperability."""
+    import uuid
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"}
+    uid = uuid.uuid4().hex[:6]
+    model_name = f"stream-cache-model-{uid}"
+
+    # Register model
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={"name": model_name, "provider": "openai", "endpoint": mock_url},
+    )
+    assert resp.status_code == 201
+
+    # Create client key
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={"name": f"stream-client-{uid}", "allowed_models": [model_name]},
+    )
+    assert resp.status_code == 201
+    api_key = resp.json()["plaintext"]
+    client_headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    prompt = f"Explain quantum computing in one sentence (uid={uid})"
+    stream_body = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+    }
+
+    # 1. First streaming request -> upstream mock streams chunks, accumulator caches full JSON
+    r1 = requests.post(f"{base_url}/v1/chat/completions", headers=client_headers, json=stream_body, stream=True)
+    assert r1.status_code == 200
+    assert "text/event-stream" in r1.headers.get("Content-Type", "")
+    assert r1.headers.get("X-Cache") == "MISS"
+    lines1 = [line.decode("utf-8") for line in r1.iter_lines() if line]
+    assert any("data: [DONE]" in l for l in lines1)
+
+    # 2. Second streaming request -> cache hit! Replays SSE stream directly
+    r2 = requests.post(f"{base_url}/v1/chat/completions", headers=client_headers, json=stream_body, stream=True)
+    assert r2.status_code == 200
+    assert "text/event-stream" in r2.headers.get("Content-Type", "")
+    assert r2.headers.get("X-Cache") == "HIT"
+    assert "Age" in r2.headers
+    lines2 = [line.decode("utf-8") for line in r2.iter_lines() if line]
+    assert any("data: [DONE]" in l for l in lines2)
+    assert any("chat.completion.chunk" in l for l in lines2)
+
+    # 3. Third request: non-streaming with the exact same prompt -> cache hit! Returns cached OpenAI JSON
+    non_stream_body = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }
+    r3 = requests.post(f"{base_url}/v1/chat/completions", headers=client_headers, json=non_stream_body)
+    assert r3.status_code == 200
+    assert r3.headers.get("X-Cache") == "HIT"
+    assert "Age" in r3.headers
+    data3 = r3.json()
+    assert data3["object"] == "chat.completion"
+    assert len(data3["choices"]) > 0
+
+
+def test_admin_cache_stats_and_purge(gateway):
+    """Test GET /admin/v1/cache/stats and POST /admin/v1/cache/purge in end-to-end gateway."""
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    admin_headers = {"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"}
+
+    # 1. Unauthenticated stats -> 401
+    r_unauth = requests.get(f"{base_url}/admin/v1/cache/stats", headers={"Authorization": "Bearer wrong-token"})
+    assert r_unauth.status_code == 401
+
+    # 2. GET cache stats
+    r_stats = requests.get(f"{base_url}/admin/v1/cache/stats", headers=admin_headers)
+    assert r_stats.status_code == 200
+    stats = r_stats.json()
+    assert stats["enabled"] is True
+    assert stats["backend"] == "sharded_lru"
+    assert stats["shards"] == 16
+    assert "entries_count" in stats
+    assert "bytes_used" in stats
+    assert "hit_rate_percent" in stats
+    assert "shards_detail" in stats
+    assert len(stats["shards_detail"]) == 16
+
+    # 3. Purge by specific non-matching model
+    r_purge1 = requests.post(
+        f"{base_url}/admin/v1/cache/purge",
+        headers=admin_headers,
+        json={"model": "non-existent-model-xyz"},
+    )
+    assert r_purge1.status_code == 200
+    p1 = r_purge1.json()
+    assert p1["purged_entries"] == 0
+    assert p1["model"] == "non-existent-model-xyz"
+
+    # 4. Purge all
+    r_purge2 = requests.post(f"{base_url}/admin/v1/cache/purge", headers=admin_headers, json={})
+    assert r_purge2.status_code == 200
+    p2 = r_purge2.json()
+    assert p2["model"] == "all"
+    assert "purged_entries" in p2
+    assert "freed_bytes" in p2
+
+    # 5. Verify stats after purge
+    r_stats2 = requests.get(f"{base_url}/admin/v1/cache/stats", headers=admin_headers)
+    assert r_stats2.status_code == 200
+    stats2 = r_stats2.json()
+    assert stats2["entries_count"] == 0
+    assert stats2["bytes_used"] == 0
 
 
 def test_admin_lockout_429(gateway):
