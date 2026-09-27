@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** @brief LRU 值析构：释放堆上 model_rec_t。 */
 static void
 free_route_cb(void* val)
 {
@@ -71,6 +72,8 @@ static _Atomic unsigned long g_rr_counter = 0;
  * restart or cache invalidation — by design, keeps the hot path
  * allocation-free. */
 
+/** @brief 解析单个密钥引用：空串表无需鉴权；`env:` 读环境变量；`pg:` 用 master 解密；其余按明文直存。
+ *  @return 0 已写 @p out_key；-1 环境缺失/无 master/解密失败。 */
 static int
 resolve_single_key(
     model_router_t* mr, const char* key_ref, char* out_key, size_t out_sz, const char* model_name)
@@ -104,6 +107,8 @@ resolve_single_key(
     return 0;
 }
 
+/** @brief 解析记录主密钥与各 target 密钥（target 缺引用时继承主引用）进 @p out。
+ *  @return 0 全成；任一失败返回 -1。 */
 static int
 resolve_key(model_router_t* mr, const model_rec_t* rec, model_rec_t* out)
 {

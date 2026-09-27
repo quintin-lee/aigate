@@ -326,6 +326,7 @@ anthropic_bridge_init(anthropic_bridge_t* b, aigate_response_ctx* rc)
     b->rc = rc;
 }
 
+/** @brief 发一个转译后分片：首包先发 SSE 头，下游写失败置 aborted。 */
 static void
 bridge_send_chunk(anthropic_bridge_t* b, const char* chunk_str)
 {
@@ -346,6 +347,7 @@ bridge_send_chunk(anthropic_bridge_t* b, const char* chunk_str)
     }
 }
 
+/** @brief 处理 Anthropic SSE 一行：`event:` 行记录当前事件类型（message_start/usage 等）。 */
 static void
 bridge_process_line(anthropic_bridge_t* b, const char* line)
 {
@@ -611,12 +613,15 @@ anthropic_bridge_finish(anthropic_bridge_t* b)
 
 /* ------------------------------------------------------------ adapter impl */
 
+/** @brief 适配器 supports 桩：委托 provider_anthropic_supports。 */
 static bool
 adapter_anthropic_supports(const char* provider)
 {
     return provider_anthropic_supports(provider) != 0;
 }
 
+/** @brief 适配器 build_chat 桩：OpenAI 请求转 Anthropic `/messages` 请求（URL/头/体）。
+ *  @return 0 成功；-1 URL 越界/分配失败。 */
 static int
 anthropic_build_chat(const model_rec_t* route,
                      const char*        in_body,
@@ -631,6 +636,8 @@ anthropic_build_chat(const model_rec_t* route,
         route, in_body, url_out, url_cap, extra_headers, n_extra_headers, out_body, out_body_len);
 }
 
+/** @brief 适配器 parse_chat_response 桩：Anthropic 非流式响应转 OpenAI 格式并提 usage token。
+ *  @return 0 成功；-1 分配失败。 */
 static int
 anthropic_parse_chat_response(const char* raw_body,
                               size_t      raw_len,
@@ -651,6 +658,7 @@ anthropic_parse_chat_response(const char* raw_body,
         raw_body, model, out_body, out_len, out_ptok, out_ctok);
 }
 
+/** @brief 新建 Anthropic→OpenAI 流转译桥。@return 桥；OOM 返回 NULL。 */
 static stream_bridge_t*
 anthropic_bridge_new(aigate_response_ctx* rc, const char* model)
 {
@@ -663,18 +671,22 @@ anthropic_bridge_new(aigate_response_ctx* rc, const char* model)
     return (stream_bridge_t*)b;
 }
 
+/** @brief 流转译 feed：Anthropic SSE 事件转 OpenAI data 行并累计 usage。
+ *  @return 0 成功；-1 下游写失败。 */
 static int
 anthropic_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
 {
     return anthropic_bridge_feed((anthropic_bridge_t*)bridge, chunk, len);
 }
 
+/** @brief 终结转译流（补发 [DONE] 并 fin）。@return 下游写结果。 */
 static int
 anthropic_stream_bridge_finish(stream_bridge_t* b)
 {
     return anthropic_bridge_finish((anthropic_bridge_t*)b);
 }
 
+/** @brief 转译桥是否已发头。 */
 static bool
 anthropic_stream_bridge_headers_sent(stream_bridge_t* b)
 {
@@ -682,6 +694,7 @@ anthropic_stream_bridge_headers_sent(stream_bridge_t* b)
     return ab->headers_sent;
 }
 
+/** @brief 取转译桥累计的 input/output/cached token（任一 out 可 NULL）。 */
 static void
 anthropic_stream_bridge_get_tokens(stream_bridge_t* b,
                                    long*            out_ptok,
@@ -700,6 +713,7 @@ anthropic_stream_bridge_get_tokens(stream_bridge_t* b,
     }
 }
 
+/** @brief 释放转译桥。 */
 static void
 anthropic_stream_bridge_free(stream_bridge_t* b)
 {
@@ -765,6 +779,7 @@ anthropic_sniffer_init(anthropic_sniffer_t* s)
     memset(s, 0, sizeof(*s));
 }
 
+/** @brief 嗅探器行处理：解析 message_start/usage 事件行累计 token。 */
 static void
 anthropic_sniffer_process_line(anthropic_sniffer_t* s, const char* line)
 {

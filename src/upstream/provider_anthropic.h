@@ -89,8 +89,12 @@ typedef struct anthropic_sniffer {
     long   cached_tokens;
 } anthropic_sniffer_t;
 
+/** @brief 嗅探器清零（行缓冲与 token 累计）。 */
 void anthropic_sniffer_init(anthropic_sniffer_t* s);
+/** @brief 逐分片喂 SSE 数据，按行解析 message_start/usage 事件累计 token。
+ *  @return 0 成功；-1 写下游中断（本嗅探器恒 0，保留签名兼容）。 */
 int  anthropic_sniffer_feed(anthropic_sniffer_t* s, const void* chunk, size_t len);
+/** @brief 取累计的 input/output/cached token（任一 out 可 NULL）。 */
 void anthropic_sniffer_get_tokens(const anthropic_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached);
 
 #endif /* AIGATE_PROVIDER_ANTHROPIC_H */

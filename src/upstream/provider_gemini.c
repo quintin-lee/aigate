@@ -18,6 +18,7 @@ provider_gemini_supports(const char* provider)
     return provider != NULL && (strcmp(provider, "gemini") == 0 || strcmp(provider, "google") == 0);
 }
 
+/** @brief 适配器 supports 桩：委托 provider_gemini_supports。 */
 static bool
 adapter_gemini_supports(const char* provider)
 {
@@ -183,6 +184,8 @@ provider_gemini_build(const model_rec_t* route,
     return 0;
 }
 
+/** @brief Gemini 原生结束原因转 OpenAI finish_reason（STOP→stop、MAX_TOKENS→length、SAFETY/RECITATION→content_filter；未知→stop）。
+ *  @return 借用静态字符串，勿释放。 */
 static const char*
 map_gemini_finish_reason(const char* reason)
 {
@@ -353,6 +356,7 @@ typedef struct gemini_bridge {
     bool                 done_emitted;
 } gemini_bridge_t;
 
+/** @brief 新建 Gemini→OpenAI 流转译桥。@return 桥；OOM 返回 NULL。 */
 static stream_bridge_t*
 gemini_bridge_new(aigate_response_ctx* rc, const char* model)
 {
@@ -367,6 +371,8 @@ gemini_bridge_new(aigate_response_ctx* rc, const char* model)
     return (stream_bridge_t*)b;
 }
 
+/** @brief 发一个转译后 SSE 分片：首包先发 SSE 头，下游写失败置 aborted。
+ *  @return 0 成功；-1 下游写失败。 */
 static int
 gemini_bridge_send_chunk(gemini_bridge_t* b, const char* str)
 {
@@ -390,6 +396,7 @@ gemini_bridge_send_chunk(gemini_bridge_t* b, const char* str)
     return wr;
 }
 
+/** @brief 处理 Gemini SSE 一行：转译 candidates/usageMetadata 为 OpenAI data 行并累计 token。 */
 static void
 gemini_bridge_process_line(gemini_bridge_t* b, const char* line)
 {
@@ -483,6 +490,8 @@ gemini_bridge_process_line(gemini_bridge_t* b, const char* line)
     json_decref(root);
 }
 
+/** @brief 流转译 feed：逐行转译 Gemini SSE 为 OpenAI data 行。
+ *  @return 0 成功；-1 下游写失败。 */
 static int
 gemini_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
 {
@@ -529,6 +538,7 @@ gemini_stream_bridge_feed(void* bridge, const void* chunk, size_t len)
     return 0;
 }
 
+/** @brief 终结转译流（补发 [DONE] 并 fin）。@return 下游写结果。 */
 static int
 gemini_stream_bridge_finish(stream_bridge_t* bridge)
 {
@@ -572,6 +582,7 @@ gemini_stream_bridge_finish(stream_bridge_t* bridge)
     return 0;
 }
 
+/** @brief 转译桥是否已发头。 */
 static bool
 gemini_stream_bridge_headers_sent(stream_bridge_t* bridge)
 {
@@ -579,6 +590,7 @@ gemini_stream_bridge_headers_sent(stream_bridge_t* bridge)
     return b->headers_sent;
 }
 
+/** @brief 取转译桥累计的 prompt/candidates/cached token（任一 out 可 NULL）。 */
 static void
 gemini_stream_bridge_get_tokens(stream_bridge_t* bridge,
                                 long*            out_ptok,
@@ -597,6 +609,7 @@ gemini_stream_bridge_get_tokens(stream_bridge_t* bridge,
     }
 }
 
+/** @brief 释放转译桥。 */
 static void
 gemini_stream_bridge_free(stream_bridge_t* bridge)
 {
@@ -605,6 +618,8 @@ gemini_stream_bridge_free(stream_bridge_t* bridge)
 
 /* ------------------------------------------------------------ adapter export */
 
+/** @brief 适配器 build_chat 桩：OpenAI 请求转 Gemini `generateContent` 请求（URL/体）。
+ *  @return 0 成功；-1 URL 越界/分配失败。 */
 static int
 gemini_build_chat(const model_rec_t* route,
                   const char*        in_body,
@@ -619,6 +634,8 @@ gemini_build_chat(const model_rec_t* route,
         route, in_body, url_out, url_cap, extra_headers, n_extra_headers, out_body, out_body_len);
 }
 
+/** @brief 适配器 parse_chat_response 桩：Gemini 非流式响应转 OpenAI 格式并提 usage token。
+ *  @return 0 成功；-1 分配失败。 */
 static int
 gemini_parse_chat_response(const char* raw_body,
                            size_t      raw_len,
@@ -951,6 +968,7 @@ gemini_sniffer_init(gemini_sniffer_t* s)
     memset(s, 0, sizeof(*s));
 }
 
+/** @brief 嗅探器行处理：解析 usageMetadata 行累计 token。 */
 static void
 gemini_sniffer_process_line(gemini_sniffer_t* s, const char* line)
 {

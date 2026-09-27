@@ -65,8 +65,12 @@ typedef struct gemini_sniffer {
     long   cached_tokens;
 } gemini_sniffer_t;
 
+/** @brief 嗅探器清零（行缓冲与 token 累计）。 */
 void gemini_sniffer_init(gemini_sniffer_t* s);
+/** @brief 逐分片喂 SSE 数据，按行解析 usageMetadata 累计 token。
+ *  @return 0 成功（签名兼容保留）。 */
 int  gemini_sniffer_feed(gemini_sniffer_t* s, const void* chunk, size_t len);
+/** @brief 取累计的 prompt/candidates/cached token（任一 out 可 NULL）。 */
 void gemini_sniffer_get_tokens(const gemini_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached);
 
 #endif /* AIGATE_PROVIDER_GEMINI_H */

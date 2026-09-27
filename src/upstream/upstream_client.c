@@ -1,3 +1,5 @@
+/** @file upstream_client.c
+ *  @brief libcurl 上游 HTTP 客户端：线程复用 easy 句柄、共享 DNS/SSL 会话、非流式/流式/探针三种调用。 */
 #include "upstream_client.h"
 #include "aigate_log.h"
 
@@ -14,6 +16,7 @@ static CURLSH*         g_curl_sh = NULL;
 static pthread_mutex_t g_curl_sh_dns_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t g_curl_sh_ssl_mtx = PTHREAD_MUTEX_INITIALIZER;
 
+/** @brief curl_share 加锁回调：DNS/SSL 会话槽分别上对应互斥锁。 */
 static void
 curl_sh_lock(CURL* handle, curl_lock_data data, curl_lock_access access, void* userptr)
 {
@@ -27,6 +30,7 @@ curl_sh_lock(CURL* handle, curl_lock_data data, curl_lock_access access, void* u
     }
 }
 
+/** @brief curl_share 解锁回调：与 curl_sh_lock 配对。 */
 static void
 curl_sh_unlock(CURL* handle, curl_lock_data data, void* userptr)
 {
@@ -40,6 +44,7 @@ curl_sh_unlock(CURL* handle, curl_lock_data data, void* userptr)
 }
 
 static pthread_once_t g_curl_once = PTHREAD_ONCE_INIT;
+/** @brief 进程级 curl 全局初始化（pthread_once）：global_init + 共享 DNS/SSL 会话句柄。 */
 static void
 curl_init_once(void)
 {
@@ -56,6 +61,7 @@ curl_init_once(void)
 static pthread_key_t  g_curl_tkey;
 static pthread_once_t g_curl_tkey_once = PTHREAD_ONCE_INIT;
 
+/** @brief 线程退出时回收该线程的复用 easy 句柄（pthread_key 析构）。 */
 static void
 curl_thread_cleanup(void* val)
 {
@@ -64,6 +70,7 @@ curl_thread_cleanup(void* val)
     }
 }
 
+/** @brief 创建线程局部 easy 句柄槽（pthread_once）。 */
 static void
 curl_tkey_init(void)
 {
@@ -72,6 +79,8 @@ curl_tkey_init(void)
 
 /* Per-thread CURL handle: reused across calls to amortize init.
  * Automatically cleaned up on worker thread exit. */
+/** @brief 取本线程复用的 easy 句柄（首次 lazy 创建，线程退出自动回收）。
+ *  @return 句柄；curl_easy_init 失败返回 NULL。 */
 static CURL*
 thread_curl(void)
 {
@@ -86,6 +95,7 @@ thread_curl(void)
     return c;
 }
 
+/** @brief 每次调用前统一 easy 选项：挂共享句柄、HTTP/2+TLS、TCP keepalive。 */
 static void
 curl_apply_common_opts(CURL* c)
 {
@@ -111,6 +121,8 @@ struct resp_buf {
 #define UPSTREAM_RESP_MAX (32 * 1024 * 1024)
 
 /* libcurl write callback: data first, userdata last. */
+/** @brief 非流式 write 回调：累积响应体（32MB 上限，超限/分配失败返回 0 中断传输）。
+ *  @return 消费字节数；返回 0 中断传输。 */
 static size_t
 append_body(char* buf, size_t size, size_t nmemb, void* ud)
 {
@@ -257,6 +269,7 @@ upstream_call(const char* url,
                              out_body_len);
 }
 
+/** @brief 单调时钟纳秒（探针延迟计时）。 */
 static uint64_t
 mono_ns(void)
 {
@@ -266,6 +279,7 @@ mono_ns(void)
 }
 
 /* libcurl write callback: accept all data, discard. */
+/** @brief 探针 write 回调：只计大小不存体。@return 恒 size*nmemb。 */
 static size_t
 discard_body(char* buf, size_t size, size_t nmemb, void* ud)
 {
@@ -374,6 +388,8 @@ struct stream_ctx {
     size_t err_cap;
 };
 
+/** @brief 流式 write 回调：首包记状态码；4xx/5xx 累积错误体，其余分片交 on_chunk（回调非零即中断）。
+ *  @return 消费字节数；返回 0 中断传输。 */
 static size_t
 stream_write_cb(char* buf, size_t size, size_t nmemb, void* ud)
 {
@@ -416,6 +432,7 @@ stream_write_cb(char* buf, size_t size, size_t nmemb, void* ud)
     return total;
 }
 
+/** @brief 流式进度回调：分片静默超 silence_timeout 即中断。@return 0 继续；1 中断。 */
 static int
 stream_xferinfo_cb(
     void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow)

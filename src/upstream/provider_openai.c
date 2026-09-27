@@ -102,12 +102,15 @@ provider_openai_build(const model_rec_t* route,
 
 /* ------------------------------------------------------------ adapter impl */
 
+/** @brief 适配器 supports 桩：委托 provider_openai_supports。 */
 static bool
 adapter_openai_supports(const char* provider)
 {
     return provider_openai_supports(provider) != 0;
 }
 
+/** @brief 适配器 build_chat 桩：拼 `/chat/completions` URL + 透传请求体（无额外头）。
+ *  @return 0 成功；-1 URL 越界/分配失败。 */
 static int
 openai_build_chat(const model_rec_t* route,
                   const char*        in_body,
@@ -124,6 +127,8 @@ openai_build_chat(const model_rec_t* route,
         route, "/chat/completions", in_body, url_out, url_cap, out_body, out_body_len);
 }
 
+/** @brief 适配器 parse_chat_response 桩：提 usage token（prompt/completion/cached）后原样透传响应体。
+ *  @return 0 成功；-1 分配失败。 */
 static int
 openai_parse_chat_response(const char* raw_body,
                            size_t      raw_len,
@@ -202,6 +207,8 @@ typedef struct {
     long   reasoning_tokens;
 } openai_bridge_t;
 
+/** @brief 新建 OpenAI 直通流桥（首包才发 SSE 头）。
+ *  @return 桥；OOM 返回 NULL。 */
 static stream_bridge_t*
 openai_bridge_new(aigate_response_ctx* rc, const char* model)
 {
@@ -214,6 +221,7 @@ openai_bridge_new(aigate_response_ctx* rc, const char* model)
     return (stream_bridge_t*)b;
 }
 
+/** @brief 解析直通流中含 `"usage"` 的 SSE 行，累计 prompt/completion/cached/reasoning token（兼容 input/output 别名）。 */
 static void
 openai_stream_process_line(openai_bridge_t* acc, const char* line)
 {
@@ -286,6 +294,8 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
     json_decref(root);
 }
 
+/** @brief 直通流 feed：首包发 SSE 头，原样转发分片并逐行累计 usage。
+ *  @return 0 成功；-1 下游写失败。 */
 static int
 openai_bridge_feed(void* bridge, const void* chunk, size_t len)
 {
@@ -341,6 +351,7 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
     return 0;
 }
 
+/** @brief 终结直通流（空写 fin 标记）。@return 下游写结果。 */
 static int
 openai_bridge_finish(stream_bridge_t* b)
 {
@@ -351,6 +362,7 @@ openai_bridge_finish(stream_bridge_t* b)
     return 0;
 }
 
+/** @brief 直通流是否已发头。 */
 static bool
 openai_bridge_headers_sent(stream_bridge_t* b)
 {
@@ -358,6 +370,7 @@ openai_bridge_headers_sent(stream_bridge_t* b)
     return acc->headers_sent;
 }
 
+/** @brief 取直通流累计的 prompt/completion/cached token（任一 out 可 NULL）。 */
 static void
 openai_bridge_get_tokens(stream_bridge_t* b, long* out_ptok, long* out_ctok, long* out_cached_tok)
 {
@@ -396,6 +409,7 @@ provider_openai_bridge_get_tokens(stream_bridge_t* b,
 }
 
 
+/** @brief 释放直通流桥。 */
 static void
 openai_bridge_free(stream_bridge_t* b)
 {
@@ -521,6 +535,7 @@ provider_openai_build_responses(const model_rec_t* route,
     return 0;
 }
 
+/** @brief 从 Responses API 响应（含嵌套 `response.usage`）提 input/output/cached/reasoning token（缺失字段保持 out 原值）。 */
 static void
 extract_responses_usage_from_json(json_t* root,
                                   long*   out_input_tokens,
