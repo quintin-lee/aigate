@@ -28,6 +28,7 @@ typedef struct aigate_request_ctx {
     const char* client_ip;
     const void* body;
     size_t      body_len;
+    const char* cache_control;
 } aigate_request_ctx;
 
 typedef struct aigate_response_ctx {

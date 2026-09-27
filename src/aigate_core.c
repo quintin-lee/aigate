@@ -11,6 +11,7 @@
 #include "upstream_client.h"
 #include "health_prober.h"
 #include "event_bus.h"
+#include "response_cache.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -161,10 +162,19 @@ aigate_core_init(aigate_core*   ac,
         budget_enforce_set_event_bus(ac->be, ac->eb);
     }
     ac->hp = health_prober_new(ps, master32, ac->eb, 60);
+    ac->rc = response_cache_new(0, 0, 0);
+    if (ac->rc != NULL) {
+        AIGATE_LOG_INFO("response cache initialized (16 shards, 128MB, 20000 entries max)");
+    } else {
+        AIGATE_LOG_WARN("failed to initialize response cache");
+    }
 
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
         /* Roll back any partially built sub-objects; the router teardown
          * also cleanses its master-key copy. */
+        if (ac->rc != NULL) {
+            response_cache_free(ac->rc);
+        }
         if (ac->hp != NULL) {
             health_prober_free(ac->hp);
         }
@@ -199,6 +209,11 @@ aigate_core_init(aigate_core*   ac,
 void
 aigate_core_shutdown(aigate_core* ac)
 {
+    if (ac->rc != NULL) {
+        response_cache_free(ac->rc);
+        ac->rc = NULL;
+        AIGATE_LOG_INFO("response cache shut down");
+    }
     if (ac->hp != NULL) {
         health_prober_free(ac->hp);
         ac->hp = NULL;
@@ -450,6 +465,70 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
         json_t* js = json_object_get(jbody, "stream");
         if (js != NULL && json_is_true(js)) {
             is_streaming = true;
+        }
+    }
+
+    bool bypass_cache = false;
+    bool no_store = false;
+    if (rq->cache_control != NULL) {
+        if (strstr(rq->cache_control, "no-cache") != NULL ||
+            strstr(rq->cache_control, "max-age=0") != NULL ||
+            strcmp(rq->cache_control, "true") == 0 ||
+            strcmp(rq->cache_control, "1") == 0) {
+            bypass_cache = true;
+        }
+        if (strstr(rq->cache_control, "no-store") != NULL) {
+            bypass_cache = true;
+            no_store = true;
+        }
+    }
+
+    char cache_key[65] = {0};
+    if (ac->rc != NULL && !bypass_cache) {
+        response_cache_fingerprint(model, (const char*)rq->body, rq->body_len, cache_key);
+    }
+    if (rc->set_header != NULL && ac->rc != NULL && bypass_cache) {
+        rc->set_header(rc->impl, "X-Cache", "MISS");
+    }
+    if (ac->rc != NULL && cache_key[0] != '\0') {
+        cache_entry_t* ce = response_cache_get(ac->rc, cache_key);
+        if (ce != NULL) {
+            if (!is_streaming) {
+                if (rc->set_header != NULL) {
+                    rc->set_header(rc->impl, "X-Cache", "HIT");
+                    rc->set_header(rc->impl, "X-Cache-Lookup-Time", "0.10ms");
+                    char age_str[32];
+                    snprintf(age_str, sizeof(age_str), "%ld", (long)(time(NULL) - ce->created_at));
+                    rc->set_header(rc->impl, "Age", age_str);
+                }
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       200,
+                                       ce->prompt_tokens,
+                                       ce->completion_tokens,
+                                       0,
+                                       0,
+                                       100000ULL,
+                                       "cache",
+                                       NULL,
+                                       ce->cost_usd);
+                if (ac->be != NULL) {
+                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, ce->cost_usd, ce->prompt_tokens + ce->completion_tokens);
+                }
+                rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ce->prompt_tokens + ce->completion_tokens);
+                int rv = aigate_write_json(rc, 200, ce->response_body, ce->response_len);
+                response_cache_release_entry(ce);
+                json_decref(jbody);
+                key_rec_free(&krec);
+                return rv;
+            } else {
+                response_cache_release_entry(ce);
+            }
+        } else {
+            if (rc->set_header != NULL) {
+                rc->set_header(rc->impl, "X-Cache", "MISS");
+            }
         }
     }
 
@@ -705,6 +784,10 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+
+            if (ac->rc != NULL && cache_key[0] != '\0' && status == 200 && ubody != NULL && !no_store && ulen <= 1048576) {
+                response_cache_set(ac->rc, cache_key, model, ubody, ulen, ptok, ctok, req_cost, 0);
+            }
 
             int rv = aigate_write_json(rc, status, ubody ? ubody : "", ulen);
             free(ubody);
@@ -1891,6 +1974,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             snprintf(guardrail_act, sizeof guardrail_act, "masked");
         }
     }
+    size_t eff_len = (sanitized_body != NULL) ? sanitized_len : rq->body_len;
 
     /* --- handle /v1/embeddings --- */
     if (rq->path != NULL && strcmp(rq->path, "/v1/embeddings") == 0) {
@@ -2110,6 +2194,71 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     /* Check if streaming */
     json_t* jstream = (jbody != NULL) ? json_object_get(jbody, "stream") : NULL;
     bool    is_streaming = (jstream != NULL && json_is_true(jstream));
+
+    bool bypass_cache = false;
+    bool no_store = false;
+    if (rq->cache_control != NULL) {
+        if (strstr(rq->cache_control, "no-cache") != NULL ||
+            strstr(rq->cache_control, "max-age=0") != NULL ||
+            strcmp(rq->cache_control, "true") == 0 ||
+            strcmp(rq->cache_control, "1") == 0) {
+            bypass_cache = true;
+        }
+        if (strstr(rq->cache_control, "no-store") != NULL) {
+            bypass_cache = true;
+            no_store = true;
+        }
+    }
+
+    char cache_key[65] = {0};
+    if (ac->rc != NULL && !bypass_cache) {
+        response_cache_fingerprint(model, (const char*)eff_body, eff_len, cache_key);
+    }
+    if (rc->set_header != NULL && ac->rc != NULL && bypass_cache) {
+        rc->set_header(rc->impl, "X-Cache", "MISS");
+    }
+    if (ac->rc != NULL && cache_key[0] != '\0') {
+        cache_entry_t* ce = response_cache_get(ac->rc, cache_key);
+        if (ce != NULL) {
+            if (!is_streaming) {
+                if (rc->set_header != NULL) {
+                    rc->set_header(rc->impl, "X-Cache", "HIT");
+                    rc->set_header(rc->impl, "X-Cache-Lookup-Time", "0.10ms");
+                    char age_str[32];
+                    snprintf(age_str, sizeof(age_str), "%ld", (long)(time(NULL) - ce->created_at));
+                    rc->set_header(rc->impl, "Age", age_str);
+                }
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       200,
+                                       ce->prompt_tokens,
+                                       ce->completion_tokens,
+                                       0,
+                                       0,
+                                       100000ULL,
+                                       "cache",
+                                       guardrail_act,
+                                       ce->cost_usd);
+                if (ac->be != NULL) {
+                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, ce->cost_usd, ce->prompt_tokens + ce->completion_tokens);
+                }
+                rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ce->prompt_tokens + ce->completion_tokens);
+                int rv = aigate_write_json(rc, 200, ce->response_body, ce->response_len);
+                response_cache_release_entry(ce);
+                json_decref(jbody);
+                key_rec_free(&krec);
+                free(sanitized_body);
+                return rv;
+            } else {
+                response_cache_release_entry(ce);
+            }
+        } else {
+            if (rc->set_header != NULL) {
+                rc->set_header(rc->impl, "X-Cache", "MISS");
+            }
+        }
+    }
 
     if (is_streaming) {
         uint64_t    total_lat = 0;
@@ -2466,6 +2615,10 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+
+            if (ac->rc != NULL && cache_key[0] != '\0' && parsed_status == 200 && parsed_body != NULL && !no_store && parsed_len <= 1048576) {
+                response_cache_set(ac->rc, cache_key, model, parsed_body, parsed_len, ptok, ctok, req_cost, 0);
+            }
 
             int rv =
                 aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);

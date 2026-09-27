@@ -206,6 +206,11 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     rq.client_ip = ri->remote_addr;
     rq.body = body;
     rq.body_len = body_len;
+    const char* cc = mg_get_header(conn, "Cache-Control");
+    if (cc == NULL) {
+        cc = mg_get_header(conn, "x-skip-cache");
+    }
+    rq.cache_control = cc;
 
     aigate_handle_request(cw->ac, &rq, &rc);
 

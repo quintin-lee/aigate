@@ -256,6 +256,7 @@ TEST_CASE(test_failover_circuit_breaker_tripping)
         .client_ip = "127.0.0.1",
         .body = req_json,
         .body_len = strlen(req_json),
+        .cache_control = "no-cache",
     };
 
     /* Send 3 requests: u1 fails each time and fails over to u2 */

@@ -261,7 +261,7 @@ event_bus_publish_request(event_bus_t* eb,
              sizeof buf,
              "{\"ts\":%ld,\"key_id\":%ld,\"model\":\"%s\",\"provider\":\"%s\",\"status\":%d,"
              "\"latency_ms\":%ld,\"prompt_tokens\":%ld,\"completion_tokens\":%ld,\"cost\":%.6f,"
-             "\"guardrail\":\"%s\"}",
+             "\"guardrail\":\"%s\",\"cached\":%s}",
              (long)time(NULL),
              key_id,
              safe_model,
@@ -271,7 +271,8 @@ event_bus_publish_request(event_bus_t* eb,
              prompt_tokens,
              completion_tokens,
              cost,
-             safe_gr);
+             safe_gr,
+             strcmp(safe_provider, "cache") == 0 ? "true" : "false");
     event_bus_publish(eb, EVENT_REQUEST, "request", buf);
 }
 

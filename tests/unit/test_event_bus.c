@@ -56,6 +56,7 @@ TEST_CASE(test_event_bus_publish_pop)
     TEST_ASSERT(strstr(item1.payload, "\"provider\":\"openai\"") != NULL, "item1 provider missing");
     TEST_ASSERT(strstr(item1.payload, "\"status\":200") != NULL, "item1 status missing");
     TEST_ASSERT(strstr(item1.payload, "\"guardrail\":\"masked\"") != NULL, "item1 guardrail missing");
+    TEST_ASSERT(strstr(item1.payload, "\"cached\":false") != NULL, "item1 cached missing");
 
     event_item_t item2;
     int rc2 = event_bus_pop(eb, sub2, &item2, 500);

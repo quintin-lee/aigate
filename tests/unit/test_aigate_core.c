@@ -405,7 +405,9 @@ TEST_CASE(test_core_pipeline)
     mock_upstream_fail_all(mu, 1);
     struct cap c6;
     memset(&c6, 0, sizeof c6);
-    run(&ac, "good-key", "gpt-4o", &c6);
+    run_with_body(&ac, "good-key",
+                  "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"err-prompt\"}]}",
+                  &c6);
     TEST_ASSERT(c6.status == 502, "502 on upstream 500, got %d", c6.status);
     TEST_ASSERT(cap_has_header(&c6, "X-Upstream-Provider: openai"), "X-Upstream-Provider header");
     TEST_ASSERT(strstr(c6.body, "upstream request failed") != NULL, "502 body");
