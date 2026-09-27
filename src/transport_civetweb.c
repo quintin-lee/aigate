@@ -449,6 +449,7 @@ transport_civetweb_start(aigate_core* ac,
     if (ac != NULL) {
         cw->adm.hp = ac->hp;
         cw->adm.eb = ac->eb;
+        cw->adm.rc = ac->rc;
     }
 
     /* Admin lockout policy: out-of-range values keep the defaults. */

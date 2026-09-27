@@ -15,16 +15,18 @@ struct redis_pool; /* forward-declare for admin_lockout_set_pool */
 
 struct health_prober;
 struct event_bus;
+struct response_cache;
 
 /** @brief Admin plane state: pipeline caches (for invalidation after
  *  mutations), the store, and the SHA-256 hex of the admin token. */
 typedef struct admin_ctx {
-    aigate_core*          ac;
-    pg_store_t*           ps;
-    const char*           admin_token_hash;     /* 64 lowercase hex chars + NUL */
-    int                   allow_plaintext_keys; /* 1 when direct plaintext provider keys are accepted */
-    struct health_prober* hp;
-    struct event_bus*     eb;
+    aigate_core*           ac;
+    pg_store_t*            ps;
+    const char*            admin_token_hash;     /* 64 lowercase hex chars + NUL */
+    int                    allow_plaintext_keys; /* 1 when direct plaintext provider keys are accepted */
+    struct health_prober*  hp;
+    struct event_bus*      eb;
+    struct response_cache* rc;
 } admin_ctx_t;
 
 /** @brief Validate an admin bearer token against the configured hash. */

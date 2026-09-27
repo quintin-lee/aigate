@@ -40,19 +40,21 @@ typedef struct aigate_response_ctx {
 
 struct health_prober;
 struct event_bus;
+struct response_cache;
 
 typedef struct aigate_core {
-    auth_key_cache        keys;
-    ratelimit_t*          rl;
-    model_router_t*       router;
-    usage_meter_t*        um;
-    circuit_breaker_t*    cb;
-    pg_store_t*           ps;
-    int                   default_timeout_ms;
-    guardrails_ctx_t*     gr;
-    budget_enforce_mgr_t* be;
-    struct health_prober* hp;
-    struct event_bus*     eb;
+    auth_key_cache         keys;
+    ratelimit_t*           rl;
+    model_router_t*        router;
+    usage_meter_t*         um;
+    circuit_breaker_t*     cb;
+    pg_store_t*            ps;
+    int                    default_timeout_ms;
+    guardrails_ctx_t*      gr;
+    budget_enforce_mgr_t*  be;
+    struct health_prober*  hp;
+    struct event_bus*      eb;
+    struct response_cache* rc;
 } aigate_core;
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */

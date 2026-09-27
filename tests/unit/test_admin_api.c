@@ -8,6 +8,7 @@
 #include "sha256.h"
 #include "mock_upstream.h"
 #include "health_prober.h"
+#include "response_cache.h"
 
 #include <jansson.h>
 #include <math.h>
@@ -3231,5 +3232,84 @@ test_admin_provider_health_and_probe(void)
     free(body);
 
     health_prober_free(hp);
+    teardown_admin(ps, &core, &db);
+}
+
+void
+test_admin_cache_stats_and_purge(void)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps = NULL;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    response_cache_t* rc = response_cache_new(1024 * 1024, 100, 3600);
+    TEST_ASSERT(rc != NULL, "response_cache_new ok");
+    adm.rc = rc;
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. 401 Unauthorized check */
+    admin_dispatch(&adm,
+                   "/admin/v1/cache/stats",
+                   "GET",
+                   NULL,
+                   "wrong-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 401, "cache/stats without token -> 401");
+    free(body);
+
+    /* 2. GET /admin/v1/cache/stats -> 200 */
+    admin_dispatch(&adm,
+                   "/admin/v1/cache/stats",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "cache/stats -> 200");
+    json_error_t jerr;
+    json_t* js = json_loads(body, 0, &jerr);
+    TEST_ASSERT(js != NULL, "json parse cache stats failed");
+    TEST_ASSERT(json_is_boolean(json_object_get(js, "enabled")), "enabled is boolean");
+    TEST_ASSERT(json_is_integer(json_object_get(js, "shards")), "shards is integer");
+    json_decref(js);
+    free(body);
+
+    /* 3. Insert dummy item and test POST /admin/v1/cache/purge */
+    const char* k = "1111111111111111111111111111111111111111111111111111111111111111";
+    response_cache_set(rc, k, "test-model", "{\"ok\":true}", 11, 5, 5, 0.0001, 3600);
+
+    const char* purge_req = "{\"model\":\"test-model\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/cache/purge",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   purge_req,
+                   strlen(purge_req),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "cache/purge -> 200");
+    json_t* jp = json_loads(body, 0, &jerr);
+    TEST_ASSERT(jp != NULL, "json parse cache purge failed");
+    TEST_ASSERT(json_integer_value(json_object_get(jp, "purged_entries")) == 1, "purged 1 entry");
+    json_decref(jp);
+    free(body);
+
+    response_cache_free(rc);
     teardown_admin(ps, &core, &db);
 }

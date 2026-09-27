@@ -410,6 +410,9 @@ main(void)
     extern void test_response_cache_all(void);
     test_register("response_cache_all", test_response_cache_all);
 
+    extern void test_admin_cache_stats_and_purge(void);
+    test_register("admin_cache_stats_and_purge", test_admin_cache_stats_and_purge);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

@@ -25,6 +25,7 @@
 #include "upstream_client.h"
 #include "health_prober.h"
 #include "event_bus.h"
+#include "response_cache.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -2819,6 +2820,58 @@ guardrails_reload(admin_ctx_t* adm, int* status, char** body, size_t* len)
     return finish_json(status, body, len, 200, out);
 }
 
+/* ------------------------------------------------------------ response cache */
+
+static int
+cache_stats_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    if (adm->rc == NULL) {
+        return finish_error(status, body, len, 503, "unavailable", "response cache not initialized");
+    }
+    char* json_str = response_cache_get_stats_json(adm->rc);
+    if (json_str == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "failed to serialize cache stats");
+    }
+    *status = 200;
+    *body = json_str;
+    *len = strlen(json_str);
+    return 0;
+}
+
+static int
+cache_purge_trigger(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* req_body)
+{
+    if (adm->rc == NULL) {
+        return finish_error(status, body, len, 503, "unavailable", "response cache not initialized");
+    }
+    const char* model = NULL;
+    json_t* root = NULL;
+    if (req_body != NULL && req_body[0] != '\0') {
+        json_error_t err;
+        root = json_loads(req_body, 0, &err);
+        if (root != NULL && json_is_object(root)) {
+            json_t* j_m = json_object_get(root, "model");
+            if (json_is_string(j_m)) {
+                model = json_string_value(j_m);
+            }
+        }
+    }
+
+    size_t purged_count = 0;
+    size_t freed_bytes = 0;
+    response_cache_purge(adm->rc, model, &purged_count, &freed_bytes);
+
+    json_t* out = json_object();
+    json_object_set_new(out, "purged_entries", json_integer((json_int_t)purged_count));
+    json_object_set_new(out, "freed_bytes", json_integer((json_int_t)freed_bytes));
+    json_object_set_new(out, "model", json_string(model != NULL ? model : "all"));
+
+    if (root != NULL) {
+        json_decref(root);
+    }
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -2981,6 +3034,13 @@ admin_dispatch(admin_ctx_t* adm,
             if (strcmp(method, "DELETE") == 0) {
                 return guardrails_rule_delete(adm, out_status, out_body, out_len, rest + 11);
             }
+        }
+    } else if (strncmp(rest, "cache", 5) == 0) {
+        if (strcmp(rest, "cache/stats") == 0 && strcmp(method, "GET") == 0) {
+            return cache_stats_get(adm, out_status, out_body, out_len);
+        }
+        if (strcmp(rest, "cache/purge") == 0 && strcmp(method, "POST") == 0) {
+            return cache_purge_trigger(adm, out_status, out_body, out_len, body);
         }
     }
 
