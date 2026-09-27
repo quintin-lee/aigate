@@ -1,5 +1,8 @@
 # aigate Repo Map
 
+> 新人先看：根 [README.md](../README.md)（快速开始）→
+> [DEVELOPMENT.md](DEVELOPMENT.md)（构建变体、加模块/加测试）。
+
 ## Top-level directories
 
 - `src/` — gateway source, 7 layers: `core/` (lifecycle/config/log/secrets),
