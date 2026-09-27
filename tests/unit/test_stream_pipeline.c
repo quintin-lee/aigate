@@ -415,3 +415,93 @@ TEST_CASE(test_stream_pipeline_silence_timeout)
     pg_store_close(ps);
     mock_upstream_stop(mu);
 }
+
+TEST_CASE(test_stream_pipeline_cache_dual_interop)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "stream-key", 0, 1000);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    /* 1. First streaming request: passes through upstream mock and accumulates into cache */
+    struct cap c1;
+    memset(&c1, 0, sizeof c1);
+    const char* req1 = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"cache-stream-test\"}]}";
+    aigate_request_ctx rq1 = {
+        .method = "POST",
+        .path = "/v1/chat/completions",
+        .bearer = "stream-key",
+        .client_ip = "127.0.0.1",
+        .body = req1,
+        .body_len = strlen(req1),
+    };
+    aigate_response_ctx rc1 = cap_rc(&c1);
+    TEST_ASSERT(aigate_handle_request(&ac, &rq1, &rc1) == 0, "request 1 ok");
+    TEST_ASSERT(rc1.status == 200, "status 200");
+    TEST_ASSERT(cap_has_header(&c1, "Content-Type: text/event-stream; charset=utf-8"), "sse header");
+    TEST_ASSERT(strstr(c1.body, "hello") != NULL, "received hello");
+    TEST_ASSERT(strstr(c1.body, "world") != NULL, "received world");
+    TEST_ASSERT(strstr(c1.body, "[DONE]") != NULL, "received [DONE]");
+    TEST_ASSERT(mock_upstream_request_count(mu) == 1, "upstream count == 1");
+
+    /* 2. Second streaming request with identical prompt: should HIT cache (0 upstream calls) */
+    struct cap c2;
+    memset(&c2, 0, sizeof c2);
+    aigate_response_ctx rc2 = cap_rc(&c2);
+    TEST_ASSERT(aigate_handle_request(&ac, &rq1, &rc2) == 0, "request 2 ok");
+    TEST_ASSERT(rc2.status == 200, "status 200");
+    TEST_ASSERT(cap_has_header(&c2, "X-Cache: HIT"), "X-Cache: HIT on streaming replay");
+    TEST_ASSERT(strstr(c2.body, "hello") != NULL, "replayed hello");
+    TEST_ASSERT(strstr(c2.body, "world") != NULL, "replayed world");
+    TEST_ASSERT(strstr(c2.body, "[DONE]") != NULL, "replayed [DONE]");
+    TEST_ASSERT(mock_upstream_request_count(mu) == 1, "upstream count STILL 1 (cache hit)");
+
+    /* 3. Third request with NON-STREAMING (stream: false): should HIT cache and return JSON! */
+    struct cap c3;
+    memset(&c3, 0, sizeof c3);
+    const char* req3 = "{\"model\":\"gpt-4o\",\"stream\":false,\"messages\":[{\"role\":\"user\",\"content\":\"cache-stream-test\"}]}";
+    aigate_request_ctx rq3 = {
+        .method = "POST",
+        .path = "/v1/chat/completions",
+        .bearer = "stream-key",
+        .client_ip = "127.0.0.1",
+        .body = req3,
+        .body_len = strlen(req3),
+    };
+    aigate_response_ctx rc3 = cap_rc(&c3);
+    TEST_ASSERT(aigate_handle_request(&ac, &rq3, &rc3) == 0, "request 3 ok");
+    TEST_ASSERT(rc3.status == 200, "status 200");
+    TEST_ASSERT(cap_has_header(&c3, "X-Cache: HIT"), "X-Cache: HIT on non-streaming hit");
+    TEST_ASSERT(strstr(c3.body, "hello world") != NULL, "full json body contains hello world");
+    TEST_ASSERT(mock_upstream_request_count(mu) == 1, "upstream count STILL 1 (cache hit)");
+
+    /* 4. Fourth request with Cache-Control: no-cache: should BYPASS cache and hit upstream! */
+    struct cap c4;
+    memset(&c4, 0, sizeof c4);
+    rq3.cache_control = "no-cache";
+    aigate_response_ctx rc4 = cap_rc(&c4);
+    TEST_ASSERT(aigate_handle_request(&ac, &rq3, &rc4) == 0, "request 4 ok");
+    TEST_ASSERT(rc4.status == 200, "status 200");
+    TEST_ASSERT(cap_has_header(&c4, "X-Cache: MISS"), "X-Cache: MISS on bypass");
+    TEST_ASSERT(mock_upstream_request_count(mu) == 2, "upstream count became 2 (bypass hit upstream)");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    mock_upstream_stop(mu);
+}

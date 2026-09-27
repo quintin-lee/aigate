@@ -292,10 +292,12 @@ main(void)
     extern void test_stream_pipeline_early_error(void);
     extern void test_stream_pipeline_4xx_passthrough(void);
     extern void test_stream_pipeline_silence_timeout(void);
+    extern void test_stream_pipeline_cache_dual_interop(void);
     test_register("stream_pipeline_normal", test_stream_pipeline_normal);
     test_register("stream_pipeline_early_error", test_stream_pipeline_early_error);
     test_register("stream_pipeline_4xx_passthrough", test_stream_pipeline_4xx_passthrough);
     test_register("stream_pipeline_silence_timeout", test_stream_pipeline_silence_timeout);
+    test_register("stream_pipeline_cache_dual_interop", test_stream_pipeline_cache_dual_interop);
 
     extern void test_anthropic_build_system_and_defaults(void);
     extern void test_anthropic_build_params(void);

@@ -334,6 +334,305 @@ enum {
     PIPE_UNSUPPORTED = 501,
 };
 
+/* ========================================================================= */
+/* Streaming SSE Cache Replay & Accumulator Engine                          */
+/* ========================================================================= */
+
+typedef struct stream_cache_acc {
+    aigate_response_ctx* orig_rc;
+    char*                accum_content;
+    size_t               accum_len;
+    size_t               accum_cap;
+    char                 line_buf[4096];
+    size_t               line_len;
+    char                 id[64];
+    long                 created;
+    bool                 overflow;
+} stream_cache_acc_t;
+
+static int
+stream_cache_acc_set_header(void* impl, const char* name, const char* value)
+{
+    stream_cache_acc_t* acc = (stream_cache_acc_t*)impl;
+    if (acc != NULL && acc->orig_rc != NULL) {
+        acc->orig_rc->status = 200;
+        if (acc->orig_rc->set_header != NULL) {
+            return acc->orig_rc->set_header(acc->orig_rc->impl, name, value);
+        }
+    }
+    return 0;
+}
+
+static int
+stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
+{
+    stream_cache_acc_t* acc = (stream_cache_acc_t*)impl;
+    if (acc == NULL || acc->orig_rc == NULL) {
+        return -1;
+    }
+    acc->orig_rc->status = 200;
+    acc->orig_rc->headers_sent = true;
+    int rv = 0;
+    if (acc->orig_rc->write != NULL) {
+        rv = acc->orig_rc->write(acc->orig_rc->impl, buf, len, fin);
+    }
+    if (len == 0 || buf == NULL || acc->overflow) {
+        return rv;
+    }
+
+    const char* p = (const char*)buf;
+    const char* end = p + len;
+    while (p < end) {
+        const char* nl = memchr(p, '\n', (size_t)(end - p));
+        if (nl != NULL) {
+            size_t seg = (size_t)(nl - p);
+            if (acc->line_len + seg < sizeof(acc->line_buf) - 1) {
+                memcpy(acc->line_buf + acc->line_len, p, seg);
+                acc->line_len += seg;
+                acc->line_buf[acc->line_len] = '\0';
+
+                if (strncmp(acc->line_buf, "data: ", 6) == 0 &&
+                    strcmp(acc->line_buf, "data: [DONE]") != 0) {
+                    json_t* root = json_loads(acc->line_buf + 6, 0, NULL);
+                    if (root != NULL && json_is_object(root)) {
+                        if (acc->id[0] == '\0') {
+                            json_t* jid = json_object_get(root, "id");
+                            if (jid != NULL && json_is_string(jid)) {
+                                snprintf(acc->id, sizeof(acc->id), "%s", json_string_value(jid));
+                            }
+                        }
+                        if (acc->created == 0) {
+                            json_t* jc = json_object_get(root, "created");
+                            if (jc != NULL && json_is_integer(jc)) {
+                                acc->created = (long)json_integer_value(jc);
+                            }
+                        }
+                        json_t* choices = json_object_get(root, "choices");
+                        if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+                            json_t* c0 = json_array_get(choices, 0);
+                            json_t* delta = json_object_get(c0, "delta");
+                            if (delta != NULL && json_is_object(delta)) {
+                                json_t* jcnt = json_object_get(delta, "content");
+                                if (jcnt != NULL && json_is_string(jcnt)) {
+                                    const char* ctext = json_string_value(jcnt);
+                                    size_t clen = strlen(ctext);
+                                    if (clen > 0) {
+                                        if (acc->accum_len + clen + 1 > acc->accum_cap) {
+                                            size_t new_cap = acc->accum_cap ? acc->accum_cap * 2 : 4096;
+                                            while (new_cap < acc->accum_len + clen + 1) {
+                                                new_cap *= 2;
+                                            }
+                                            if (new_cap > 512 * 1024) {
+                                                acc->overflow = true;
+                                            } else {
+                                                char* nb = realloc(acc->accum_content, new_cap);
+                                                if (nb != NULL) {
+                                                    acc->accum_content = nb;
+                                                    acc->accum_cap = new_cap;
+                                                } else {
+                                                    acc->overflow = true;
+                                                }
+                                            }
+                                        }
+                                        if (!acc->overflow && acc->accum_content != NULL) {
+                                            memcpy(acc->accum_content + acc->accum_len, ctext, clen);
+                                            acc->accum_len += clen;
+                                            acc->accum_content[acc->accum_len] = '\0';
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        json_decref(root);
+                    }
+                }
+            }
+            acc->line_len = 0;
+            p = nl + 1;
+        } else {
+            size_t seg = (size_t)(end - p);
+            if (acc->line_len + seg < sizeof(acc->line_buf) - 1) {
+                memcpy(acc->line_buf + acc->line_len, p, seg);
+                acc->line_len += seg;
+                acc->line_buf[acc->line_len] = '\0';
+            } else {
+                acc->line_len = 0;
+            }
+            p = end;
+        }
+    }
+    return rv;
+}
+
+static int
+cache_stream_replay(aigate_core*         ac,
+                    aigate_response_ctx* rc,
+                    cache_entry_t*       ce,
+                    const char*          model,
+                    const key_rec_t*     krec,
+                    const char*          guardrail_act)
+{
+    rc->status = 200;
+    if (rc->set_header != NULL) {
+        rc->set_header(rc->impl, "Content-Type", "text/event-stream; charset=utf-8");
+        rc->set_header(rc->impl, "Cache-Control", "no-cache");
+        rc->set_header(rc->impl, "Connection", "keep-alive");
+        rc->set_header(rc->impl, "X-Cache", "HIT");
+        rc->set_header(rc->impl, "X-Cache-Lookup-Time", "0.10ms");
+        char age_str[32];
+        snprintf(age_str, sizeof(age_str), "%ld", (long)(time(NULL) - ce->created_at));
+        rc->set_header(rc->impl, "Age", age_str);
+    }
+
+    const char* id_str = "chatcmpl-cache";
+    const char* model_str = model;
+    long        created_ts = (long)ce->created_at;
+    const char* content_str = "";
+
+    json_t* root = json_loads(ce->response_body, 0, NULL);
+    if (root != NULL) {
+        json_t* jid = json_object_get(root, "id");
+        if (jid != NULL && json_is_string(jid)) {
+            id_str = json_string_value(jid);
+        }
+        json_t* jm = json_object_get(root, "model");
+        if (jm != NULL && json_is_string(jm)) {
+            model_str = json_string_value(jm);
+        }
+        json_t* jc = json_object_get(root, "created");
+        if (jc != NULL && json_is_integer(jc)) {
+            created_ts = (long)json_integer_value(jc);
+        }
+        json_t* choices = json_object_get(root, "choices");
+        if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+            json_t* c0 = json_array_get(choices, 0);
+            json_t* msg = json_object_get(c0, "message");
+            if (msg != NULL) {
+                json_t* cnt = json_object_get(msg, "content");
+                if (cnt != NULL && json_is_string(cnt)) {
+                    content_str = json_string_value(cnt);
+                }
+            }
+        }
+    }
+
+    /* 1. Initial chunk with role */
+    json_t* role_obj = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:n}]}",
+                                 "id", id_str,
+                                 "object", "chat.completion.chunk",
+                                 "created", (json_int_t)created_ts,
+                                 "model", model_str,
+                                 "choices",
+                                 "index", 0,
+                                 "delta", "role", "assistant", "content", "",
+                                 "finish_reason");
+    if (role_obj != NULL) {
+        char* role_json = json_dumps(role_obj, JSON_COMPACT);
+        if (role_json != NULL) {
+            char line[2048];
+            int n = snprintf(line, sizeof(line), "data: %s\n\n", role_json);
+            if (rc->write != NULL) {
+                rc->write(rc->impl, line, n, false);
+            }
+            free(role_json);
+        }
+        json_decref(role_obj);
+    }
+
+    /* 2. Content chunks in pieces */
+    size_t clen = content_str ? strlen(content_str) : 0;
+    size_t pos = 0;
+    while (pos < clen) {
+        size_t step = clen - pos;
+        if (step > 32) {
+            step = 32;
+        }
+        char piece[33];
+        memcpy(piece, content_str + pos, step);
+        piece[step] = '\0';
+
+        json_t* chunk_obj = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s}, s:n}]}",
+                                      "id", id_str,
+                                      "object", "chat.completion.chunk",
+                                      "created", (json_int_t)created_ts,
+                                      "model", model_str,
+                                      "choices",
+                                      "index", 0,
+                                      "delta", "content", piece,
+                                      "finish_reason");
+        if (chunk_obj != NULL) {
+            char* chunk_json = json_dumps(chunk_obj, JSON_COMPACT);
+            if (chunk_json != NULL) {
+                char line[2048];
+                int n = snprintf(line, sizeof(line), "data: %s\n\n", chunk_json);
+                if (rc->write != NULL) {
+                    rc->write(rc->impl, line, n, false);
+                }
+                free(chunk_json);
+            }
+            json_decref(chunk_obj);
+        }
+        pos += step;
+    }
+
+    /* 3. Finish chunk with finish_reason and usage */
+    json_t* fin_obj = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{}, s:s}], s:{s:i, s:i, s:i}}",
+                                "id", id_str,
+                                "object", "chat.completion.chunk",
+                                "created", (json_int_t)created_ts,
+                                "model", model_str,
+                                "choices",
+                                "index", 0,
+                                "delta",
+                                "finish_reason", "stop",
+                                "usage",
+                                "prompt_tokens", (int)ce->prompt_tokens,
+                                "completion_tokens", (int)ce->completion_tokens,
+                                "total_tokens", (int)(ce->prompt_tokens + ce->completion_tokens));
+    if (fin_obj != NULL) {
+        char* fin_json = json_dumps(fin_obj, JSON_COMPACT);
+        if (fin_json != NULL) {
+            char line[2048];
+            int n = snprintf(line, sizeof(line), "data: %s\n\n", fin_json);
+            if (rc->write != NULL) {
+                rc->write(rc->impl, line, n, false);
+            }
+            free(fin_json);
+        }
+        json_decref(fin_obj);
+    }
+
+    /* 4. Stream terminator */
+    if (rc->write != NULL) {
+        rc->write(rc->impl, "data: [DONE]\n\n", 14, false);
+        rc->write(rc->impl, "", 0, true);
+    }
+
+    if (root != NULL) {
+        json_decref(root);
+    }
+
+    record_usage_and_event(ac,
+                           krec->key_id,
+                           model,
+                           200,
+                           ce->prompt_tokens,
+                           ce->completion_tokens,
+                           0,
+                           0,
+                           100000ULL,
+                           "cache",
+                           guardrail_act,
+                           ce->cost_usd);
+    if (ac->be != NULL) {
+        budget_enforce_record(ac->be, krec->key_id, krec->group_id, ce->cost_usd, ce->prompt_tokens + ce->completion_tokens);
+    }
+    rl_reserve_tokens(ac->rl, krec->key_id, krec->daily_token_quota, ce->prompt_tokens + ce->completion_tokens);
+
+    response_cache_release_entry(ce);
+    return 0;
+}
+
 static int
 handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)
 {
@@ -523,7 +822,10 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                 key_rec_free(&krec);
                 return rv;
             } else {
-                response_cache_release_entry(ce);
+                int rv = cache_stream_replay(ac, rc, ce, model, &krec, NULL);
+                json_decref(jbody);
+                key_rec_free(&krec);
+                return rv;
             }
         } else {
             if (rc->set_header != NULL) {
@@ -570,8 +872,17 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                 continue;
             }
 
+            stream_cache_acc_t acc;
+            memset(&acc, 0, sizeof(acc));
+            acc.orig_rc = rc;
+
+            aigate_response_ctx proxy_rc = *rc;
+            proxy_rc.impl = &acc;
+            proxy_rc.set_header = stream_cache_acc_set_header;
+            proxy_rc.write = stream_cache_acc_write;
+
             stream_bridge_t* bridge = adapter->stream_bridge_new != NULL ?
-                                      adapter->stream_bridge_new(rc, model) : NULL;
+                                      adapter->stream_bridge_new(&proxy_rc, model) : NULL;
             if (bridge == NULL) {
                 free(out_body);
                 continue;
@@ -624,6 +935,9 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             if (!headers_sent) {
                 cb_record_failure(ac->cb, model, target->endpoint, status);
                 adapter->stream_bridge_free(bridge);
+                if (acc.accum_content != NULL) {
+                    free(acc.accum_content);
+                }
 
                 if (!is_failover && status >= 400) {
                     if (sbody != NULL && urc == 0) {
@@ -670,6 +984,9 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
                 }
                 adapter->stream_bridge_free(bridge);
+                if (acc.accum_content != NULL) {
+                    free(acc.accum_content);
+                }
                 json_decref(jbody);
                 key_rec_free(&krec);
                 return 0;
@@ -683,6 +1000,34 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+
+            if (ac->rc != NULL && cache_key[0] != '\0' && !no_store && !acc.overflow &&
+                (status == 0 || status == 200) && acc.accum_content != NULL && acc.accum_len > 0) {
+                json_t* full_resp = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:s}], s:{s:i, s:i, s:i}}",
+                                              "id", acc.id[0] ? acc.id : "chatcmpl-stream",
+                                              "object", "chat.completion",
+                                              "created", (json_int_t)(acc.created > 0 ? acc.created : time(NULL)),
+                                              "model", model,
+                                              "choices",
+                                              "index", 0,
+                                              "message", "role", "assistant", "content", acc.accum_content,
+                                              "finish_reason", "stop",
+                                              "usage",
+                                              "prompt_tokens", (int)ptok,
+                                              "completion_tokens", (int)ctok,
+                                              "total_tokens", (int)(ptok + ctok));
+                if (full_resp != NULL) {
+                    char* full_json = json_dumps(full_resp, JSON_COMPACT);
+                    if (full_json != NULL) {
+                        response_cache_set(ac->rc, cache_key, model, full_json, strlen(full_json), ptok, ctok, req_cost, 0);
+                        free(full_json);
+                    }
+                    json_decref(full_resp);
+                }
+            }
+            if (acc.accum_content != NULL) {
+                free(acc.accum_content);
+            }
             adapter->stream_bridge_free(bridge);
 
             json_decref(jbody);
@@ -2251,7 +2596,11 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 free(sanitized_body);
                 return rv;
             } else {
-                response_cache_release_entry(ce);
+                int rv = cache_stream_replay(ac, rc, ce, model, &krec, guardrail_act);
+                json_decref(jbody);
+                key_rec_free(&krec);
+                free(sanitized_body);
+                return rv;
             }
         } else {
             if (rc->set_header != NULL) {
@@ -2308,7 +2657,16 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 continue;
             }
 
-            stream_bridge_t* bridge = adapter->stream_bridge_new(rc, model);
+            stream_cache_acc_t acc;
+            memset(&acc, 0, sizeof(acc));
+            acc.orig_rc = rc;
+
+            aigate_response_ctx proxy_rc = *rc;
+            proxy_rc.impl = &acc;
+            proxy_rc.set_header = stream_cache_acc_set_header;
+            proxy_rc.write = stream_cache_acc_write;
+
+            stream_bridge_t* bridge = adapter->stream_bridge_new(&proxy_rc, model);
             if (bridge == NULL) {
                 free(merged);
                 continue;
@@ -2362,6 +2720,9 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
             if (!headers_sent) {
                 cb_record_failure(ac->cb, model, target->endpoint, status);
                 adapter->stream_bridge_free(bridge);
+                if (acc.accum_content != NULL) {
+                    free(acc.accum_content);
+                }
 
                 if (!is_failover && status >= 400) {
                     /* Pre-headers 4xx: surface the upstream's own error body
@@ -2393,14 +2754,14 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
 
                 if (ci + 1 < n_candidates) {
                     AIGATE_LOG_WARN("streaming failover for model %s from %s (%s) to %s (%s) due "
-                                    "to status %d (urc %d)",
-                                    model,
-                                    target->provider,
-                                    target->endpoint,
-                                    candidates[ci + 1].provider,
-                                    candidates[ci + 1].endpoint,
-                                    status,
-                                    urc);
+                                     "to status %d (urc %d)",
+                                     model,
+                                     target->provider,
+                                     target->endpoint,
+                                     candidates[ci + 1].provider,
+                                     candidates[ci + 1].endpoint,
+                                     status,
+                                     urc);
                     metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
                     free(sbody);
                     continue;
@@ -2446,6 +2807,9 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
                 }
                 adapter->stream_bridge_free(bridge);
+                if (acc.accum_content != NULL) {
+                    free(acc.accum_content);
+                }
                 json_decref(jbody);
                 key_rec_free(&krec);
                 free(sanitized_body);
@@ -2471,6 +2835,34 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+
+            if (ac->rc != NULL && cache_key[0] != '\0' && !no_store && !acc.overflow &&
+                (status == 0 || status == 200) && acc.accum_content != NULL && acc.accum_len > 0) {
+                json_t* full_resp = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:s}], s:{s:i, s:i, s:i}}",
+                                              "id", acc.id[0] ? acc.id : "chatcmpl-stream",
+                                              "object", "chat.completion",
+                                              "created", (json_int_t)(acc.created > 0 ? acc.created : time(NULL)),
+                                              "model", model,
+                                              "choices",
+                                              "index", 0,
+                                              "message", "role", "assistant", "content", acc.accum_content,
+                                              "finish_reason", "stop",
+                                              "usage",
+                                              "prompt_tokens", (int)ptok,
+                                              "completion_tokens", (int)ctok,
+                                              "total_tokens", (int)(ptok + ctok));
+                if (full_resp != NULL) {
+                    char* full_json = json_dumps(full_resp, JSON_COMPACT);
+                    if (full_json != NULL) {
+                        response_cache_set(ac->rc, cache_key, model, full_json, strlen(full_json), ptok, ctok, req_cost, 0);
+                        free(full_json);
+                    }
+                    json_decref(full_resp);
+                }
+            }
+            if (acc.accum_content != NULL) {
+                free(acc.accum_content);
+            }
             adapter->stream_bridge_free(bridge);
 
             json_decref(jbody);
