@@ -7,13 +7,13 @@
 ## 1. 背景与目标
 
 `src/` 已完成七层目录拆分，58/59 文件带有 `@file/@brief` 文件头，
-但函数级注释几乎空白（`grep` 估算约 400 定义，其中非 static 约 300+ 无前置 `/** */`）。
+但函数级注释缺口集中：实测 `.h` 声明待补约 60 处、`.c` 内 static 函数待补约 170 处（含少量多声明同行误报），合计约 230；另 `src/upstream/upstream_client.c` 缺 `@file/@brief` 文件头（全仓唯一）。
 目标：新人能不读实现读懂七层模块与调用链（可读性优先）。
 
 ## 2. 确认的需求（用户四选）
 
 - 动机：可读性优先（新人看懂模块与调用链）。
-- 范围：全部函数（公开 + static，共约 400 定义，含 `src/main.c` 的 2 个）。
+- 范围：缺口函数全覆盖（`.h` 约 60 + static 约 170，含 `src/main.c` 的 2 个；已具备文档的约 160 处不动）。
 - 粒度：完整 Doxygen（`@brief/@param/@return` 全套，延续现有文件头风格）。
 - 验收：构建测试全绿（注释纯加行，零警告 + ctest 6/6）。
 
@@ -41,15 +41,15 @@
 
 | 批次 | 目录 | 文件 |
 |---|---|---|
-| 1 | common（4 文件，~17 函数） | lru.c/h、sha256.c/h |
-| 2 | core + main.c（9 文件，~31 函数） | aigate_core.c/h、aigate_log.c/h、config.c/h、secrets.c/h、main.c |
-| 3 | observe（6 文件，~28 函数） | event_bus.c/h、health_prober.c/h、metrics.c/h |
-| 4 | server（6 文件，~76 函数） | admin_api.c/h、admin_ui.c/h、transport_civetweb.c/h |
-| 5 | policy（12 文件，~78 函数） | auth_key、budget_enforce、circuit_breaker、guardrails、ratelimit、response_cache（各 .c/.h） |
-| 6 | store（10 文件，~89 函数） | pg_store.c/h、redis_client.c/h、redis_pool.c/h、redis_scripts.h、schema_sql.h、usage_meter.c/h |
-| 7 | upstream（12 文件，~88 函数） | model_router、provider_adapter、provider_anthropic、provider_gemini、provider_openai、upstream_client（各 .c/.h；含给 upstream_client.c 补 `@file/@brief` 文件头——全仓唯一缺头文件） |
+| 1 | common（4 文件，待补 8） | lru.c/h、sha256.c/h |
+| 2 | core + main.c（9 文件，待补 19） | aigate_core.c/h、aigate_log.c/h、config.c/h、secrets.c/h、main.c |
+| 3 | observe（6 文件，待补 9） | event_bus.c/h、health_prober.c/h、metrics.c/h |
+| 4 | server（6 文件，待补 48） | admin_api.c/h、admin_ui.c/h、transport_civetweb.c/h |
+| 5 | policy（12 文件，待补 31） | auth_key、budget_enforce、circuit_breaker、guardrails、ratelimit、response_cache（各 .c/.h） |
+| 6 | store（10 文件，待补 54） | pg_store.c/h、redis_client.c/h、redis_pool.c/h、redis_scripts.h、schema_sql.h、usage_meter.c/h |
+| 7 | upstream（12 文件，待补 59） | model_router、provider_adapter、provider_anthropic、provider_gemini、provider_openai、upstream_client（各 .c/.h；含给 upstream_client.c 补 `@file/@brief` 文件头——全仓唯一缺头文件） |
 
-函数数为 `grep` 估算，实施时以实际为准；任一批可独立叫停，已补批次照样可用。
+待补数为实测（含少量多声明同行误报，实施时以 Task 0 审计为准）。任一批可独立叫停，已补批次照样可用。
 
 ## 6. 验证标准（每批必跑）
 
