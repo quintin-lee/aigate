@@ -277,9 +277,13 @@ health_prober_probe_all(health_prober_t* hp)
         return -1;
     }
 
-    provider_rec_t recs[MAX_TRACKED_PROVIDERS];
-    int            n = 0;
+    provider_rec_t* recs = calloc(MAX_TRACKED_PROVIDERS, sizeof(provider_rec_t));
+    if (recs == NULL) {
+        return -1;
+    }
+    int n = 0;
     if (ops->list_providers(ops->ctx, recs, MAX_TRACKED_PROVIDERS, &n) != 0) {
+        free(recs);
         return -1;
     }
 
@@ -375,6 +379,7 @@ health_prober_probe_all(health_prober_t* hp)
         provider_rec_free(p);
     }
 
+    free(recs);
     pthread_mutex_lock(&hp->lock);
     hp->last_full_probe_ts = time(NULL);
     pthread_mutex_unlock(&hp->lock);
@@ -427,6 +432,7 @@ health_prober_to_json(health_prober_t* hp)
     json_object_set_new(root, "degraded", json_integer(degraded_cnt));
     json_object_set_new(root, "down", json_integer(down_cnt));
     json_object_set_new(root, "paused", json_integer(paused_cnt));
+    json_object_set_new(root, "prober_interval_s", json_integer(hp->interval_sec));
     json_object_set_new(root, "checked_at", json_integer(hp->last_full_probe_ts));
     pthread_mutex_unlock(&hp->lock);
 

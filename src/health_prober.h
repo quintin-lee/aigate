@@ -13,7 +13,7 @@
 #include "pg_store.h"
 #include "event_bus.h"
 
-#define MAX_TRACKED_PROVIDERS 32
+#define MAX_TRACKED_PROVIDERS 128
 
 typedef enum {
     HEALTH_STATUS_UNKNOWN = 0,

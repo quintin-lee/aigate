@@ -46,30 +46,30 @@
 - Create: `tests/unit/test_event_bus.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写 `src/event_bus.h` 接口定义**
+- [x] **Step 1: 编写 `src/event_bus.h` 接口定义**
   - 定义 `event_type_t` (`EVENT_REQUEST`, `EVENT_CIRCUIT_BREAKER`, `EVENT_HEALTH_PROBE`, `EVENT_BUDGET_ALERT`, `EVENT_PING`)。
   - 定义 `event_item_t`（类型、时间戳、JSON 载荷字符串）。
   - 定义 `event_bus_t` 与订阅者句柄 `event_sub_t`。
   - 声明生命周期函数：`event_bus_new()`, `event_bus_free()`, `event_bus_subscribe()`, `event_bus_unsubscribe()`, `event_bus_pop()`, `event_bus_publish()` 及其便捷辅助函数。
 
-- [ ] **Step 2: 编写 `src/event_bus.c` 实现**
+- [x] **Step 2: 编写 `src/event_bus.c` 实现**
   - 实现基于 `pthread_mutex_t` 与 `pthread_cond_t` 的线程安全分发。
   - 支持固定最大 8 个并发订阅者，每个订阅者拥有 64 容量的环形队列。
   - 慢消费者保护：当队列满时，丢弃最旧的普通事件并记录丢弃计数。
   - 实现 `event_bus_pop` 带毫秒级超时的等待机制。
 
-- [ ] **Step 3: 编写 `tests/unit/test_event_bus.c` 单元测试**
+- [x] **Step 3: 编写 `tests/unit/test_event_bus.c` 单元测试**
   - 测试创建与销毁。
   - 测试订阅与注销。
   - 测试事件广播与跨线程消费。
   - 测试队列满时的环形覆盖与丢弃保护。
   - 测试超时返回。
 
-- [ ] **Step 4: 在 `tests/unit/run_tests.c` 注册并运行测试**
+- [x] **Step 4: 在 `tests/unit/run_tests.c` 注册并运行测试**
   - 执行 `cmake --build .build -j$(nproc)`
   - 执行 `ctest --test-dir .build -R unit --output-on-failure` 验证测试通过。
 
-- [ ] **Step 5: Commit Task 1**
+- [x] **Step 5: Commit Task 1**
   ```bash
   git add src/event_bus.h src/event_bus.c tests/unit/test_event_bus.c tests/unit/run_tests.c
   git commit -m "feat(events): ⚡ implement in-memory pub-sub event bus for real-time telemetry"
@@ -84,27 +84,27 @@
 - Create: `tests/unit/test_health_prober.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写 `src/health_prober.h` 接口定义**
+- [x] **Step 1: 编写 `src/health_prober.h` 接口定义**
   - 定义 `health_status_t` (`HEALTHY`, `DEGRADED`, `DOWN`, `PAUSED`, `UNKNOWN`)。
   - 定义 `provider_health_t` 结构体（名称、endpoint、状态、RTT、连续失败数、最后探测时间、报错）。
   - 声明 `health_prober_t` 及操作接口：`health_prober_new()`, `health_prober_free()`, `health_prober_start()`, `health_prober_stop()`, `health_prober_probe_all()`, `health_prober_probe_one()`, `health_prober_get_status_json()`。
 
-- [ ] **Step 2: 编写 `src/health_prober.c` 实现**
+- [x] **Step 2: 编写 `src/health_prober.c` 实现**
   - 实现内存状态表与锁保护。
   - 实现后台探活工作线程（周期休眠 `interval_sec`，默认 60s，可通过环境变量 `AIGATE_HEALTH_PROBE_INTERVAL_SEC` 配置）。
   - 调用 `upstream_probe()` 获取真实状态码与 RTT。
   - 状态判定机：200 且 RTT < 2000ms 为 HEALTHY；200 且 RTT $\ge$ 2000ms 为 DEGRADED；401/403 或连续失败 $\ge$ 2 次为 DOWN。
   - 状态发生跃迁时通过关联的 `event_bus` 触发 `health_probe` 事件。
 
-- [ ] **Step 3: 编写 `tests/unit/test_health_prober.c` 单元测试**
+- [x] **Step 3: 编写 `tests/unit/test_health_prober.c` 单元测试**
   - 测试探活状态表初始化与更新。
   - 测试状态机判定（HEALTHY / DEGRADED / DOWN）。
   - 测试 JSON 序列化输出。
 
-- [ ] **Step 4: 在 `tests/unit/run_tests.c` 注册并运行单元测试**
+- [x] **Step 4: 在 `tests/unit/run_tests.c` 注册并运行单元测试**
   - 编译并执行 `ctest --test-dir .build -R unit --output-on-failure`。
 
-- [ ] **Step 5: Commit Task 2**
+- [x] **Step 5: Commit Task 2**
   ```bash
   git add src/health_prober.h src/health_prober.c tests/unit/test_health_prober.c tests/unit/run_tests.c
   git commit -m "feat(prober): 🩺 implement active upstream health prober engine"
@@ -118,12 +118,12 @@
 - Modify: `src/admin_api.h`, `src/admin_api.c`
 - Modify: `src/transport_civetweb.c`
 
-- [ ] **Step 1: 在 `admin_api.c` 中添加健康查询与即时巡检端点**
+- [x] **Step 1: 在 `admin_api.c` 中添加健康查询与即时巡检端点**
   - `GET /admin/v1/providers/health`：调用 `health_prober_get_status_json()` 返回全量健康状态。
   - `POST /admin/v1/providers/probe`：调用 `health_prober_probe_all()` 即时并发探活并返回最新健康状态。
   - 更新现有的 `POST /admin/v1/providers/:id/test`，在单测完成后同步更新 `health_prober` 中的健康记录。
 
-- [ ] **Step 2: 在 `transport_civetweb.c` 中实现 SSE 端点 `GET /admin/v1/events`**
+- [x] **Step 2: 在 `transport_civetweb.c` 中实现 SSE 端点 `GET /admin/v1/events`**
   - 解析 `Authorization: Bearer <token>` 或 URL Query `?token=<token>`。
   - 校验 Admin Token 有效性，若失败返回 401。
   - 发送 SSE 响应头：
@@ -140,10 +140,10 @@
     - 有事件时发送 `event: <type>\ndata: <json>\n\n`。
     - 若 `mg_write` 失败（客户端关闭页面或网络中断），跳出循环并注销订阅者。
 
-- [ ] **Step 3: 运行 CMake 编译验证无语法与告警错误**
+- [x] **Step 3: 运行 CMake 编译验证无语法与告警错误**
   - 执行 `cmake --build .build -j$(nproc)`。
 
-- [ ] **Step 4: Commit Task 3**
+- [x] **Step 4: Commit Task 3**
   ```bash
   git add src/admin_api.h src/admin_api.c src/transport_civetweb.c
   git commit -m "feat(admin): 🌐 expose health probe endpoints and /admin/v1/events SSE stream"
@@ -159,28 +159,28 @@
 - Modify: `src/budget_enforce.h`, `src/budget_enforce.c`
 - Modify: `src/main.c`
 
-- [ ] **Step 1: 在 `aigate_core_t` 中持有 `event_bus_t*` 和 `health_prober_t*`**
+- [x] **Step 1: 在 `aigate_core_t` 中持有 `event_bus_t*` 和 `health_prober_t*`**
   - 在 `aigate_core_init` 中注入或创建 `event_bus` 与 `health_prober`。
   - 关联至 `admin_api`。
 
-- [ ] **Step 2: 在 `aigate_core.c` 的请求收尾阶段触发 `publish_request`**
+- [x] **Step 2: 在 `aigate_core.c` 的请求收尾阶段触发 `publish_request`**
   - 在流式（streaming）与非流式（non-streaming）请求完成处（包含成功与失败），提取 `model`, `provider`, `status`, `lat_ns`, `tokens`, `cost`, `guardrail_action`，发布至事件总线。
 
-- [ ] **Step 3: 在 `circuit_breaker.c` 中触发 `publish_cb`**
+- [x] **Step 3: 在 `circuit_breaker.c` 中触发 `publish_cb`**
   - 当状态在 `CLOSED`, `OPEN`, `HALF_OPEN` 间跃迁时发布事件。
 
-- [ ] **Step 4: 在 `budget_enforce.c` 中触发 `publish_budget`**
+- [x] **Step 4: 在 `budget_enforce.c` 中触发 `publish_budget`**
   - 当当月用量达到预算 80% 警戒线或 100% 阻断线时发布告警事件。
 
-- [ ] **Step 5: 在 `main.c` 中管理 prober 生命周期**
+- [x] **Step 5: 在 `main.c` 中管理 prober 生命周期**
   - 启动网关时调用 `health_prober_start()`。
   - 网关优雅退出（SIGINT/SIGTERM）时调用 `health_prober_stop()` 与资源释放。
 
-- [ ] **Step 6: 编译并执行全量单元测试**
+- [x] **Step 6: 编译并执行全量单元测试**
   - `cmake --build .build -j$(nproc)`
   - `ctest --test-dir .build -R unit --output-on-failure` 验证全绿。
 
-- [ ] **Step 7: Commit Task 4**
+- [x] **Step 7: Commit Task 4**
   ```bash
   git add src/aigate_core.h src/aigate_core.c src/circuit_breaker.h src/circuit_breaker.c src/budget_enforce.h src/budget_enforce.c src/main.c
   git commit -m "feat(core): 🔗 hook event bus and health prober into gateway data-plane"
@@ -193,7 +193,7 @@
 **Files:**
 - Modify: `web/admin.html:220-360` (侧边栏与移动端导航), `web/admin.html:1500-1800` (`#tab-live` HTML)
 
-- [ ] **Step 1: 侧边导航与移动端导航增加「📡 实时大屏」入口与实时指示灯**
+- [x] **Step 1: 侧边导航与移动端导航增加「📡 实时大屏」入口与实时指示灯**
   - 侧边栏与移动导航顶端增加：
     ```html
     <button data-tab="live" onclick="switchTab('live')" class="side-link" id="nav-live-side">
@@ -203,7 +203,7 @@
     </button>
     ```
 
-- [ ] **Step 2: 搭建 `#tab-live` 面板 HTML 结构**
+- [x] **Step 2: 搭建 `#tab-live` 面板 HTML 结构**
   - **顶部实时状态栏**：
     - 连接状态徽章（`#liveConnBadge`，显示 🟢 Live / 🔴 离线 / 🟡 重连中）。
     - 4 项动态指标卡：实时 QPS (`#liveStatQps`)、滑动 P99 延迟 (`#liveStatP99`)、Token/s 吞吐 (`#liveStatToks`)、今日实时风控数 (`#liveStatGuardrails`)。
@@ -217,10 +217,10 @@
     - 侧栏 `#liveAlertTicker` 列表，展示熔断跳闸、节点异常、预算告警。
     - 页面右上角全局浮动 Toast 容器 `#liveToastContainer`。
 
-- [ ] **Step 3: 运行 CMake 重新生成头文件并验证编译**
+- [x] **Step 3: 运行 CMake 重新生成头文件并验证编译**
   - `cmake --build .build -j$(nproc)`
 
-- [ ] **Step 4: Commit Task 5**
+- [x] **Step 4: Commit Task 5**
   ```bash
   git add web/admin.html
   git commit -m "feat(ui): 🎨 scaffold live operations room dashboard in admin console"
@@ -233,14 +233,14 @@
 **Files:**
 - Modify: `web/admin.html:3100-3600` (JS 脚本区)
 
-- [ ] **Step 1: 实现 SSE 长连接管理与自动重连机制**
+- [x] **Step 1: 实现 SSE 长连接管理与自动重连机制**
   - 实现 `connectLiveStream()`：
     - 构造 URL `/admin/v1/events?token=` + 当前 Token。
     - 使用原生 `new EventSource()`（或带有 Reader 的 `fetch`）。
     - 监听 `open`：更新 `#liveConnBadge` 为绿色呼吸动效 `🟢 实时连接中 (Live)`。
     - 监听 `error`：更新为黄色 `🟡 正在重连...`，并在断线后使用指数退避重连。
 
-- [ ] **Step 2: 实现实时事件消费与大屏动态渲染**
+- [x] **Step 2: 实现实时事件消费与大屏动态渲染**
   - 监听 `request` 事件：
     - 累加最近 5 秒滑动窗口数据，更新实时 QPS 与 Token/s。
     - 计算滑动 P99/平均延迟并更新指标卡。
@@ -254,15 +254,15 @@
   - 监听 `budget_alert` 事件：
     - 弹出高优先级 Toast 警报，记录到告警时间线。
 
-- [ ] **Step 3: 实现健康雷达初始化与「⚡ 一键全量巡检」交互**
+- [x] **Step 3: 实现健康雷达初始化与「⚡ 一键全量巡检」交互**
   - `fetchProviderHealth()`：调用 `GET /admin/v1/providers/health` 渲染各供应商卡片。
   - `triggerProbeAll()`：点击后按钮展示旋转 loading 动画，调用 `POST /admin/v1/providers/probe`，完成后就地重绘各节点卡片并提示 Toast。
   - 单节点「🔍 立即测试」按钮联动。
 
-- [ ] **Step 4: 编译并验证**
+- [x] **Step 4: 编译并验证**
   - `cmake --build .build -j$(nproc)`
 
-- [ ] **Step 5: Commit Task 6**
+- [x] **Step 5: Commit Task 6**
   ```bash
   git add web/admin.html
   git commit -m "feat(ui): ⚡ implement SSE streaming client and real-time dashboard interactions"
@@ -275,22 +275,22 @@
 **Files:**
 - Modify: `tests/integration/test_gateway.py`
 
-- [ ] **Step 1: 在 `test_gateway.py` 中编写 SSE 实时流端到端测试**
+- [x] **Step 1: 在 `test_gateway.py` 中编写 SSE 实时流端到端测试**
   - `test_admin_events_sse_stream`:
     - 启动后台线程或异步流连接 `GET /admin/v1/events?token=...`。
     - 发送数据面 Chat 请求。
     - 断言在 SSE 流中实时收到 `event: request`，解析 JSON 包含 model、status 200 与 token 数据。
 
-- [ ] **Step 2: 编写上游健康巡检与批量探测接口测试**
+- [x] **Step 2: 编写上游健康巡检与批量探测接口测试**
   - `test_provider_health_probe_endpoints`:
     - 调用 `GET /admin/v1/providers/health`，验证返回 providers 列表及其状态结构。
     - 调用 `POST /admin/v1/providers/probe`，验证批量探活执行与最新延迟指标。
 
-- [ ] **Step 3: 执行全量测试套件回归**
+- [x] **Step 3: 执行全量测试套件回归**
   - C 单元测试：`ctest --test-dir .build -R unit --output-on-failure`（预期 100% 通过）。
   - Python E2E 测试：`pytest tests/integration/test_gateway.py -v`（预期 34+ 项全量通过）。
 
-- [ ] **Step 4: Commit Task 7**
+- [x] **Step 4: Commit Task 7**
   ```bash
   git add tests/integration/test_gateway.py
   git commit -m "test(live): 🧪 add e2e integration tests for SSE events and health prober"

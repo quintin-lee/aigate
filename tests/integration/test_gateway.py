@@ -2423,6 +2423,127 @@ def test_monthly_budget_enforce_e2e(gateway):
     assert err["error"]["type"] == "budget_exceeded"
 
 
+def test_admin_events_sse_stream(gateway):
+    """GET /admin/v1/events provides a real-time SSE stream of gateway telemetry."""
+    import uuid
+    import json
+
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    # 1. 401 when unauthenticated
+    resp = requests.get(f"{base_url}/admin/v1/events")
+    assert resp.status_code == 401
+
+    # 2. 401 with wrong token
+    resp = requests.get(f"{base_url}/admin/v1/events?token=invalid_token")
+    assert resp.status_code == 401
+
+    # 3. Connect with query param ?token=
+    stream_resp = requests.get(f"{base_url}/admin/v1/events?token={admin_token}", stream=True, timeout=10)
+    assert stream_resp.status_code == 200
+    assert "text/event-stream" in stream_resp.headers.get("Content-Type", "")
+
+    # 4. Register a model and key, then make a request
+    uid = uuid.uuid4().hex[:6]
+    model_name = f"test-live-model-{uid}"
+    requests.post(
+        f"{base_url}/admin/v1/models",
+        headers={"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"},
+        json={"name": model_name, "provider": "openai", "endpoint": mock_url},
+    )
+    key_resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers={"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"},
+        json={"name": f"live-key-{uid}", "allowed_models": [model_name]},
+    )
+    assert key_resp.status_code == 201
+    client_key = key_resp.json()["plaintext"]
+
+    # Fire a completion request
+    req_resp = requests.post(
+        f"{base_url}/v1/chat/completions",
+        headers={"Authorization": f"Bearer {client_key}", "Content-Type": "application/json"},
+        json={"model": model_name, "messages": [{"role": "user", "content": "hello live"}]},
+    )
+    assert req_resp.status_code == 200
+
+    # Read SSE events from the stream
+    found_request_event = False
+    event_name = None
+    lines_read = 0
+    for line in stream_resp.iter_lines(decode_unicode=True):
+        lines_read += 1
+        if not line:
+            continue
+        if line.startswith("event: "):
+            event_name = line[len("event: "):].strip()
+        elif line.startswith("data: ") and event_name == "request":
+            payload = json.loads(line[len("data: "):])
+            if payload.get("model") == model_name:
+                assert payload.get("status") == 200
+                assert payload.get("provider") == "openai"
+                assert "prompt_tokens" in payload
+                assert "completion_tokens" in payload
+                found_request_event = True
+                break
+        if lines_read > 50:
+            break
+
+    stream_resp.close()
+    assert found_request_event, "Expected to receive SSE request event for completion"
+
+
+def test_provider_health_probe_endpoints(gateway):
+    """GET /admin/v1/providers/health and POST /admin/v1/providers/probe."""
+    import uuid
+
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+    admin_headers = {"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"}
+
+    # 1. Configure a provider
+    uid = uuid.uuid4().hex[:6]
+    p_resp = requests.post(
+        f"{base_url}/admin/v1/providers",
+        headers=admin_headers,
+        json={
+            "name": f"mock-health-{uid}",
+            "type": "openai",
+            "endpoint": mock_url,
+            "api_key": "sk-mock-key",
+            "models": ["gpt-4o"],
+        },
+    )
+    assert p_resp.status_code == 201
+
+    # 2. GET /admin/v1/providers/health (before active probe)
+    h_resp = requests.get(f"{base_url}/admin/v1/providers/health", headers=admin_headers)
+    assert h_resp.status_code == 200
+    h_data = h_resp.json()
+    assert "prober_interval_s" in h_data
+    assert "providers" in h_data
+    assert isinstance(h_data["providers"], list)
+
+    # 3. POST /admin/v1/providers/probe (trigger immediate probe)
+    probe_resp = requests.post(f"{base_url}/admin/v1/providers/probe", headers=admin_headers)
+    assert probe_resp.status_code == 200
+    p_data = probe_resp.json()
+    assert "providers" in p_data
+    assert "total" in p_data
+    assert p_data["total"] >= 1
+
+    # 4. GET /admin/v1/providers/health (after active probe)
+    h_resp2 = requests.get(f"{base_url}/admin/v1/providers/health", headers=admin_headers)
+    assert h_resp2.status_code == 200
+    h_data2 = h_resp2.json()
+    assert h_data2["total"] >= 1
+    found = any(p["name"] == f"mock-health-{uid}" for p in h_data2["providers"])
+    assert found
+
+
 def test_admin_lockout_429(gateway):
     """10 failed admin auth attempts from one IP lock that IP out (429).
 

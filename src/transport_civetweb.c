@@ -247,6 +247,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
                   "Content-Type: text/event-stream\r\n"
                   "Cache-Control: no-cache, no-transform\r\n"
                   "Connection: keep-alive\r\n"
+                  "Transfer-Encoding: chunked\r\n"
                   "Access-Control-Allow-Origin: *\r\n\r\n");
 
         if (strcmp(ri->request_method, "HEAD") == 0) {
@@ -256,7 +257,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
 
         char init_ping[128];
         snprintf(init_ping, sizeof init_ping, "event: ping\ndata: {\"ts\":%ld}\n\n", (long)time(NULL));
-        if (mg_write(conn, init_ping, strlen(init_ping)) < 0) {
+        if (mg_send_chunk(conn, init_ping, (unsigned int)strlen(init_ping)) < 0) {
             event_bus_unsubscribe(cw->adm.eb, sub_id);
             return 1;
         }
@@ -270,7 +271,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
             if (prc == 0) {
                 char ping_buf[64];
                 snprintf(ping_buf, sizeof ping_buf, ": ping\n\n");
-                if (mg_write(conn, ping_buf, strlen(ping_buf)) < 0) {
+                if (mg_send_chunk(conn, ping_buf, (unsigned int)strlen(ping_buf)) < 0) {
                     break;
                 }
                 continue;
@@ -283,12 +284,13 @@ handle_admin(struct mg_connection* conn, void* cbdata)
                              item.event_name,
                              item.payload);
             if (n > 0) {
-                if (mg_write(conn, sse_msg, (size_t)n) < 0) {
+                if (mg_send_chunk(conn, sse_msg, (unsigned int)n) < 0) {
                     break;
                 }
             }
         }
 
+        mg_send_chunk(conn, "", 0);
         event_bus_unsubscribe(cw->adm.eb, sub_id);
         return 1;
     }
