@@ -33,6 +33,10 @@ struct lru {
     size_t            table_cap;
 };
 
+/** @brief FNV-1a 哈希并对桶数取模。
+ *  @param s    NUL 结尾的键，不许 NULL。
+ *  @param cap  哈希表容量（> 0）。
+ *  @return h(s) % cap，用作桶下标。 */
 static size_t
 fnv1a(const char* s, size_t cap)
 {
@@ -43,6 +47,9 @@ fnv1a(const char* s, size_t cap)
     return h % cap;
 }
 
+/** @brief 向上取 2 的幂（最小 4，用作哈希表初始/扩容容量）。
+ *  @param n  期望容量。
+ *  @return ≥ @p n 的最小 2 的幂，至少为 4。 */
 static size_t
 next_pow2(size_t n)
 {
@@ -76,6 +83,8 @@ lru_new(size_t capacity, lru_evict_fn on_evict)
 
 /* @invariant caller holds lr->mtx. */
 
+/** @brief 把节点插到新近度链表头（标记为最近使用）。
+ *  @note 调用方持有 lr->mtx。 */
 static void
 rec_link_head(lru_t* lr, struct lru_node* n)
 {
@@ -90,6 +99,8 @@ rec_link_head(lru_t* lr, struct lru_node* n)
     }
 }
 
+/** @brief 把节点从新近度链表摘除（前后驱重链，自身 prev/next 置空）。
+ *  @note 调用方持有 lr->mtx。 */
 static void
 rec_unlink(lru_t* lr, struct lru_node* n)
 {
@@ -106,6 +117,8 @@ rec_unlink(lru_t* lr, struct lru_node* n)
     n->prev = n->next = NULL;
 }
 
+/** @brief 刷新节点新近度（已在头则无操作，否则摘除后插头）。
+ *  @note 调用方持有 lr->mtx。 */
 static void
 rec_move_to_head(lru_t* lr, struct lru_node* n)
 {
@@ -116,6 +129,9 @@ rec_move_to_head(lru_t* lr, struct lru_node* n)
     rec_link_head(lr, n);
 }
 
+/** @brief 按键在哈希桶链中查找节点（strcmp 精确匹配）。
+ *  @return 命中节点；表空或未命中返回 NULL。
+ *  @note 调用方持有 lr->mtx。 */
 static struct lru_node*
 find_node(lru_t* lr, const char* key)
 {
@@ -131,6 +147,8 @@ find_node(lru_t* lr, const char* key)
     return NULL;
 }
 
+/** @brief 计算节点哈希并头插进对应桶链。
+ *  @note 调用方持有 lr->mtx。 */
 static void
 bkt_insert(lru_t* lr, struct lru_node* n)
 {
@@ -139,6 +157,8 @@ bkt_insert(lru_t* lr, struct lru_node* n)
     lr->table[n->h] = n;
 }
 
+/** @brief 把节点从其桶链摘除（pointer-to-pointer 写法；要求节点确在表中）。
+ *  @note 调用方持有 lr->mtx。 */
 static void
 bkt_remove(lru_t* lr, struct lru_node* n)
 {
@@ -150,6 +170,7 @@ bkt_remove(lru_t* lr, struct lru_node* n)
     n->next_bkt = NULL;
 }
 
+/** @brief 释放节点的 key 与节点本体；value 归 owner（经 on_evict 交还），此处不碰。 */
 static void
 destroy_node(struct lru_node* n)
 {
