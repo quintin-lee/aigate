@@ -386,6 +386,17 @@ main(void)
     test_register("redis_pool_invalid_args", test_redis_pool_invalid_args);
     test_register("redis_client_eval_and_pool_live", test_redis_client_eval_and_pool_live);
 
+    extern void test_event_bus_lifecycle(void);
+    extern void test_event_bus_sub_unsub(void);
+    extern void test_event_bus_publish_pop(void);
+    extern void test_event_bus_overflow_drop(void);
+    extern void test_event_bus_helpers(void);
+    test_register("event_bus_lifecycle", test_event_bus_lifecycle);
+    test_register("event_bus_sub_unsub", test_event_bus_sub_unsub);
+    test_register("event_bus_publish_pop", test_event_bus_publish_pop);
+    test_register("event_bus_overflow_drop", test_event_bus_overflow_drop);
+    test_register("event_bus_helpers", test_event_bus_helpers);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
