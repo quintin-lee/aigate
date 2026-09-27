@@ -407,6 +407,9 @@ main(void)
     extern void test_admin_provider_health_and_probe(void);
     test_register("admin_provider_health_and_probe", test_admin_provider_health_and_probe);
 
+    extern void test_response_cache_all(void);
+    test_register("response_cache_all", test_response_cache_all);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
