@@ -66,7 +66,7 @@ add_custom_command(
 )
 add_custom_target(generate_admin_ui_html DEPENDS ${ADMIN_UI_HTML_HDR})
 
-file(GLOB AIGATE_SRC src/*.c)
+file(GLOB AIGATE_SRC CONFIGURE_DEPENDS src/*.c src/*/*.c)
 list(REMOVE_ITEM AIGATE_SRC ${CMAKE_SOURCE_DIR}/src/main.c)
 # Optional ASan/UBSan build: -DAIGATE_SANITIZERS=ON adds
 # -fsanitize=address,undefined + -O1 -g to aigate + libaigate.
@@ -77,7 +77,7 @@ endif()
 
 add_library(libaigate STATIC ${AIGATE_SRC})
 add_dependencies(libaigate generate_admin_ui_html civetweb-c-library hdr_histogram_static)
-target_include_directories(libaigate PUBLIC src ${CMAKE_BINARY_DIR}/generated)
+target_include_directories(libaigate PUBLIC src src/core src/common src/upstream src/policy src/store src/observe src/server ${CMAKE_BINARY_DIR}/generated)
 target_compile_options(libaigate PRIVATE -Wall -Wextra -Werror)
 if(AIGATE_SANITIZERS)
     target_compile_options(libaigate PRIVATE ${AIGATE_SAN_FLAGS})
