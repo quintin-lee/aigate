@@ -1,4 +1,5 @@
 /** @file model_router.h
+ *  @ingroup group_upstream
  *  @brief model name → route (provider/endpoint/key/params) with LRU cache.
  *
  *  Resolving a route pulls the model record from the PG ops, then resolves
@@ -15,11 +16,11 @@
 
 /** @brief Model router state (owned by the core; one per process). */
 typedef struct model_router {
-    lru_t*   routes;      /* model_name → model_rec_t* (heap values, evict frees) */
-    pg_ops_t ops;         /* borrowed ops table */
-    void*    ops_ctx; /* ops 上下文（借用） */
-    uint8_t  master[32]; /* 主密钥（32 字节，解密 pg: 用） */
-    int      have_master; /* 1 when AIGATE_MASTER_KEY was provided */
+    lru_t*   routes; /**< model_name → model_rec_t*（堆值，逐出释放） */
+    pg_ops_t ops; /**< 借用的 ops 表 */
+    void*    ops_ctx; /**< ops 上下文（借用） */
+    uint8_t  master[32]; /**< 主密钥（32 字节，解密 pg: 用） */
+    int      have_master; /**< 1 when AIGATE_MASTER_KEY was provided */
 } model_router_t;
 
 /** @brief New router over @p ps; @p master (32 bytes) enables pg: secrets.
@@ -30,6 +31,8 @@ model_router_t* model_router_new(pg_store_t* ps, const uint8_t* master);
 void model_router_free(model_router_t* mr);
 
 /** @brief Resolve a model name into a fully populated route.
+ * @param mr    router (borrowed)
+ * @param model model name to resolve
  * @param out   caller-provided record (e.g. on the stack); filled in place,
  *              no allocation, nothing to release.
  * @return 0 + @p out filled (including upstream_key); -1 unknown/disabled

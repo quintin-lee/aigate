@@ -1,4 +1,5 @@
 /** @file provider_anthropic.h
+ *  @ingroup group_upstream
  *  @brief Anthropic Claude provider adapter (messages API & SSE bridge, spec §5).
  */
 #ifndef AIGATE_PROVIDER_ANTHROPIC_H
@@ -10,6 +11,7 @@
 
 #include <stddef.h>
 
+/** @brief Anthropic 供应商虚表实例（见 provider_adapter 虚表）。 */
 extern const provider_adapter_t g_provider_anthropic;
 
 /** @brief 1 when provider label is "anthropic". */
@@ -53,17 +55,17 @@ int provider_anthropic_resp_to_openai(const char* anthropic_resp,
 
 /** @brief State machine for streaming Anthropic SSE to OpenAI SSE chunks. */
 typedef struct anthropic_bridge {
-    aigate_response_ctx* rc; /* 下游响应上下文（借用） */
-    bool                 headers_sent; /* 下游头已发出 */
-    bool                 aborted; /* 下游已中断 */
-    char                 line_buf[8192]; /* SSE 行缓冲 */
-    size_t               line_len; /* 行缓冲已用字节 */
-    char                 current_event[64]; /* 当前 SSE 事件名 */
-    char                 msg_id[64]; /* 上游消息 id */
-    char                 model[64]; /* 模型名 */
-    long                 input_tokens; /* 累计 input token */
-    long                 output_tokens; /* 累计 output token */
-    bool                 done_emitted; /* [DONE] 已发出 */
+    aigate_response_ctx* rc; /**< 下游响应上下文（借用） */
+    bool                 headers_sent; /**< 下游头已发出 */
+    bool                 aborted; /**< 下游已中断 */
+    char                 line_buf[8192]; /**< SSE 行缓冲 */
+    size_t               line_len; /**< 行缓冲已用字节 */
+    char                 current_event[64]; /**< 当前 SSE 事件名 */
+    char                 msg_id[64]; /**< 上游消息 id */
+    char                 model[64]; /**< 模型名 */
+    long                 input_tokens; /**< 累计 input token */
+    long                 output_tokens; /**< 累计 output token */
+    bool                 done_emitted; /**< [DONE] 已发出 */
 } anthropic_bridge_t;
 
 /** @brief Initialize bridge with response context. */
@@ -81,12 +83,12 @@ int anthropic_sniff_usage_json(const char* json_str, long* out_ptok, long* out_c
 
 /** @brief Lightweight passive line-buffered sniffer for Anthropic SSE streams. */
 typedef struct anthropic_sniffer {
-    char   line_buf[8192]; /* SSE 行缓冲 */
-    size_t line_len; /* 行缓冲已用字节 */
-    char   current_event[64]; /* 当前 SSE 事件名 */
-    long   input_tokens; /* 累计 input token */
-    long   output_tokens; /* 累计 output token */
-    long   cached_tokens; /* 累计缓存命中 token */
+    char   line_buf[8192]; /**< SSE 行缓冲 */
+    size_t line_len; /**< 行缓冲已用字节 */
+    char   current_event[64]; /**< 当前 SSE 事件名 */
+    long   input_tokens; /**< 累计 input token */
+    long   output_tokens; /**< 累计 output token */
+    long   cached_tokens; /**< 累计缓存命中 token */
 } anthropic_sniffer_t;
 
 /** @brief 嗅探器清零（行缓冲与 token 累计）。 */

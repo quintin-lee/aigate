@@ -720,6 +720,7 @@ anthropic_stream_bridge_free(stream_bridge_t* b)
     free(b);
 }
 
+/** @brief Anthropic 供应商虚表实例（见 provider_adapter 虚表）。 */
 const provider_adapter_t g_provider_anthropic = {
     .name = "anthropic",
     .supports = adapter_anthropic_supports,

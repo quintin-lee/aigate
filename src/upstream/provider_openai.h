@@ -1,4 +1,5 @@
 /** @file provider_openai.h
+ *  @ingroup group_upstream
  *  @brief OpenAI-compatible provider adapter (openai / ollama / azure).
  *
  *  Covers every provider whose wire format matches OpenAI: vanilla OpenAI,
@@ -11,6 +12,7 @@
 #include "pg_store.h"
 #include "provider_adapter.h"
 
+/** @brief OpenAI 兼容供应商虚表实例（见 provider_adapter 虚表）。 */
 extern const provider_adapter_t g_provider_openai;
 
 /** @brief 1 when @p provider label is handled by this adapter. */

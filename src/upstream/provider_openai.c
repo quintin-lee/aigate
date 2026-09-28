@@ -194,18 +194,19 @@ openai_parse_chat_response(const char* raw_body,
     return 0;
 }
 
+/** @brief OpenAI 直通流桥状态机（首包才发 SSE 头）。 */
 typedef struct {
-    aigate_response_ctx* rc;
-    bool                 headers_sent;
+    aigate_response_ctx* rc; /**< 下游响应上下文（借用） */
+    bool                 headers_sent; /**< 下游头已发出 */
     char                 line_buf
-        [8192]; /* SSE lines >8KB are truncated (P3-6): long deltas beyond this lose token accounting */
-    size_t line_len;
-    char   model[128];
-    long   prompt_tokens;
-    long   completion_tokens;
-    long   cached_tokens;
-    long   reasoning_tokens;
-} openai_bridge_t;
+        [8192]; /**< SSE 行缓冲；超 8KB 行截断（P3-6），超长 delta 丢失 token 计数 */
+    size_t line_len; /**< 行缓冲已用字节 */
+    char   model[128]; /**< 模型名 */
+    long   prompt_tokens; /**< 累计 prompt token */
+    long   completion_tokens; /**< 累计 completion token */
+    long   cached_tokens; /**< 累计缓存命中 token */
+    long   reasoning_tokens; /**< 累计 reasoning token */
+} openai_bridge_t; /**< OpenAI 直通流桥类型（见上）。 */
 
 /** @brief 新建 OpenAI 直通流桥（首包才发 SSE 头）。
  *  @return 桥；OOM 返回 NULL。 */
@@ -657,6 +658,7 @@ provider_openai_parse_responses_usage(const char* body,
     return 0;
 }
 
+/** @brief OpenAI 兼容供应商虚表实例（见 provider_adapter 虚表）。 */
 const provider_adapter_t g_provider_openai = {
     .name = "openai",
     .supports = adapter_openai_supports,

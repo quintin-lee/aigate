@@ -1,4 +1,5 @@
 /** @file upstream_client.h
+ *  @ingroup group_upstream
  *  @brief libcurl upstream transport: one non-streaming call per request.
  *
  *  The URL is produced by the provider adapter (which knows about
@@ -60,6 +61,9 @@ typedef int (*upstream_chunk_fn)(void* user_data, const void* chunk, size_t len)
  * @param on_chunk           called on every incoming data chunk
  * @param user_data          passed to on_chunk
  * @param out_status         receives HTTP status code
+ * @param out_err_body       receives malloc'd upstream error body on 4xx/5xx
+ *                           pre-SSE paths (caller frees via free; NULL otherwise)
+ * @param out_err_len        receives length of @p out_err_body
  * @return 0 on success; -110 on timeout; -502 on transport error.
  * @note When the upstream answers 4xx/5xx before any SSE data, the error
  *       body is accumulated and returned via @p out_err_body (malloc'd,
@@ -78,10 +82,12 @@ int upstream_stream_call(const char*       url,
                          size_t*           out_err_len);
 /** @brief One upstream GET probe (P1-4 provider health check).
  * Reuses the per-thread curl handle; the response body is discarded.
- * @param hdr_name/hdr_value        auth header pair (value is final,
- *                                   e.g. "Bearer sk-…"); either NULL skips
- * @param extra_hdr_name/extra_hdr_value optional second header pair;
- *                                   either NULL skips
+ * @param url          probe URL (scheme://host:port/path)
+ * @param hdr_name     auth header name (NULL skips auth header)
+ * @param hdr_value    auth header value, final form (e.g. "Bearer sk-…")
+ * @param extra_hdr_name  optional second header name (NULL skips)
+ * @param extra_hdr_value optional second header value
+ * @param timeout_ms   timeout in ms (0 → default)
  * @param out_status    receives upstream status (0 when transport failed)
  * @param out_latency_ns optional wall duration in ns (may be NULL)
  * @return 0 transport success (even 4xx/5xx); -110 timeout; -502 failure. */

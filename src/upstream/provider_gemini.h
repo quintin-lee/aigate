@@ -1,4 +1,5 @@
 /** @file provider_gemini.h
+ *  @ingroup group_upstream
  *  @brief Google Gemini provider adapter (Plan 3, Task 3 & 4).
  */
 #ifndef AIGATE_PROVIDER_GEMINI_H
@@ -11,6 +12,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
+/** @brief Gemini 供应商虚表实例（见 provider_adapter 虚表）。 */
 extern const provider_adapter_t g_provider_gemini;
 
 /** @brief 1 when provider is "gemini" or "google". */
@@ -58,11 +60,11 @@ int gemini_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok
 
 /** @brief Lightweight passive line-buffered sniffer for Gemini SSE streams. */
 typedef struct gemini_sniffer {
-    char   line_buf[8192]; /* SSE 行缓冲 */
-    size_t line_len; /* 行缓冲已用字节 */
-    long   prompt_tokens; /* 累计 prompt token */
-    long   candidates_tokens; /* 累计 candidates token */
-    long   cached_tokens; /* 累计缓存命中 token */
+    char   line_buf[8192]; /**< SSE 行缓冲 */
+    size_t line_len; /**< 行缓冲已用字节 */
+    long   prompt_tokens; /**< 累计 prompt token */
+    long   candidates_tokens; /**< 累计 candidates token */
+    long   cached_tokens; /**< 累计缓存命中 token */
 } gemini_sniffer_t;
 
 /** @brief 嗅探器清零（行缓冲与 token 累计）。 */

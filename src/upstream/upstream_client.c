@@ -114,16 +114,15 @@ curl_apply_common_opts(CURL* c)
     curl_easy_setopt(c, CURLOPT_TCP_KEEPINTVL, 30L);
 }
 
+/** @brief Non-streaming response accumulator (whole body in memory). */
 struct resp_buf {
-    char*  data;
-    size_t len;
-    size_t cap;
+    char*  data; /**< 累积的响应体 */
+    size_t len; /**< 已用字节 */
+    size_t cap; /**< 缓冲容量 */
 };
 
-/* Non-streaming responses are buffered whole in memory (the bridge then
- * re-parses JSON/SSE). Cap the accumulation so a hostile or misconfigured
- * upstream cannot grow a worker's footprint without bound; aborting the
- * transfer is reported to the caller as a transport error (-502). */
+/** @brief 非流式响应累积上限（32MB）：防恶意/ misconfigured 上游撑爆 worker 内存，超限按传输错误（-502）上报。
+ *  @note 流式错误体累积同样受此上限约束。 */
 #define UPSTREAM_RESP_MAX (32 * 1024 * 1024)
 
 /* libcurl write callback: data first, userdata last. */
@@ -377,21 +376,22 @@ upstream_probe(const char* url,
     return rc;
 }
 
+/** @brief 流式传输上下文（write 回调状态）：分片转发 + 静默超时 + 错误体捕获。 */
 struct stream_ctx {
-    upstream_chunk_fn on_chunk;
-    void*             user_data;
-    uint64_t          last_chunk_mono_ns;
-    uint64_t          silence_timeout_ns;
-    int               aborted;
-    CURL*             curl;
-    int               status;
+    upstream_chunk_fn on_chunk; /**< 逐分片回调（借用） */
+    void*             user_data; /**< 回调透传数据（借用） */
+    uint64_t          last_chunk_mono_ns; /**< 末分片单调时间（静默超时基准） */
+    uint64_t          silence_timeout_ns; /**< 分片间静默超时（纳秒） */
+    int               aborted; /**< 非零=回调要求中断 */
+    CURL*             curl; /**< 本次 easy 句柄（借用） */
+    int               status; /**< 首包 HTTP 状态码 */
     /* Error-body capture: when the upstream answers 4xx/5xx before the first
      * SSE chunk, the body is accumulated here so the caller can surface the
      * upstream's own error instead of a generic 502. Capped like the
      * non-streaming buffer. */
-    char*  err_body;
-    size_t err_len;
-    size_t err_cap;
+    char*  err_body; /**< 4xx/5xx 预 SSE 错误体累积缓冲 */
+    size_t err_len; /**< 错误体已用字节 */
+    size_t err_cap; /**< 错误体缓冲容量 */
 };
 
 /** @brief 流式 write 回调：首包记状态码；4xx/5xx 累积错误体，其余分片交 on_chunk（回调非零即中断）。

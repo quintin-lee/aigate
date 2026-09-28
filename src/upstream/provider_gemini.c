@@ -342,19 +342,20 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
 
 /* ------------------------------------------------------------ streaming bridge */
 
+/** @brief Gemini→OpenAI 流转译桥状态机。 */
 typedef struct gemini_bridge {
-    aigate_response_ctx* rc;
-    bool                 headers_sent;
-    bool                 aborted;
-    char                 line_buf[8192];
-    size_t               line_len;
-    char                 model[64];
-    char                 msg_id[64];
-    char                 finish_reason[32];
-    long                 prompt_tokens;
-    long                 completion_tokens;
-    bool                 done_emitted;
-} gemini_bridge_t;
+    aigate_response_ctx* rc; /**< 下游响应上下文（借用） */
+    bool                 headers_sent; /**< 下游头已发出 */
+    bool                 aborted; /**< 下游已中断 */
+    char                 line_buf[8192]; /**< SSE 行缓冲 */
+    size_t               line_len; /**< 行缓冲已用字节 */
+    char                 model[64]; /**< 模型名 */
+    char                 msg_id[64]; /**< 上游消息 id */
+    char                 finish_reason[32]; /**< 上游 finishReason */
+    long                 prompt_tokens; /**< 累计 prompt token */
+    long                 completion_tokens; /**< 累计 completion token */
+    bool                 done_emitted; /**< [DONE] 已发出 */
+} gemini_bridge_t; /**< Gemini 流转译桥类型（见 gemini_bridge 结构）。 */
 
 /** @brief 新建 Gemini→OpenAI 流转译桥。@return 桥；OOM 返回 NULL。 */
 static stream_bridge_t*
@@ -913,6 +914,7 @@ provider_gemini_parse_embeddings(const char* raw_body,
     return 0;
 }
 
+/** @brief Gemini 供应商虚表实例（见 provider_adapter 虚表）。 */
 const provider_adapter_t g_provider_gemini = {
     .name = "gemini",
     .supports = adapter_gemini_supports,
