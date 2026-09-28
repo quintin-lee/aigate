@@ -1,4 +1,5 @@
 /** @file sha256.h
+ *  @ingroup group_common
  *  @brief SHA-256 hex digest helpers built on OpenSSL EVP.
  *
  *  Used to hash API keys and admin tokens at rest (spec section 3:

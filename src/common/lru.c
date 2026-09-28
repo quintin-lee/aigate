@@ -13,24 +13,26 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** @brief Hash-table node; links recency list and bucket chain. */
 struct lru_node {
-    char*            key;
-    void*            val;
-    struct lru_node* prev;     /* recency list */
-    struct lru_node* next;     /* recency list */
-    struct lru_node* next_bkt; /* hash bucket chain */
-    size_t           h;
+    char*            key;      /**< Owned key copy. */
+    void*            val;      /**< Owned value (see file brief). */
+    struct lru_node* prev;     /**< Recency list: newer neighbor. */
+    struct lru_node* next;     /**< Recency list: older neighbor. */
+    struct lru_node* next_bkt; /**< Hash bucket chain. */
+    size_t           h;        /**< Cached full hash of key. */
 };
 
+/** @brief LRU map instance: recency list + hash table under one mutex. */
 struct lru {
-    pthread_mutex_t   mtx;
-    size_t            capacity;
-    size_t            count;
-    lru_evict_fn      on_evict;
-    struct lru_node*  head; /* most recent */
-    struct lru_node*  tail; /* least recent */
-    struct lru_node** table;
-    size_t            table_cap;
+    pthread_mutex_t   mtx;      /**< Guards everything below. */
+    size_t            capacity; /**< Max live entries. */
+    size_t            count;    /**< Current live entries. */
+    lru_evict_fn      on_evict; /**< Displaced-value callback (may be NULL). */
+    struct lru_node*  head; /**< Recency list: most recent. */
+    struct lru_node*  tail; /**< Recency list: least recent. */
+    struct lru_node** table;    /**< Bucket array. */
+    size_t            table_cap; /**< Bucket count (power of two). */
 };
 
 /** @brief FNV-1a 哈希并对桶数取模。

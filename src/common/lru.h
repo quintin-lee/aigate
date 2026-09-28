@@ -6,6 +6,11 @@
  *  eviction, on lru_invalidate removal, and on lru_free — so the
  *  owner can release it.
  */
+
+/**
+ * @defgroup group_common 通用层
+ * @brief 通用：LRU 缓存、SHA-256。
+ */
 #ifndef AIGATE_LRU_H
 #define AIGATE_LRU_H
 
@@ -14,6 +19,7 @@
 /** @brief Eviction callback; @p val is a value displaced by capacity or free. */
 typedef void (*lru_evict_fn)(void* val);
 
+/** @brief Opaque LRU map instance (see lru.c for layout). */
 typedef struct lru lru_t;
 
 /** @brief Create an LRU holding at most @p capacity entries.
