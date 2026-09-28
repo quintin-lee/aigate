@@ -1,4 +1,5 @@
 /** @file aigate_log.h
+ *  @ingroup group_core
  *  @brief Leveled stderr logging used by all aigate modules.
  *
  *  Every call emits `<UTC ISO-8601> LEVEL message (file:line)` to stderr

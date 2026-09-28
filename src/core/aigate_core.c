@@ -347,16 +347,17 @@ enum {
 /* Streaming SSE Cache Replay & Accumulator Engine                          */
 /* ========================================================================= */
 
+/** @brief 流式缓存累加器：透传分片给客户端的同时累加 choices[0].delta.content 供回填缓存。 */
 typedef struct stream_cache_acc {
-    aigate_response_ctx* orig_rc;
-    char*                accum_content;
-    size_t               accum_len;
-    size_t               accum_cap;
-    char                 line_buf[4096];
-    size_t               line_len;
-    char                 id[64];
-    long                 created;
-    bool                 overflow;
+    aigate_response_ctx* orig_rc;      /**< 真实响应上下文（借用）。 */
+    char*                accum_content; /**< 累加的完整正文（上限 512KiB）。 */
+    size_t               accum_len;    /**< 已累加字节数。 */
+    size_t               accum_cap;    /**< accum_content 容量。 */
+    char                 line_buf[4096]; /**< SSE 行缓冲。 */
+    size_t               line_len;     /**< 行缓冲有效长度。 */
+    char                 id[64];       /**< 响应 id（取自首个 data 行）。 */
+    long                 created;      /**< 响应 created 时间戳。 */
+    bool                 overflow;     /**< 超限/分配失败后只透传不再累加。 */
 } stream_cache_acc_t;
 
 /** @brief 流式缓存累加器的 set_header 垫片：强制 status=200 后透传给真实响应。
@@ -1219,10 +1220,11 @@ build_anthropic_url(const char* endpoint, char* url_out, size_t url_cap)
     }
 }
 
+/** @brief Anthropic 流式回调上下文：首分片写 SSE 头并透传分片、喂 usage 嗅探器。 */
 typedef struct {
-    aigate_response_ctx* rc;
-    bool                 headers_sent;
-    anthropic_sniffer_t  sniffer;
+    aigate_response_ctx* rc;           /**< 真实响应上下文（借用）。 */
+    bool                 headers_sent; /**< SSE 头是否已写。 */
+    anthropic_sniffer_t  sniffer;      /**< usage 累计嗅探器。 */
 } anthropic_stream_ctx_t;
 
 /** @brief Anthropic 流式上游回调：首分片先写 SSE 头，再透传分片并喂 usage 嗅探器。
@@ -1728,10 +1730,11 @@ build_gemini_url(const char* endpoint, const char* model, bool is_streaming, cha
     }
 }
 
+/** @brief Gemini 流式回调上下文：首分片写 SSE 头并透传分片、喂 usage 嗅探器。 */
 typedef struct {
-    aigate_response_ctx* rc;
-    bool                 headers_sent;
-    gemini_sniffer_t     sniffer;
+    aigate_response_ctx* rc;           /**< 真实响应上下文（借用）。 */
+    bool                 headers_sent; /**< SSE 头是否已写。 */
+    gemini_sniffer_t     sniffer;      /**< usage 累计嗅探器。 */
 } gemini_stream_ctx_t;
 
 /** @brief Gemini 流式上游回调：首分片先写 SSE 头，再透传分片并喂 usage 嗅探器。

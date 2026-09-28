@@ -1,4 +1,5 @@
 /** @file secrets.h
+ *  @ingroup group_core
  *  @brief AES-256-GCM encryption for upstream secrets at rest (spec section 5).
  *
  *  Wire format: hex( "v1:" || nonce[12] || tag[16] || ciphertext ). The whole
