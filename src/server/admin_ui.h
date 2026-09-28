@@ -1,4 +1,5 @@
 /** @file admin_ui.h
+ *  @ingroup group_server
  *  @brief Web admin dashboard handler and static asset delivery.
  */
 #ifndef AIGATE_ADMIN_UI_H

@@ -37,9 +37,13 @@
 #include <time.h>
 #include <openssl/rand.h>
 
+/** @brief Max keys/models/providers/usage rows staged per list response. */
 #define KEY_LIST_CAP 512
+/** @copydoc KEY_LIST_CAP */
 #define MODEL_LIST_CAP 256
+/** @copydoc KEY_LIST_CAP */
 #define PROVIDER_LIST_CAP 128
+/** @copydoc KEY_LIST_CAP */
 #define USAGE_LIST_CAP 256
 
 /* ------------------------------------------------------------ helpers */
@@ -78,6 +82,7 @@ admin_auth_ok(admin_ctx_t* adm, const char* bearer)
 
 /* ------------------------------------------------------------ brute-force lockout */
 
+/** @brief Number of in-process admin lockout hash slots. */
 #define LOCKOUT_SLOTS 128
 
 /* Policy is process-wide; transport sets it from env at start-up.
@@ -92,11 +97,12 @@ static redis_pool_t* g_lockout_pool = NULL;
 /** 分布式熔断 Lua 脚本 SHA（随 g_lockout_pool 初始化加载，空串表未加载）。 */
 static char          g_lockout_sha[48] = { 0 };
 
+/** @brief One in-process admin-lockout hash slot. */
 typedef struct {
-    char           ip[32];
-    _Atomic long   fails;
-    _Atomic time_t first_fail;
-    int            in_use;
+    char           ip[32];     /**< keyed client IP text */
+    _Atomic long   fails;     /**< failures inside the current window */
+    _Atomic time_t first_fail;/**< window start (seconds since epoch) */
+    int            in_use;    /**< slot occupied flag */
 } lockout_slot_t;
 
 /** 本地管理口熔断计数槽（按 IP 分片，g_lockout_mtx 保护）。 */
@@ -443,7 +449,9 @@ add_pagination_meta(json_t* root, size_t total, int page, int limit)
     }
 }
 
+/** @brief API key plaintext buffer size ("aig_" + 32 hex + NUL). */
 #define KEY_PLAIN_CAP 48
+/** @brief SHA-256 hex digest buffer size (64 hex + NUL). */
 #define KEY_HASH_CAP 65
 
 /** @brief Build a 16-byte random "aig_" + 32 hex plaintext; hash it. */
@@ -2316,14 +2324,15 @@ calculate_model_cost(const char*        model_name,
     return 0;
 }
 
+/** @brief Per-model cost accumulator used while folding usage rows. */
 struct model_agg {
-    long group_id;
-    char group_name[128];
-    char model[128];
-    long prompt;
-    long completion;
-    long cached;
-    long requests;
+    long group_id;       /**< owning group id (0 = ungrouped) */
+    char group_name[128];/**< resolved group display name */
+    char model[128];     /**< model route name */
+    long prompt;         /**< summed prompt tokens */
+    long completion;     /**< summed completion tokens */
+    long cached;         /**< summed cache-hit tokens */
+    long requests;       /**< summed request count */
 };
 
 char*
@@ -2458,6 +2467,8 @@ cost_from_rows_paginated(const cost_row_t*  rows,
     return ret;
 }
 
+/** @brief Pure calculation: transform cost_row_t rows + models pricing into a JSON cost report (unpaginated).
+ *  Exported for unit testing. */
 char*
 cost_from_rows(const cost_row_t*  rows,
                int                n_rows,

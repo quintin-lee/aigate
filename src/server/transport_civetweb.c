@@ -18,23 +18,25 @@
 #include <string.h>
 #include <time.h>
 
+/** @brief CivetWeb transport instance state. */
 struct transport_civetweb {
-    struct mg_context* ctx;
-    aigate_core*       ac;
-    pg_store_t*        ps;
-    char               admin_token_hash[65];
-    char               metrics_acl[256];
-    admin_ctx_t        adm;
-    long               max_body_bytes;
+    struct mg_context* ctx;                 /**< CivetWeb context handle */
+    aigate_core*       ac;                  /**< pipeline core (borrowed) */
+    pg_store_t*        ps;                  /**< backing store (borrowed) */
+    char               admin_token_hash[65];/**< SHA-256 hex of admin token + NUL */
+    char               metrics_acl[256];    /**< /metrics IP allowlist text */
+    admin_ctx_t        adm;                 /**< admin plane state */
+    long               max_body_bytes;      /**< max /v1 request body in bytes */
 };
 
+/** @brief Per-request response state for the CivetWeb adapter. */
 struct cw_response_state {
-    struct mg_connection* conn;
-    int                   status;
-    bool                  headers_sent;
-    char                  header_buf[4096];
-    size_t                header_len;
-    aigate_response_ctx*  rc;
+    struct mg_connection* conn;         /**< active CivetWeb connection */
+    int                   status;       /**< HTTP status staged for flush */
+    bool                  headers_sent; /**< status line already flushed */
+    char                  header_buf[4096];/**< accumulated header block */
+    size_t                header_len;   /**< bytes used in header_buf */
+    aigate_response_ctx*  rc;           /**< pipeline response context */
 };
 
 /** @brief HTTP 状态码转原因短语；未收录返回 "Response"。 */

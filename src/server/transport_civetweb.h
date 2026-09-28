@@ -6,12 +6,18 @@
  *    - /admin/v1/... → admin_dispatch
  *    - /metrics      → Prometheus text exposition with IP ACL
  */
+
+/**
+ * @defgroup group_server 服务层
+ * @brief 服务：HTTP 传输、管理 API、后台页面。
+ */
 #ifndef AIGATE_TRANSPORT_CIVETWEB_H
 #define AIGATE_TRANSPORT_CIVETWEB_H
 
 #include "aigate_core.h"
 #include "pg_store.h"
 
+/** @brief Opaque CivetWeb transport handle. */
 typedef struct transport_civetweb transport_civetweb_t;
 
 /**
@@ -21,6 +27,7 @@ typedef struct transport_civetweb transport_civetweb_t;
  * @param admin_token_hash 64 hex chars SHA-256 of the admin token
  * @param listen_addr      e.g. ":8080" or "0.0.0.0:8080"
  * @param metrics_acl      comma-separated IPv4 list / CIDRs (e.g. "127.0.0.1")
+ * @param max_body_bytes   max /v1 request body in bytes (larger → 413)
  * @return opaque transport handle, or NULL on bind/init failure
  */
 transport_civetweb_t* transport_civetweb_start(aigate_core* ac,
