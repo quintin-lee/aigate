@@ -1,0 +1,14 @@
+PROJECT_NAME           = aigate
+INPUT                  = src
+RECURSIVE              = YES
+GENERATE_HTML          = YES
+OUTPUT_DIRECTORY       = build/docs
+QUIET                  = YES
+# Strip GNU __attribute__ so declarations merge with definitions
+# (else e.g. aigate_log warns as undocumented in its .c file).
+MACRO_EXPANSION        = YES
+EXPAND_ONLY_PREDEF     = YES
+PREDEFINED             = __attribute__(x)=
+# Feature-test macros (_XOPEN_SOURCE/_DEFAULT_SOURCE) are toolchain
+# noise, not API: exclude them from documentation.
+EXCLUDE_SYMBOLS        = _XOPEN_SOURCE _DEFAULT_SOURCE

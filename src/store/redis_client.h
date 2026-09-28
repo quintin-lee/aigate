@@ -1,4 +1,5 @@
 /** @file redis_client.h
+ *  @ingroup group_store
  *  @brief hiredis connection helpers and Lua script evaluation. */
 #ifndef AIGATE_REDIS_CLIENT_H
 #define AIGATE_REDIS_CLIENT_H

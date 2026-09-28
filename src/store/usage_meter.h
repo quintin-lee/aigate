@@ -1,4 +1,5 @@
 /** @file usage_meter.h
+ *  @ingroup group_store
  *  @brief Atomic counters + HDR per-provider latency histograms; 5s PG flush.
  *
  *  Hot path (um_record): atomics + one mutex-taken row accumulate + one
@@ -13,6 +14,7 @@
 #include "pg_store.h"
 #include "ratelimit.h"
 
+/** @brief Opaque usage meter: atomics + accumulator table + audit ring + worker. */
 typedef struct usage_meter usage_meter_t;
 
 /** @brief Create a meter. flush_interval_s <= 0 disables the background
@@ -37,6 +39,7 @@ void um_record(usage_meter_t* um,
                uint64_t       latency_ns,
                const char*    provider);
 
+/** @brief Record one request with reasoning tokens (guardrail_action defaults to ""). */
 void um_record_ext(usage_meter_t* um,
                    long           key_id,
                    const char*    model,
@@ -48,6 +51,7 @@ void um_record_ext(usage_meter_t* um,
                    uint64_t       latency_ns,
                    const char*    provider);
 
+/** @brief Record one request with reasoning tokens and guardrail action. */
 void um_record_full(usage_meter_t* um,
                     long           key_id,
                     const char*    model,
@@ -62,8 +66,11 @@ void um_record_full(usage_meter_t* um,
 
 /** @brief Lifetime totals (for /metrics). */
 long um_total_requests(usage_meter_t* um);
+/** @brief Lifetime error count (status >= 500). */
 long um_total_errors(usage_meter_t* um);
+/** @brief Lifetime prompt+completion tokens. */
 long um_total_tokens(usage_meter_t* um);
+/** @brief Lifetime cached prompt tokens. */
 long um_total_cached_tokens(usage_meter_t* um);
 
 /** @brief Drain the daily accumulator map into @p out (up to @p cap rows),

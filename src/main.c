@@ -43,6 +43,7 @@ sig_handler(int sig)
     g_stop = 1;
 }
 
+/** @brief 程序入口：加载配置→初始化存储/路由/传输→阻塞服务直到信号退出。 */
 int
 main(void)
 {

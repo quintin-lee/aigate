@@ -1,4 +1,5 @@
 /** @file redis_scripts.h
+ *  @ingroup group_store
  *  @brief Lua scripts for atomic Redis clustering operations. */
 #ifndef AIGATE_REDIS_SCRIPTS_H
 #define AIGATE_REDIS_SCRIPTS_H

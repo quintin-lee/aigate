@@ -12,41 +12,55 @@
 #include <unistd.h>
 #include <time.h>
 
+/** @brief 用量累加槽数（key_id+model 哈希散列）。 */
 #define UM_ACC_CAP 4096
+/** @brief 延迟直方图提供商槽位数。 */
 #define UM_MAX_PROVS 16
+/** @brief 审计环容量（行）。 */
 #define UM_REQ_CAP 4096
+/** @brief 审计单批刷盘上限（行）。 */
 #define UM_REQ_BATCH 512
 
+/** @brief 日粒度用量累加槽：同一 key+model+日期的计数合并。 */
 typedef struct {
-    int    in_use;
-    long   key_id;
-    char   model[128];
-    time_t day;
-    long   requests, prompt, completion, errors;
-    long   cached_prompt;
+    int    in_use;         /**< 槽占用标记。 */
+    long   key_id;         /**< API key 数字 id。 */
+    char   model[128];     /**< 模型名。 */
+    time_t day;            /**< UTC 日期（零点时间戳）。 */
+    long   requests;       /**< 请求数。 */
+    long   prompt;         /**< 输入 token。 */
+    long   completion;     /**< 输出 token。 */
+    long   errors;         /**< 错误数。 */
+    long   cached_prompt;  /**< 缓存命中输入 token。 */
 } um_acc_t;
 
+/** @brief 单提供商延迟直方图槽。 */
 typedef struct {
-    char                  name[32];
-    struct hdr_histogram* h;
-    int                   in_use;
+    char                  name[32]; /**< 提供商标签。 */
+    struct hdr_histogram* h;        /**< HDR 直方图（延迟纳秒）。 */
+    int                   in_use;   /**< 槽占用标记。 */
 } um_prov_t;
 
+/** @brief 用量计内部状态：原子累计 + 日累加表 + 审计环 + 后台刷盘线程。 */
 struct usage_meter {
-    pg_store_t*          ps;
-    ratelimit_t*         rl;
-    time_t               last_rollover_day;
-    pthread_mutex_t      mtx;
-    um_acc_t             accs[UM_ACC_CAP];
-    um_prov_t            provs[UM_MAX_PROVS];
-    atomic_long          reqs, errs, toks, cached_toks;
-    pthread_t            worker;
-    int                  have_worker;
-    int                  flush_interval_s;
-    int                  stop;
-    usage_request_row_t* req_ring;
-    int                  req_head, req_tail;
-    atomic_int           req_dropped;
+    pg_store_t*          ps;                 /**< PG 存储（刷盘目标，可空）。 */
+    ratelimit_t*         rl;                 /**< 限流器（日期滚动时重置，可空）。 */
+    time_t               last_rollover_day;  /**< 上次配额滚动日期。 */
+    pthread_mutex_t      mtx;                /**< 累加表/审计环互斥锁。 */
+    um_acc_t             accs[UM_ACC_CAP];   /**< 日用量累加槽。 */
+    um_prov_t            provs[UM_MAX_PROVS];/**< 提供商延迟直方图槽。 */
+    atomic_long          reqs;               /**< 生涯请求数。 */
+    atomic_long          errs;               /**< 生涯错误数。 */
+    atomic_long          toks;               /**< 生涯 token 数。 */
+    atomic_long          cached_toks;        /**< 生涯缓存 token 数。 */
+    pthread_t            worker;             /**< 后台刷盘线程句柄。 */
+    int                  have_worker;        /**< 线程是否已创建。 */
+    int                  flush_interval_s;   /**< 刷盘间隔秒（<=0 禁用线程）。 */
+    int                  stop;               /**< 线程退出标记。 */
+    usage_request_row_t* req_ring;           /**< 审计环缓冲。 */
+    int                  req_head;           /**< 审计环头序号。 */
+    int                  req_tail;           /**< 审计环尾序号。 */
+    atomic_int           req_dropped;        /**< 审计环溢出丢弃计数。 */
 };
 
 /** @brief 今日 UTC 零点（用量累加桶的日期分界）。 */

@@ -1,4 +1,5 @@
 /** @file schema_sql.h
+ *  @ingroup group_store
  *  @brief Embedded copy of schema/schema.sql (generated; do not edit by hand). */
 #ifndef AIGATE_SCHEMA_SQL_H
 #define AIGATE_SCHEMA_SQL_H

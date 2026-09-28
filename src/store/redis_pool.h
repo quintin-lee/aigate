@@ -1,4 +1,5 @@
 /** @file redis_pool.h
+ *  @ingroup group_store
  *  @brief Thread-safe redis connection pool. */
 #ifndef AIGATE_REDIS_POOL_H
 #define AIGATE_REDIS_POOL_H
@@ -9,6 +10,7 @@
 extern "C" {
 #endif
 
+/** @brief Opaque Redis connection pool. */
 typedef struct redis_pool redis_pool_t;
 
 /**

@@ -22,16 +22,18 @@
 #include <string.h>
 #include <time.h>
 
+/** @brief PG 存储句柄：ops 表 + 上下文（自有 pq_ctx 或外部 fake 上下文）。 */
 struct pg_store {
-    pg_ops_t ops; /* live ops table (libpq or fake) */
-    void*    ctx; /* pq_ctx when owns_ctx, else caller-provided */
-    int      owns_ctx;
+    pg_ops_t ops;  /**< 操作表（libpq 真实现或 fake）。 */
+    void*    ctx;  /**< pq_ctx（owns_ctx 时），否则外部传入。 */
+    int      owns_ctx; /**< 是否自有 ctx（free 时释放）。 */
 };
 
+/** @brief libpq 连接上下文：单连接 + 串行互斥锁。 */
 struct pq_ctx {
-    PGconn*         db;
-    char            dsn[1024];
-    pthread_mutex_t mtx;
+    PGconn*         db;       /**< libpq 连接。 */
+    char            dsn[1024];/**< 连接串（重连用）。 */
+    pthread_mutex_t mtx;      /**< 连接串行锁。 */
 };
 
 /* ------------------------------------------------------------ helpers */
@@ -1218,6 +1220,7 @@ pq_delete_provider(void* vctx, long id)
     return n > 0 ? 0 : -1;
 }
 
+/** @brief 日用量单批 upsert 行数。 */
 #define FLUSH_USAGE_CHUNK 64
 
 /** @brief pg_ops.flush_usage 的 libpq 实现：批量 upsert 日用量行，0 成功，-1 错误。 */
@@ -1390,6 +1393,7 @@ pq_query_usage(void*        vctx,
     return 0;
 }
 
+/** @brief 请求审计单批插入行数。 */
 #define FLUSH_REQ_CHUNK 64
 
 /** @brief pg_ops.flush_usage_requests 的 libpq 实现：批量插入请求审计行，0 成功，-1 错误。 */
