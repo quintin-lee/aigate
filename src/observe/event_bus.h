@@ -23,6 +23,7 @@
 /** @brief 最大订阅者数，超限订阅返回 -1。 */
 #define MAX_EVENT_SUBSCRIBERS 8
 
+/** @brief 事件类型枚举：请求 / 熔断 / 探针 / 预算告警 / 心跳。 */
 typedef enum {
     /** @brief 哨兵值：无事件，订阅者收到的空轮询结果。 */
     EVENT_NONE = 0,
@@ -38,30 +39,33 @@ typedef enum {
     EVENT_PING
 } event_type_t;
 
+/** @brief 单个事件项：类型 + 事件名 + JSON 载荷 + 发生时间。 */
 typedef struct {
-    event_type_t type;                 /* 事件类型 */
-    char         event_name[32];       /* 事件名 */
-    char         payload[EVENT_MAX_PAYLOAD]; /* JSON 载荷 */
-    time_t       ts;                   /* 发生时间（秒） */
+    event_type_t type;                        /**< 事件类型 */
+    char         event_name[32];              /**< 事件名 */
+    char         payload[EVENT_MAX_PAYLOAD];  /**< JSON 载荷 */
+    time_t       ts;                          /**< 发生时间（秒） */
 } event_item_t;
 
+/** @brief 单个订阅者：有界环形缓冲 + 等待条件变量。 */
 typedef struct event_sub {
-    event_item_t   queue[EVENT_QUEUE_CAPACITY]; /* 环形缓冲 */
-    int            head;     /* 读指针 */
-    int            tail;     /* 写指针 */
-    int            count;    /* 队列现存事件数 */
-    long           dropped_count; /* 队列满丢弃累计 */
-    int            active;   /* 1 有效，0 已退订 */
-    int            id;       /* 订阅者 ID（>0） */
-    pthread_cond_t cond;     /* 新事件到达通知 */
+    event_item_t   queue[EVENT_QUEUE_CAPACITY]; /**< 环形缓冲 */
+    int            head;     /**< 读指针 */
+    int            tail;     /**< 写指针 */
+    int            count;    /**< 队列现存事件数 */
+    long           dropped_count; /**< 队列满丢弃累计 */
+    int            active;   /**< 1 有效，0 已退订 */
+    int            id;       /**< 订阅者 ID（>0） */
+    pthread_cond_t cond;     /**< 新事件到达通知 */
 } event_sub_t;
 
+/** @brief 事件总线：订阅槽表 + 全局锁。 */
 typedef struct event_bus {
-    pthread_mutex_t lock;     /* 保护订阅表与队列 */
-    event_sub_t     subscribers[MAX_EVENT_SUBSCRIBERS]; /* 订阅槽（active 标记有效） */
-    int             n_subscribers; /* 有效订阅数 */
-    int             next_sub_id;   /* 下一个订阅 ID */
-    int             destroyed;     /* 1 已销毁，pop 返回 -1 */
+    pthread_mutex_t lock;     /**< 保护订阅表与队列 */
+    event_sub_t     subscribers[MAX_EVENT_SUBSCRIBERS]; /**< 订阅槽（active 标记有效） */
+    int             n_subscribers; /**< 有效订阅数 */
+    int             next_sub_id;   /**< 下一个订阅 ID */
+    int             destroyed;     /**< 1 已销毁，pop 返回 -1 */
 } event_bus_t;
 
 /** @brief Create a new event bus. Returns NULL on failure. */
@@ -93,6 +97,17 @@ int event_bus_publish(event_bus_t* eb,
 
 /* Helper publish functions (thread-safe, safe no-op if eb == NULL) */
 
+/** @brief 发布一次推理请求完成事件（线程安全，eb 为 NULL 时空操作）。
+ *  @param eb  事件总线，可为 NULL。
+ *  @param key_id  API key 记录 ID。
+ *  @param model  模型名。
+ *  @param provider  供应商名。
+ *  @param status  HTTP 状态码。
+ *  @param latency_ns  推理耗时，纳秒。
+ *  @param prompt_tokens  提示 token 数。
+ *  @param completion_tokens  补全 token 数。
+ *  @param cost  本次费用，美元。
+ *  @param guardrail_act  护栏动作描述。 */
 void event_bus_publish_request(event_bus_t* eb,
                                long         key_id,
                                const char*  model,
@@ -104,6 +119,13 @@ void event_bus_publish_request(event_bus_t* eb,
                                double       cost,
                                const char*  guardrail_act);
 
+/** @brief 发布一次熔断器状态变迁事件（线程安全，eb 为 NULL 时空操作）。
+ *  @param eb  事件总线，可为 NULL。
+ *  @param provider  供应商名。
+ *  @param model  模型名。
+ *  @param old_state  变迁前状态名。
+ *  @param new_state  变迁后状态名。
+ *  @param reason  变迁原因。 */
 void event_bus_publish_cb(event_bus_t* eb,
                           const char*  provider,
                           const char*  model,
@@ -111,6 +133,13 @@ void event_bus_publish_cb(event_bus_t* eb,
                           const char*  new_state,
                           const char*  reason);
 
+/** @brief 发布一次上游健康探测结果事件（线程安全，eb 为 NULL 时空操作）。
+ *  @param eb  事件总线，可为 NULL。
+ *  @param provider  供应商名。
+ *  @param status  探测状态字符串。
+ *  @param latency_ms  探测 RTT，毫秒。
+ *  @param http_status  探测 HTTP 状态码。
+ *  @param error  错误信息，可为 NULL。 */
 void event_bus_publish_health(event_bus_t* eb,
                               const char*  provider,
                               const char*  status,
@@ -118,6 +147,14 @@ void event_bus_publish_health(event_bus_t* eb,
                               int          http_status,
                               const char*  error);
 
+/** @brief 发布一次预算阈值告警事件（线程安全，eb 为 NULL 时空操作）。
+ *  @param eb  事件总线，可为 NULL。
+ *  @param type  告警对象类型（key/group）。
+ *  @param id  告警对象记录 ID。
+ *  @param name  告警对象名。
+ *  @param percent  已用预算占比。
+ *  @param current_usd  当前已用，美元。
+ *  @param budget_usd  预算上限，美元。 */
 void event_bus_publish_budget(event_bus_t* eb,
                               const char*  type,
                               long         id,

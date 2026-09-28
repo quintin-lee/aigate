@@ -10,14 +10,16 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** @brief 熔断指标表容量（model from_prov→to_prov 条目上限）。 */
 #define METRICS_MAX_FAILOVERS 128
 
+/** @brief 熔断迁移计数条目：模型 + 源/目标供应商 + 原子计数 + 在用标记。 */
 typedef struct {
-    char        model[128];
-    char        from_prov[32];
-    char        to_prov[32];
-    atomic_long count;
-    int         in_use;
+    char        model[128];  /**< 模型名 */
+    char        from_prov[32]; /**< 源供应商 */
+    char        to_prov[32];   /**< 目标供应商 */
+    atomic_long count; /**< 迁移次数（原子） */
+    int         in_use; /**< 槽位占用标记 */
 } failover_metric_entry_t;
 
 /** 熔断指标表（model from_prov→to_prov 计数，g_failover_mtx 保护）。 */
@@ -27,6 +29,7 @@ static pthread_mutex_t         g_failover_mtx = PTHREAD_MUTEX_INITIALIZER;
 /** 表满丢弃警告是否已打过（仅 warn 一次，防日志刷屏）。 */
 static _Atomic int             g_failover_warned = 0;
 
+/** @brief 延迟直方图桶数（与 BUCKET_LE 长度一致）。 */
 #define NUM_BUCKETS 6
 /** 延迟直方图桶上界（纳秒，字符串形式，与 exposition 输出一致）。 */
 static const char* BUCKET_LE[NUM_BUCKETS] = {
