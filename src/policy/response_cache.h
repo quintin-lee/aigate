@@ -10,7 +10,9 @@
 #include <pthread.h>
 #include <stdatomic.h>
 
+/** @brief 缓存分片数（按指纹哈希散列到分片，各持独立锁）。 */
 #define CACHE_SHARDS_COUNT 16
+/** @brief 每分片哈希桶数。 */
 #define CACHE_BUCKETS_PER_SHARD 1024
 
 typedef struct cache_entry {
@@ -32,28 +34,28 @@ typedef struct cache_entry {
 } cache_entry_t;
 
 typedef struct {
-    pthread_mutex_t     lock;
-    cache_entry_t*      buckets[CACHE_BUCKETS_PER_SHARD];
+    pthread_mutex_t     lock; /* 分片互斥锁 */
+    cache_entry_t*      buckets[CACHE_BUCKETS_PER_SHARD]; /* 哈希桶数组 */
     cache_entry_t*      lru_head;          /* MRU */
     cache_entry_t*      lru_tail;          /* LRU (eviction target) */
-    size_t              count;
-    size_t              bytes_used;
-    size_t              max_count;
-    size_t              max_bytes;
-    uint64_t            hits;
-    uint64_t            misses;
+    size_t              count; /* 当前条目数 */
+    size_t              bytes_used; /* 已用字节数 */
+    size_t              max_count; /* 条目上限（分片配额） */
+    size_t              max_bytes; /* 字节上限（分片配额） */
+    uint64_t            hits; /* 命中计数 */
+    uint64_t            misses; /* 未命中计数 */
 } cache_shard_t;
 
 typedef struct response_cache {
-    cache_shard_t       shards[CACHE_SHARDS_COUNT];
-    int                 enabled;
-    long                default_ttl_sec;
-    size_t              total_max_bytes;
-    size_t              total_max_entries;
+    cache_shard_t       shards[CACHE_SHARDS_COUNT]; /* 分片数组 */
+    int                 enabled; /* 总开关（0 关闭直通） */
+    long                default_ttl_sec; /* 默认 TTL 秒数 */
+    size_t              total_max_bytes; /* 全缓存字节上限 */
+    size_t              total_max_entries; /* 全缓存条目上限 */
 
-    _Atomic uint64_t    total_saved_prompt_tokens;
-    _Atomic uint64_t    total_saved_completion_tokens;
-    _Atomic double      total_saved_cost_usd;
+    _Atomic uint64_t    total_saved_prompt_tokens; /* 累计节省 prompt token */
+    _Atomic uint64_t    total_saved_completion_tokens; /* 累计节省 completion token */
+    _Atomic double      total_saved_cost_usd; /* 累计节省费用（美元） */
 } response_cache_t;
 
 /**

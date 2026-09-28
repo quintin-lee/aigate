@@ -22,7 +22,9 @@ typedef time_t (*cb_time_fn)(void);
 struct redis_pool;
 struct event_bus;
 
+/** @brief 默认熔断阈值：连续失败达此次数后打开。 */
 #define CB_DEFAULT_FAILURE_THRESHOLD 3
+/** @brief 默认冷却窗口秒数：打开后经此秒数才允许半开探测。 */
 #define CB_DEFAULT_COOLOFF_SEC 30
 
 /** @brief Allocate and initialize a circuit breaker instance. */

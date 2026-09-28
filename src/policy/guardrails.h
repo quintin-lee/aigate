@@ -25,9 +25,9 @@ typedef struct ac_node {
 } ac_node_t;
 
 typedef struct ac_trie {
-    ac_node_t* nodes;
-    size_t     node_count;
-    size_t     node_cap;
+    ac_node_t* nodes; /* 节点池（索引 0 为根） */
+    size_t     node_count; /* 已用节点数 */
+    size_t     node_cap; /* 节点池容量 */
 } ac_trie_t;
 
 /** @brief 新建 AC 自动机（空 trie，仅根节点）。
