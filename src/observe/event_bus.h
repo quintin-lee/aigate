@@ -11,8 +11,11 @@
 #include <time.h>
 #include <pthread.h>
 
+/** @brief 单个事件 JSON 载荷上限，字节。 */
 #define EVENT_MAX_PAYLOAD 1024
+/** @brief 每个订阅者有界队列容量，满时丢新事件并计数。 */
 #define EVENT_QUEUE_CAPACITY 64
+/** @brief 最大订阅者数，超限订阅返回 -1。 */
 #define MAX_EVENT_SUBSCRIBERS 8
 
 typedef enum {
@@ -25,29 +28,29 @@ typedef enum {
 } event_type_t;
 
 typedef struct {
-    event_type_t type;
-    char         event_name[32];
-    char         payload[EVENT_MAX_PAYLOAD];
-    time_t       ts;
+    event_type_t type;                 /* 事件类型 */
+    char         event_name[32];       /* 事件名 */
+    char         payload[EVENT_MAX_PAYLOAD]; /* JSON 载荷 */
+    time_t       ts;                   /* 发生时间（秒） */
 } event_item_t;
 
 typedef struct event_sub {
-    event_item_t   queue[EVENT_QUEUE_CAPACITY];
-    int            head;
-    int            tail;
-    int            count;
-    long           dropped_count;
-    int            active;
-    int            id;
-    pthread_cond_t cond;
+    event_item_t   queue[EVENT_QUEUE_CAPACITY]; /* 环形缓冲 */
+    int            head;     /* 读指针 */
+    int            tail;     /* 写指针 */
+    int            count;    /* 队列现存事件数 */
+    long           dropped_count; /* 队列满丢弃累计 */
+    int            active;   /* 1 有效，0 已退订 */
+    int            id;       /* 订阅者 ID（>0） */
+    pthread_cond_t cond;     /* 新事件到达通知 */
 } event_sub_t;
 
 typedef struct event_bus {
-    pthread_mutex_t lock;
-    event_sub_t     subscribers[MAX_EVENT_SUBSCRIBERS];
-    int             n_subscribers;
-    int             next_sub_id;
-    int             destroyed;
+    pthread_mutex_t lock;     /* 保护订阅表与队列 */
+    event_sub_t     subscribers[MAX_EVENT_SUBSCRIBERS]; /* 订阅槽（active 标记有效） */
+    int             n_subscribers; /* 有效订阅数 */
+    int             next_sub_id;   /* 下一个订阅 ID */
+    int             destroyed;     /* 1 已销毁，pop 返回 -1 */
 } event_bus_t;
 
 /** @brief Create a new event bus. Returns NULL on failure. */

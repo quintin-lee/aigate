@@ -13,6 +13,7 @@
 #include "pg_store.h"
 #include "event_bus.h"
 
+/** @brief 健康表最大跟踪供应商数，超限不再新增。 */
 #define MAX_TRACKED_PROVIDERS 128
 
 typedef enum {
@@ -29,33 +30,33 @@ typedef enum {
 const char* health_status_str(health_status_t st);
 
 typedef struct {
-    long            id;
-    char            provider_name[64];
-    char            endpoint[512];
-    char            provider_type[32];
-    health_status_t status;
-    long            latency_ms;
-    int             last_http_status;
-    time_t          last_check_ts;
-    int             consecutive_failures;
-    int             consecutive_successes;
-    char            last_error[256];
+    long            id;                /* provider 记录 ID */
+    char            provider_name[64]; /* 供应商名 */
+    char            endpoint[512];     /* 探测端点 */
+    char            provider_type[32]; /* 类型：openai/anthropic/gemini */
+    health_status_t status;            /* 当前状态 */
+    long            latency_ms;        /* 最近 RTT，毫秒 */
+    int             last_http_status;  /* 最近 HTTP 状态码 */
+    time_t          last_check_ts;     /* 最近探测时间（秒） */
+    int             consecutive_failures;  /* 连续失败次数 */
+    int             consecutive_successes; /* 连续成功次数 */
+    char            last_error[256];   /* 最近错误信息 */
 } provider_health_t;
 
 typedef struct health_prober {
-    pthread_mutex_t   lock;
-    pthread_cond_t    cond;
-    pthread_t         thread;
-    int               thread_started;
-    int               running;
-    int               interval_sec;
-    pg_store_t*       ps;
-    uint8_t           master_key[32];
-    int               have_master_key;
-    event_bus_t*      eb;
-    provider_health_t providers[MAX_TRACKED_PROVIDERS];
-    int               n_providers;
-    time_t            last_full_probe_ts;
+    pthread_mutex_t   lock;           /* 保护健康表与运行态 */
+    pthread_cond_t    cond;           /* 停机/立即探测通知 */
+    pthread_t         thread;         /* 后台探测线程 */
+    int               thread_started; /* 线程已启动 */
+    int               running;        /* 1 运行中，0 已停 */
+    int               interval_sec;   /* 探测周期，秒 */
+    pg_store_t*       ps;             /* 供应商清单来源（借用） */
+    uint8_t           master_key[32]; /* 探测用主密钥（拷贝） */
+    int               have_master_key; /* master_key 有效 */
+    event_bus_t*      eb;             /* 状态变更事件出口，可为 NULL */
+    provider_health_t providers[MAX_TRACKED_PROVIDERS]; /* 健康表 */
+    int               n_providers;    /* 表中有效条目数 */
+    time_t            last_full_probe_ts; /* 上次全量探测时间（秒） */
 } health_prober_t;
 
 /** @brief Create a new health prober instance. */
