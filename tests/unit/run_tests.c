@@ -10,6 +10,7 @@
 
 int g_failures = 0;
 
+/** @brief 单个测试用例函数指针。 */
 typedef void (*test_fn)(void);
 static struct {
     const char* name;
@@ -17,6 +18,8 @@ static struct {
 } g_tests[256];
 static int g_n_tests = 0;
 
+/** @brief 注册一个测试用例。
+ *  @param name 用例名。@param fn 用例函数。 */
 void
 test_register(const char* name, test_fn fn)
 {
@@ -27,6 +30,8 @@ test_register(const char* name, test_fn fn)
     }
 }
 
+/** @brief 顺序跑完全部注册用例。
+ *  @return 失败用例数，0 表全过。 */
 int
 main(void)
 {
