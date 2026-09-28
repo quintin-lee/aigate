@@ -13,7 +13,7 @@
 typedef struct stream_bridge stream_bridge_t;
 
 typedef struct provider_adapter {
-    const char* name;
+    const char* name; /* 供应商标签 */
 
     /** @brief Check if this adapter handles the given provider label. */
     bool (*supports)(const char* provider);
@@ -107,10 +107,10 @@ const provider_adapter_t* provider_find(const char* provider);
  * @p out->extra_header holds "anthropic-version" for the anthropic
  * family (fixed value "2023-06-01"); empty string otherwise. */
 typedef struct {
-    char url[1024];
-    char auth_header[32];
+    char url[1024]; /* 探测 URL */
+    char auth_header[32]; /* 鉴权头名 */
     int  bearer; /* 1 = prefix the key value with "Bearer " */
-    char extra_header[32];
+    char extra_header[32]; /* 额外头名（anthropic 系为 anthropic-version） */
 } provider_probe_plan_t;
 
 /** @brief Map a provider_type + endpoint to a GET /models probe plan.

@@ -17,8 +17,8 @@
 typedef struct model_router {
     lru_t*   routes;      /* model_name → model_rec_t* (heap values, evict frees) */
     pg_ops_t ops;         /* borrowed ops table */
-    void*    ops_ctx;
-    uint8_t  master[32];
+    void*    ops_ctx; /* ops 上下文（借用） */
+    uint8_t  master[32]; /* 主密钥（32 字节，解密 pg: 用） */
     int      have_master; /* 1 when AIGATE_MASTER_KEY was provided */
 } model_router_t;
 
