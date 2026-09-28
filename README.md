@@ -47,7 +47,7 @@ export AIGATE_REDIS_URL="redis://127.0.0.1:6379"
 ./build/aigate
 ```
 
-完整变量清单见 [.env.example](.env.example)。
+完整变量清单见 `.env.example`。
 
 ## 测试
 

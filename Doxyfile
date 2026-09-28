@@ -1,5 +1,5 @@
 PROJECT_NAME           = aigate
-INPUT                  = src
+INPUT                  = src README.md docs/README.md docs/DEVELOPMENT.md .env.example
 RECURSIVE              = YES
 GENERATE_HTML          = YES
 OUTPUT_DIRECTORY       = build/docs
@@ -12,3 +12,5 @@ PREDEFINED             = __attribute__(x)=
 # Feature-test macros (_XOPEN_SOURCE/_DEFAULT_SOURCE) are toolchain
 # noise, not API: exclude them from documentation.
 EXCLUDE_SYMBOLS        = _XOPEN_SOURCE _DEFAULT_SOURCE
+
+USE_MDFILE_AS_MAINPAGE = README.md
