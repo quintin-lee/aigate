@@ -2090,6 +2090,7 @@
       requests: { page: 1, limit: 10, total: 0 },
     };
 
+// 取某表的当前页切片。
     function getPageSlice(key, fullList) {
       if (!paginationState[key]) return fullList || [];
       const p = paginationState[key];
@@ -2102,6 +2103,7 @@
       return fullList ? fullList.slice(start, start + p.limit) : [];
     }
 
+// 刷新分页条显示。
     function updatePaginationUI(key, totalPages) {
       const p = paginationState[key];
       if (!p) return;
@@ -2120,6 +2122,7 @@
       if (sizeSelect && sizeSelect.value !== String(p.limit)) sizeSelect.value = String(p.limit);
     }
 
+// 按当前页重渲染表格。
     function reRenderTable(key) {
       if (key === "providers") {
         filterProvidersTable(false);
@@ -2141,6 +2144,7 @@
       }
     }
 
+// 切换每页条数。
     function changePageSize(key, val) {
       if (!paginationState[key]) return;
       paginationState[key].limit = parseInt(val, 10) || 10;
@@ -2148,6 +2152,7 @@
       reRenderTable(key);
     }
 
+// 上一页。
     function prevPage(key) {
       if (!paginationState[key]) return;
       if (paginationState[key].page > 1) {
@@ -2156,6 +2161,7 @@
       }
     }
 
+// 下一页。
     function nextPage(key) {
       if (!paginationState[key]) return;
       paginationState[key].page++;
@@ -2199,6 +2205,7 @@
       });
     });
 
+// 刷新令牌状态显示。
     function updateTokenUI() {
       const icon = document.getElementById("tokenIcon");
       const label = document.getElementById("tokenLabel");
@@ -2215,6 +2222,7 @@
       }
     }
 
+// 设置连接状态徽标。
     function setConnectionStatus(status) {
       const badge = document.getElementById("connectionStatusBadge");
       const styles = {
@@ -2228,15 +2236,18 @@
       badge.innerHTML = `<span class="w-2 h-2 rounded-full ${entry[1]}"></span><span>${entry[2]}</span>`;
     }
 
+// 打开令牌弹窗。
     function openTokenModal() {
       document.getElementById("adminTokenInput").value = state.adminToken;
       document.getElementById("tokenModal").classList.remove("hidden");
     }
 
+// 关闭令牌弹窗。
     function closeTokenModal() {
       document.getElementById("tokenModal").classList.add("hidden");
     }
 
+// 保存管理令牌并重连。
     async function saveAdminToken() {
       const val = document.getElementById("adminTokenInput").value.trim();
       if (!val) {
@@ -2358,6 +2369,7 @@
       refreshCurrentTab();
     }
 
+// 刷新当前页签数据。
     function refreshCurrentTab() {
       if (state.activeTab === "overview") {
         fetchOverviewData();
@@ -2392,6 +2404,7 @@
       renderOverviewStats();
     }
 
+// 渲染总览统计卡。
     function renderOverviewStats() {
       const activeModels = state.models.filter(m => m.enabled).length;
       document.getElementById("statActiveModels").innerText = activeModels;
@@ -2417,6 +2430,7 @@
       renderOverviewChart();
     }
 
+// 渲染总览图表。
     function renderOverviewChart() {
       const ctx = document.getElementById("overviewChart");
       const noData = document.getElementById("noChartDataMsg");
@@ -2509,6 +2523,7 @@
       }
     };
 
+// 应用供应商预设模板。
     function applyProviderPreset(name) {
       const preset = PROVIDER_PRESETS[name];
       if (!preset) return;
@@ -2519,6 +2534,7 @@
       showToast(`已应用 ${name.toUpperCase()} 预设`, "info");
     }
 
+// 切换密码框可见性。
     function togglePasswordVisibility(inputId, btn) {
       const input = document.getElementById(inputId);
       if (!input) return;
@@ -2531,6 +2547,7 @@
       }
     }
 
+// 拉取供应商列表。
     async function fetchProviders() {
       const tbody = document.getElementById("providersTableBody");
       if (!tbody) return;
@@ -2544,6 +2561,7 @@
       renderProvidersTable();
     }
 
+// 渲染供应商表格。
     function renderProvidersTable(list = state.providers) {
       const tbody = document.getElementById("providersTableBody");
       const empty = document.getElementById("providersEmptyState");
@@ -2620,6 +2638,7 @@
       });
     }
 
+// 过滤供应商表格。
     function filterProvidersTable(resetPage = false) {
       if (resetPage) paginationState.providers.page = 1;
       const q = (document.getElementById("providerSearchInput")?.value || "").toLowerCase();
@@ -2633,6 +2652,7 @@
       renderProvidersTable(filtered);
     }
 
+// 打开供应商弹窗（空则新建）。
     function openProviderModal(prov = null) {
       state.editingProviderId = prov ? prov.id : null;
       document.getElementById("providerModalTitle").innerText = prov ? `编辑供应商：${prov.name}` : "新建供应商";
@@ -2648,11 +2668,13 @@
       document.getElementById("providerModal").classList.remove("hidden");
     }
 
+// 关闭供应商弹窗。
     function closeProviderModal() {
       document.getElementById("providerModal").classList.add("hidden");
       state.editingProviderId = null;
     }
 
+// 按 id 编辑供应商。
     function editProvider(id) {
       const prov = state.providers.find(p => p.id === id);
       if (prov) {
@@ -2660,6 +2682,7 @@
       }
     }
 
+// 提交供应商表单。
     async function handleProviderSubmit(e) {
       e.preventDefault();
       const id = document.getElementById("pFormId").value;
@@ -2706,6 +2729,7 @@
       fetchModels(); // Refresh models too since they were auto-synced
     }
 
+// 启停供应商。
     async function toggleProviderEnabled(id, enabled) {
       const resp = await apiCall(`/admin/v1/providers/${id}`, {
         method: "PATCH",
@@ -2718,6 +2742,7 @@
       }
     }
 
+// 测试供应商连通性。
     async function testProvider(id, btn) {
       const origText = btn.innerText;
       btn.innerText = "⏳ 探测中";
@@ -2740,6 +2765,7 @@
       }
     }
 
+// 删除供应商（二次确认）。
     async function deleteProvider(id, name) {
       const ok = await openConfirmModal(`确定要删除供应商 "${name}" 吗？此操作不可撤销。已同步的模型将被保留。`, "确认删除供应商");
       if (!ok) return;
@@ -2764,6 +2790,7 @@
       populateModelFilters();
     }
 
+// 渲染模型路由表格。
     function renderModelsTable(list = state.models) {
       const tbody = document.getElementById("modelsTableBody");
       const empty = document.getElementById("modelsEmptyState");
@@ -2858,6 +2885,7 @@
       });
     }
 
+// 过滤模型表格。
     function filterModelsTable(resetPage = false) {
       if (resetPage) paginationState.models.page = 1;
       const q = (document.getElementById("modelSearchInput")?.value || "").toLowerCase();
@@ -2873,6 +2901,7 @@
       renderModelsTable(filtered);
     }
 
+// 创建上游目标行元素。
     function createTargetRowElement(tgt = {}, index = 0) {
       const row = document.createElement("div");
       row.className = "target-row p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2 relative";
@@ -2922,6 +2951,7 @@
       return row;
     }
 
+// 新增上游目标行。
     function addTargetRow(tgt = {}) {
       const container = document.getElementById("mFormTargetsContainer");
       const currentRows = container.querySelectorAll(".target-row");
@@ -2934,6 +2964,7 @@
       updateTargetRowHeaders();
     }
 
+// 删除上游目标行。
     function removeTargetRow(btn) {
       const container = document.getElementById("mFormTargetsContainer");
       const currentRows = container.querySelectorAll(".target-row");
@@ -2948,6 +2979,7 @@
       }
     }
 
+// 更新目标行表头序号。
     function updateTargetRowHeaders() {
       const container = document.getElementById("mFormTargetsContainer");
       const rows = container.querySelectorAll(".target-row");
@@ -2961,6 +2993,7 @@
       });
     }
 
+// 一键填充行预设。
     function setRowPreset(btn, provider, endpoint, keyref) {
       const row = btn.closest(".target-row");
       if (!row) return;
@@ -2969,6 +3002,7 @@
       row.querySelector(".tgt-keyref").value = keyref;
     }
 
+// 打开模型弹窗（空则新建）。
     function openModelModal(name = null) {
       state.editingModelName = name;
       const title = document.getElementById("modelModalTitle");
@@ -3045,11 +3079,13 @@
       document.getElementById("modelModal").classList.remove("hidden");
     }
 
+// 关闭模型弹窗。
     function closeModelModal() {
       document.getElementById("modelModal").classList.add("hidden");
       state.editingModelName = null;
     }
 
+// 提交模型表单。
     async function handleModelSubmit(e) {
       e.preventDefault();
       const name = document.getElementById("mFormName").value.trim();
@@ -3136,6 +3172,7 @@
       }
     }
 
+// 启停模型。
     async function toggleModelEnabled(name, newStatus) {
       const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(name)}`, {
         method: "PATCH",
@@ -3147,10 +3184,12 @@
       }
     }
 
+// 按名编辑模型。
     function editModel(name) {
       openModelModal(name);
     }
 
+// 删除模型（二次确认）。
     async function deleteModel(name) {
       if (!await openConfirmModal(`确定要删除模型 "${name}" 吗？`, "删除模型")) return;
       const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(name)}`, {
@@ -3175,6 +3214,7 @@
       renderKeysTable();
     }
 
+// 渲染密钥表格。
     function renderKeysTable(list = state.keys) {
       const tbody = document.getElementById("keysTableBody");
       const empty = document.getElementById("keysEmptyState");
@@ -3239,6 +3279,7 @@
       });
     }
 
+// 过滤密钥表格。
     function filterKeysTable(resetPage = false) {
       if (resetPage) paginationState.keys.page = 1;
       const q = (document.getElementById("keySearchInput")?.value || "").toLowerCase();
@@ -3249,6 +3290,7 @@
       renderKeysTable(filtered);
     }
 
+// 打开新建密钥弹窗。
     function openKeyModal() {
       document.getElementById("kFormName").value = "";
       document.getElementById("kFormRateQps").value = "10";
@@ -3285,10 +3327,12 @@
       document.getElementById("keyModal").classList.remove("hidden");
     }
 
+// 关闭密钥弹窗。
     function closeKeyModal() {
       document.getElementById("keyModal").classList.add("hidden");
     }
 
+// 提交新建密钥。
     async function handleKeySubmit(e) {
       e.preventDefault();
       const name = document.getElementById("kFormName").value.trim();
@@ -3336,6 +3380,7 @@
       }
     }
 
+// 展示新建密钥明文（仅显示一次）。
     function showNewKeySuccessModal(plaintext) {
       document.getElementById("newKeyPlaintextDisplay").innerText = plaintext;
       document.getElementById("copyKeyIcon").innerText = "📋";
@@ -3343,10 +3388,12 @@
       document.getElementById("newKeySuccessModal").classList.remove("hidden");
     }
 
+// 关闭明文弹窗。
     function closeNewKeySuccessModal() {
       document.getElementById("newKeySuccessModal").classList.add("hidden");
     }
 
+// 复制明文密钥。
     function copyPlaintextKey() {
       const key = document.getElementById("newKeyPlaintextDisplay").innerText;
       navigator.clipboard.writeText(key).then(() => {
@@ -3356,6 +3403,7 @@
       });
     }
 
+// 吊销密钥（二次确认）。
     async function revokeKey(id) {
       if (!await openConfirmModal(`确定要吊销 API 密钥 #${id} 吗？此操作不可撤销。`, "吊销密钥")) return;
       const resp = await apiCall(`/admin/v1/keys/${id}`, { method: "DELETE" });
@@ -3376,6 +3424,7 @@
         .replace(/'/g, "&#039;");
     }
 
+// 拉取护栏规则。
     async function fetchGuardrails() {
       const tbody = document.getElementById("guardrailsTableBody");
       if (tbody) {
@@ -3390,6 +3439,7 @@
       filterGuardrailsTable(false);
     }
 
+// 更新护栏统计卡。
     function updateGuardrailStats() {
       const totalEl = document.getElementById("grStatTotal");
       const kwEl = document.getElementById("grStatKeyword");
@@ -3412,6 +3462,7 @@
       }
     }
 
+// 渲染护栏规则表格。
     function renderGuardrailsTable(list = state.guardrails) {
       const tbody = document.getElementById("guardrailsTableBody");
       const empty = document.getElementById("guardrailsEmptyState");
@@ -3464,6 +3515,7 @@
       });
     }
 
+// 过滤护栏表格。
     function filterGuardrailsTable(resetPage = false) {
       if (resetPage) paginationState.guardrails.page = 1;
       const q = (document.getElementById("grSearchInput")?.value || "").toLowerCase().trim();
@@ -3480,6 +3532,7 @@
       renderGuardrailsTable(filtered);
     }
 
+// 打开护栏弹窗（空则新建）。
     function openGuardrailModal(rule = null) {
       state.editingGuardrailId = rule ? rule.id : null;
       document.getElementById("guardrailModalTitle").innerText = rule ? `编辑风控规则 #${rule.id}` : "新建风控规则";
@@ -3495,11 +3548,13 @@
       setTimeout(() => document.getElementById("grFormPattern").focus(), 50);
     }
 
+// 关闭护栏弹窗。
     function closeGuardrailModal() {
       document.getElementById("guardrailModal").classList.add("hidden");
       state.editingGuardrailId = null;
     }
 
+// 护栏类型切换联动表单。
     function onGuardrailTypeChange() {
       const type = document.getElementById("grFormType").value;
       const actionSelect = document.getElementById("grFormAction");
@@ -3526,6 +3581,7 @@
       }
     }
 
+// 按 id 编辑护栏规则。
     function editGuardrailRule(id) {
       const rule = (state.guardrails || []).find(r => r.id === id);
       if (rule) {
@@ -3533,6 +3589,7 @@
       }
     }
 
+// 提交护栏表单。
     async function handleGuardrailSubmit(e) {
       e.preventDefault();
       const id = document.getElementById("grFormId").value;
@@ -3571,6 +3628,7 @@
       fetchGuardrails();
     }
 
+// 启停护栏规则。
     async function toggleGuardrailRule(id, newEnabled) {
       const resp = await apiCall(`/admin/v1/guardrails/${id}`, {
         method: "PATCH",
@@ -3582,6 +3640,7 @@
       }
     }
 
+// 删除护栏规则。
     async function deleteGuardrailRule(id) {
       const rule = (state.guardrails || []).find(r => r.id === id);
       const pat = rule ? rule.pattern : `#${id}`;
@@ -3595,6 +3654,7 @@
       }
     }
 
+// 热重载护栏引擎。
     async function reloadGuardrailsEngine() {
       const resp = await apiCall("/admin/v1/guardrails/reload", { method: "POST" });
       if (resp && resp.ok) {
@@ -3603,6 +3663,7 @@
       }
     }
 
+// 植入默认 PII 规则。
     async function seedDefaultPiiRules() {
       const presets = [
         { rule_type: "pii", pattern: "PHONE", action: "mask", category: "privacy", enabled: true },
@@ -3630,6 +3691,7 @@
       fetchGuardrails();
     }
 
+// 护栏沙盒试算。
     function testGuardrailsSandbox() {
       const inputEl = document.getElementById("grSandboxInput");
       const resultEl = document.getElementById("grSandboxResult");
@@ -3774,6 +3836,7 @@
       populateCostGroupFilters();
     }
 
+// 渲染分组表格。
     function renderGroupsTable(list = state.groups) {
       const tbody = document.getElementById("groupsTableBody");
       const empty = document.getElementById("groupsEmptyState");
@@ -3811,6 +3874,7 @@
       });
     }
 
+// 打开分组弹窗（空则新建）。
     function openGroupModal(id = null, name = "", monthlyBudget = 0) {
       document.getElementById("gFormId").value = id || "";
       document.getElementById("gFormName").value = name || "";
@@ -3820,10 +3884,12 @@
       setTimeout(() => document.getElementById("gFormName").focus(), 50);
     }
 
+// 关闭分组弹窗。
     function closeGroupModal() {
       document.getElementById("groupModal").classList.add("hidden");
     }
 
+// 提交分组表单。
     async function handleGroupSubmit(e) {
       e.preventDefault();
       const id = document.getElementById("gFormId").value;
@@ -3860,6 +3926,7 @@
       }
     }
 
+// 删除分组（二次确认）。
     async function deleteGroup(id, name) {
       const ok = await openConfirmModal(`确定要删除部门分组 "${name}" 吗？注意：该分组下的所有密钥需先转移或解除绑定。`, "删除部门分组");
       if (!ok) return;
@@ -3880,6 +3947,7 @@
       gSelect.value = curr;
     }
 
+// 初始化费用日期范围。
     function initCostDates() {
       const now = new Date();
       const toStr = now.toISOString().slice(0, 10);
@@ -3891,6 +3959,7 @@
       if (toEl && !toEl.value) toEl.value = toStr;
     }
 
+// 拉取费用归因数据。
     async function fetchCostData() {
       const tbody = document.getElementById("costTableBody");
       if (!tbody) return;
@@ -3922,6 +3991,7 @@
       renderCostTable(state.costRows, by);
     }
 
+// 渲染费用表格。
     function renderCostTable(rows, by) {
       const tbody = document.getElementById("costTableBody");
       const empty = document.getElementById("costEmptyState");
@@ -4019,11 +4089,13 @@
     }
 
     let usageFetchTimer = null;
+// 防抖拉取用量数据。
     function debouncedUsageFetch() {
       clearTimeout(usageFetchTimer);
       usageFetchTimer = setTimeout(() => fetchUsageData(), 400);
     }
 
+// 填充模型筛选下拉。
     function populateModelFilters() {
       const sel = document.getElementById("usageModelFilter");
       sel.innerHTML = `<option value="">全部模型</option>`;
@@ -4035,6 +4107,7 @@
       });
     }
 
+// 拉取用量数据。
     async function fetchUsageData(silent = false) {
       let queryParams = [];
       const preset = document.getElementById("usageDatePreset").value;
@@ -4099,6 +4172,7 @@
       }
     }
 
+// 渲染用量表格。
     function renderUsageTable() {
       const tbody = document.getElementById("usageTableBody");
       const empty = document.getElementById("usageEmptyState");
@@ -4130,6 +4204,7 @@
       });
     }
 
+// 过滤请求明细表。
     function filterUsageRequestsTable(resetPage = false) {
       if (resetPage) paginationState.requests.page = 1;
       const q = (document.getElementById("reqSearchInput")?.value || "").toLowerCase().trim();
@@ -4151,6 +4226,7 @@
       renderUsageRequestsTable(filtered);
     }
 
+// 渲染请求明细表。
     function renderUsageRequestsTable(list = state.requestRows) {
       const tbody = document.getElementById("requestsTableBody");
       const empty = document.getElementById("requestsEmptyState");
@@ -4220,6 +4296,7 @@
       }
     }
 
+// 按模型打开调试台。
     function openPlaygroundForModel(name) {
       switchTab("playground");
       setTimeout(() => {
@@ -4227,6 +4304,7 @@
       }, 50);
     }
 
+// 自动填充调试用 key。
     function autoFillPlaygroundKey() {
       const activeKey = state.keys.find(k => !k.revoked);
       if (activeKey) {
@@ -4236,6 +4314,7 @@
       }
     }
 
+// 发起调试请求（含流式）。
     async function runPlaygroundRequest() {
       const model = document.getElementById("playModelSelect").value;
       const key = document.getElementById("playApiKeyInput").value.trim();
@@ -4379,12 +4458,14 @@ ${errText}`;
       }
     }
 
+// 停止调试流。
     function stopPlaygroundStream() {
       if (state.streamAbortController) {
         state.streamAbortController.abort();
       }
     }
 
+// 清空调试响应。
     function clearPlaygroundResponse() {
       document.getElementById("playOutputArea").innerHTML = '<span class="text-slate-600 italic">响应将实时显示在这里...</span>';
       document.getElementById("inspectorPanel").innerText = "";
@@ -4392,6 +4473,7 @@ ${errText}`;
       document.getElementById("playLatencyStat").classList.add("hidden");
     }
 
+// 开关请求检查器。
     function toggleInspector() {
       const panel = document.getElementById("inspectorPanel");
       const arrow = document.getElementById("inspectorArrow");
@@ -4421,6 +4503,7 @@ ${errText}`;
       }
     }
 
+// 过滤指标列表。
     function filterMetrics() {
       const q = (document.getElementById("metricFilterInput").value || "").toLowerCase();
       const pre = document.getElementById("metricsPre");
@@ -4456,6 +4539,7 @@ ${errText}`;
       }
     }
 
+// 初始化实时看板。
     function initLiveDashboard() {
       if (!state.liveEventSource) {
         connectLiveStream();
@@ -4466,6 +4550,7 @@ ${errText}`;
       }
     }
 
+// 连接 SSE 实时流。
     function connectLiveStream() {
       if (state.liveEventSource) {
         try { state.liveEventSource.close(); } catch(e){}
@@ -4547,6 +4632,7 @@ ${errText}`;
       });
     }
 
+// 开关实时流。
     function toggleLiveStream() {
       state.liveStreamingPaused = !state.liveStreamingPaused;
       const icon = document.getElementById("btnLiveToggleIcon");
@@ -4562,17 +4648,20 @@ ${errText}`;
       }
     }
 
+// 清空实时瀑布。
     function clearLiveWaterfall() {
       state.liveRequests = [];
       renderLiveWaterfall();
       showToast("实时瀑布流已清空", "info");
     }
 
+// 过滤实时瀑布。
     function filterLiveWaterfall() {
       state.liveWaterfallFilter = document.getElementById("liveWaterfallFilter").value;
       renderLiveWaterfall();
     }
 
+// 处理实时请求事件。
     function handleLiveRequestEvent(req) {
       req.ts = Date.now();
       state.liveRecentWindow.push(req);
@@ -4625,6 +4714,7 @@ ${errText}`;
       }
     }
 
+// 渲染实时瀑布。
     function renderLiveWaterfall() {
       const tbody = document.getElementById("liveWaterfallTbody");
       if (!tbody) return;
@@ -4684,6 +4774,7 @@ ${errText}`;
       }).join("");
     }
 
+// 打开请求详情弹窗。
     function openLiveReqDetailModal(index) {
       const req = state.liveRequests[index];
       if (!req) return;
@@ -4695,11 +4786,13 @@ ${errText}`;
       if (modal) modal.classList.remove("hidden");
     }
 
+// 关闭请求详情弹窗。
     function closeLiveReqDetailModal() {
       const modal = document.getElementById("liveReqDetailModal");
       if (modal) modal.classList.add("hidden");
     }
 
+// 处理熔断器事件。
     function handleLiveCircuitBreakerEvent(cb) {
       state.liveAlerts.unshift({
         type: "cb",
@@ -4713,6 +4806,7 @@ ${errText}`;
       showToast(`🚨 熔断状态变更: ${cb.model} ➜ ${cb.to_state} (${cb.reason || ""})`, isTrip ? "error" : "warning");
     }
 
+// 处理探针事件。
     function handleLiveHealthProbeEvent(hp) {
       if (!state.liveProviders) state.liveProviders = {};
       state.liveProviders[hp.provider] = {
@@ -4734,6 +4828,7 @@ ${errText}`;
       }
     }
 
+// 处理预算告警事件。
     function handleLiveBudgetAlertEvent(ba) {
       state.liveAlerts.unshift({
         type: "budget",
@@ -4745,6 +4840,7 @@ ${errText}`;
       showToast(`💰 预算超额: ${ba.entity_type} #${ba.entity_id} 支出 $${ba.spent} 已超额度 $${ba.budget}`, "warning");
     }
 
+// 渲染实时告警。
     function renderLiveAlerts() {
       const countEl = document.getElementById("liveAlertCount");
       const listEl = document.getElementById("liveAlertList");
@@ -4793,6 +4889,7 @@ ${errText}`;
       }).join("");
     }
 
+// 拉取供应商健康快照。
     async function fetchProviderHealth() {
       try {
         const resp = await apiCall("/admin/v1/providers/health");
@@ -4810,6 +4907,7 @@ ${errText}`;
       }
     }
 
+// 渲染供应商健康列表。
     function renderLiveProviders() {
       const grid = document.getElementById("liveProviderGrid");
       const summary = document.getElementById("liveProviderSummary");
@@ -4879,6 +4977,7 @@ ${errText}`;
       }).join("");
     }
 
+// 触发全量探针。
     async function triggerFullProbe() {
       const btn = document.getElementById("btnFullProbe");
       const icon = document.getElementById("btnFullProbeIcon");
@@ -4921,6 +5020,7 @@ ${errText}`;
       }
     }
 
+// 探针单个供应商。
     async function probeSingleProvider(providerName, btn) {
       const origText = btn ? btn.innerText : "";
       if (btn) {
@@ -4945,16 +5045,19 @@ ${errText}`;
 
     // --- Confirm Modal ---
     let confirmModalResolve = null;
+// 打开通用确认框。
     function openConfirmModal(message, title = "请确认") {
       document.getElementById("confirmModalTitle").innerText = title;
       document.getElementById("confirmModalMessage").innerText = message;
       document.getElementById("confirmModal").classList.remove("hidden");
       return new Promise(resolve => { confirmModalResolve = resolve; });
     }
+// 确认框返回值。
     function resolveConfirmModal(val) {
       document.getElementById("confirmModal").classList.add("hidden");
       if (confirmModalResolve) { confirmModalResolve(val); confirmModalResolve = null; }
     }
+// 关闭确认框。
     function closeConfirmModal() {
       resolveConfirmModal(false);
     }
@@ -5003,6 +5106,7 @@ ${errText}`;
       }
     }
 
+// 拉取缓存统计。
     async function fetchCacheStats() {
       try {
         const resp = await apiCall("/admin/v1/cache/stats");
@@ -5067,6 +5171,7 @@ ${errText}`;
       }
     }
 
+// 渲染缓存分片表。
     function renderCacheShardsTable(shards) {
       const tbody = document.getElementById("cacheShardsTbody");
       if (!tbody) return;
@@ -5106,6 +5211,7 @@ ${errText}`;
       }).join("");
     }
 
+// 按模型清理缓存。
     async function triggerCachePurge(model) {
       const targetDesc = model ? `模型 "${model}" 的缓存` : "所有缓存条目";
       const confirmed = await openConfirmModal(`确定要清空 ${targetDesc} 吗？此操作将立即释放对应的内存缓存。`, "确认清空缓存");
@@ -5129,6 +5235,7 @@ ${errText}`;
       }
     }
 
+// 按输入框内容清理缓存。
     function triggerCachePurgeByInput() {
       const input = document.getElementById("cachePurgeModelInput");
       const model = input ? input.value.trim() : "";
