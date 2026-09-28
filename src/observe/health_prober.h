@@ -1,4 +1,5 @@
 /** @file health_prober.h
+ *  @ingroup group_observe
  *  @brief Active upstream health probing engine for aigate.
  *
  *  Maintains health matrix for all active providers and runs periodic background

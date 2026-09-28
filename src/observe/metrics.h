@@ -1,4 +1,5 @@
 /** @file metrics.h
+ *  @ingroup group_observe
  *  @brief Prometheus text exposition + source-IP ACL check. */
 #ifndef AIGATE_METRICS_H
 #define AIGATE_METRICS_H

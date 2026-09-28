@@ -4,6 +4,11 @@
  *  Thread-safe bounded queue per subscriber. Supports broadcasting events to multiple
  *  admin consoles (e.g. GET /admin/v1/events SSE stream).
  */
+
+/**
+ * @defgroup group_observe 可观测层
+ * @brief 可观测：事件总线、健康探针、指标。
+ */
 #ifndef AIGATE_EVENT_BUS_H
 #define AIGATE_EVENT_BUS_H
 
