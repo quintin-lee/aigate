@@ -8,8 +8,8 @@
  */
 
 /**
- * @defgroup group_common 通用层
- * @brief 通用：LRU 缓存、SHA-256。
+ * @defgroup group_common Common layer
+ * @brief Common: LRU cache, SHA-256.
  */
 #ifndef AIGATE_LRU_H
 #define AIGATE_LRU_H

@@ -32,10 +32,10 @@
 #include <time.h>
 #include <unistd.h>
 
-/** 停机标志：SIGINT/SIGTERM 处理器置 1，主循环退出走优雅停机。 */
+/** Shutdown flag: the SIGINT/SIGTERM handler sets it to 1; the main loop exits for graceful shutdown. */
 static volatile sig_atomic_t g_stop = 0;
 
-/** @brief SIGINT/SIGTERM 处理器：置 g_stop 触发主循环退出走优雅停机（仅做异步信号安全操作）。 */
+/** @brief SIGINT/SIGTERM handler: set g_stop so the main loop exits for graceful shutdown (async-signal-safe operations only). */
 static void
 sig_handler(int sig)
 {
@@ -43,7 +43,7 @@ sig_handler(int sig)
     g_stop = 1;
 }
 
-/** @brief 程序入口：加载配置→初始化存储/路由/传输→阻塞服务直到信号退出。 */
+/** @brief Program entry: load config, init storage/routing/transport, then serve until signaled to exit. */
 int
 main(void)
 {
