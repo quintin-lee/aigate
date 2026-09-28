@@ -9,8 +9,8 @@
  */
 
 /**
- * @defgroup group_core 核心层
- * @brief 核心：网关上下文、配置、密钥、日志。
+ * @defgroup group_core Core layer
+ * @brief Core: gateway context, config, secrets, logging.
  */
 #ifndef AIGATE_CORE_H
 #define AIGATE_CORE_H
@@ -31,19 +31,19 @@ typedef struct aigate_request_ctx {
     const char* method; /**< "POST" */
     const char* path;   /**< "/v1/chat/completions" */
     const char* bearer; /**< client key, raw */
-    const char* client_ip;    /**< 对端 IP（限流/审计用，可为 NULL） */
-    const void* body;         /**< 请求体（借用，不拥有） */
-    size_t      body_len;     /**< 请求体字节数 */
-    const char* cache_control; /**< 客户端 Cache-Control 头，可为 NULL */
+    const char* client_ip;    /**< Peer IP (for rate limiting/auditing, may be NULL) */
+    const void* body;         /**< Request body (borrowed, not owned) */
+    size_t      body_len;     /**< Request body length in bytes */
+    const char* cache_control; /**< Client Cache-Control header, may be NULL */
 } aigate_request_ctx;
 
 /** @brief Outbound response sink (transport implements callbacks). */
 typedef struct aigate_response_ctx {
-    int   status;       /**< 待写 HTTP 状态码 */
-    bool  headers_sent; /**< 头已刷出（首写触发），防重复 */
-    void* impl;         /**< 传输私有句柄（借用） */
-    int (*set_header)(void* impl, const char* name, const char* value); /**< 未发出前追加响应头 */
-    int (*write)(void* impl, const void* buf, size_t len, bool fin);    /**< 首写刷状态行+头后分片写 */
+    int   status;       /**< HTTP status to write */
+    bool  headers_sent; /**< Headers already flushed (triggered by first write), prevent duplicates */
+    void* impl;         /**< Transport private handle (borrowed) */
+    int (*set_header)(void* impl, const char* name, const char* value); /**< Append response header before flush */
+    int (*write)(void* impl, const void* buf, size_t len, bool fin);    /**< Chunked write after status+headers flushed */
 } aigate_response_ctx;
 
 struct health_prober;
@@ -52,18 +52,18 @@ struct response_cache;
 
 /** @brief Gateway pipeline state: policy handles plus config (THE SEAM owner). */
 typedef struct aigate_core {
-    auth_key_cache         keys;              /**< API key 缓存（含否定缓存） */
-    ratelimit_t*           rl;                /**< 限流器，可为 NULL（禁用） */
-    model_router_t*        router;            /**< 模型路由表 */
-    usage_meter_t*         um;                /**< 用量计量，可为 NULL（禁用） */
-    circuit_breaker_t*     cb;                /**< 熔断器，可为 NULL（禁用） */
-    pg_store_t*            ps;                /**< 后备存储（借用，不拥有） */
-    int                    default_timeout_ms; /**< 上游默认超时，毫秒 */
-    guardrails_ctx_t*      gr;                /**< 护栏上下文，可为 NULL（禁用） */
-    budget_enforce_mgr_t*  be;                /**< 预算强制，可为 NULL（禁用） */
-    struct health_prober*  hp;                /**< 健康探针，可为 NULL */
-    struct event_bus*      eb;                /**< 事件总线，可为 NULL */
-    struct response_cache* rc;                /**< 响应缓存，可为 NULL（禁用） */
+    auth_key_cache         keys;              /**< API key cache (includes negative cache) */
+    ratelimit_t*           rl;                /**< Rate limiter, may be NULL (disabled) */
+    model_router_t*        router;            /**< Model routing table */
+    usage_meter_t*         um;                /**< Usage meter, may be NULL (disabled) */
+    circuit_breaker_t*     cb;                /**< Circuit breaker, may be NULL (disabled) */
+    pg_store_t*            ps;                /**< Backing store (borrowed, not owned) */
+    int                    default_timeout_ms; /**< Upstream default timeout, ms */
+    guardrails_ctx_t*      gr;                /**< Guardrails context, may be NULL (disabled) */
+    budget_enforce_mgr_t*  be;                /**< Budget enforcement, may be NULL (disabled) */
+    struct health_prober*  hp;                /**< Health prober, may be NULL */
+    struct event_bus*      eb;                /**< Event bus, may be NULL */
+    struct response_cache* rc;                /**< Response cache, may be NULL (disabled) */
 } aigate_core;
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */
@@ -88,7 +88,7 @@ int aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 int aigate_write_json(aigate_response_ctx* rc, int status, const char* body, size_t len);
 
 /** @brief Write an OpenAI-shaped error body:
- *  {"error":{"message":...,"type":...,"code":HTTP 状态码}}. */
+ *  {"error":{"message":...,"type":...,"code":HTTP status}}. */
 int
 aigate_write_error(aigate_response_ctx* rc, int http_status, const char* type, const char* message);
 

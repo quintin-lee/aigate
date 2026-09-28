@@ -7,7 +7,7 @@
 #include <pthread.h>
 #include <time.h>
 
-/** stderr 日志互斥锁（aigate_log 全路径持锁，防多线程交错）。 */
+/** stderr log mutex (aigate_log holds lock across full path to prevent interleaving). */
 static pthread_mutex_t g_log_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 void

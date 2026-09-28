@@ -34,7 +34,7 @@ hex_to_bytes32(const char* hex64, uint8_t out[32])
     return 0;
 }
 
-/** hex 编解码查表（小写）。 */
+/** Hex encode/decode lookup table (lowercase). */
 static const char HEXD[] = "0123456789abcdef";
 
 int
@@ -102,7 +102,7 @@ done:
     return rc;
 }
 
-/** @brief 单个十六进制字符转 0–15；非法字符返回 -1。 */
+/** @brief Single hex char to 0-15; returns -1 on invalid. */
 static int
 hexval(char c)
 {
