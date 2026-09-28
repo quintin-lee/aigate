@@ -11,6 +11,7 @@
 #include <ctype.h>
 #include <jansson.h>
 
+/** @brief AC 自动机节点初始容量（按需扩容）。 */
 #define AC_INIT_CAP 256
 
 ac_trie_t*
@@ -161,15 +162,16 @@ ac_trie_search(const ac_trie_t* trie, const char* text, size_t len)
 
 /* --- Guardrails Engine Context --- */
 
+/** @brief 护栏引擎实例：读写锁/黑白名单 trie/PII 正则组/就绪标记。 */
 struct guardrails_ctx {
-    pthread_rwlock_t rwlock;
-    ac_trie_t*       ac_block;
-    ac_trie_t*       ac_exempt;
-    regex_t          re_api_key;
-    regex_t          re_email;
-    regex_t          re_id_card;
-    regex_t          re_phone;
-    int              regex_ready;
+    pthread_rwlock_t rwlock; /**< 规则热加载读写锁 */
+    ac_trie_t*       ac_block; /**< 黑名单关键词 trie */
+    ac_trie_t*       ac_exempt; /**< 豁免关键词 trie */
+    regex_t          re_api_key; /**< API key 正则 */
+    regex_t          re_email; /**< 邮箱正则 */
+    regex_t          re_id_card; /**< 身份证号正则 */
+    regex_t          re_phone; /**< 电话号码正则 */
+    int              regex_ready; /**< 正则编译就绪标记 */
 };
 
 guardrails_ctx_t*

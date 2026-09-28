@@ -1,4 +1,5 @@
 /** @file auth_key.h
+ *  @ingroup group_policy
  *  @brief Client key verification: Bearer → SHA-256 → LRU/PG, constant-time.
  *
  *  Resolves the calling key on the hot path. Records are cached in an LRU
@@ -14,13 +15,13 @@
 
 /** @brief Auth cache state (owned by the core; one instance per process). */
 typedef struct auth_key_cache {
-    lru_t*   recs;    /* key_hash(hex) → key_rec_t* (heap values, evict frees) */
-    lru_t*   neg;     /* key_hash(hex) → sentinel: unknown keys (no PG re-query) */
-    pg_ops_t ops;     /* backing ops table (borrowed, not owned) */
-    void*    ops_ctx; /* ops->ctx */
+    lru_t*   recs;    /**< key_hash(hex) → key_rec_t* (heap values, evict frees) */
+    lru_t*   neg;     /**< key_hash(hex) → sentinel: unknown keys (no PG re-query) */
+    pg_ops_t ops;     /**< backing ops table (borrowed, not owned) */
+    void*    ops_ctx; /**< ops->ctx */
 } auth_key_cache;
 
-/** @brief Initialize the cache. @param ps the backing store; @return 0 ok, -1 OOM.
+/** @brief Initialize the cache. @param akc the cache to initialize. @param ps the backing store; @return 0 ok, -1 OOM.
  * @note Copies the ops table + ctx from the store; the caller keeps owning
  *       the store. */
 int auth_key_init(auth_key_cache* akc, pg_store_t* ps);

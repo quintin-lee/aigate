@@ -1,4 +1,5 @@
 /** @file circuit_breaker.h
+ *  @ingroup group_policy
  *  @brief Per-endpoint circuit breaker state machine for multi-upstream routing.
  */
 #ifndef AIGATE_CIRCUIT_BREAKER_H
@@ -11,6 +12,7 @@
 extern "C" {
 #endif
 
+/** @brief 熔断器三态：关闭（放行）/打开（拒绝）/半开（探测）。 */
 typedef enum {
     /** @brief 关闭态：正常放行，失败计数累计中。 */
     CB_CLOSED = 0,
@@ -20,6 +22,7 @@ typedef enum {
     CB_HALF_OPEN = 2,
 } cb_state_t;
 
+/** @brief 熔断器实例（不透明，定义见 circuit_breaker.c）。 */
 typedef struct circuit_breaker circuit_breaker_t;
 /** @brief 时间源函数类型：返回当前秒级时间戳，用于熔断冷却计时（便于测试注入假时钟）。 */
 typedef time_t (*cb_time_fn)(void);

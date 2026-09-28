@@ -15,27 +15,30 @@
 #include <string.h>
 #include <time.h>
 
+/** @brief 桶数组分片数（按模型+端点哈希散列）。 */
 #define CB_BUCKETS 64
 
+/** @brief 单端点熔断状态：模型/端点/三态/失败计数/打开截止/半开探测/链表。 */
 typedef struct cb_entry {
-    char             model[128];
-    char             endpoint[512];
-    cb_state_t       state;
-    int              consecutive_failures;
-    time_t           open_until;
-    int              half_open_probe_active;
-    struct cb_entry* next;
+    char             model[128]; /**< 模型名 */
+    char             endpoint[512]; /**< 端点 URL */
+    cb_state_t       state; /**< 当前三态 */
+    int              consecutive_failures; /**< 连续失败计数 */
+    time_t           open_until; /**< 打开截止时间戳 */
+    int              half_open_probe_active; /**< 半开探测进行中标记 */
+    struct cb_entry* next; /**< 桶内链表 */
 } cb_entry_t;
 
+/** @brief 熔断器实例：锁/阈值/冷却/时间源/Redis 池/事件总线/分片桶。 */
 struct circuit_breaker {
-    pthread_mutex_t mtx;
-    int             failure_threshold;
-    int             cooloff_sec;
-    cb_time_fn      time_fn;
-    redis_pool_t*   pool;
-    char            sha_cb[48];
-    event_bus_t*    eb;
-    cb_entry_t*     buckets[CB_BUCKETS];
+    pthread_mutex_t mtx; /**< 实例互斥锁 */
+    int             failure_threshold; /**< 熔断阈值（连续失败次数） */
+    int             cooloff_sec; /**< 冷却窗口秒数 */
+    cb_time_fn      time_fn; /**< 时间源（可注入假时钟） */
+    redis_pool_t*   pool; /**< 共享 Redis 池（分布式熔断，可空） */
+    char            sha_cb[48]; /**< Redis Lua 脚本 SHA 缓存 */
+    event_bus_t*    eb; /**< 事件总线（状态变迁事件，可空） */
+    cb_entry_t*     buckets[CB_BUCKETS]; /**< 端点状态分片桶 */
 };
 
 /** @brief 当前时间：测试注入优先，否则 time()。 */

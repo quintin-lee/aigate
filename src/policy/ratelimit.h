@@ -1,4 +1,5 @@
 /** @file ratelimit.h
+ *  @ingroup group_policy
  *  @brief Per-key QPS token buckets + daily token quotas.
  *
  *  The bucket table is an open-addressed map keyed by key_id, guarded by a
@@ -25,6 +26,8 @@ void ratelimit_set_redis_pool(ratelimit_t* rl, struct redis_pool* pool);
 void ratelimit_free(ratelimit_t* rl);
 
 /** @brief Admit one request under @p key_id's QPS budget.
+ * @param rl     the limiter instance.
+ * @param key_id the key whose budget is checked.
  * @param qps    the key's configured QPS (0 = unlimited, always admitted)
  * @param retry_ms receives ms until a token is expected when denied
  * @return 0 admitted; -1 denied (rate), with *retry_ms set. */
@@ -33,7 +36,10 @@ int rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms);
 /** @brief Consume @p tokens of the key's daily quota after upstream usage.
  * Tokens are recorded first (accounting always happens); the return
  * reports whether the running total now exceeds @p daily_quota.
+ * @param rl     the limiter instance.
+ * @param key_id the key whose quota is consumed.
  * @param daily_quota 0 = unlimited (never returns -1)
+ * @param tokens token count to consume.
  * @return 0 within quota (or unlimited); -1 over quota or allocation failure. */
 int rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens);
 

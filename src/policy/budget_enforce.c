@@ -9,30 +9,34 @@
 #include <time.h>
 #include <pthread.h>
 
+/** @brief 月度 खर्च 分片桶数（按 key/group id 哈希散列）。 */
 #define BUCKET_COUNT 1024
 
+/** @brief 单 key 月度累计：key id/已花费用/已用 token/链表。 */
 typedef struct key_spend_node {
-    int64_t                key_id;
-    double                 spent_cost;
-    int64_t                spent_tokens;
-    struct key_spend_node* next;
+    int64_t                key_id; /**< API key id */
+    double                 spent_cost; /**< 已花费用（美元） */
+    int64_t                spent_tokens; /**< 已用 token 数 */
+    struct key_spend_node* next; /**< 桶内链表 */
 } key_spend_node_t;
 
+/** @brief 单组月度累计：group id/已花费用/预算上限/链表。 */
 typedef struct group_spend_node {
-    int64_t                  group_id;
-    double                   spent_cost;
-    double                   budget_usd;
-    struct group_spend_node* next;
+    int64_t                  group_id; /**< 分组 id */
+    double                   spent_cost; /**< 已花费用（美元） */
+    double                   budget_usd; /**< 月度预算上限（美元） */
+    struct group_spend_node* next; /**< 桶内链表 */
 } group_spend_node_t;
 
+/** @brief 预算执行器实例：存储/Redis/锁/当前年月/事件总线/分片桶。 */
 struct budget_enforce_mgr {
-    pg_store_t*         store;
-    redis_pool_t*       redis;
-    pthread_mutex_t     mtx;
-    int                 current_ym;
-    event_bus_t*        eb;
-    key_spend_node_t*   key_buckets[BUCKET_COUNT];
-    group_spend_node_t* group_buckets[BUCKET_COUNT];
+    pg_store_t*         store; /**< PG 持久化存储（启动同步，可空） */
+    redis_pool_t*       redis; /**< Redis 池（集群同步，可空） */
+    pthread_mutex_t     mtx; /**< 实例互斥锁 */
+    int                 current_ym; /**< 当前年月（YYYYMM，桶滚动比较） */
+    event_bus_t*        eb; /**< 事件总线（预算告警事件，可空） */
+    key_spend_node_t*   key_buckets[BUCKET_COUNT]; /**< key 月度累计分片桶 */
+    group_spend_node_t* group_buckets[BUCKET_COUNT]; /**< group 月度累计分片桶 */
 };
 
 /** @brief 当前 UTC 年月（YYYYMM 整数，供月度桶滚动比较）。 */

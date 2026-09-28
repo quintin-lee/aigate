@@ -16,24 +16,26 @@
 #include <string.h>
 #include <time.h>
 
+/** @brief 单 key 限流桶：key id/占用标记/可用令牌/容量/上次补充/日累计/日期。 */
 struct bucket {
-    long     key_id;
-    int      in_use;
-    double   tokens;         /* available request tokens */
-    double   capacity;
-    uint64_t last_refill_ns; /* CLOCK_MONOTONIC */
-    long     daily_used;
-    time_t   day;            /* UTC midnight of the accounting window */
+    long     key_id; /**< API key id */
+    int      in_use; /**< 槽位占用标记 */
+    double   tokens;         /**< available request tokens */
+    double   capacity; /**< 桶容量（QPS 上限） */
+    uint64_t last_refill_ns; /**< CLOCK_MONOTONIC */
+    long     daily_used; /**< 当日已用 token 数 */
+    time_t   day;            /**< UTC midnight of the accounting window */
 };
 
+/** @brief 限流器实例：锁/开放寻址桶表/容量/计数/Redis 池/Lua SHA 缓存。 */
 struct ratelimit {
-    pthread_mutex_t mtx;
-    struct bucket*  b;
-    size_t          cap;
-    size_t          count;
-    redis_pool_t*   pool;
-    char            sha_qps[48];
-    char            sha_quota[48];
+    pthread_mutex_t mtx; /**< 实例互斥锁 */
+    struct bucket*  b; /**< 开放寻址桶表 */
+    size_t          cap; /**< 表容量 */
+    size_t          count; /**< 已用槽位数 */
+    redis_pool_t*   pool; /**< 共享 Redis 池（分布式限流，可空） */
+    char            sha_qps[48]; /**< QPS Lua 脚本 SHA 缓存 */
+    char            sha_quota[48]; /**< 配额 Lua 脚本 SHA 缓存 */
 };
 
 /** @brief 单调时钟纳秒（令牌桶/QPS 时间基准，不受 wall clock 跳变影响）。 */

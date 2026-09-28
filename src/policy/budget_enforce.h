@@ -1,4 +1,5 @@
 /** @file budget_enforce.h
+ *  @ingroup group_policy
  *  @brief Monthly budget limit enforcer for API Keys and Groups.
  */
 #ifndef AIGATE_BUDGET_ENFORCE_H
@@ -9,6 +10,7 @@
 #include "pg_store.h"
 #include "redis_pool.h"
 
+/** @brief 预算执行器实例（不透明，定义见 budget_enforce.c）。 */
 typedef struct budget_enforce_mgr budget_enforce_mgr_t;
 
 /** @brief Create a budget enforcer instance.
