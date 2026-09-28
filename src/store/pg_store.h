@@ -13,28 +13,29 @@
 
 /** @brief Client API key record (api_keys row; allowed_models is a copy). */
 typedef struct key_rec {
-    long   key_id;
+    long   key_id; /* 主键 */
     char   key_hash[65];      /* 64 lowercase hex + NUL */
-    char   name[128];
+    char   name[128]; /* 名称 */
     char** allowed_models;    /* NUL-terminated-ish: exactly n_allowed entries */
     int    n_allowed;         /* 0 = all models allowed */
     int    rate_qps;          /* 0 = unlimited */
     long   daily_token_quota; /* 0 = unlimited */
-    time_t expires_at;
-    int    has_expiry;
-    int    revoked;
+    time_t expires_at; /* 过期时间戳 */
+    int    has_expiry; /* 是否设置过期（1 生效） */
+    int    revoked; /* 吊销标记（1 已吊销） */
     long   group_id; /* 0 = ungrouped */
     int    guardrails_enabled;   /* 1 = enabled (default), 0 = disabled */
     double monthly_cost_budget;  /* 0.0 = unlimited */
     long   monthly_token_budget; /* 0 = unlimited */
 } key_rec_t;
 
+/** @brief 单模型多目标上限。 */
 #define MAX_TARGETS_PER_MODEL 8
 
 typedef struct upstream_target {
-    char provider[32];
-    char endpoint[512];
-    char upstream_key_ref[1024];
+    char provider[32]; /* 供应商类型 */
+    char endpoint[512]; /* 上游基址 */
+    char upstream_key_ref[1024]; /* "env:NAME" | "pg:<blob>" | "" */
     char upstream_key[1024]; /* resolved in-memory */
     int  weight;             /* weight > 0, default 1 */
     int  priority;           /* 0 = primary tier, 1 = fallback tier, etc. */
@@ -42,111 +43,131 @@ typedef struct upstream_target {
 
 /** @brief Model route record (models row + resolved upstream key). */
 typedef struct model_rec {
-    char name[128];
+    char name[128]; /* 模型名 */
     char provider[32];              /* primary / fallback default */
     char endpoint[512];             /* primary / fallback default */
     char upstream_key_ref[1024];    /* "env:NAME" | "pg:<blob>" | "" */
     char default_params_json[1024]; /* jansson object; default_params win < request */
-    int  enabled;
+    int  enabled; /* 启用开关（1 启用） */
     char upstream_key[1024];        /* filled by model_router, not stored */
 
     /* Multi-target additions */
-    int               n_targets;
-    upstream_target_t targets[MAX_TARGETS_PER_MODEL];
+    int               n_targets; /* 目标数 */
+    upstream_target_t targets[MAX_TARGETS_PER_MODEL]; /* 多目标数组 */
     char lb_policy[32];      /* "priority", "round_robin", "weighted", "weighted_round_robin" */
     char pricing_json[1024]; /* jansson object with in_mtok, out_mtok, cached_mtok_discount */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
 typedef struct usage_row {
-    long   key_id;
-    char   model_name[128];
+    long   key_id; /* API key 主键 */
+    char   model_name[128]; /* 模型名 */
     time_t day; /* midnight UTC */
-    long   requests, prompt_tokens, completion_tokens, errors;
-    long   cached_prompt_tokens;
+    long   requests, prompt_tokens, completion_tokens, errors; /* 当日累计：请求/词元/错误数 */
+    long   cached_prompt_tokens; /* 缓存命中 prompt token */
 } usage_row_t;
 
 /** @brief One usage_requests (per-request audit) row. */
 typedef struct usage_request_row {
-    long     key_id;
-    char     model_name[128];
-    char     provider[32];
-    int      http_status;
-    long     prompt_tokens;
-    long     completion_tokens;
-    long     cached_prompt_tokens;
-    long     reasoning_tokens;
-    uint64_t latency_ns;
-    time_t   ts;
-    char     guardrail_action[16];
+    long     key_id; /* API key 主键 */
+    char     model_name[128]; /* 模型名 */
+    char     provider[32]; /* 供应商类型 */
+    int      http_status; /* 上游 HTTP 状态码 */
+    long     prompt_tokens; /* prompt token 数 */
+    long     completion_tokens; /* completion token 数 */
+    long     cached_prompt_tokens; /* 缓存命中 prompt token */
+    long     reasoning_tokens; /* 推理 token 数 */
+    uint64_t latency_ns; /* 端到端延迟纳秒 */
+    time_t   ts; /* 请求时间戳 */
+    char     guardrail_action[16]; /* 护栏处置结果 */
 } usage_request_row_t;
 
 /** @brief Group record (groups row + key count). */
 typedef struct group_rec {
-    long   id;
-    char   name[128];
-    long   key_count;
-    time_t created_at;
+    long   id; /* 主键 */
+    char   name[128]; /* 组名 */
+    long   key_count; /* 组内 key 数 */
+    time_t created_at; /* 创建时间戳 */
     double monthly_budget_usd; /* 0.0 = unlimited */
 } group_rec_t;
 
 /** @brief Guardrail rule record (guardrails_rules row). */
 typedef struct guardrail_rule {
-    long   id;
+    long   id; /* 主键 */
     char   rule_type[32];   /* "keyword" | "regex" | "pii" */
-    char   pattern[512];
+    char   pattern[512]; /* 匹配模式（关键词/正则/待脱敏文本特征） */
     char   action[32];      /* "block" | "mask" */
     char   category[64];    /* "general" | "profanity" | "safety" etc. */
     int    enabled;         /* 1 = true, 0 = false */
-    time_t created_at;
+    time_t created_at; /* 创建时间戳 */
 } guardrail_rule_t;
 
 /** @brief One cost attribution row. */
 typedef struct cost_row {
-    long   group_id;
-    char   model[128];
-    long   prompt;
-    long   completion;
-    long   cached;
-    long   requests;
+    long   group_id; /* 分组 id */
+    char   model[128]; /* 模型名 */
+    long   prompt; /* prompt token */
+    long   completion; /* completion token */
+    long   cached; /* 缓存命中 token */
+    long   requests; /* 请求数 */
     time_t bucket_day; /* midnight UTC timestamp */
 } cost_row_t;
 
 /* update_key / update_model / update_provider field masks (bit flags). */
+/** @brief key 更新掩码：限速字段。 */
 #define KMASK_RATE (1 << 0)
+/** @brief key 更新掩码：配额字段。 */
 #define KMASK_QUOTA (1 << 1)
+/** @brief key 更新掩码：模型白名单。 */
 #define KMASK_ALLOWLIST (1 << 2)
+/** @brief key 更新掩码：过期时间。 */
 #define KMASK_EXPIRY (1 << 3)
+/** @brief key 更新掩码：所属分组。 */
 #define KMASK_GROUP (1 << 4)
+/** @brief key 更新掩码：护栏开关。 */
 #define KMASK_GUARDRAILS (1 << 5)
+/** @brief key 更新掩码：月费用预算。 */
 #define KMASK_MONTHLY_COST_BUDGET (1 << 6)
+/** @brief key 更新掩码：月 token 预算。 */
 #define KMASK_MONTHLY_TOKEN_BUDGET (1 << 7)
 
+/** @brief model 更新掩码：端点。 */
 #define MMASK_ENDPOINT (1 << 0)
+/** @brief model 更新掩码：默认参数。 */
 #define MMASK_PARAMS (1 << 1)
+/** @brief model 更新掩码：启用开关。 */
 #define MMASK_ENABLED (1 << 2)
+/** @brief model 更新掩码：上游密钥引用。 */
 #define MMASK_KEYREF (1 << 3)
+/** @brief model 更新掩码：多目标列表。 */
 #define MMASK_TARGETS (1 << 4)
+/** @brief model 更新掩码：负载策略。 */
 #define MMASK_LB_POLICY (1 << 5)
+/** @brief model 更新掩码：定价。 */
 #define MMASK_PRICING (1 << 6)
 
+/** @brief provider 更新掩码：供应商类型。 */
 #define PMASK_TYPE (1 << 0)
+/** @brief provider 更新掩码：端点。 */
 #define PMASK_ENDPOINT (1 << 1)
+/** @brief provider 更新掩码：API 密钥。 */
 #define PMASK_API_KEY (1 << 2)
+/** @brief provider 更新掩码：模型清单。 */
 #define PMASK_MODELS (1 << 3)
+/** @brief provider 更新掩码：启用开关。 */
 #define PMASK_ENABLED (1 << 4)
 
 /** @brief Provider record (providers row). */
 typedef struct provider_rec {
-    long   id;
-    char   name[64];
-    char   provider_type[32];
-    char   endpoint[512];
-    char   api_key[1024];
-    char** models;
-    int    n_models;
-    int    enabled;
-    time_t created_at;
+    long   id; /* 主键 */
+    char   name[64]; /* 供应商名 */
+    char   provider_type[32]; /* 供应商类型 */
+    char   endpoint[512]; /* 上游基址 */
+    char   api_key[1024]; /* 上游密钥 */
+    char** models; /* 模型清单（堆数组） */
+    int    n_models; /* 模型数 */
+    int    enabled; /* 启用开关（1 启用） */
+    time_t created_at; /* 创建时间戳 */
 } provider_rec_t;
 
 /** @brief Uniform persistence operations; real libpq or in-memory fakes.
@@ -158,7 +179,7 @@ typedef struct provider_rec {
  *  Thread-safety: implementations MUST be re-entrant safe; the libpq
  *  implementation serializes with an internal mutex. */
 typedef struct pg_ops {
-    void* ctx;
+    void* ctx; /* 实现私有状态 */
 
     int (*get_key_by_hash)(void* ctx, const char* key_hash, key_rec_t* out);
     int (*list_keys)(void* ctx, key_rec_t* out, int cap, int* n);
