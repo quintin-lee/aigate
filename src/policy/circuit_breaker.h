@@ -12,12 +12,16 @@ extern "C" {
 #endif
 
 typedef enum {
+    /** @brief 关闭态：正常放行，失败计数累计中。 */
     CB_CLOSED = 0,
+    /** @brief 打开态：熔断中，直接拒绝并走降级。 */
     CB_OPEN = 1,
+    /** @brief 半开态：冷却后放少量探测流量，成功则关闭。 */
     CB_HALF_OPEN = 2,
 } cb_state_t;
 
 typedef struct circuit_breaker circuit_breaker_t;
+/** @brief 时间源函数类型：返回当前秒级时间戳，用于熔断冷却计时（便于测试注入假时钟）。 */
 typedef time_t (*cb_time_fn)(void);
 struct redis_pool;
 struct event_bus;

@@ -19,11 +19,17 @@
 #define MAX_EVENT_SUBSCRIBERS 8
 
 typedef enum {
+    /** @brief 哨兵值：无事件，订阅者收到的空轮询结果。 */
     EVENT_NONE = 0,
+    /** @brief 请求事件：网关完成一次推理请求（含状态码与耗时）。 */
     EVENT_REQUEST,
+    /** @brief 熔断事件：某上游端点熔断器状态变迁。 */
     EVENT_CIRCUIT_BREAKER,
+    /** @brief 探针事件：上游健康探针完成一轮探测。 */
     EVENT_HEALTH_PROBE,
+    /** @brief 预算告警事件：key 或分组用量触及预算阈值。 */
     EVENT_BUDGET_ALERT,
+    /** @brief 心跳事件：SSE 保活 ping，订阅者忽略内容。 */
     EVENT_PING
 } event_type_t;
 
