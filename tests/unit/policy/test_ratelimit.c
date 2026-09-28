@@ -87,6 +87,7 @@ struct cc_arg {
     ratelimit_t* rl;
     int          iters;
 };
+/** @brief 限流并发 worker 线程入口。 */
 static void*
 cc_worker(void* arg)
 {

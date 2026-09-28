@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+/** @brief 清空测试相关环境变量。 */
 static void
 clear_env(void)
 {

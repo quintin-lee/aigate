@@ -15,6 +15,7 @@ struct stream_capture {
     int    chunks_count;
 };
 
+/** @brief 流式分片捕获回调。 */
 static int
 capture_chunk(void* user_data, const void* chunk, size_t len)
 {

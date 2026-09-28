@@ -9,6 +9,7 @@
 
 static time_t g_fake_time = 1000000;
 
+/** @brief fake 时间源。 */
 static time_t
 fake_time_provider(void)
 {
@@ -21,6 +22,7 @@ struct mro_db {
     int         n_models;
 };
 
+/** @brief fake 查模型。 */
 static int
 mro_get_model(void* ctx, const char* name, model_rec_t* out)
 {
@@ -35,6 +37,7 @@ mro_get_model(void* ctx, const char* name, model_rec_t* out)
     return -1;
 }
 
+/** @brief fake 失败桩。 */
 static int
 mro_fail(void* ctx, ...)
 {
@@ -42,6 +45,7 @@ mro_fail(void* ctx, ...)
     return -1;
 }
 
+/** @brief 组装路由测试用 pg_ops 虚表。 */
 static pg_ops_t
 build_mro_ops(struct mro_db* db)
 {
@@ -66,6 +70,7 @@ build_mro_ops(struct mro_db* db)
     return ops;
 }
 
+/** @brief 打开路由测试用内存库。 */
 static pg_store_t*
 open_mro_store(struct mro_db* db)
 {

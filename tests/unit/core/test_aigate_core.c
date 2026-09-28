@@ -49,6 +49,7 @@ struct fdb {
     int              n_guardrails;
 };
 
+/** @brief fake allowlist：整条拷贝 key 记录。 */
 static int
 fdeep_allowlist(key_rec_t* dst, const key_rec_t* src)
 {
@@ -74,6 +75,7 @@ fdeep_allowlist(key_rec_t* dst, const key_rec_t* src)
     return 0;
 }
 
+/** @brief fake 查 key：命中返回 1，未命中返回 0。 */
 static int
 fget_key(void* ctx, const char* key_hash, key_rec_t* out)
 {
@@ -96,6 +98,7 @@ fget_key(void* ctx, const char* key_hash, key_rec_t* out)
     return 1;
 }
 
+/** @brief fake 查模型路由：命中返回 1，未命中返回 0。 */
 static int
 fget_model(void* ctx, const char* name, model_rec_t* out)
 {
@@ -109,6 +112,7 @@ fget_model(void* ctx, const char* name, model_rec_t* out)
     return -1;
 }
 
+/** @brief fake 用量落库：吞掉行并返回成功。 */
 static int
 f_flush_rows(void* ctx, const usage_row_t* rows, int n)
 {
@@ -120,6 +124,7 @@ f_flush_rows(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
+/** @brief fake 上游请求桩：恒返回成功。 */
 static int
 f_req_stub(void* ctx, ...)
 {
@@ -127,6 +132,7 @@ f_req_stub(void* ctx, ...)
     return 0;
 }
 
+/** @brief fake 列模型：拷贝内存表到输出。 */
 static int
 f_list_models(void* ctx, model_rec_t* out, int cap, int* n)
 {
@@ -143,6 +149,7 @@ f_list_models(void* ctx, model_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief fake 列护栏规则：拷贝内存表到输出。 */
 static int
 f_list_guardrails(void* ctx, guardrail_rule_t* out, int cap, int* n)
 {
@@ -156,6 +163,7 @@ f_list_guardrails(void* ctx, guardrail_rule_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief 组装 fake pg_ops 虚表，ctx 指向内存库。 */
 static void
 fbuild_ops(struct fdb* db, pg_ops_t* ops)
 {
@@ -198,12 +206,14 @@ fkey_add(struct fdb* db,
     }
 }
 
+/** @brief 置内存 key 槽位的护栏开关。 */
 static void
 fkey_set_guardrails(struct fdb* db, int slot, bool enabled)
 {
     db->keys[slot].k.guardrails_enabled = enabled;
 }
 
+/** @brief 置内存 key 槽位的费用/token 预算。 */
 static void
 fkey_set_budget(struct fdb* db, int slot, double cost_budget, long token_budget)
 {
@@ -235,6 +245,7 @@ struct cap {
     int    status;
 };
 
+/** @brief 捕获响应头：记入 cap 缓冲。 */
 static int
 cap_set_header(void* impl, const char* name, const char* value)
 {
@@ -243,6 +254,7 @@ cap_set_header(void* impl, const char* name, const char* value)
     return 0;
 }
 
+/** @brief 捕获响应体分片：追加进 cap 缓冲。 */
 static int
 cap_write(void* impl, const void* buf, size_t len, bool fin)
 {
@@ -256,6 +268,7 @@ cap_write(void* impl, const void* buf, size_t len, bool fin)
     return 0;
 }
 
+/** @brief 由 cap 缓冲构造响应上下文。 */
 static aigate_response_ctx
 cap_rc(struct cap* c)
 {
@@ -267,6 +280,7 @@ cap_rc(struct cap* c)
     return rc;
 }
 
+/** @brief 检查捕获头中是否含某子串。 */
 static int
 cap_has_header(const struct cap* c, const char* needle)
 {
@@ -297,6 +311,7 @@ run(aigate_core* ac, const char* bearer, const char* model, struct cap* out)
     return out->body;
 }
 
+/** @brief 驱动一次带请求体的推理调用，返回响应体（借用）。 */
 static const char*
 run_with_body(aigate_core* ac, const char* bearer, const char* body, struct cap* out)
 {
@@ -695,6 +710,7 @@ TEST_CASE(test_core_daily_quota_429)
     mock_upstream_stop(mu);
 }
 
+/** @brief 驱动一次 /v1/responses 调用，返回响应体（借用）。 */
 static const char*
 run_responses(aigate_core* ac, const char* bearer, const char* body, struct cap* out)
 {
@@ -804,6 +820,7 @@ TEST_CASE(test_responses_missing_model_400)
     freed_db(&db);
 }
 
+/** @brief 驱动一次 Anthropic messages 调用，返回响应体（借用）。 */
 static const char*
 run_anthropic_messages(aigate_core* ac, const char* bearer, const char* body, struct cap* out)
 {
@@ -822,6 +839,7 @@ run_anthropic_messages(aigate_core* ac, const char* bearer, const char* body, st
     return out->body;
 }
 
+/** @brief 驱动一次 Gemini generate 调用，返回响应体（借用）。 */
 static const char*
 run_gemini_generate(aigate_core* ac, const char* bearer, const char* path, const char* body, struct cap* out)
 {

@@ -11,6 +11,7 @@
 
 static time_t g_fake_time = 1000000;
 
+/** @brief fake 时间源：返回可推进的虚拟时间。 */
 static time_t
 fake_time_provider(void)
 {
@@ -178,6 +179,7 @@ struct thread_arg {
     int                id;
 };
 
+/** @brief 熔断并发 worker 线程入口。 */
 static void*
 cb_thread_worker(void* v)
 {

@@ -18,6 +18,7 @@ struct um_db {
     int                 req_flush_calls;
 };
 
+/** @brief fake 用量落库（吞掉）。 */
 static int
 um_flush(void* ctx, const usage_row_t* rows, int n)
 {
@@ -32,6 +33,7 @@ um_flush(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
+/** @brief fake 请求明细落库（吞掉）。 */
 static int
 um_flush_reqs(void* ctx, const usage_request_row_t* rows, int n)
 {
@@ -46,6 +48,7 @@ um_flush_reqs(void* ctx, const usage_request_row_t* rows, int n)
     return 0;
 }
 
+/** @brief fake 失败桩：恒返回失败。 */
 static int
 um_fail(void* ctx, ...)
 {
@@ -53,6 +56,7 @@ um_fail(void* ctx, ...)
     return -1;
 }
 
+/** @brief 打开 usage_meter 测试用内存库。 */
 static pg_store_t*
 open_um_store(struct um_db* db)
 {

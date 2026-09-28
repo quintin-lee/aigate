@@ -52,6 +52,7 @@ struct fake_db {
     int lookup_calls;
 };
 
+/** @brief 深拷贝 key 记录（含动态数组）。 */
 static int
 deep_copy_allowlist(key_rec_t* dst, const key_rec_t* src)
 {
@@ -73,6 +74,7 @@ deep_copy_allowlist(key_rec_t* dst, const key_rec_t* src)
     return 0;
 }
 
+/** @brief 深拷贝供应商模型清单。 */
 static int
 deep_copy_provider_models(provider_rec_t* dst, const provider_rec_t* src)
 {
@@ -94,6 +96,7 @@ deep_copy_provider_models(provider_rec_t* dst, const provider_rec_t* src)
     return 0;
 }
 
+/** @brief fake 按哈希查 key。 */
 static int
 fake_get_key_by_hash(void* ctx, const char* key_hash, key_rec_t* out)
 {
@@ -116,6 +119,7 @@ fake_get_key_by_hash(void* ctx, const char* key_hash, key_rec_t* out)
     return 1;
 }
 
+/** @brief 归一化模型记录的测试替身。 */
 static void
 fake_sanitize_model(model_rec_t* out)
 {
@@ -138,6 +142,7 @@ fake_sanitize_model(model_rec_t* out)
     }
 }
 
+/** @brief fake 分页列模型路由。 */
 static int
 fake_list_models(void* ctx, model_rec_t* out, int cap, int* n)
 {
@@ -150,6 +155,7 @@ fake_list_models(void* ctx, model_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief fake 按名查模型路由。 */
 static int
 fake_get_model(void* ctx, const char* name, model_rec_t* out)
 {
@@ -164,6 +170,7 @@ fake_get_model(void* ctx, const char* name, model_rec_t* out)
     return -1;
 }
 
+/** @brief fake 分页列 key。 */
 static int
 fake_list_keys(void* ctx, key_rec_t* out, int cap, int* n)
 {
@@ -186,6 +193,7 @@ fake_list_keys(void* ctx, key_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief fake 按 id 查 key。 */
 static int
 fake_get_key_by_id(void* ctx, long key_id, key_rec_t* out)
 {
@@ -205,6 +213,7 @@ fake_get_key_by_id(void* ctx, long key_id, key_rec_t* out)
     return -1;
 }
 
+/** @brief fake 建 key，回写新 id。 */
 static int
 fake_create_key(void* ctx, const key_rec_t* k, long* out_key_id)
 {
@@ -225,6 +234,7 @@ fake_create_key(void* ctx, const key_rec_t* k, long* out_key_id)
     return -1;
 }
 
+/** @brief fake 按掩码更新 key。 */
 static int
 fake_update_key(void* ctx, const key_rec_t* k, int mask)
 {
@@ -270,6 +280,7 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
     return -1;
 }
 
+/** @brief fake 吊销 key。 */
 static int
 fake_revoke_key(void* ctx, long key_id)
 {
@@ -284,6 +295,7 @@ fake_revoke_key(void* ctx, long key_id)
     return -1;
 }
 
+/** @brief fake 建模型路由。 */
 static int
 fake_create_model(void* ctx, const model_rec_t* m)
 {
@@ -297,6 +309,7 @@ fake_create_model(void* ctx, const model_rec_t* m)
     return 0;
 }
 
+/** @brief fake 按掩码更新模型路由。 */
 static int
 fake_update_model(void* ctx, const model_rec_t* m, int mask)
 {
@@ -335,6 +348,7 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
     return -1;
 }
 
+/** @brief fake 按名删模型路由。 */
 static int
 fake_delete_model(void* ctx, const char* name)
 {
@@ -351,6 +365,7 @@ fake_delete_model(void* ctx, const char* name)
     return -1;
 }
 
+/** @brief fake 用量行落库（吞掉）。 */
 static int
 fake_flush_usage(void* ctx, const usage_row_t* rows, int n)
 {
@@ -376,6 +391,7 @@ fake_flush_usage(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
+/** @brief fake 按 key/模型/时间范围查用量。 */
 static int
 fake_query_usage(void*        ctx,
                  long         key_id,
@@ -405,6 +421,7 @@ fake_query_usage(void*        ctx,
     return 0;
 }
 
+/** @brief fake 请求明细落库（吞掉）。 */
 static int
 fake_flush_requests(void* ctx, const usage_request_row_t* rows, int n)
 {
@@ -415,6 +432,7 @@ fake_flush_requests(void* ctx, const usage_request_row_t* rows, int n)
     return 0;
 }
 
+/** @brief fake 查请求明细。 */
 static int
 fake_query_requests(void* ctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n)
 {
@@ -433,6 +451,7 @@ fake_query_requests(void* ctx, long key_id, time_t since, usage_request_row_t* o
     return 0;
 }
 
+/** @brief fake 分页列供应商。 */
 static int
 fake_list_providers(void* ctx, provider_rec_t* out, int cap, int* n)
 {
@@ -454,6 +473,7 @@ fake_list_providers(void* ctx, provider_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief fake 按 id 查供应商。 */
 static int
 fake_get_provider(void* ctx, long id, provider_rec_t* out)
 {
@@ -473,6 +493,7 @@ fake_get_provider(void* ctx, long id, provider_rec_t* out)
     return -1;
 }
 
+/** @brief fake 建供应商，回写新 id。 */
 static int
 fake_create_provider(void* ctx, const provider_rec_t* p, long* out_id)
 {
@@ -496,6 +517,7 @@ fake_create_provider(void* ctx, const provider_rec_t* p, long* out_id)
     return -1;
 }
 
+/** @brief fake 按掩码更新供应商。 */
 static int
 fake_update_provider(void* ctx, const provider_rec_t* p, int mask)
 {
@@ -532,6 +554,7 @@ fake_update_provider(void* ctx, const provider_rec_t* p, int mask)
     return -1;
 }
 
+/** @brief fake 按 id 删供应商。 */
 static int
 fake_delete_provider(void* ctx, long id)
 {
@@ -552,6 +575,7 @@ fake_delete_provider(void* ctx, long id)
     return -1;
 }
 
+/** @brief fake 建分组，回写新 id。 */
 static int
 fake_create_group(void* ctx, const char* name, long* out_id)
 {
@@ -576,6 +600,7 @@ fake_create_group(void* ctx, const char* name, long* out_id)
     return -1;
 }
 
+/** @brief fake 分页列分组。 */
 static int
 fake_list_groups(void* ctx, group_rec_t* out, int cap, int* n)
 {
@@ -597,6 +622,7 @@ fake_list_groups(void* ctx, group_rec_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief fake 改组名。 */
 static int
 fake_patch_group(void* ctx, long id, const char* name)
 {
@@ -610,6 +636,7 @@ fake_patch_group(void* ctx, long id, const char* name)
     return 1;
 }
 
+/** @brief fake 改分组预算。 */
 static int
 fake_patch_group_budget(void* ctx, long id, double budget)
 {
@@ -623,6 +650,7 @@ fake_patch_group_budget(void* ctx, long id, double budget)
     return 1;
 }
 
+/** @brief fake 删分组。 */
 static int
 fake_delete_group(void* ctx, long id)
 {
@@ -636,6 +664,7 @@ fake_delete_group(void* ctx, long id)
     return 1;
 }
 
+/** @brief fake 统计组内 key 数。 */
 static int
 fake_count_keys_in_group(void* ctx, long group_id, long* n)
 {
@@ -649,6 +678,7 @@ fake_count_keys_in_group(void* ctx, long group_id, long* n)
     return 0;
 }
 
+/** @brief fake 按时间范围查费用行。 */
 static int
 fake_query_cost(void* ctx, long since_s, long until_s, cost_row_t* out, int cap, int* n)
 {
@@ -657,6 +687,7 @@ fake_query_cost(void* ctx, long since_s, long until_s, cost_row_t* out, int cap,
     return 0;
 }
 
+/** @brief fake 分页列护栏规则。 */
 static int
 fake_list_guardrails_rules(void* ctx, guardrail_rule_t* out, int cap, int* n)
 {
@@ -671,6 +702,7 @@ fake_list_guardrails_rules(void* ctx, guardrail_rule_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief fake 建护栏规则，回写新 id。 */
 static int
 fake_create_guardrails_rule(void* ctx, const guardrail_rule_t* rule, long* out_id)
 {
@@ -688,6 +720,7 @@ fake_create_guardrails_rule(void* ctx, const guardrail_rule_t* rule, long* out_i
     return -1;
 }
 
+/** @brief fake 更新护栏规则。 */
 static int
 fake_update_guardrails_rule(void* ctx, const guardrail_rule_t* rule)
 {
@@ -701,6 +734,7 @@ fake_update_guardrails_rule(void* ctx, const guardrail_rule_t* rule)
     return 1;
 }
 
+/** @brief fake 删护栏规则。 */
 static int
 fake_delete_guardrails_rule(void* ctx, long id)
 {
@@ -714,6 +748,7 @@ fake_delete_guardrails_rule(void* ctx, long id)
     return 1;
 }
 
+/** @brief 组装 pg_store 测试用 pg_ops 虚表。 */
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
 {

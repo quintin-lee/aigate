@@ -116,6 +116,7 @@ typedef struct {
     int    status;
 } dummy_sink_t;
 
+/** @brief 占位响应头写入。 */
 static int
 dummy_set_hdr(void* impl, const char* name, const char* value)
 {
@@ -125,6 +126,7 @@ dummy_set_hdr(void* impl, const char* name, const char* value)
     return 0;
 }
 
+/** @brief 占位响应体写入。 */
 static int
 dummy_write(void* impl, const void* buf, size_t len, bool fin)
 {

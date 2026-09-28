@@ -5,6 +5,7 @@
 #include <pthread.h>
 
 static int g_evictions = 0;
+/** @brief LRU 淘汰回调：计数一次淘汰。 */
 static void
 count_evict(void* val)
 {
@@ -66,6 +67,7 @@ struct cc_arg {
     lru_t* lr;
     int    ops_per_thread;
 };
+/** @brief 并发 worker 线程入口：循环读写 LRU。 */
 static void*
 cc_worker(void* arg)
 {

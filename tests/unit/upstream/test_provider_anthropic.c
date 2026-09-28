@@ -181,6 +181,7 @@ struct test_cap {
     int    status;
 };
 
+/** @brief 捕获响应头。 */
 static int
 tcap_set_header(void* impl, const char* name, const char* value)
 {
@@ -189,6 +190,7 @@ tcap_set_header(void* impl, const char* name, const char* value)
     return 0;
 }
 
+/** @brief 捕获响应体。 */
 static int
 tcap_write(void* impl, const void* buf, size_t len, bool fin)
 {
@@ -254,6 +256,7 @@ TEST_CASE(test_anthropic_bridge_streaming)
     TEST_ASSERT(bridge.output_tokens == 20, "bridge output_tokens == 20");
 }
 
+/** @brief 恒失败的响应写入桩。 */
 static int
 tcap_write_fail(void* impl, const void* buf, size_t len, bool fin)
 {
@@ -302,6 +305,7 @@ struct fdb {
     int         flush_calls;
 };
 
+/** @brief fake 查 key。 */
 static int
 fget_key(void* ctx, const char* key_hash, key_rec_t* out)
 {
@@ -317,6 +321,7 @@ fget_key(void* ctx, const char* key_hash, key_rec_t* out)
     return 1;
 }
 
+/** @brief fake 查模型。 */
 static int
 fget_model(void* ctx, const char* name, model_rec_t* out)
 {
@@ -330,6 +335,7 @@ fget_model(void* ctx, const char* name, model_rec_t* out)
     return -1;
 }
 
+/** @brief fake 用量落库。 */
 static int
 f_flush(void* ctx, const usage_row_t* rows, int n)
 {
@@ -341,6 +347,7 @@ f_flush(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
+/** @brief fake 上游请求桩。 */
 static int
 f_req_stub(void* ctx, ...)
 {
