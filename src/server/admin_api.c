@@ -89,6 +89,7 @@ static int g_lockout_window_s = 300;
 
 /* Optional Redis pool for distributed lockout (NULL = in-process only). */
 static redis_pool_t* g_lockout_pool = NULL;
+/** 分布式熔断 Lua 脚本 SHA（随 g_lockout_pool 初始化加载，空串表未加载）。 */
 static char          g_lockout_sha[48] = { 0 };
 
 typedef struct {
@@ -98,7 +99,9 @@ typedef struct {
     int            in_use;
 } lockout_slot_t;
 
+/** 本地管理口熔断计数槽（按 IP 分片，g_lockout_mtx 保护）。 */
 static lockout_slot_t  g_lockout[LOCKOUT_SLOTS];
+/** 本地熔断槽互斥锁。 */
 static pthread_mutex_t g_lockout_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 /** @brief IP 字符串的 FNV-1a 哈希对锁槽数取模（本地熔断表分片定位）。 */

@@ -488,6 +488,7 @@ provider_openai_parse_embeddings(const char* raw_body,
     return 0;
 }
 
+/** Responses API 认证头线程本地缓存（"Bearer <key>"，避 per-request snprintf）。 */
 static _Thread_local char s_responses_bearer_auth[2048];
 
 int

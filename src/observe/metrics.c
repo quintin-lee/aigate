@@ -20,11 +20,15 @@ typedef struct {
     int         in_use;
 } failover_metric_entry_t;
 
+/** 熔断指标表（model from_prov→to_prov 计数，g_failover_mtx 保护）。 */
 static failover_metric_entry_t g_failovers[METRICS_MAX_FAILOVERS];
+/** 熔断指标表互斥锁。 */
 static pthread_mutex_t         g_failover_mtx = PTHREAD_MUTEX_INITIALIZER;
+/** 表满丢弃警告是否已打过（仅 warn 一次，防日志刷屏）。 */
 static _Atomic int             g_failover_warned = 0;
 
 #define NUM_BUCKETS 6
+/** 延迟直方图桶上界（纳秒，字符串形式，与 exposition 输出一致）。 */
 static const char* BUCKET_LE[NUM_BUCKETS] = {
     "5000000", "50000000", "500000000", "2000000000", "5000000000", "10000000000"};
 

@@ -34,6 +34,7 @@ hex_to_bytes32(const char* hex64, uint8_t out[32])
     return 0;
 }
 
+/** hex 编解码查表（小写）。 */
 static const char HEXD[] = "0123456789abcdef";
 
 int

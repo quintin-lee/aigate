@@ -12,8 +12,11 @@
 #include <strings.h>
 #include <time.h>
 
+/** curl 共享句柄（DNS/SSL 会话跨 easy 句柄复用，g_curl_once 初始化）。 */
 static CURLSH*         g_curl_sh = NULL;
+/** curl 共享 DNS 缓存锁。 */
 static pthread_mutex_t g_curl_sh_dns_mtx = PTHREAD_MUTEX_INITIALIZER;
+/** curl 共享 SSL 会话锁。 */
 static pthread_mutex_t g_curl_sh_ssl_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 /** @brief curl_share 加锁回调：DNS/SSL 会话槽分别上对应互斥锁。 */
@@ -43,6 +46,7 @@ curl_sh_unlock(CURL* handle, curl_lock_data data, void* userptr)
     }
 }
 
+/** 进程级 curl 全局初始化 once 守卫。 */
 static pthread_once_t g_curl_once = PTHREAD_ONCE_INIT;
 /** @brief 进程级 curl 全局初始化（pthread_once）：global_init + 共享 DNS/SSL 会话句柄。 */
 static void
@@ -58,7 +62,9 @@ curl_init_once(void)
     }
 }
 
+/** 线程本地 easy 句柄 key（析构回收该线程复用句柄）。 */
 static pthread_key_t  g_curl_tkey;
+/** 线程 key 初始化 once 守卫。 */
 static pthread_once_t g_curl_tkey_once = PTHREAD_ONCE_INIT;
 
 /** @brief 线程退出时回收该线程的复用 easy 句柄（pthread_key 析构）。 */

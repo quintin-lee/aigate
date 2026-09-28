@@ -9,6 +9,7 @@ extern const provider_adapter_t g_provider_openai;
 extern const provider_adapter_t g_provider_anthropic;
 extern const provider_adapter_t g_provider_gemini;
 
+/** 供应商适配器注册表（NULL 结尾，按 supports(provider) 顺序匹配）。 */
 static const provider_adapter_t* s_adapters[] = {
     &g_provider_openai, &g_provider_anthropic, &g_provider_gemini, NULL};
 
