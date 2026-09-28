@@ -18,8 +18,11 @@
 void aigate_log(const char* level, const char* file, int line, const char* fmt, ...)
     __attribute__((format(printf, 4, 5)));
 
+/** @brief INFO 级日志宏，自动带 __FILE__/__LINE__。 */
 #define AIGATE_LOG_INFO(...) aigate_log("INFO", __FILE__, __LINE__, __VA_ARGS__)
+/** @brief WARN 级日志宏，自动带 __FILE__/__LINE__。 */
 #define AIGATE_LOG_WARN(...) aigate_log("WARN", __FILE__, __LINE__, __VA_ARGS__)
+/** @brief ERROR 级日志宏，自动带 __FILE__/__LINE__。 */
 #define AIGATE_LOG_ERROR(...) aigate_log("ERROR", __FILE__, __LINE__, __VA_ARGS__)
 
 #endif /* AIGATE_LOG_H */
