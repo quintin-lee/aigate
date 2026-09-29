@@ -321,6 +321,19 @@ main(void)
     test_register("anthropic_sniff_usage_json", test_anthropic_sniff_usage_json);
     test_register("anthropic_sniff_streaming_sse", test_anthropic_sniff_streaming_sse);
 
+    extern void test_anthropic_tools_request_build(void);
+    extern void test_anthropic_tool_use_response_parse(void);
+    extern void test_anthropic_mixed_text_and_tool_use(void);
+    extern void test_anthropic_tool_result_message_build(void);
+    extern void test_anthropic_sse_tool_call_stream(void);
+    extern void test_anthropic_tool_choice_required_mapping(void);
+    test_register("anthropic_tools_request_build",       test_anthropic_tools_request_build);
+    test_register("anthropic_tool_use_response_parse",   test_anthropic_tool_use_response_parse);
+    test_register("anthropic_mixed_text_and_tool_use",   test_anthropic_mixed_text_and_tool_use);
+    test_register("anthropic_tool_result_message_build", test_anthropic_tool_result_message_build);
+    test_register("anthropic_sse_tool_call_stream",      test_anthropic_sse_tool_call_stream);
+    test_register("anthropic_tool_choice_required_mapping", test_anthropic_tool_choice_required_mapping);
+
     extern void admin_ui_content(void);
     test_register("admin_ui_content", admin_ui_content);
 

@@ -66,6 +66,13 @@ typedef struct anthropic_bridge {
     long                 input_tokens; /**< Accumulated input tokens. */
     long                 output_tokens; /**< Accumulated output tokens. */
     bool                 done_emitted; /**< [DONE] already emitted. */
+    /* Tool calling state (one active tool_use block at a time) */
+    bool   in_tool_use;    /**< Currently accumulating a tool_use content block. */
+    char   tool_id[64];    /**< Current tool call id (from content_block_start). */
+    char   tool_name[128]; /**< Current tool call name. */
+    char*  tool_args_buf;  /**< malloc'd dynamic buffer accumulating input_json_delta; NULL = empty. */
+    size_t tool_args_len;  /**< Bytes used in tool_args_buf. */
+    int    tool_index;     /**< tool_calls array index (increments per completed block). */
 } anthropic_bridge_t;
 
 /** @brief Initialize bridge with response context. */
