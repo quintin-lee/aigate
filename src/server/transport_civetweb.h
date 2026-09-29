@@ -8,8 +8,8 @@
  */
 
 /**
- * @defgroup group_server 服务层
- * @brief 服务：HTTP 传输、管理 API、后台页面。
+ * @defgroup group_server Server layer
+ * @brief Server: HTTP transport, admin API, admin pages.
  */
 #ifndef AIGATE_TRANSPORT_CIVETWEB_H
 #define AIGATE_TRANSPORT_CIVETWEB_H
