@@ -10,7 +10,7 @@
 #include "pg_store.h"
 #include "redis_pool.h"
 
-/** @brief 预算执行器实例（不透明，定义见 budget_enforce.c）。 */
+/** @brief Budget enforcer instance (opaque, defined in budget_enforce.c). */
 typedef struct budget_enforce_mgr budget_enforce_mgr_t;
 
 /** @brief Create a budget enforcer instance.

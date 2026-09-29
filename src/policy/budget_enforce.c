@@ -9,37 +9,37 @@
 #include <time.h>
 #include <pthread.h>
 
-/** @brief 月度 खर्च 分片桶数（按 key/group id 哈希散列）。 */
+/** @brief Monthly spend shard bucket count (hashed by key/group id). */
 #define BUCKET_COUNT 1024
 
-/** @brief 单 key 月度累计：key id/已花费用/已用 token/链表。 */
+/** @brief Per-key monthly total: key id/spent cost/spent tokens/link. */
 typedef struct key_spend_node {
     int64_t                key_id; /**< API key id */
-    double                 spent_cost; /**< 已花费用（美元） */
-    int64_t                spent_tokens; /**< 已用 token 数 */
-    struct key_spend_node* next; /**< 桶内链表 */
+    double                 spent_cost; /**< Spent cost (USD). */
+    int64_t                spent_tokens; /**< Spent token count. */
+    struct key_spend_node* next; /**< Intra-bucket link. */
 } key_spend_node_t;
 
-/** @brief 单组月度累计：group id/已花费用/预算上限/链表。 */
+/** @brief Per-group monthly total: group id/spent cost/budget cap/link. */
 typedef struct group_spend_node {
-    int64_t                  group_id; /**< 分组 id */
-    double                   spent_cost; /**< 已花费用（美元） */
-    double                   budget_usd; /**< 月度预算上限（美元） */
-    struct group_spend_node* next; /**< 桶内链表 */
+    int64_t                  group_id; /**< Group id. */
+    double                   spent_cost; /**< Spent cost (USD). */
+    double                   budget_usd; /**< Monthly budget cap (USD). */
+    struct group_spend_node* next; /**< Intra-bucket link. */
 } group_spend_node_t;
 
-/** @brief 预算执行器实例：存储/Redis/锁/当前年月/事件总线/分片桶。 */
+/** @brief Budget enforcer instance: store/Redis/lock/current year-month/event bus/shard buckets. */
 struct budget_enforce_mgr {
-    pg_store_t*         store; /**< PG 持久化存储（启动同步，可空） */
-    redis_pool_t*       redis; /**< Redis 池（集群同步，可空） */
-    pthread_mutex_t     mtx; /**< 实例互斥锁 */
-    int                 current_ym; /**< 当前年月（YYYYMM，桶滚动比较） */
-    event_bus_t*        eb; /**< 事件总线（预算告警事件，可空） */
-    key_spend_node_t*   key_buckets[BUCKET_COUNT]; /**< key 月度累计分片桶 */
-    group_spend_node_t* group_buckets[BUCKET_COUNT]; /**< group 月度累计分片桶 */
+    pg_store_t*         store; /**< PG persistent store (bootstrapped at startup, nullable). */
+    redis_pool_t*       redis; /**< Redis pool (cluster sync, nullable). */
+    pthread_mutex_t     mtx; /**< Instance mutex. */
+    int                 current_ym; /**< Current year-month (YYYYMM, for bucket rollover comparison). */
+    event_bus_t*        eb; /**< Event bus (budget alert events, nullable). */
+    key_spend_node_t*   key_buckets[BUCKET_COUNT]; /**< Per-key monthly total shard buckets. */
+    group_spend_node_t* group_buckets[BUCKET_COUNT]; /**< Per-group monthly total shard buckets. */
 };
 
-/** @brief 当前 UTC 年月（YYYYMM 整数，供月度桶滚动比较）。 */
+/** @brief Current UTC year-month (YYYYMM integer, for monthly bucket rollover comparison). */
 static int
 get_current_year_month(void)
 {
@@ -49,7 +49,7 @@ get_current_year_month(void)
     return (tm_buf.tm_year + 1900) * 100 + (tm_buf.tm_mon + 1);
 }
 
-/** @brief splitmix64 风格整型哈希，映射 id 到支出桶分片。 */
+/** @brief SplitMix64-style integer hash mapping ids to spend bucket shards. */
 static inline size_t
 hash_id(int64_t id)
 {
@@ -60,7 +60,7 @@ hash_id(int64_t id)
     return (size_t)(x % BUCKET_COUNT);
 }
 
-/** @brief 释放全部 key/分组支出桶节点并清指针（不碰 Redis）。 */
+/** @brief Free all key/group spend bucket nodes and clear pointers (Redis untouched). */
 static void
 clear_buckets(budget_enforce_mgr_t* mgr)
 {

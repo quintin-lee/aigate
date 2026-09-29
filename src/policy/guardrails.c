@@ -11,7 +11,7 @@
 #include <ctype.h>
 #include <jansson.h>
 
-/** @brief AC 自动机节点初始容量（按需扩容）。 */
+/** @brief Initial AC automaton node capacity (grown on demand). */
 #define AC_INIT_CAP 256
 
 ac_trie_t*
@@ -162,16 +162,16 @@ ac_trie_search(const ac_trie_t* trie, const char* text, size_t len)
 
 /* --- Guardrails Engine Context --- */
 
-/** @brief 护栏引擎实例：读写锁/黑白名单 trie/PII 正则组/就绪标记。 */
+/** @brief Guardrails engine instance: rwlock/block+exempt tries/PII regex group/ready flag. */
 struct guardrails_ctx {
-    pthread_rwlock_t rwlock; /**< 规则热加载读写锁 */
-    ac_trie_t*       ac_block; /**< 黑名单关键词 trie */
-    ac_trie_t*       ac_exempt; /**< 豁免关键词 trie */
-    regex_t          re_api_key; /**< API key 正则 */
-    regex_t          re_email; /**< 邮箱正则 */
-    regex_t          re_id_card; /**< 身份证号正则 */
-    regex_t          re_phone; /**< 电话号码正则 */
-    int              regex_ready; /**< 正则编译就绪标记 */
+    pthread_rwlock_t rwlock; /**< Rule hot-reload rwlock. */
+    ac_trie_t*       ac_block; /**< Blocklist keyword trie. */
+    ac_trie_t*       ac_exempt; /**< Exempt keyword trie. */
+    regex_t          re_api_key; /**< API key regex. */
+    regex_t          re_email; /**< Email regex. */
+    regex_t          re_id_card; /**< ID card number regex. */
+    regex_t          re_phone; /**< Phone number regex. */
+    int              regex_ready; /**< Regex compilation ready flag. */
 };
 
 guardrails_ctx_t*
@@ -251,9 +251,9 @@ guardrails_load_rules(guardrails_ctx_t* ctx, const guardrail_rule_t* rules, size
     return 0;
 }
 
-/** @brief 正则全局替换：数字边界检查为真时跳过两侧紧邻数字的命中（如身份证/电话）。
- *  @param out_changed 可选，恒写是否发生替换。
- *  @return 新串（调用方 free）；src 为 NULL 返回 NULL，OOM 回退返回 src 拷贝。 */
+/** @brief Regex global replace: with digit-boundary check on, skip hits directly adjacent to digits on both sides (e.g. ID card/phone).
+ *  @param out_changed Optional, always written with whether a replacement happened.
+ *  @return New string (caller frees); NULL when src is NULL, src copy as OOM fallback. */
 static char*
 replace_regex(const regex_t* re, const char* src, const char* repl, int check_digit_boundary, int* out_changed)
 {

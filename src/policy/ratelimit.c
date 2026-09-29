@@ -16,29 +16,29 @@
 #include <string.h>
 #include <time.h>
 
-/** @brief 单 key 限流桶：key id/占用标记/可用令牌/容量/上次补充/日累计/日期。 */
+/** @brief Per-key rate-limit bucket: key id/in-use flag/available tokens/capacity/last refill/daily total/date. */
 struct bucket {
     long     key_id; /**< API key id */
-    int      in_use; /**< 槽位占用标记 */
+    int      in_use; /**< Slot occupancy flag. */
     double   tokens;         /**< available request tokens */
-    double   capacity; /**< 桶容量（QPS 上限） */
+    double   capacity; /**< Bucket capacity (QPS ceiling). */
     uint64_t last_refill_ns; /**< CLOCK_MONOTONIC */
-    long     daily_used; /**< 当日已用 token 数 */
+    long     daily_used; /**< Tokens consumed today. */
     time_t   day;            /**< UTC midnight of the accounting window */
 };
 
-/** @brief 限流器实例：锁/开放寻址桶表/容量/计数/Redis 池/Lua SHA 缓存。 */
+/** @brief Limiter instance: lock/open-addressing bucket table/capacity/count/Redis pool/Lua SHA cache. */
 struct ratelimit {
-    pthread_mutex_t mtx; /**< 实例互斥锁 */
-    struct bucket*  b; /**< 开放寻址桶表 */
-    size_t          cap; /**< 表容量 */
-    size_t          count; /**< 已用槽位数 */
-    redis_pool_t*   pool; /**< 共享 Redis 池（分布式限流，可空） */
-    char            sha_qps[48]; /**< QPS Lua 脚本 SHA 缓存 */
-    char            sha_quota[48]; /**< 配额 Lua 脚本 SHA 缓存 */
+    pthread_mutex_t mtx; /**< Instance mutex. */
+    struct bucket*  b; /**< Open-addressing bucket table. */
+    size_t          cap; /**< Table capacity. */
+    size_t          count; /**< Occupied slot count. */
+    redis_pool_t*   pool; /**< Shared Redis pool (distributed limiting, nullable). */
+    char            sha_qps[48]; /**< QPS Lua script SHA cache. */
+    char            sha_quota[48]; /**< Quota Lua script SHA cache. */
 };
 
-/** @brief 单调时钟纳秒（令牌桶/QPS 时间基准，不受 wall clock 跳变影响）。 */
+/** @brief Monotonic clock in nanoseconds (time base for token bucket/QPS, immune to wall clock jumps). */
 static uint64_t
 mono_ns(void)
 {
@@ -47,7 +47,7 @@ mono_ns(void)
     return (uint64_t)ts.tv_sec * 1000000000ull + (uint64_t)ts.tv_nsec;
 }
 
-/** @brief 取当日 UTC 零点（日配额桶的日期分界）。 */
+/** @brief Start of the current UTC day (date boundary for the daily quota bucket). */
 static time_t
 utc_midnight(time_t t)
 {
@@ -57,7 +57,7 @@ utc_midnight(time_t t)
     return timegm(&tmv);
 }
 
-/** @brief 上取整到 2 的幂（最小 16，哈希表扩容用）。 */
+/** @brief Round up to a power of two (minimum 16, for hash table growth). */
 static size_t
 next_pow2(size_t n)
 {
@@ -68,7 +68,7 @@ next_pow2(size_t n)
     return p;
 }
 
-/** @brief key_id 雪崩哈希（开放寻址桶表索引用）。 */
+/** @brief Avalanche hash of key_id (indexing for the open-addressing bucket table). */
 static size_t
 hash_id(long key_id)
 {
@@ -128,8 +128,8 @@ ratelimit_set_redis_pool(ratelimit_t* rl, redis_pool_t* pool)
 }
 
 /* @invariant caller holds rl->mtx. */
-/** @brief 按 key 查桶，不存在则建（负载超 3/4 时先 2 倍 rehash）。
- *  @return 桶指针；rehash OOM 返回 NULL。 */
+/** @brief Look up a bucket by key, creating it when absent (rehash at 2x first when load exceeds 3/4).
+ *  @return Bucket pointer; NULL on rehash OOM. */
 static struct bucket*
 find_or_make(ratelimit_t* rl, long key_id)
 {

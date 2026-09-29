@@ -12,26 +12,26 @@
 extern "C" {
 #endif
 
-/** @brief 熔断器三态：关闭（放行）/打开（拒绝）/半开（探测）。 */
+/** @brief Breaker tri-state: closed (admit)/open (reject)/half-open (probing). */
 typedef enum {
-    /** @brief 关闭态：正常放行，失败计数累计中。 */
+    /** @brief Closed: admitting normally, failure count accumulating. */
     CB_CLOSED = 0,
-    /** @brief 打开态：熔断中，直接拒绝并走降级。 */
+    /** @brief Open: tripped, rejecting directly with fallback. */
     CB_OPEN = 1,
-    /** @brief 半开态：冷却后放少量探测流量，成功则关闭。 */
+    /** @brief Half-open: admitting a trickle of probe traffic after cooldown, closing on success. */
     CB_HALF_OPEN = 2,
 } cb_state_t;
 
-/** @brief 熔断器实例（不透明，定义见 circuit_breaker.c）。 */
+/** @brief Breaker instance (opaque, defined in circuit_breaker.c). */
 typedef struct circuit_breaker circuit_breaker_t;
-/** @brief 时间源函数类型：返回当前秒级时间戳，用于熔断冷却计时（便于测试注入假时钟）。 */
+/** @brief Time source function type: returns the current second-resolution timestamp for breaker cooldown timing (fake clock injection for tests). */
 typedef time_t (*cb_time_fn)(void);
 struct redis_pool;
 struct event_bus;
 
-/** @brief 默认熔断阈值：连续失败达此次数后打开。 */
+/** @brief Default trip threshold: open after this many consecutive failures. */
 #define CB_DEFAULT_FAILURE_THRESHOLD 3
-/** @brief 默认冷却窗口秒数：打开后经此秒数才允许半开探测。 */
+/** @brief Default cooldown window in seconds: half-open probing allowed only after this many seconds open. */
 #define CB_DEFAULT_COOLOFF_SEC 30
 
 /** @brief Allocate and initialize a circuit breaker instance. */

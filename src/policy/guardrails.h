@@ -4,8 +4,8 @@
  */
 
 /**
- * @defgroup group_policy 策略层
- * @brief 策略：鉴权、预算、熔断、护栏、限流、响应缓存。
+ * @defgroup group_policy Policy layer
+ * @brief Policy: auth, budget, circuit breaking, guardrails, rate limiting, response cache.
  */
 #ifndef AIGATE_GUARDRAILS_H
 #define AIGATE_GUARDRAILS_H
@@ -15,7 +15,7 @@
 #include <stdbool.h>
 #include "pg_store.h"
 
-/** @brief 入站检查结果：放行/已脱敏放行/拦截。 */
+/** @brief Inbound check result: pass/masked pass/block. */
 typedef enum {
     GUARDRAILS_PASS = 0,     /* Content clean, no masking or blocking */
     GUARDRAILS_MASKED = 1,   /* PII found and masked */
@@ -24,52 +24,52 @@ typedef enum {
 
 /* --- Aho-Corasick Pattern Matching Trie --- */
 
-/** @brief AC 自动机节点：转移表/失败链接/命中关键词。 */
-/** @brief AC 自动机节点：转移表/失败链接/命中关键词。 */
+/** @brief AC automaton node: transition table/failure link/hit keyword. */
+/** @brief AC automaton node: transition table/failure link/hit keyword. */
 typedef struct ac_node {
     int   next[256];          /**< Transition on byte 0..255; -1 = uninitialized */
     int   fail;               /**< Failure link index */
     char* matched_keyword;    /**< Keyword ending at this node (or NULL) */
 } ac_node_t;
 
-/** @brief AC 自动机：节点池 + 已用数 + 容量。 */
+/** @brief AC automaton: node pool + used count + capacity. */
 typedef struct ac_trie {
-    ac_node_t* nodes; /**< 节点池（索引 0 为根） */
-    size_t     node_count; /**< 已用节点数 */
-    size_t     node_cap; /**< 节点池容量 */
+    ac_node_t* nodes; /**< Node pool (index 0 is the root). */
+    size_t     node_count; /**< Used node count. */
+    size_t     node_cap; /**< Node pool capacity. */
 } ac_trie_t;
 
-/** @brief 新建 AC 自动机（空 trie，仅根节点）。
- *  @return 新实例；OOM 返回 NULL。 */
+/** @brief Create an AC automaton (empty trie, root node only).
+ *  @return New instance; NULL on OOM. */
 ac_trie_t*  ac_trie_create(void);
-/** @brief 释放 trie 及其全部节点关键词（NULL 安全）。 */
+/** @brief Free the trie and all node keywords (NULL-safe). */
 void        ac_trie_destroy(ac_trie_t* trie);
-/** @brief 插入一个关键词（空串/NULL 拒绝）。
- *  @return 0 成功；-1 参数非法或 OOM。 */
+/** @brief Insert one keyword (empty string/NULL rejected).
+ *  @return 0 on success; -1 on bad arguments or OOM. */
 int         ac_trie_insert(ac_trie_t* trie, const char* keyword);
-/** @brief BFS 构建失败链接并补全转移表（调用 insert 后、search 前必须调用一次）。
- *  @return 0 成功（含空 trie）；-1 OOM。 */
+/** @brief BFS-build failure links and complete the transition table (call once after insert, before search).
+ *  @return 0 on success (empty trie included); -1 on OOM. */
 int         ac_trie_build_failure_links(ac_trie_t* trie);
-/** @brief 在文本中搜首个命中关键词。
- *  @return 命中关键词（借用指针，勿释放）；无命中/空 trie 返回 NULL。 */
+/** @brief Search text for the first hit keyword.
+ *  @return Hit keyword (borrowed pointer, do not free); NULL on no hit/empty trie. */
 const char* ac_trie_search(const ac_trie_t* trie, const char* text, size_t len);
 
 /* --- Full Guardrails Engine --- */
 
-/** @brief 护栏引擎实例（不透明，定义见 guardrails.c）。 */
+/** @brief Guardrails engine instance (opaque, defined in guardrails.c). */
 typedef struct guardrails_ctx guardrails_ctx_t;
 
-/** @brief 新建护栏引擎（编译 PII 正则，空规则集）。
- *  @return 新实例；OOM 返回 NULL。 */
+/** @brief Create a guardrails engine (compiles PII regexes, empty rule set).
+ *  @return New instance; NULL on OOM. */
 guardrails_ctx_t* guardrails_create(void);
-/** @brief 释放引擎（含两棵 AC trie 与正则，NULL 安全）。 */
+/** @brief Free the engine (both AC tries and regexes, NULL-safe). */
 void              guardrails_destroy(guardrails_ctx_t* ctx);
-/** @brief 全量替换规则集（重建 block/exempt 两棵 trie 并 build 失败链接）。
- *  @return 0 成功；-1 OOM（旧规则保留）。 */
+/** @brief Replace the whole rule set (rebuilds the block/exempt tries and builds failure links).
+ *  @return 0 on success; -1 on OOM (old rules kept). */
 int               guardrails_load_rules(guardrails_ctx_t* ctx, const guardrail_rule_t* rules, size_t count);
 
-/** @brief 入站检查：先 AC 黑名单（命中且无豁免 → BLOCKED 并回填关键词），再 PII 脱敏（命中 → MASKED 并输出脱敏体），否则 PASS。
- *  @return GUARDRAILS_PASS/MASKED/BLOCKED 三者之一。 */
+/** @brief Inbound check: AC blocklist first (hit without exemption yields BLOCKED with the keyword filled back), then PII masking (hit yields MASKED with masked body), else PASS.
+ *  @return One of GUARDRAILS_PASS/MASKED/BLOCKED. */
 guardrails_action_t guardrails_inspect_inbound(
     guardrails_ctx_t* ctx,
     const char*       raw_body,
@@ -79,12 +79,12 @@ guardrails_action_t guardrails_inspect_inbound(
     char*             blocked_keyword,
     size_t            blocked_keyword_sz);
 
-/** @brief PII 脱敏：API key→[API_KEY]、邮箱→[EMAIL]、身份证→[ID_CARD]、电话→[PHONE]。
- *  @param ctx 护栏引擎实例。
- *  @param text 待脱敏文本（不要求 NUL 结尾）。
- *  @param len 文本长度。
- *  @param changed 可选，恒写是否发生替换。
- *  @return 脱敏后新串（调用方 free）；无命中/空输入返回 NULL。 */
+/** @brief PII masking: API key to [API_KEY], email to [EMAIL], ID card to [ID_CARD], phone to [PHONE].
+ *  @param ctx Guardrails engine instance.
+ *  @param text Text to mask (NUL termination not required).
+ *  @param len Text length.
+ *  @param changed Optional, always written with whether a replacement happened.
+ *  @return Masked new string (caller frees); NULL on no hit/empty input. */
 char* guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t len, int* changed);
 
 #endif /* AIGATE_GUARDRAILS_H */

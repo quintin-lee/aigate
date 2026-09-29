@@ -15,33 +15,33 @@
 #include <string.h>
 #include <time.h>
 
-/** @brief 桶数组分片数（按模型+端点哈希散列）。 */
+/** @brief Bucket array shard count (hashed by model+endpoint). */
 #define CB_BUCKETS 64
 
-/** @brief 单端点熔断状态：模型/端点/三态/失败计数/打开截止/半开探测/链表。 */
+/** @brief Per-endpoint breaker state: model/endpoint/tri-state/failure count/open deadline/half-open probe/link. */
 typedef struct cb_entry {
-    char             model[128]; /**< 模型名 */
-    char             endpoint[512]; /**< 端点 URL */
-    cb_state_t       state; /**< 当前三态 */
-    int              consecutive_failures; /**< 连续失败计数 */
-    time_t           open_until; /**< 打开截止时间戳 */
-    int              half_open_probe_active; /**< 半开探测进行中标记 */
-    struct cb_entry* next; /**< 桶内链表 */
+    char             model[128]; /**< Model name. */
+    char             endpoint[512]; /**< Endpoint URL. */
+    cb_state_t       state; /**< Current tri-state. */
+    int              consecutive_failures; /**< Consecutive failure count. */
+    time_t           open_until; /**< Open-state deadline timestamp. */
+    int              half_open_probe_active; /**< Half-open probe in-flight flag. */
+    struct cb_entry* next; /**< Intra-bucket link. */
 } cb_entry_t;
 
-/** @brief 熔断器实例：锁/阈值/冷却/时间源/Redis 池/事件总线/分片桶。 */
+/** @brief Breaker instance: lock/threshold/cooldown/time source/Redis pool/event bus/shard buckets. */
 struct circuit_breaker {
-    pthread_mutex_t mtx; /**< 实例互斥锁 */
-    int             failure_threshold; /**< 熔断阈值（连续失败次数） */
-    int             cooloff_sec; /**< 冷却窗口秒数 */
-    cb_time_fn      time_fn; /**< 时间源（可注入假时钟） */
-    redis_pool_t*   pool; /**< 共享 Redis 池（分布式熔断，可空） */
-    char            sha_cb[48]; /**< Redis Lua 脚本 SHA 缓存 */
-    event_bus_t*    eb; /**< 事件总线（状态变迁事件，可空） */
-    cb_entry_t*     buckets[CB_BUCKETS]; /**< 端点状态分片桶 */
+    pthread_mutex_t mtx; /**< Instance mutex. */
+    int             failure_threshold; /**< Trip threshold (consecutive failures). */
+    int             cooloff_sec; /**< Cooldown window in seconds. */
+    cb_time_fn      time_fn; /**< Time source (fake clock injectable). */
+    redis_pool_t*   pool; /**< Shared Redis pool (distributed breaking, nullable). */
+    char            sha_cb[48]; /**< Redis Lua script SHA cache. */
+    event_bus_t*    eb; /**< Event bus (state transition events, nullable). */
+    cb_entry_t*     buckets[CB_BUCKETS]; /**< Endpoint state shard buckets. */
 };
 
-/** @brief 当前时间：测试注入优先，否则 time()。 */
+/** @brief Current time: injected test clock first, else time(). */
 static time_t
 get_now(const circuit_breaker_t* cb)
 {
@@ -51,7 +51,7 @@ get_now(const circuit_breaker_t* cb)
     return time(NULL);
 }
 
-/** @brief model:endpoint 的 djb2 哈希对桶数取模（条目分片定位）。 */
+/** @brief djb2 hash of model:endpoint modulo bucket count (entry shard location). */
 static unsigned int
 hash_key(const char* model, const char* endpoint)
 {
@@ -71,8 +71,8 @@ hash_key(const char* model, const char* endpoint)
     return h % CB_BUCKETS;
 }
 
-/** @brief 哈希桶链中精确查找 model+endpoint 条目（调用方须持锁）。
- *  @return 条目指针；不存在返回 NULL。 */
+/** @brief Exact lookup of a model+endpoint entry in the hash bucket chain (caller must hold the lock).
+ *  @return Entry pointer; NULL when absent. */
 static cb_entry_t*
 find_entry_locked(circuit_breaker_t* cb, const char* model, const char* endpoint)
 {
@@ -87,8 +87,8 @@ find_entry_locked(circuit_breaker_t* cb, const char* model, const char* endpoint
     return NULL;
 }
 
-/** @brief 查或建条目：不存在则 calloc 新建为 CLOSED 态挂链头（调用方须持锁）。
- *  @return 条目指针；OOM 返回 NULL。 */
+/** @brief Look up or create an entry: calloc a new CLOSED entry at the chain head when absent (caller must hold the lock).
+ *  @return Entry pointer; NULL on OOM. */
 static cb_entry_t*
 get_or_create_entry_locked(circuit_breaker_t* cb, const char* model, const char* endpoint)
 {
@@ -112,7 +112,7 @@ get_or_create_entry_locked(circuit_breaker_t* cb, const char* model, const char*
     return e;
 }
 
-/** @brief 时间驱动状态推进：OPEN 且冷却到期 → HALF_OPEN（清探测标记，发事件）。调用方须持锁。 */
+/** @brief Time-driven state advance: OPEN with expired cooldown becomes HALF_OPEN (clear probe flag, emit event). Caller must hold the lock. */
 static void
 update_state_on_time_locked(circuit_breaker_t* cb, cb_entry_t* e, time_t now)
 {
@@ -269,7 +269,7 @@ cb_get_open_until(circuit_breaker_t* cb, const char* model, const char* endpoint
 /* --- Redis helper ---------------------------------------------------- */
 
 /* Builds the Redis key: aigate:cb:{djb2(model:endpoint) hex8} */
-/** @brief 组装分布式熔断 Redis 键：`aigate:cb:{djb2(model:endpoint) hex8}`。 */
+/** @brief Build the distributed breaker Redis key: `aigate:cb:{djb2(model:endpoint) hex8}`. */
 static void
 cb_redis_key(const char* model, const char* endpoint, char* out, size_t cap)
 {
