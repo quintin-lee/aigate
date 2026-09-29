@@ -25,6 +25,52 @@ adapter_gemini_supports(const char* provider)
     return provider_gemini_supports(provider) != 0;
 }
 
+/** @brief Look up function name for a tool_call_id by scanning backwards through messages.
+ *  Falls back to tool_call_id itself if not found (logs WARN). */
+static void
+gemini_lookup_tool_name(json_t* msgs, const char* tool_call_id, char* out, size_t out_cap)
+{
+    if (!msgs || !json_is_array(msgs) || !tool_call_id) {
+        snprintf(out, out_cap, "%s", tool_call_id ? tool_call_id : "unknown");
+        return;
+    }
+    int n = (int)json_array_size(msgs);
+    for (int i = n - 1; i >= 0; i--) {
+        json_t*     mi    = json_array_get(msgs, i);
+        json_t*     jrole = json_object_get(mi, "role");
+        if (!jrole || !json_is_string(jrole)) {
+            continue;
+        }
+        if (strcmp(json_string_value(jrole), "assistant") != 0) {
+            continue;
+        }
+        json_t* jtcs = json_object_get(mi, "tool_calls");
+        if (!jtcs || !json_is_array(jtcs)) {
+            continue;
+        }
+        size_t  ti;
+        json_t* tc;
+        json_array_foreach(jtcs, ti, tc)
+        {
+            json_t* jid = json_object_get(tc, "id");
+            if (!jid || !json_is_string(jid)) {
+                continue;
+            }
+            if (strcmp(json_string_value(jid), tool_call_id) == 0) {
+                json_t*     jfn    = json_object_get(tc, "function");
+                json_t*     jname  = jfn ? json_object_get(jfn, "name") : NULL;
+                if (jname && json_is_string(jname)) {
+                    snprintf(out, out_cap, "%s", json_string_value(jname));
+                    return;
+                }
+            }
+        }
+    }
+    AIGATE_LOG_WARN("gemini_lookup_tool_name: no match for tool_call_id=%s, using id as name",
+                    tool_call_id);
+    snprintf(out, out_cap, "%s", tool_call_id);
+}
+
 int
 provider_gemini_build(const model_rec_t* route,
                       const char*        in_body,
@@ -84,6 +130,7 @@ provider_gemini_build(const model_rec_t* route,
     json_t* contents = json_array();
 
     /* Process messages */
+
     json_t* msgs = json_object_get(in_req, "messages");
     char    system_buf[8192];
     size_t  system_len = 0;
@@ -94,43 +141,108 @@ provider_gemini_build(const model_rec_t* route,
         json_t* m;
         json_array_foreach(msgs, idx, m)
         {
-            json_t*     jrole = json_object_get(m, "role");
+            json_t*     jrole    = json_object_get(m, "role");
             json_t*     jcontent = json_object_get(m, "content");
             const char* role = (jrole && json_is_string(jrole)) ? json_string_value(jrole) : "user";
-            const char* content =
+            /* Plain text content (string) — for system/user/assistant fallback */
+            const char* plain_content =
                 (jcontent && json_is_string(jcontent)) ? json_string_value(jcontent) : "";
 
             if (strcmp(role, "system") == 0) {
-                size_t clen = strlen(content);
+                size_t clen = strlen(plain_content);
                 if (clen > 0) {
                     if (system_len > 0 && system_len + 2 < sizeof(system_buf)) {
                         memcpy(system_buf + system_len, "\n\n", 2);
                         system_len += 2;
                     }
                     if (system_len + clen < sizeof(system_buf)) {
-                        memcpy(system_buf + system_len, content, clen);
+                        memcpy(system_buf + system_len, plain_content, clen);
                         system_len += clen;
                         system_buf[system_len] = '\0';
                     }
                 }
-            } else {
-                const char* gemini_role = (strcmp(role, "assistant") == 0) ? "model" : "user";
-                json_t*     entry = json_object();
-                json_object_set_new(entry, "role", json_string(gemini_role));
+            } else if (strcmp(role, "tool") == 0) {
+                /* OpenAI tool result → Gemini functionResponse */
+                json_t*     jtcid = json_object_get(m, "tool_call_id");
+                const char* tcid  = (jtcid && json_is_string(jtcid)) ? json_string_value(jtcid) : "";
+                char        fname[128];
+                gemini_lookup_tool_name(msgs, tcid, fname, sizeof fname);
+                const char* result_str = plain_content;
+                /* Try JSON parse; wrap as {output:...} if not */
+                json_t* result_obj = json_loads(result_str, 0, NULL);
+                if (result_obj == NULL) {
+                    result_obj = json_object();
+                    json_object_set_new(result_obj, "output", json_string(result_str));
+                }
+                json_t* fr = json_object();
+                json_object_set_new(fr, "name",     json_string(fname));
+                json_object_set_new(fr, "response", result_obj);
+                json_t* frp = json_object();
+                json_object_set_new(frp, "functionResponse", fr);
                 json_t* parts = json_array();
-                json_t* part = json_object();
-                json_object_set_new(part, "text", json_string(content));
-                json_array_append_new(parts, part);
+                json_array_append_new(parts, frp);
+                json_t* entry = json_object();
+                json_object_set_new(entry, "role",  json_string("user"));
                 json_object_set_new(entry, "parts", parts);
                 json_array_append_new(contents, entry);
+            } else {
+                /* user or assistant message */
+                const char* gemini_role     = (strcmp(role, "assistant") == 0) ? "model" : "user";
+                json_t*     jtool_calls     = json_object_get(m, "tool_calls");
+                if (strcmp(role, "assistant") == 0 && jtool_calls != NULL &&
+                    json_is_array(jtool_calls) && json_array_size(jtool_calls) > 0) {
+                    /* assistant + tool_calls → functionCall parts */
+                    json_t* parts = json_array();
+                    /* Optional text part */
+                    if (plain_content && plain_content[0] != '\0') {
+                        json_t* tp = json_object();
+                        json_object_set_new(tp, "text", json_string(plain_content));
+                        json_array_append_new(parts, tp);
+                    }
+                    size_t  ti;
+                    json_t* tc;
+                    json_array_foreach(jtool_calls, ti, tc)
+                    {
+                        json_t*     jfn     = json_object_get(tc, "function");
+                        const char* fn_name = jfn ? json_string_value(json_object_get(jfn, "name")) : NULL;
+                        const char* fn_args = jfn ? json_string_value(json_object_get(jfn, "arguments")) : NULL;
+                        if (!fn_name) {
+                            continue;
+                        }
+                        json_t* args = (fn_args && fn_args[0]) ? json_loads(fn_args, 0, NULL) : NULL;
+                        if (!args) {
+                            args = json_object();
+                        }
+                        json_t* fc = json_object();
+                        json_object_set_new(fc, "name", json_string(fn_name));
+                        json_object_set_new(fc, "args", args);
+                        json_t* fcp = json_object();
+                        json_object_set_new(fcp, "functionCall", fc);
+                        json_array_append_new(parts, fcp);
+                    }
+                    json_t* entry = json_object();
+                    json_object_set_new(entry, "role",  json_string(gemini_role));
+                    json_object_set_new(entry, "parts", parts);
+                    json_array_append_new(contents, entry);
+                } else {
+                    /* plain text message */
+                    json_t* entry = json_object();
+                    json_object_set_new(entry, "role", json_string(gemini_role));
+                    json_t* parts = json_array();
+                    json_t* part  = json_object();
+                    json_object_set_new(part, "text", json_string(plain_content));
+                    json_array_append_new(parts, part);
+                    json_object_set_new(entry, "parts", parts);
+                    json_array_append_new(contents, entry);
+                }
             }
         }
     }
 
     if (system_len > 0) {
-        json_t* sys_inst = json_object();
+        json_t* sys_inst  = json_object();
         json_t* sys_parts = json_array();
-        json_t* sys_part = json_object();
+        json_t* sys_part  = json_object();
         json_object_set_new(sys_part, "text", json_string(system_buf));
         json_array_append_new(sys_parts, sys_part);
         json_object_set_new(sys_inst, "parts", sys_parts);
@@ -141,7 +253,7 @@ provider_gemini_build(const model_rec_t* route,
 
     /* generationConfig */
     json_t* gen_cfg = json_object();
-    json_t* jtemp = json_object_get(in_req, "temperature");
+    json_t* jtemp   = json_object_get(in_req, "temperature");
     if (jtemp != NULL && json_is_number(jtemp)) {
         json_object_set_new(gen_cfg, "temperature", json_real(json_number_value(jtemp)));
     }
@@ -163,11 +275,67 @@ provider_gemini_build(const model_rec_t* route,
             json_object_set(gen_cfg, "stopSequences", jstop);
         }
     }
-
     if (json_object_size(gen_cfg) > 0) {
         json_object_set_new(out_req, "generationConfig", gen_cfg);
     } else {
         json_decref(gen_cfg);
+    }
+
+    /* tools → functionDeclarations */
+    json_t* jtools = json_object_get(in_req, "tools");
+    if (jtools != NULL && json_is_array(jtools) && json_array_size(jtools) > 0) {
+        json_t* fn_decls = json_array();
+        size_t  ti;
+        json_t* tool;
+        json_array_foreach(jtools, ti, tool)
+        {
+            json_t* jfn = json_object_get(tool, "function");
+            if (!jfn) {
+                continue;
+            }
+            json_t* fd    = json_object();
+            json_t* jname = json_object_get(jfn, "name");
+            json_t* jdesc = json_object_get(jfn, "description");
+            json_t* jparm = json_object_get(jfn, "parameters");
+            if (jname) { json_object_set(fd, "name",        jname); }
+            if (jdesc) { json_object_set(fd, "description", jdesc); }
+            if (jparm) { json_object_set_new(fd, "parameters", json_deep_copy(jparm)); }
+            json_array_append_new(fn_decls, fd);
+        }
+        json_t* tools_wrapper = json_object();
+        json_object_set_new(tools_wrapper, "functionDeclarations", fn_decls);
+        json_t* tools_arr = json_array();
+        json_array_append_new(tools_arr, tools_wrapper);
+        json_object_set_new(out_req, "tools", tools_arr);
+    }
+
+    /* tool_choice → toolConfig */
+    json_t* jtc = json_object_get(in_req, "tool_choice");
+    if (jtc != NULL) {
+        const char* mode    = "AUTO";
+        json_t*     allowed = NULL;
+        if (json_is_string(jtc)) {
+            const char* s = json_string_value(jtc);
+            if      (strcmp(s, "required") == 0) { mode = "ANY";  }
+            else if (strcmp(s, "none")     == 0) { mode = "NONE"; }
+            /* "auto" → "AUTO" (default) */
+        } else if (json_is_object(jtc)) {
+            json_t*     jfn   = json_object_get(jtc, "function");
+            const char* fname = jfn ? json_string_value(json_object_get(jfn, "name")) : NULL;
+            mode = "ANY";
+            if (fname) {
+                allowed = json_array();
+                json_array_append_new(allowed, json_string(fname));
+            }
+        }
+        json_t* fcc = json_object();
+        json_object_set_new(fcc, "mode", json_string(mode));
+        if (allowed) {
+            json_object_set_new(fcc, "allowedFunctionNames", allowed);
+        }
+        json_t* tool_cfg = json_object();
+        json_object_set_new(tool_cfg, "functionCallingConfig", fcc);
+        json_object_set_new(out_req, "toolConfig", tool_cfg);
     }
 
     char* packed = json_dumps(out_req, JSON_COMPACT);
@@ -183,6 +351,7 @@ provider_gemini_build(const model_rec_t* route,
     }
     return 0;
 }
+
 
 /** @brief Map a native Gemini finish reason to an OpenAI finish_reason (STOP→stop, MAX_TOKENS→length, SAFETY/RECITATION→content_filter; unknown→stop).
  *  @return Borrowed static string; do not free. */
@@ -257,8 +426,10 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
         return 0;
     }
 
-    /* Extract content from candidates[0].content.parts[0].text */
-    const char* text = "";
+    /* Extract content from candidates[0].content.parts */
+    char*   accum_text = NULL;
+    size_t  accum_len = 0;
+    json_t* tool_calls_arr = json_array();
     const char* finish_reason = "stop";
 
     json_t* candidates = json_object_get(root, "candidates");
@@ -267,11 +438,41 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
         json_t* content = json_object_get(c0, "content");
         if (content != NULL && json_is_object(content)) {
             json_t* parts = json_object_get(content, "parts");
-            if (parts != NULL && json_is_array(parts) && json_array_size(parts) > 0) {
-                json_t* p0 = json_array_get(parts, 0);
-                json_t* jtext = json_object_get(p0, "text");
-                if (jtext != NULL && json_is_string(jtext)) {
-                    text = json_string_value(jtext);
+            if (parts != NULL && json_is_array(parts)) {
+                size_t  pi;
+                json_t* part;
+                json_array_foreach(parts, pi, part)
+                {
+                    json_t* jtext = json_object_get(part, "text");
+                    if (jtext && json_is_string(jtext)) {
+                        const char* t = json_string_value(jtext);
+                        size_t tlen = strlen(t);
+                        char* nb = realloc(accum_text, accum_len + tlen + 1);
+                        if (nb) {
+                            accum_text = nb;
+                            memcpy(accum_text + accum_len, t, tlen);
+                            accum_len += tlen;
+                            accum_text[accum_len] = '\0';
+                        }
+                    }
+                    json_t* jfc = json_object_get(part, "functionCall");
+                    if (jfc && json_is_object(jfc)) {
+                        json_t*     jname = json_object_get(jfc, "name");
+                        json_t*     jargs = json_object_get(jfc, "args");
+                        const char* fname = (jname && json_is_string(jname)) ? json_string_value(jname) : "";
+                        char* args_str = jargs ? json_dumps(jargs, JSON_COMPACT) : strdup("{}");
+                        char  call_id[64];
+                        snprintf(call_id, sizeof call_id, "call_%s_%zu", fname, pi);
+                        json_t* tc = json_object();
+                        json_object_set_new(tc, "id",   json_string(call_id));
+                        json_object_set_new(tc, "type", json_string("function"));
+                        json_t* fn = json_object();
+                        json_object_set_new(fn, "name",      json_string(fname));
+                        json_object_set_new(fn, "arguments", json_string(args_str ? args_str : "{}"));
+                        free(args_str);
+                        json_object_set_new(tc, "function", fn);
+                        json_array_append_new(tool_calls_arr, tc);
+                    }
                 }
             }
         }
@@ -279,6 +480,9 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
         if (jfinish != NULL && json_is_string(jfinish)) {
             finish_reason = map_gemini_finish_reason(json_string_value(jfinish));
         }
+    }
+    if (json_array_size(tool_calls_arr) > 0) {
+        finish_reason = "tool_calls";
     }
 
     /* Usage metadata */
@@ -316,7 +520,16 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
 
     json_t* msg = json_object();
     json_object_set_new(msg, "role", json_string("assistant"));
-    json_object_set_new(msg, "content", json_string(text));
+    if (accum_text && accum_text[0] != '\0') {
+        json_object_set_new(msg, "content", json_string(accum_text));
+    } else {
+        json_object_set_new(msg, "content", json_null());
+    }
+    if (json_array_size(tool_calls_arr) > 0) {
+        json_object_set_new(msg, "tool_calls", tool_calls_arr);
+    } else {
+        json_decref(tool_calls_arr);
+    }
     json_object_set_new(choice, "message", msg);
     json_object_set_new(choice, "finish_reason", json_string(finish_reason));
     json_array_append_new(choices, choice);
@@ -328,6 +541,7 @@ provider_gemini_resp_to_openai(const char* gemini_resp,
     json_object_set_new(usg, "total_tokens", json_integer(ptok + ctok));
     json_object_set_new(oai, "usage", usg);
 
+    free(accum_text);
     char* packed = json_dumps(oai, JSON_COMPACT);
     json_decref(oai);
     json_decref(root);
@@ -431,60 +645,119 @@ gemini_bridge_process_line(gemini_bridge_t* b, const char* line)
         }
     }
 
-    /* Extract delta text */
-    const char* delta_text = NULL;
-    json_t*     candidates = json_object_get(root, "candidates");
+    /* Extract content and emit chunks for text / functionCall parts */
+    json_t* candidates = json_object_get(root, "candidates");
     if (candidates != NULL && json_is_array(candidates) && json_array_size(candidates) > 0) {
         json_t* c0 = json_array_get(candidates, 0);
         json_t* content = json_object_get(c0, "content");
         if (content != NULL && json_is_object(content)) {
             json_t* parts = json_object_get(content, "parts");
-            if (parts != NULL && json_is_array(parts) && json_array_size(parts) > 0) {
-                json_t* p0 = json_array_get(parts, 0);
-                json_t* jt = json_object_get(p0, "text");
-                if (jt && json_is_string(jt)) {
-                    delta_text = json_string_value(jt);
+            if (parts != NULL && json_is_array(parts)) {
+                size_t  pi;
+                json_t* part;
+                json_array_foreach(parts, pi, part)
+                {
+                    /* Check for text delta */
+                    json_t* jt = json_object_get(part, "text");
+                    if (jt && json_is_string(jt)) {
+                        const char* delta_text = json_string_value(jt);
+                        if (delta_text[0] != '\0') {
+                            json_t* chunk = json_object();
+                            json_object_set_new(chunk, "id", json_string(b->msg_id));
+                            json_object_set_new(chunk, "object", json_string("chat.completion.chunk"));
+                            json_object_set_new(chunk, "created", json_integer((int64_t)time(NULL)));
+                            json_object_set_new(chunk, "model", json_string(b->model));
+
+                            json_t* choices = json_array();
+                            json_t* choice = json_object();
+                            json_object_set_new(choice, "index", json_integer(0));
+
+                            json_t* delta = json_object();
+                            json_object_set_new(delta, "content", json_string(delta_text));
+                            json_object_set_new(choice, "delta", delta);
+                            json_object_set_new(choice, "finish_reason", json_null());
+                            json_array_append_new(choices, choice);
+                            json_object_set_new(chunk, "choices", choices);
+
+                            char* packed = json_dumps(chunk, JSON_COMPACT);
+                            json_decref(chunk);
+                            if (packed != NULL) {
+                                char sse_line[8192];
+                                int  w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
+                                if (w >= (int)sizeof sse_line) {
+                                    AIGATE_LOG_WARN("stream sse chunk truncated for model %s",
+                                                    b->model[0] ? b->model : "unknown");
+                                }
+                                free(packed);
+                                gemini_bridge_send_chunk(b, sse_line);
+                            }
+                        }
+                    }
+
+                    /* Check for functionCall */
+                    json_t* jfc = json_object_get(part, "functionCall");
+                    if (jfc && json_is_object(jfc)) {
+                        json_t*     jname = json_object_get(jfc, "name");
+                        json_t*     jargs = json_object_get(jfc, "args");
+                        const char* fname = (jname && json_is_string(jname)) ? json_string_value(jname) : "";
+                        char* args_str = jargs ? json_dumps(jargs, JSON_COMPACT) : strdup("{}");
+                        char  call_id[64];
+                        snprintf(call_id, sizeof call_id, "call_%s_%zu", fname, pi);
+
+                        json_t* chunk = json_object();
+                        json_object_set_new(chunk, "id", json_string(b->msg_id));
+                        json_object_set_new(chunk, "object", json_string("chat.completion.chunk"));
+                        json_object_set_new(chunk, "created", json_integer((int64_t)time(NULL)));
+                        json_object_set_new(chunk, "model", json_string(b->model));
+
+                        json_t* choices = json_array();
+                        json_t* choice  = json_object();
+                        json_object_set_new(choice, "index", json_integer(0));
+
+                        json_t* delta   = json_object();
+                        json_t* tc_arr  = json_array();
+                        json_t* tc      = json_object();
+                        json_object_set_new(tc, "index", json_integer((int)pi));
+                        json_object_set_new(tc, "id",    json_string(call_id));
+                        json_object_set_new(tc, "type",  json_string("function"));
+                        json_t* fn = json_object();
+                        json_object_set_new(fn, "name",      json_string(fname));
+                        json_object_set_new(fn, "arguments", json_string(args_str ? args_str : "{}"));
+                        free(args_str);
+                        json_object_set_new(tc, "function", fn);
+                        json_array_append_new(tc_arr, tc);
+
+                        json_object_set_new(delta, "tool_calls", tc_arr);
+                        json_object_set_new(choice, "delta",         delta);
+                        json_object_set_new(choice, "finish_reason", json_null());
+                        json_array_append_new(choices, choice);
+                        json_object_set_new(chunk, "choices", choices);
+
+                        char* packed = json_dumps(chunk, JSON_COMPACT);
+                        json_decref(chunk);
+                        if (packed != NULL) {
+                            char sse_line[8192];
+                            int  w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
+                            if (w >= (int)sizeof sse_line) {
+                                AIGATE_LOG_WARN("stream sse chunk truncated for model %s",
+                                                b->model[0] ? b->model : "unknown");
+                            }
+                            free(packed);
+                            gemini_bridge_send_chunk(b, sse_line);
+                        }
+                        snprintf(b->finish_reason, sizeof b->finish_reason, "tool_calls");
+                    }
                 }
             }
         }
         json_t* jfinish = json_object_get(c0, "finishReason");
         if (jfinish != NULL && json_is_string(jfinish)) {
-            snprintf(b->finish_reason,
-                     sizeof b->finish_reason,
-                     "%s",
-                     map_gemini_finish_reason(json_string_value(jfinish)));
-        }
-    }
-
-    if (delta_text != NULL && delta_text[0] != '\0') {
-        json_t* chunk = json_object();
-        json_object_set_new(chunk, "id", json_string(b->msg_id));
-        json_object_set_new(chunk, "object", json_string("chat.completion.chunk"));
-        json_object_set_new(chunk, "created", json_integer((int64_t)time(NULL)));
-        json_object_set_new(chunk, "model", json_string(b->model));
-
-        json_t* choices = json_array();
-        json_t* choice = json_object();
-        json_object_set_new(choice, "index", json_integer(0));
-
-        json_t* delta = json_object();
-        json_object_set_new(delta, "content", json_string(delta_text));
-        json_object_set_new(choice, "delta", delta);
-        json_object_set_new(choice, "finish_reason", json_null());
-        json_array_append_new(choices, choice);
-        json_object_set_new(chunk, "choices", choices);
-
-        char* packed = json_dumps(chunk, JSON_COMPACT);
-        json_decref(chunk);
-        if (packed != NULL) {
-            char sse_line[8192];
-            int  w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
-            if (w >= (int)sizeof sse_line) {
-                AIGATE_LOG_WARN("stream sse chunk truncated for model %s",
-                                b->model[0] ? b->model : "unknown");
+            if (strcmp(b->finish_reason, "tool_calls") != 0) {
+                snprintf(b->finish_reason,
+                         sizeof b->finish_reason,
+                         "%s",
+                         map_gemini_finish_reason(json_string_value(jfinish)));
             }
-            free(packed);
-            gemini_bridge_send_chunk(b, sse_line);
         }
     }
 

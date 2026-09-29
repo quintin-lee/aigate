@@ -364,6 +364,19 @@ main(void)
     test_register("gemini_sniff_usage_json", test_gemini_sniff_usage_json);
     test_register("gemini_sniff_streaming_sse", test_gemini_sniff_streaming_sse);
 
+    extern void test_gemini_tools_request_build(void);
+    extern void test_gemini_function_call_response_parse(void);
+    extern void test_gemini_tool_result_name_lookup(void);
+    extern void test_gemini_tool_result_name_missing_fallback(void);
+    extern void test_gemini_multi_tool_calls_response(void);
+    extern void test_gemini_sse_function_call_stream(void);
+    test_register("gemini_tools_request_build",               test_gemini_tools_request_build);
+    test_register("gemini_function_call_response_parse",      test_gemini_function_call_response_parse);
+    test_register("gemini_tool_result_name_lookup",           test_gemini_tool_result_name_lookup);
+    test_register("gemini_tool_result_name_missing_fallback", test_gemini_tool_result_name_missing_fallback);
+    test_register("gemini_multi_tool_calls_response",         test_gemini_multi_tool_calls_response);
+    test_register("gemini_sse_function_call_stream",          test_gemini_sse_function_call_stream);
+
     extern void test_openai_embeddings_build(void);
     extern void test_openai_embeddings_parse(void);
     extern void test_gemini_embeddings_build_single(void);
