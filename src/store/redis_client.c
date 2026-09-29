@@ -8,8 +8,8 @@
 #include <string.h>
 #include <sys/time.h>
 
-/** @brief 解析 redis://[[user:]pass@]host[:port][/db]，缺省端口 6379、db 0（输出串恒 NUL 结尾）。
- *  @return 0 成功。 */
+/** @brief Parse redis://[[user:]pass@]host[:port][/db]; default port 6379, db 0 (output strings always NUL-terminated).
+ *  @return 0 on success. */
 static int
 parse_redis_url(
     const char* url, char* host, size_t host_cap, int* port, char* pass, size_t pass_cap, int* db)

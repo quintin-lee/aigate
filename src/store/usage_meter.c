@@ -12,58 +12,58 @@
 #include <unistd.h>
 #include <time.h>
 
-/** @brief 用量累加槽数（key_id+model 哈希散列）。 */
+/** @brief Usage accumulation slot count (hashed by key_id+model). */
 #define UM_ACC_CAP 4096
-/** @brief 延迟直方图提供商槽位数。 */
+/** @brief Latency-histogram provider slot count. */
 #define UM_MAX_PROVS 16
-/** @brief 审计环容量（行）。 */
+/** @brief Audit ring capacity (rows). */
 #define UM_REQ_CAP 4096
-/** @brief 审计单批刷盘上限（行）。 */
+/** @brief Audit flush batch cap (rows). */
 #define UM_REQ_BATCH 512
 
-/** @brief 日粒度用量累加槽：同一 key+model+日期的计数合并。 */
+/** @brief Day-granularity usage accumulation slot: counts for the same key+model+date are merged. */
 typedef struct {
-    int    in_use;         /**< 槽占用标记。 */
-    long   key_id;         /**< API key 数字 id。 */
-    char   model[128];     /**< 模型名。 */
-    time_t day;            /**< UTC 日期（零点时间戳）。 */
-    long   requests;       /**< 请求数。 */
-    long   prompt;         /**< 输入 token。 */
-    long   completion;     /**< 输出 token。 */
-    long   errors;         /**< 错误数。 */
-    long   cached_prompt;  /**< 缓存命中输入 token。 */
+    int    in_use;         /**< Slot occupancy flag. */
+    long   key_id;         /**< API key numeric id. */
+    char   model[128];     /**< Model name. */
+    time_t day;            /**< UTC date (midnight timestamp). */
+    long   requests;       /**< Request count. */
+    long   prompt;         /**< Input tokens. */
+    long   completion;     /**< Output tokens. */
+    long   errors;         /**< Error count. */
+    long   cached_prompt;  /**< Cache-hit input tokens. */
 } um_acc_t;
 
-/** @brief 单提供商延迟直方图槽。 */
+/** @brief Single-provider latency histogram slot. */
 typedef struct {
-    char                  name[32]; /**< 提供商标签。 */
-    struct hdr_histogram* h;        /**< HDR 直方图（延迟纳秒）。 */
-    int                   in_use;   /**< 槽占用标记。 */
+    char                  name[32]; /**< Provider label. */
+    struct hdr_histogram* h;        /**< HDR histogram (latency in nanoseconds). */
+    int                   in_use;   /**< Slot occupancy flag. */
 } um_prov_t;
 
-/** @brief 用量计内部状态：原子累计 + 日累加表 + 审计环 + 后台刷盘线程。 */
+/** @brief Usage meter internal state: atomic counters + daily accumulation table + audit ring + background flush thread. */
 struct usage_meter {
-    pg_store_t*          ps;                 /**< PG 存储（刷盘目标，可空）。 */
-    ratelimit_t*         rl;                 /**< 限流器（日期滚动时重置，可空）。 */
-    time_t               last_rollover_day;  /**< 上次配额滚动日期。 */
-    pthread_mutex_t      mtx;                /**< 累加表/审计环互斥锁。 */
-    um_acc_t             accs[UM_ACC_CAP];   /**< 日用量累加槽。 */
-    um_prov_t            provs[UM_MAX_PROVS];/**< 提供商延迟直方图槽。 */
-    atomic_long          reqs;               /**< 生涯请求数。 */
-    atomic_long          errs;               /**< 生涯错误数。 */
-    atomic_long          toks;               /**< 生涯 token 数。 */
-    atomic_long          cached_toks;        /**< 生涯缓存 token 数。 */
-    pthread_t            worker;             /**< 后台刷盘线程句柄。 */
-    int                  have_worker;        /**< 线程是否已创建。 */
-    int                  flush_interval_s;   /**< 刷盘间隔秒（<=0 禁用线程）。 */
-    int                  stop;               /**< 线程退出标记。 */
-    usage_request_row_t* req_ring;           /**< 审计环缓冲。 */
-    int                  req_head;           /**< 审计环头序号。 */
-    int                  req_tail;           /**< 审计环尾序号。 */
-    atomic_int           req_dropped;        /**< 审计环溢出丢弃计数。 */
+    pg_store_t*          ps;                 /**< PG store (flush target, may be NULL). */
+    ratelimit_t*         rl;                 /**< Rate limiter (reset on date rollover, may be NULL). */
+    time_t               last_rollover_day;  /**< Last quota-rollover date. */
+    pthread_mutex_t      mtx;                /**< Accumulation-table/audit-ring mutex. */
+    um_acc_t             accs[UM_ACC_CAP];   /**< Daily usage accumulation slots. */
+    um_prov_t            provs[UM_MAX_PROVS];/**< Provider latency histogram slots. */
+    atomic_long          reqs;               /**< Lifetime request count. */
+    atomic_long          errs;               /**< Lifetime error count. */
+    atomic_long          toks;               /**< Lifetime token count. */
+    atomic_long          cached_toks;        /**< Lifetime cached-token count. */
+    pthread_t            worker;             /**< Background flush thread handle. */
+    int                  have_worker;        /**< Whether the thread has been created. */
+    int                  flush_interval_s;   /**< Flush interval in seconds (<=0 disables the thread). */
+    int                  stop;               /**< Thread exit flag. */
+    usage_request_row_t* req_ring;           /**< Audit ring buffer. */
+    int                  req_head;           /**< Audit ring head sequence. */
+    int                  req_tail;           /**< Audit ring tail sequence. */
+    atomic_int           req_dropped;        /**< Audit ring overflow drop count. */
 };
 
-/** @brief 今日 UTC 零点（用量累加桶的日期分界）。 */
+/** @brief Today's UTC midnight (date boundary for usage accumulation buckets). */
 static time_t
 utc_midnight_now(void)
 {
@@ -71,7 +71,7 @@ utc_midnight_now(void)
     return (time_t)(now - ((uint64_t)now % 86400));
 }
 
-/** @brief key_id+model 混合哈希，映射到用量累加槽。 */
+/** @brief key_id+model mixed hash, mapped to a usage accumulation slot. */
 static uint64_t
 acc_hash(long key_id, const char* model)
 {
@@ -136,8 +136,8 @@ um_flush_request_batch(usage_meter_t* um, usage_request_row_t* rreqs, int rcap)
         return -1;
     }
 }
-/** @brief 后台刷盘线程：定时 rollover 并把累加桶/审计环批量写入 PG，stop 置位后退出。
- *  @return 恒 NULL。 */
+/** @brief Background flush thread: periodically rolls over and batch-writes accumulation buckets/audit ring into PG, exits once stop is set.
+ *  @return Always NULL. */
 static void*
 
 worker_main(void* arg)
