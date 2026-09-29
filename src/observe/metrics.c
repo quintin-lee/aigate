@@ -10,28 +10,28 @@
 #include <stdlib.h>
 #include <string.h>
 
-/** @brief 熔断指标表容量（model from_prov→to_prov 条目上限）。 */
+/** @brief Failover metrics table capacity (upper bound on model from_prov→to_prov entries). */
 #define METRICS_MAX_FAILOVERS 128
 
-/** @brief 熔断迁移计数条目：模型 + 源/目标供应商 + 原子计数 + 在用标记。 */
+/** @brief Failover migration counter entry: model + source/target provider + atomic count + in-use flag. */
 typedef struct {
-    char        model[128];  /**< 模型名 */
-    char        from_prov[32]; /**< 源供应商 */
-    char        to_prov[32];   /**< 目标供应商 */
-    atomic_long count; /**< 迁移次数（原子） */
-    int         in_use; /**< 槽位占用标记 */
+    char        model[128];  /**< Model name. */
+    char        from_prov[32]; /**< Source provider. */
+    char        to_prov[32];   /**< Target provider. */
+    atomic_long count; /**< Migration count (atomic). */
+    int         in_use; /**< Slot occupancy flag. */
 } failover_metric_entry_t;
 
-/** 熔断指标表（model from_prov→to_prov 计数，g_failover_mtx 保护）。 */
+/** Failover metrics table (model from_prov→to_prov counts, guarded by g_failover_mtx). */
 static failover_metric_entry_t g_failovers[METRICS_MAX_FAILOVERS];
-/** 熔断指标表互斥锁。 */
+/** Failover metrics table mutex. */
 static pthread_mutex_t         g_failover_mtx = PTHREAD_MUTEX_INITIALIZER;
-/** 表满丢弃警告是否已打过（仅 warn 一次，防日志刷屏）。 */
+/** Whether the table-full drop warning was already logged (warn once, avoids log flooding). */
 static _Atomic int             g_failover_warned = 0;
 
-/** @brief 延迟直方图桶数（与 BUCKET_LE 长度一致）。 */
+/** @brief Latency histogram bucket count (matches BUCKET_LE length). */
 #define NUM_BUCKETS 6
-/** 延迟直方图桶上界（纳秒，字符串形式，与 exposition 输出一致）。 */
+/** Latency histogram bucket upper bounds (nanoseconds, as strings, matching exposition output). */
 static const char* BUCKET_LE[NUM_BUCKETS] = {
     "5000000", "50000000", "500000000", "2000000000", "5000000000", "10000000000"};
 

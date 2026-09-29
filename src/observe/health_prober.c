@@ -27,8 +27,8 @@ health_status_str(health_status_t st)
     }
 }
 
-/** @brief 解析探针密钥引用：空串留空；`env:VAR` 读环境；`pg:<blob>` 用 master 解密；否则原文拷贝。
- *  @return 0 成功；环境缺失/无 master/解密失败返回 -1。 */
+/** @brief Resolve a probe key reference: empty stays empty; `env:VAR` reads the environment; `pg:<blob>` decrypts with master; otherwise copies verbatim.
+ *  @return 0 on success; -1 on missing env/master or decryption failure. */
 static int
 prober_resolve_key(health_prober_t* hp, const char* key_ref, char* out_key, size_t out_sz)
 {
@@ -98,8 +98,8 @@ health_prober_free(health_prober_t* hp)
     free(hp);
 }
 
-/** @brief 后台探针线程：按 interval_sec 周期调用 health_prober_probe_all，stop 后退出。
- *  @return 恒 NULL。 */
+/** @brief Background probe thread: calls health_prober_probe_all every interval_sec, exits after stop.
+ *  @return Always NULL. */
 static void*
 prober_thread_func(void* arg)
 {

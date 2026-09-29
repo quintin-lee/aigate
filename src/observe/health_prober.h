@@ -14,53 +14,53 @@
 #include "pg_store.h"
 #include "event_bus.h"
 
-/** @brief 健康表最大跟踪供应商数，超限不再新增。 */
+/** @brief Max providers tracked by the health table; no new entries beyond the cap. */
 #define MAX_TRACKED_PROVIDERS 128
 
-/** @brief 上游健康状态枚举：未知 / 健康 / 降级 / 宕机 / 暂停。 */
+/** @brief Upstream health status enum: unknown / healthy / degraded / down / paused. */
 typedef enum {
-    HEALTH_STATUS_UNKNOWN = 0, /**< 初始态，未探测过 */
+    HEALTH_STATUS_UNKNOWN = 0, /**< Initial state, never probed. */
     HEALTH_STATUS_HEALTHY,   /**< 🟢 RTT < 2000ms, HTTP 200, consecutive successes */
     HEALTH_STATUS_DEGRADED,  /**< 🟡 RTT >= 2000ms, or minor error */
     HEALTH_STATUS_DOWN,      /**< 🔴 consecutive fails >= 2, 401, 5xx, or timeout */
     HEALTH_STATUS_PAUSED     /**< ⚪ disabled or missing key */
 } health_status_t;
 
-/** @brief 探针状态枚举转可读字符串。
- *  @param st  探针状态。
- *  @return 状态名字符串（静态存储，调用方勿释放）。 */
+/** @brief Convert a probe status enum to a readable string.
+ *  @param st  Probe status.
+ *  @return Status name string (static storage, caller must not free). */
 const char* health_status_str(health_status_t st);
 
-/** @brief 单个供应商健康快照：端点 + 状态 + RTT + 连续成败计数 + 错误信息。 */
+/** @brief Single-provider health snapshot: endpoint + status + RTT + consecutive success/failure counts + error info. */
 typedef struct {
-    long            id;                /**< provider 记录 ID */
-    char            provider_name[64]; /**< 供应商名 */
-    char            endpoint[512];     /**< 探测端点 */
-    char            provider_type[32]; /**< 类型：openai/anthropic/gemini */
-    health_status_t status;            /**< 当前状态 */
-    long            latency_ms;        /**< 最近 RTT，毫秒 */
-    int             last_http_status;  /**< 最近 HTTP 状态码 */
-    time_t          last_check_ts;     /**< 最近探测时间（秒） */
-    int             consecutive_failures;  /**< 连续失败次数 */
-    int             consecutive_successes; /**< 连续成功次数 */
-    char            last_error[256];   /**< 最近错误信息 */
+    long            id;                /**< provider record ID. */
+    char            provider_name[64]; /**< Provider name. */
+    char            endpoint[512];     /**< Probe endpoint. */
+    char            provider_type[32]; /**< Type: openai/anthropic/gemini. */
+    health_status_t status;            /**< Current status. */
+    long            latency_ms;        /**< Latest RTT, milliseconds. */
+    int             last_http_status;  /**< Latest HTTP status code. */
+    time_t          last_check_ts;     /**< Latest probe time, seconds. */
+    int             consecutive_failures;  /**< Consecutive failure count. */
+    int             consecutive_successes; /**< Consecutive success count. */
+    char            last_error[256];   /**< Latest error message. */
 } provider_health_t;
 
-/** @brief 健康探针实例：后台线程 + 健康表 + 事件出口。 */
+/** @brief Health prober instance: background thread + health table + event outlet. */
 typedef struct health_prober {
-    pthread_mutex_t   lock;           /**< 保护健康表与运行态 */
-    pthread_cond_t    cond;           /**< 停机/立即探测通知 */
-    pthread_t         thread;         /**< 后台探测线程 */
-    int               thread_started; /**< 线程已启动 */
-    int               running;        /**< 1 运行中，0 已停 */
-    int               interval_sec;   /**< 探测周期，秒 */
-    pg_store_t*       ps;             /**< 供应商清单来源（借用） */
-    uint8_t           master_key[32]; /**< 探测用主密钥（拷贝） */
-    int               have_master_key; /**< master_key 有效 */
-    event_bus_t*      eb;             /**< 状态变更事件出口，可为 NULL */
-    provider_health_t providers[MAX_TRACKED_PROVIDERS]; /**< 健康表 */
-    int               n_providers;    /**< 表中有效条目数 */
-    time_t            last_full_probe_ts; /**< 上次全量探测时间（秒） */
+    pthread_mutex_t   lock;           /**< Guards the health table and run state. */
+    pthread_cond_t    cond;           /**< Shutdown/immediate-probe signal. */
+    pthread_t         thread;         /**< Background probe thread. */
+    int               thread_started; /**< Thread started. */
+    int               running;        /**< 1 running, 0 stopped. */
+    int               interval_sec;   /**< Probe interval, seconds. */
+    pg_store_t*       ps;             /**< Provider inventory source (borrowed). */
+    uint8_t           master_key[32]; /**< Master key copy used for probing. */
+    int               have_master_key; /**< master_key valid. */
+    event_bus_t*      eb;             /**< State-change event outlet, may be NULL. */
+    provider_health_t providers[MAX_TRACKED_PROVIDERS]; /**< Health table. */
+    int               n_providers;    /**< Live entries in the table. */
+    time_t            last_full_probe_ts; /**< Last full-probe time, seconds. */
 } health_prober_t;
 
 /** @brief Create a new health prober instance. */

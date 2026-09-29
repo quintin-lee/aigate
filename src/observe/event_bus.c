@@ -7,8 +7,8 @@
 #include <string.h>
 #include <errno.h>
 
-/** @brief JSON 转义拷贝：转义 `"`/`\`，控制字符（< 32）替换为空格，保证 NUL 结尾。
- *  @param in  输入串；NULL 视为产出空串。@param out 输出缓冲；NULL/容量 0 直接返回。 */
+/** @brief JSON-escaping copy: escapes `"`/`\`, replaces control chars (< 32) with spaces, NUL-terminates.
+ *  @param in  Input string; NULL yields an empty string. @param out Output buffer; NULL/zero capacity returns immediately. */
 static void
 json_escape_str(const char* in, char* out, size_t cap)
 {

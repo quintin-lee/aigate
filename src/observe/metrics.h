@@ -6,10 +6,10 @@
 
 #include "usage_meter.h"
 
-/** @brief 把 usage_meter 快照渲染为 Prometheus 文本 exposition。
- *  @param um   用量表（NULL 表无数据，仍输出静态指标头）。
- *  @param out  输出缓冲；@param cap 其容量。
- *  @return 写入字节数（不含 NUL）；缓冲不足返回 -1。 */
+/** @brief Render a usage_meter snapshot as Prometheus text exposition.
+ *  @param um   Usage table (NULL means no data; static metric headers are still emitted).
+ *  @param out  Output buffer; @param cap its capacity.
+ *  @return Bytes written (excluding NUL); -1 when the buffer is too small. */
 /** @brief Render the current Prometheus text exposition into @p out
  *  (NUL-terminated; caller supplies capacity ≥ metrics_render capacity,
  *  e.g. 16 KB). Truncation when out is too small → returns -1.
