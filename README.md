@@ -61,6 +61,7 @@ export AIGATE_REDIS_URL="redis://127.0.0.1:6379"
 ## 文档
 
 - [docs/README.md](docs/README.md) — 全仓目录地图
+- [docs/ONBOARDING.md](docs/ONBOARDING.md) — 新人一站式上手（构建/配置/首个请求/排障）
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — 构建变体、加模块/加测试、代码风格
 - [docs/architecture/](docs/architecture/) — 架构笔记
 - [docs/superpowers/](docs/superpowers/) — specs / plans / reports

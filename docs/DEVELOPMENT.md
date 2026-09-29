@@ -27,6 +27,8 @@ cmake -B build-asan -S . -DAIGATE_SANITIZERS=ON && cmake --build build-asan -j
 `build-asan/` 已在 `.gitignore`。构建目录约定：`build/` 是唯一文档化目录；
 `.build/`、`build-asan/`、`Testing/` 等均为忽略项，不要提交。
 
+> 新人一站式入口见 [ONBOARDING.md](ONBOARDING.md)。
+
 ## 加模块 / 加测试（镜像规则）
 
 - 源码 `src/<layer>/<module>.c` ↔ 测试 `tests/unit/<layer>/test_<module>.c`，
