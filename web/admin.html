@@ -47,7 +47,7 @@
     @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     .hidden { display: none; }
 
-    /* 视觉重设计色板 token */
+    /* Visual redesign palette tokens */
     :root {
       --bg-side: #0b0f19;
       --bg-main: #020617;
@@ -64,7 +64,7 @@
       --txt-muted: #64748b;
     }
 
-    /* 侧边栏布局：纯 CSS 驱动，桌面端常驻 / 移动端平滑抽屉 */
+    /* Sidebar layout: pure-CSS driven, pinned on desktop / smooth drawer on mobile */
     #sideNav {
       position: fixed;
       top: 0;
@@ -103,7 +103,7 @@
       }
     }
 
-    /* 侧边分组标题与导航链接 */
+    /* Sidebar section titles and nav links */
     .side-section-title {
       font-size: 0.65rem;
       text-transform: uppercase;
@@ -139,7 +139,7 @@
       box-shadow: 0 4px 12px rgba(99, 102, 241, 0.35);
     }
 
-    /* 统计卡图标 */
+    /* Stat card icons */
     .stat-ico {
       display: inline-flex; align-items: center; justify-content: center;
       width: 2.25rem; height: 2.25rem; border-radius: .75rem; font-size: 1.15rem;
@@ -149,11 +149,11 @@
     .stat-ico.cy { background: rgba(34,211,238,.12); border-color: rgba(34,211,238,.25); }
     .stat-ico.pu { background: rgba(168,85,247,.12); border-color: rgba(168,85,247,.25); }
 
-    /* 数据表格：宽松行高 + 粘性表头 */
+    /* Data tables: roomy row height + sticky header */
     .data-tbl thead th { position: sticky; top: 0; background: #0f172a; z-index: 1; }
     .data-tbl tbody td { padding-top: 1.125rem; padding-bottom: 1.125rem; }
 
-    /* 调试场聊天气泡 */
+    /* Playground chat bubbles */
     .msg-user {
       max-width: 85%; margin: 0 0 .75rem auto; padding: .6rem .9rem;
       border-radius: 1rem 1rem .25rem 1rem; background: var(--brand); color: #fff;
@@ -166,24 +166,24 @@
       font-size: .75rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word;
     }
 
-    /* 胶囊形筛选控件 */
+    /* Pill-shaped filter controls */
     #modelSearchInput, #keySearchInput, #usageDatePreset, #usageFromDate,
     #usageToDate, #usageModelFilter, #usageKeyFilter, #metricFilterInput { border-radius: 9999px !important; }
 
-    /* 桌面端面包屑导航：仅在桌面端显示 */
+    /* Desktop breadcrumb nav: desktop only */
     .desktop-breadcrumb { display: none; }
     @media (min-width: 768px) {
       .desktop-breadcrumb { display: flex !important; }
     }
 
-    /* 连接徽标响应式：未隐藏且 >=640px 时显示 */
+    /* Connection badge responsive: shown when not hidden and >=640px */
     #connectionStatusBadge { display: none; }
     #connectionStatusBadge.hidden { display: none !important; }
     @media (min-width: 640px) {
       #connectionStatusBadge:not(.hidden) { display: flex !important; }
     }
 
-    /* 汉堡按钮：移动端显示，桌面端隐藏 */
+    /* Hamburger button: mobile only, hidden on desktop */
     #navToggle {
       display: inline-flex; align-items: center; justify-content: center;
       background: none; border: none; cursor: pointer;
@@ -201,10 +201,10 @@
 </head>
 <body class="bg-slate-950 text-slate-100 min-h-screen flex font-sans selection:bg-brand-500 selection:text-white">
 
-  <!-- 移动端侧边抽屉遮罩 (Backdrop) -->
+  <!-- Mobile side-drawer backdrop -->
   <div id="sideBackdrop" onclick="toggleSideNav(false)" class="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-30 md:hidden hidden transition-opacity" aria-hidden="true"></div>
 
-  <!-- 侧边导航（桌面端固定常驻 / 移动端平滑抽屉） -->
+  <!-- Side nav (pinned on desktop / smooth drawer on mobile) -->
   <aside id="sideNav">
     <div class="flex items-center justify-between px-5 h-16 border-b border-slate-800/80 flex-shrink-0">
       <div class="flex items-center gap-3 cursor-pointer" onclick="switchTab('overview')">
@@ -217,11 +217,11 @@
           <div class="text-[10px] text-slate-400">高性能 LLM 网关</div>
         </div>
       </div>
-      <!-- 移动端关闭按钮 -->
+      <!-- Mobile close button -->
       <button onclick="toggleSideNav(false)" class="md:hidden text-slate-400 hover:text-white p-1 text-base rounded-lg hover:bg-slate-800/60 transition" aria-label="关闭侧边栏">✕</button>
     </div>
 
-    <!-- 侧边导航项 -->
+    <!-- Side nav items -->
     <nav class="flex-1 overflow-y-auto custom-scroll p-3 space-y-1">
       <div class="side-section-title">核心管理</div>
       <button data-tab="overview" onclick="switchTab('overview')" class="side-link side-link-active">
@@ -289,7 +289,7 @@
       </button>
     </nav>
 
-    <!-- 侧边栏底部状态 -->
+    <!-- Sidebar bottom status -->
     <div class="mt-auto p-4 border-t border-slate-800/80 flex-shrink-0 bg-slate-900/40">
       <div class="flex items-center justify-between text-xs text-slate-400">
         <span class="flex items-center gap-1.5">
@@ -301,11 +301,11 @@
     </div>
   </aside>
 
-  <!-- 右侧主视口容器（顶部 Header + 主体内容 + 页脚） -->
+  <!-- Right main viewport (top header + body + footer) -->
   <div class="flex-1 flex flex-col min-w-0 md:ml-64 app-layout-right">
     <!-- TOP NAVIGATION BAR -->
     <header class="sticky top-0 z-20 h-16 glass-panel border-b border-slate-800/80 px-4 sm:px-6 lg:px-8 flex items-center justify-between backdrop-blur-md">
-      <!-- 移动端左侧：汉堡按钮 + 品牌 Logo -->
+      <!-- Mobile left: hamburger + brand logo -->
       <div class="flex items-center space-x-3">
         <button id="navToggle" onclick="toggleSideNav()" aria-label="打开导航菜单">☰</button>
         <div class="flex items-center space-x-2.5 cursor-pointer md:hidden" onclick="switchTab('overview')">
@@ -313,14 +313,14 @@
           <span class="font-extrabold text-lg tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-white via-slate-200 to-slate-400">aigate</span>
         </div>
 
-        <!-- 桌面端面包屑导航 / 当前标签标题 -->
+        <!-- Desktop breadcrumb / current tab title -->
         <div class="desktop-breadcrumb items-center space-x-2 text-sm">
           <span class="text-slate-400 font-medium">控制台</span>
           <span class="text-slate-600 font-light">/</span>
           <h1 id="currentTabTitle" class="font-bold text-white tracking-tight text-base">总览</h1>
         </div>
 
-        <!-- 隐藏的旧导航保持向后兼容及测试断言支持 -->
+        <!-- Hidden legacy nav kept for backward compat and test assertions -->
         <nav id="mainNav" class="hidden">
           <button id="nav-overview" onclick="switchTab('overview')" class="nav-tab">📊 总览</button>
           <button id="nav-providers" onclick="switchTab('providers')" class="nav-tab">🏢 供应商</button>
@@ -337,7 +337,7 @@
         </nav>
       </div>
 
-      <!-- 右侧控制区：状态徽标、令牌管理、刷新 -->
+      <!-- Right controls: status badge, token management, refresh -->
       <div class="flex items-center space-x-3">
         <div id="connectionStatusBadge" class="hidden sm:flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20">
           <span class="w-2 h-2 rounded-full bg-slate-400"></span>
@@ -355,7 +355,7 @@
       </div>
     </header>
 
-    <!-- 移动端水平快捷导航 -->
+    <!-- Mobile horizontal quick nav -->
     <div id="mobileNav" class="md:hidden sticky top-16 z-10 flex overflow-x-auto custom-scroll bg-slate-900/95 backdrop-blur-md border-b border-slate-800 p-2 space-x-2">
       <button data-tab="overview" onclick="switchTab('overview')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-white bg-brand-600 font-medium whitespace-nowrap shadow-sm">📊 总览</button>
       <button data-tab="live" onclick="switchTab('live')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🛰️ 实时大屏</button>
@@ -377,11 +377,11 @@
     <!-- MAIN VIEWPORT CONTAINER -->
     <main id="pageMain" class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
 
-    <!-- ==================== 标签页 1：总览 ==================== -->
+    <!-- ==================== Tab 1: Overview ==================== -->
     <div id="tab-overview" class="tab-content space-y-6">
-      <!-- 4 张统计卡 -->
+      <!-- 4 stat cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <!-- 卡片 1 -->
+        <!-- Card 1 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">活跃模型</div>
@@ -396,7 +396,7 @@
           </div>
         </div>
 
-        <!-- 卡片 2 -->
+        <!-- Card 2 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">API 密钥</div>
@@ -411,7 +411,7 @@
           </div>
         </div>
 
-        <!-- 卡片 3 -->
+        <!-- Card 3 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">总请求数</div>
@@ -426,7 +426,7 @@
           </div>
         </div>
 
-        <!-- 卡片 4 -->
+        <!-- Card 4 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Token 消耗</div>
@@ -442,9 +442,9 @@
         </div>
       </div>
 
-      <!-- 主图表与快捷操作 -->
+      <!-- Main chart and quick actions -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- 左侧：用量图表（占 2 列） -->
+        <!-- Left: usage chart (spans 2 cols) -->
         <div class="lg:col-span-2 glass-panel p-6 rounded-2xl flex flex-col justify-between">
           <div class="flex items-center justify-between mb-4">
             <div>
@@ -464,7 +464,7 @@
           </div>
         </div>
 
-        <!-- 右侧：网关快捷操作与状态（占 1 列） -->
+        <!-- Right: gateway quick actions and status (spans 1 col) -->
         <div class="glass-panel p-6 rounded-2xl space-y-5 flex flex-col justify-between">
           <div>
             <h3 class="font-bold text-lg text-white mb-1">快捷操作</h3>
@@ -524,7 +524,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页：供应商 ==================== -->
+    <!-- ==================== Tab: Providers ==================== -->
     <div id="tab-providers" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -540,7 +540,7 @@
         </div>
       </div>
 
-      <!-- 供应商表格 -->
+      <!-- Providers table -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="overflow-x-auto custom-scroll">
           <table class="w-full text-left border-collapse text-xs data-tbl">
@@ -555,7 +555,7 @@
               </tr>
             </thead>
             <tbody id="providersTableBody" class="divide-y divide-slate-800/60">
-              <!-- 动态插入行 -->
+              <!-- Dynamically inserted rows -->
             </tbody>
           </table>
         </div>
@@ -581,7 +581,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页 2：模型 ==================== -->
+    <!-- ==================== Tab 2: Models ==================== -->
     <div id="tab-models" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -597,7 +597,7 @@
         </div>
       </div>
 
-      <!-- 模型表格 -->
+      <!-- Models table -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="overflow-x-auto custom-scroll">
           <table class="w-full text-left border-collapse text-xs data-tbl">
@@ -611,7 +611,7 @@
               </tr>
             </thead>
             <tbody id="modelsTableBody" class="divide-y divide-slate-800/60">
-              <!-- 动态插入行 -->
+              <!-- Dynamically inserted rows -->
             </tbody>
           </table>
         </div>
@@ -637,7 +637,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页 3：API 密钥 ==================== -->
+    <!-- ==================== Tab 3: API Keys ==================== -->
     <div id="tab-keys" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -653,7 +653,7 @@
         </div>
       </div>
 
-      <!-- 密钥表格 -->
+      <!-- Keys table -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="overflow-x-auto custom-scroll">
           <table class="w-full text-left border-collapse text-xs data-tbl">
@@ -671,7 +671,7 @@
               </tr>
             </thead>
             <tbody id="keysTableBody" class="divide-y divide-slate-800/60">
-              <!-- 动态插入行 -->
+              <!-- Dynamically inserted rows -->
             </tbody>
           </table>
         </div>
@@ -697,7 +697,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页：安全风控 ==================== -->
+    <!-- ==================== Tab: Guardrails ==================== -->
     <div id="tab-guardrails" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -723,7 +723,7 @@
         </div>
       </div>
 
-      <!-- 4 个统计指标卡 -->
+      <!-- 4 stat metric cards -->
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div class="glass-panel p-5 rounded-2xl border border-slate-800">
           <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">有效规则总数</div>
@@ -750,7 +750,7 @@
         </div>
       </div>
 
-      <!-- 实时规则测试沙箱 (Rule Sandbox) -->
+      <!-- Live rule-testing sandbox -->
       <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
         <div class="flex items-center justify-between">
           <div class="text-sm font-bold text-slate-200 flex items-center gap-2">
@@ -768,7 +768,7 @@
         <div id="grSandboxResult" class="hidden p-3 rounded-xl text-xs font-mono border"></div>
       </div>
 
-      <!-- 规则表格与工具条 -->
+      <!-- Rules table and toolbar -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="p-4 border-b border-slate-800 bg-slate-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div class="flex items-center space-x-2">
@@ -799,7 +799,7 @@
               </tr>
             </thead>
             <tbody id="guardrailsTableBody" class="divide-y divide-slate-800/60 font-mono">
-              <!-- 动态插入行 -->
+              <!-- Dynamically inserted rows -->
             </tbody>
           </table>
         </div>
@@ -825,7 +825,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页：部门分组 ==================== -->
+    <!-- ==================== Tab: Groups ==================== -->
     <div id="tab-groups" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -853,7 +853,7 @@
               </tr>
             </thead>
             <tbody id="groupsTableBody" class="divide-y divide-slate-800/60 font-mono">
-              <!-- 动态插入行 -->
+              <!-- Dynamically inserted rows -->
             </tbody>
           </table>
         </div>
@@ -879,7 +879,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页：成本归属 ==================== -->
+    <!-- ==================== Tab: Cost attribution ==================== -->
     <div id="tab-cost" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -888,7 +888,7 @@
         </div>
       </div>
 
-      <!-- 汇总卡片 -->
+      <!-- Summary cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div class="glass-panel p-5 rounded-2xl border border-slate-800">
           <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">总折算成本</div>
@@ -912,7 +912,7 @@
         </div>
       </div>
 
-      <!-- 筛选表单 -->
+      <!-- Filter form -->
       <div class="glass-panel p-4 rounded-2xl border border-slate-800 flex flex-wrap items-end gap-3">
         <div>
           <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">部门分组</label>
@@ -940,7 +940,7 @@
         </button>
       </div>
 
-      <!-- 成本表格 -->
+      <!-- Cost table -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="overflow-x-auto custom-scroll">
           <table class="w-full text-left border-collapse text-xs data-tbl">
@@ -956,7 +956,7 @@
               </tr>
             </thead>
             <tbody id="costTableBody" class="divide-y divide-slate-800/60 font-mono">
-              <!-- 动态插入行 -->
+              <!-- Dynamically inserted rows -->
             </tbody>
           </table>
         </div>
@@ -982,7 +982,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页 4：用量 ==================== -->
+    <!-- ==================== Tab 4: Usage ==================== -->
     <div id="tab-usage" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -991,7 +991,7 @@
         </div>
       </div>
 
-      <!-- 筛选表单 -->
+      <!-- Filter form -->
       <div class="glass-panel p-4 rounded-2xl border border-slate-800 flex flex-wrap items-end gap-3">
         <div>
           <label class="block text-[11px] font-semibold text-slate-400 uppercase mb-1">日期范围</label>
@@ -1031,7 +1031,7 @@
         </button>
       </div>
 
-      <!-- 用量记录表格 -->
+      <!-- Usage records table -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
         <div class="overflow-x-auto custom-scroll">
           <table class="w-full text-left border-collapse text-xs data-tbl">
@@ -1048,7 +1048,7 @@
               </tr>
             </thead>
             <tbody id="usageTableBody" class="divide-y divide-slate-800/60 font-mono">
-              <!-- 用量行 -->
+              <!-- Usage rows -->
             </tbody>
           </table>
         </div>
@@ -1073,7 +1073,7 @@
         </div>
       </div>
 
-      <!-- 实时请求调用明细与审计 -->
+      <!-- Live request detail and audit -->
       <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800 space-y-0">
         <div class="p-4 border-b border-slate-800 bg-slate-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
@@ -1108,7 +1108,7 @@
               </tr>
             </thead>
             <tbody id="requestsTableBody" class="divide-y divide-slate-800/60 font-mono">
-              <!-- 动态插入行 -->
+              <!-- Dynamically inserted rows -->
             </tbody>
           </table>
         </div>
@@ -1134,7 +1134,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页 5：调试场 ==================== -->
+    <!-- ==================== Tab 5: Playground ==================== -->
     <div id="tab-playground" class="tab-content hidden space-y-6">
       <div class="flex items-center justify-between">
         <div>
@@ -1144,12 +1144,12 @@
       </div>
 
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <!-- 请求配置列（占 5 列） -->
+        <!-- Request config column (spans 5 cols) -->
         <div class="lg:col-span-5 glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
           <div>
             <label class="block text-xs font-semibold text-slate-300 mb-1">选择模型</label>
             <select id="playModelSelect" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500 font-medium">
-              <!-- 从模型列表填充 -->
+              <!-- Populated from the model list -->
             </select>
           </div>
 
@@ -1194,7 +1194,7 @@
           </div>
         </div>
 
-        <!-- 响应输出列（占 7 列） -->
+        <!-- Response output column (spans 7 cols) -->
         <div class="lg:col-span-7 space-y-4">
           <div class="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col h-[520px]">
             <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
@@ -1208,12 +1208,12 @@
               </div>
             </div>
 
-            <!-- 输出消息正文 -->
+            <!-- Output message body -->
             <div id="playOutputArea" class="flex-1 overflow-y-auto custom-scroll p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 font-mono text-xs leading-relaxed text-slate-200 whitespace-pre-wrap">
               <span class="text-slate-600 italic">响应将实时显示在这里...</span>
             </div>
 
-            <!-- 检查器折叠面板 -->
+            <!-- Inspector collapse panel -->
             <div class="mt-3 pt-2 border-t border-slate-800 text-[11px]">
               <button onclick="toggleInspector()" class="text-slate-400 hover:text-slate-200 flex items-center space-x-1">
                 <span id="inspectorArrow">▶</span>
@@ -1226,7 +1226,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页 6：监控指标 ==================== -->
+    <!-- ==================== Tab 6: Metrics ==================== -->
     <div id="tab-metrics" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -1247,9 +1247,9 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页 7：实时大屏 (Live Operations Room) ==================== -->
+    <!-- ==================== Tab 7: Live dashboard ==================== -->
     <div id="tab-live" class="tab-content hidden space-y-6">
-      <!-- 顶部控制栏与大屏状态 -->
+      <!-- Top control bar and dashboard status -->
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 glass-panel p-4 rounded-2xl border border-slate-800">
         <div>
           <div class="flex items-center gap-3">
@@ -1270,7 +1270,7 @@
         </div>
 
         <div class="flex flex-wrap items-center gap-2.5">
-          <!-- 瀑布流过滤器 -->
+          <!-- Waterfall filter -->
           <select id="liveWaterfallFilter" onchange="filterLiveWaterfall()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 font-medium focus:outline-none focus:border-brand-500">
             <option value="all">全部请求</option>
             <option value="2xx">仅成功 (2xx)</option>
@@ -1278,19 +1278,19 @@
             <option value="5xx">上游异常 (5xx)</option>
           </select>
 
-          <!-- 暂停/继续切换 -->
+          <!-- Pause/resume toggle -->
           <button id="btnLiveToggle" onclick="toggleLiveStream()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1.5">
             <span id="btnLiveToggleIcon">⏸</span>
             <span id="btnLiveToggleText">暂停瀑布流</span>
           </button>
 
-          <!-- 清屏按钮 -->
+          <!-- Clear-screen button -->
           <button onclick="clearLiveWaterfall()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-200 border border-slate-700 transition flex items-center gap-1.5" title="清空当前瀑布流">
             <span>🗑️</span>
             <span>清屏</span>
           </button>
 
-          <!-- 一键全量巡检 -->
+          <!-- One-click full probe -->
           <button id="btnFullProbe" onclick="triggerFullProbe()" class="px-3.5 py-1.5 rounded-xl text-xs font-bold bg-gradient-to-r from-amber-500 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 text-white shadow-lg shadow-indigo-500/20 border border-amber-400/30 transition flex items-center gap-1.5">
             <span id="btnFullProbeIcon">⚡</span>
             <span id="btnFullProbeText">一键全量巡检</span>
@@ -1298,7 +1298,7 @@
         </div>
       </div>
 
-      <!-- 5 张实时指标卡片 -->
+      <!-- 5 live metric cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         <!-- QPS -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
@@ -1313,7 +1313,7 @@
           <div class="mt-3 text-xs text-slate-400">滑动时间窗口实时请求频次</div>
         </div>
 
-        <!-- 平均延迟 -->
+        <!-- Average latency -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">实时响应延迟</div>
@@ -1326,7 +1326,7 @@
           <div class="mt-3 text-xs text-slate-400">近期窗口平均往返时延</div>
         </div>
 
-        <!-- Token 速率 -->
+        <!-- Token rate -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Token 吞吐 (Tok/s)</div>
@@ -1339,7 +1339,7 @@
           <div class="mt-3 text-xs text-slate-400">实时 Tokens 吐字率 (Prompt+Completion)</div>
         </div>
 
-        <!-- 风控拦截 -->
+        <!-- Guardrail blocks -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">风控拦截与脱敏</div>
@@ -1352,7 +1352,7 @@
           <div class="mt-3 text-xs text-slate-400">会话期间 Guardrail 命中拦截统计</div>
         </div>
 
-        <!-- 响应缓存命中 -->
+        <!-- Response cache hits -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">响应缓存命中</div>
@@ -1366,7 +1366,7 @@
         </div>
       </div>
 
-      <!-- 上游健康雷达矩阵 (Provider Health Radar) -->
+      <!-- Upstream health radar matrix -->
       <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
         <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
@@ -1388,9 +1388,9 @@
         </div>
       </div>
 
-      <!-- 分割区域：左侧实时请求瀑布流 (2/3) + 右侧实时告警与熔断动态 (1/3) -->
+      <!-- Split view: live request waterfall left (2/3) + live alerts and breaker activity right (1/3) -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- 实时请求瀑布流 -->
+        <!-- Live request waterfall -->
         <div class="lg:col-span-2 glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
           <div class="flex items-center justify-between">
             <h3 class="text-base font-bold text-white flex items-center gap-2">
@@ -1426,7 +1426,7 @@
           </div>
         </div>
 
-        <!-- 实时告警动态 -->
+        <!-- Live alert feed -->
         <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3 flex flex-col">
           <div class="flex items-center justify-between">
             <h3 class="text-base font-bold text-white flex items-center gap-2">
@@ -1446,7 +1446,7 @@
       </div>
     </div>
 
-    <!-- ==================== 标签页 12：响应缓存 ==================== -->
+    <!-- ==================== Tab 12: Response cache ==================== -->
     <div id="tab-cache" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
@@ -1468,9 +1468,9 @@
         </div>
       </div>
 
-      <!-- 5 张缓存核心指标卡片 -->
+      <!-- 5 core cache metric cards -->
       <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
-        <!-- 内存占用 -->
+        <!-- Memory usage -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">内存占用</div>
@@ -1487,7 +1487,7 @@
           </div>
         </div>
 
-        <!-- 缓存条目数 -->
+        <!-- Cache entry count -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">缓存条目总数</div>
@@ -1504,7 +1504,7 @@
           </div>
         </div>
 
-        <!-- 命中率 -->
+        <!-- Hit rate -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">全域命中率</div>
@@ -1517,7 +1517,7 @@
           <div class="mt-3 text-xs text-slate-400">零开销毫秒级命中</div>
         </div>
 
-        <!-- 节省 Tokens -->
+        <!-- Tokens saved -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">节约 Tokens</div>
@@ -1530,7 +1530,7 @@
           <div class="mt-3 text-xs text-slate-400">避免向上游重复消耗</div>
         </div>
 
-        <!-- 节约成本 -->
+        <!-- Cost saved -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
             <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">累计节省成本</div>
@@ -1544,9 +1544,9 @@
         </div>
       </div>
 
-      <!-- 控制面板与架构特性 -->
+      <!-- Control panel and architecture notes -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <!-- 缓存精细化清理 -->
+        <!-- Fine-grained cache purge -->
         <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
           <div>
             <h3 class="text-base font-bold text-white flex items-center gap-2">
@@ -1571,7 +1571,7 @@
           </div>
         </div>
 
-        <!-- 架构与核心特性 -->
+        <!-- Architecture and key features -->
         <div class="lg:col-span-2 glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
           <div>
             <h3 class="text-base font-bold text-white flex items-center gap-2">
@@ -1613,7 +1613,7 @@
         </div>
       </div>
 
-      <!-- 16 分片实时分布表 -->
+      <!-- 16-shard live distribution table -->
       <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
         <div class="flex items-center justify-between">
           <div>
@@ -1653,7 +1653,7 @@
 
   </main>
 
-  <!-- 页脚 FOOTER -->
+  <!-- Page footer -->
   <footer class="border-t border-slate-800/60 py-4 px-4 sm:px-6 lg:px-8 text-xs text-slate-500 flex flex-col sm:flex-row items-center justify-between gap-2 mt-auto">
     <div class="flex items-center space-x-2">
       <span>⚡ aigate 高性能 AI 网关</span>
@@ -1666,9 +1666,9 @@
   </footer>
 </div>
 
-<!-- ==================== 弹窗 ==================== -->
+<!-- ==================== Modals ==================== -->
 
-  <!-- 1. 管理员令牌弹窗 -->
+  <!-- 1. Admin token modal -->
   <div id="tokenModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <div class="flex items-center justify-between">
@@ -1692,7 +1692,7 @@
     </div>
   </div>
 
-  <!-- 1.5 供应商配置弹窗 -->
+  <!-- 1.5 Provider config modal -->
   <div id="providerModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll">
       <div class="flex items-center justify-between">
@@ -1702,7 +1702,7 @@
       <form id="providerForm" onsubmit="handleProviderSubmit(event)" class="space-y-4 text-xs">
         <input type="hidden" id="pFormId" value="">
 
-        <!-- 快捷模板填充 -->
+        <!-- Quick template fill -->
         <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1.5">
           <div class="text-[11px] font-semibold text-slate-400">快速填入主流供应商接入点与模型预设：</div>
           <div class="flex flex-wrap gap-1.5 text-[11px]">
@@ -1771,7 +1771,7 @@
     </div>
   </div>
 
-  <!-- 2. 注册/编辑模型弹窗 -->
+  <!-- 2. Register/edit model modal -->
   <div id="modelModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] overflow-y-auto custom-scroll">
       <div class="flex items-center justify-between">
@@ -1793,7 +1793,7 @@
           </div>
         </div>
 
-        <!-- 多上游目标配置 -->
+        <!-- Multi-upstream target config -->
         <div class="border-t border-b border-slate-800/80 py-3">
           <div class="flex items-center justify-between mb-2.5">
             <div>
@@ -1806,7 +1806,7 @@
             </button>
           </div>
           <div id="mFormTargetsContainer" class="space-y-3">
-            <!-- 动态生成目标行 -->
+            <!-- Dynamically generated target rows -->
           </div>
         </div>
 
@@ -1815,7 +1815,7 @@
           <textarea id="mFormParams" rows="2" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono" placeholder="{&quot;temperature&quot;: 0.7}">{}</textarea>
         </div>
 
-        <!-- 定价配置 -->
+        <!-- Pricing config -->
         <div class="border-t border-slate-800/80 pt-3">
           <div class="font-semibold text-slate-200 mb-2">定价策略 (成本核算)</div>
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -1848,7 +1848,7 @@
     </div>
   </div>
 
-  <!-- 3. 创建/编辑 API 密钥弹窗 -->
+  <!-- 3. Create/edit API key modal -->
   <div id="keyModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-lg w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <div class="flex items-center justify-between">
@@ -1921,7 +1921,7 @@
     </div>
   </div>
 
-  <!-- 4. 密钥创建成功提示弹窗 -->
+  <!-- 4. Key-created success modal -->
   <div id="newKeySuccessModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-md w-full p-6 rounded-2xl border border-emerald-500/40 shadow-2xl space-y-4 text-center">
       <div class="w-12 h-12 mx-auto rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center text-2xl font-bold">
@@ -1945,7 +1945,7 @@
     </div>
   </div>
 
-  <!-- 5. 创建/编辑部门分组弹窗 -->
+  <!-- 5. Create/edit group modal -->
   <div id="groupModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <div class="flex items-center justify-between">
@@ -1971,7 +1971,7 @@
     </div>
   </div>
 
-  <!-- 6. 创建/编辑安全风控规则弹窗 -->
+  <!-- 6. Create/edit guardrail rule modal -->
   <div id="guardrailModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
     <div class="glass-panel max-w-md w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <div class="flex items-center justify-between">
@@ -2016,7 +2016,7 @@
     </div>
   </div>
 
-  <!-- 7. 通用确认弹窗 -->
+  <!-- 7. Generic confirm modal -->
   <div id="confirmModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden" onclick="if(event.target===this)closeConfirmModal()">
     <div class="glass-panel max-w-sm w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <h3 id="confirmModalTitle" class="text-base font-bold text-white">请确认</h3>
@@ -2028,7 +2028,7 @@
     </div>
   </div>
 
-  <!-- 8. 实时请求详情弹窗 -->
+  <!-- 8. Live request detail modal -->
   <div id="liveReqDetailModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden" onclick="if(event.target===this)closeLiveReqDetailModal()">
     <div class="glass-panel max-w-lg w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
       <div class="flex items-center justify-between">
@@ -2090,7 +2090,7 @@
       requests: { page: 1, limit: 10, total: 0 },
     };
 
-// 取某表的当前页切片。
+// Slice the current page of a table.
     function getPageSlice(key, fullList) {
       if (!paginationState[key]) return fullList || [];
       const p = paginationState[key];
@@ -2103,7 +2103,7 @@
       return fullList ? fullList.slice(start, start + p.limit) : [];
     }
 
-// 刷新分页条显示。
+// Refresh the pager display.
     function updatePaginationUI(key, totalPages) {
       const p = paginationState[key];
       if (!p) return;
@@ -2122,7 +2122,7 @@
       if (sizeSelect && sizeSelect.value !== String(p.limit)) sizeSelect.value = String(p.limit);
     }
 
-// 按当前页重渲染表格。
+// Re-render the table for the current page.
     function reRenderTable(key) {
       if (key === "providers") {
         filterProvidersTable(false);
@@ -2144,7 +2144,7 @@
       }
     }
 
-// 切换每页条数。
+// Change page size.
     function changePageSize(key, val) {
       if (!paginationState[key]) return;
       paginationState[key].limit = parseInt(val, 10) || 10;
@@ -2152,7 +2152,7 @@
       reRenderTable(key);
     }
 
-// 上一页。
+// Previous page.
     function prevPage(key) {
       if (!paginationState[key]) return;
       if (paginationState[key].page > 1) {
@@ -2161,7 +2161,7 @@
       }
     }
 
-// 下一页。
+// Next page.
     function nextPage(key) {
       if (!paginationState[key]) return;
       paginationState[key].page++;
@@ -2205,7 +2205,7 @@
       });
     });
 
-// 刷新令牌状态显示。
+// Refresh the token status display.
     function updateTokenUI() {
       const icon = document.getElementById("tokenIcon");
       const label = document.getElementById("tokenLabel");
@@ -2222,7 +2222,7 @@
       }
     }
 
-// 设置连接状态徽标。
+// Set the connection status badge.
     function setConnectionStatus(status) {
       const badge = document.getElementById("connectionStatusBadge");
       const styles = {
@@ -2236,18 +2236,18 @@
       badge.innerHTML = `<span class="w-2 h-2 rounded-full ${entry[1]}"></span><span>${entry[2]}</span>`;
     }
 
-// 打开令牌弹窗。
+// Open the token modal.
     function openTokenModal() {
       document.getElementById("adminTokenInput").value = state.adminToken;
       document.getElementById("tokenModal").classList.remove("hidden");
     }
 
-// 关闭令牌弹窗。
+// Close the token modal.
     function closeTokenModal() {
       document.getElementById("tokenModal").classList.add("hidden");
     }
 
-// 保存管理令牌并重连。
+// Save the admin token and reconnect.
     async function saveAdminToken() {
       const val = document.getElementById("adminTokenInput").value.trim();
       if (!val) {
@@ -2328,12 +2328,12 @@
         activeBtn.className = "nav-tab px-3.5 py-1.5 rounded-lg text-sm font-medium transition-all text-white bg-slate-800 shadow-sm";
       }
 
-      // 同步侧边导航高亮
+      // Sync sidebar nav highlight
       document.querySelectorAll(".side-link").forEach(el => {
         el.classList.toggle("side-link-active", el.dataset.tab === tabId);
       });
 
-      // 同步移动端水平导航高亮
+      // Sync mobile horizontal nav highlight
       document.querySelectorAll(".nav-tab-m").forEach(el => {
         const isAct = el.dataset.tab === tabId || (el.getAttribute("onclick") && el.getAttribute("onclick").includes(tabId));
         if (isAct) {
@@ -2343,7 +2343,7 @@
         }
       });
 
-      // 更新顶部当前栏目标题
+      // Update the top current-tab title
       const tabTitles = {
         overview: "总览",
         live: "实时运维大屏",
@@ -2363,13 +2363,13 @@
         titleEl.textContent = tabTitles[tabId];
       }
 
-      // 移动端抽屉选中后自动收起
+      // Auto-collapse the mobile drawer after selection
       toggleSideNav(false);
 
       refreshCurrentTab();
     }
 
-// 刷新当前页签数据。
+// Refresh the current tab's data.
     function refreshCurrentTab() {
       if (state.activeTab === "overview") {
         fetchOverviewData();
@@ -2404,7 +2404,7 @@
       renderOverviewStats();
     }
 
-// 渲染总览统计卡。
+// Render the overview stat cards.
     function renderOverviewStats() {
       const activeModels = state.models.filter(m => m.enabled).length;
       document.getElementById("statActiveModels").innerText = activeModels;
@@ -2430,7 +2430,7 @@
       renderOverviewChart();
     }
 
-// 渲染总览图表。
+// Render the overview chart.
     function renderOverviewChart() {
       const ctx = document.getElementById("overviewChart");
       const noData = document.getElementById("noChartDataMsg");
@@ -2523,7 +2523,7 @@
       }
     };
 
-// 应用供应商预设模板。
+// Apply a provider preset template.
     function applyProviderPreset(name) {
       const preset = PROVIDER_PRESETS[name];
       if (!preset) return;
@@ -2534,7 +2534,7 @@
       showToast(`已应用 ${name.toUpperCase()} 预设`, "info");
     }
 
-// 切换密码框可见性。
+// Toggle password field visibility.
     function togglePasswordVisibility(inputId, btn) {
       const input = document.getElementById(inputId);
       if (!input) return;
@@ -2547,7 +2547,7 @@
       }
     }
 
-// 拉取供应商列表。
+// Fetch the provider list.
     async function fetchProviders() {
       const tbody = document.getElementById("providersTableBody");
       if (!tbody) return;
@@ -2561,7 +2561,7 @@
       renderProvidersTable();
     }
 
-// 渲染供应商表格。
+// Render the providers table.
     function renderProvidersTable(list = state.providers) {
       const tbody = document.getElementById("providersTableBody");
       const empty = document.getElementById("providersEmptyState");
@@ -2638,7 +2638,7 @@
       });
     }
 
-// 过滤供应商表格。
+// Filter the providers table.
     function filterProvidersTable(resetPage = false) {
       if (resetPage) paginationState.providers.page = 1;
       const q = (document.getElementById("providerSearchInput")?.value || "").toLowerCase();
@@ -2652,7 +2652,7 @@
       renderProvidersTable(filtered);
     }
 
-// 打开供应商弹窗（空则新建）。
+// Open the provider modal (blank for create).
     function openProviderModal(prov = null) {
       state.editingProviderId = prov ? prov.id : null;
       document.getElementById("providerModalTitle").innerText = prov ? `编辑供应商：${prov.name}` : "新建供应商";
@@ -2668,13 +2668,13 @@
       document.getElementById("providerModal").classList.remove("hidden");
     }
 
-// 关闭供应商弹窗。
+// Close the provider modal.
     function closeProviderModal() {
       document.getElementById("providerModal").classList.add("hidden");
       state.editingProviderId = null;
     }
 
-// 按 id 编辑供应商。
+// Edit a provider by id.
     function editProvider(id) {
       const prov = state.providers.find(p => p.id === id);
       if (prov) {
@@ -2682,7 +2682,7 @@
       }
     }
 
-// 提交供应商表单。
+// Submit the provider form.
     async function handleProviderSubmit(e) {
       e.preventDefault();
       const id = document.getElementById("pFormId").value;
@@ -2729,7 +2729,7 @@
       fetchModels(); // Refresh models too since they were auto-synced
     }
 
-// 启停供应商。
+// Enable/disable a provider.
     async function toggleProviderEnabled(id, enabled) {
       const resp = await apiCall(`/admin/v1/providers/${id}`, {
         method: "PATCH",
@@ -2742,7 +2742,7 @@
       }
     }
 
-// 测试供应商连通性。
+// Test provider connectivity.
     async function testProvider(id, btn) {
       const origText = btn.innerText;
       btn.innerText = "⏳ 探测中";
@@ -2765,7 +2765,7 @@
       }
     }
 
-// 删除供应商（二次确认）。
+// Delete a provider (confirm first).
     async function deleteProvider(id, name) {
       const ok = await openConfirmModal(`确定要删除供应商 "${name}" 吗？此操作不可撤销。已同步的模型将被保留。`, "确认删除供应商");
       if (!ok) return;
@@ -2790,7 +2790,7 @@
       populateModelFilters();
     }
 
-// 渲染模型路由表格。
+// Render the model routing table.
     function renderModelsTable(list = state.models) {
       const tbody = document.getElementById("modelsTableBody");
       const empty = document.getElementById("modelsEmptyState");
@@ -2885,7 +2885,7 @@
       });
     }
 
-// 过滤模型表格。
+// Filter the models table.
     function filterModelsTable(resetPage = false) {
       if (resetPage) paginationState.models.page = 1;
       const q = (document.getElementById("modelSearchInput")?.value || "").toLowerCase();
@@ -2901,7 +2901,7 @@
       renderModelsTable(filtered);
     }
 
-// 创建上游目标行元素。
+// Create an upstream target row element.
     function createTargetRowElement(tgt = {}, index = 0) {
       const row = document.createElement("div");
       row.className = "target-row p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2 relative";
@@ -2951,7 +2951,7 @@
       return row;
     }
 
-// 新增上游目标行。
+// Add an upstream target row.
     function addTargetRow(tgt = {}) {
       const container = document.getElementById("mFormTargetsContainer");
       const currentRows = container.querySelectorAll(".target-row");
@@ -2964,7 +2964,7 @@
       updateTargetRowHeaders();
     }
 
-// 删除上游目标行。
+// Delete an upstream target row.
     function removeTargetRow(btn) {
       const container = document.getElementById("mFormTargetsContainer");
       const currentRows = container.querySelectorAll(".target-row");
@@ -2979,7 +2979,7 @@
       }
     }
 
-// 更新目标行表头序号。
+// Renumber target row headers.
     function updateTargetRowHeaders() {
       const container = document.getElementById("mFormTargetsContainer");
       const rows = container.querySelectorAll(".target-row");
@@ -2993,7 +2993,7 @@
       });
     }
 
-// 一键填充行预设。
+// One-click fill row presets.
     function setRowPreset(btn, provider, endpoint, keyref) {
       const row = btn.closest(".target-row");
       if (!row) return;
@@ -3002,7 +3002,7 @@
       row.querySelector(".tgt-keyref").value = keyref;
     }
 
-// 打开模型弹窗（空则新建）。
+// Open the model modal (blank for create).
     function openModelModal(name = null) {
       state.editingModelName = name;
       const title = document.getElementById("modelModalTitle");
@@ -3079,13 +3079,13 @@
       document.getElementById("modelModal").classList.remove("hidden");
     }
 
-// 关闭模型弹窗。
+// Close the model modal.
     function closeModelModal() {
       document.getElementById("modelModal").classList.add("hidden");
       state.editingModelName = null;
     }
 
-// 提交模型表单。
+// Submit the model form.
     async function handleModelSubmit(e) {
       e.preventDefault();
       const name = document.getElementById("mFormName").value.trim();
@@ -3172,7 +3172,7 @@
       }
     }
 
-// 启停模型。
+// Enable/disable a model.
     async function toggleModelEnabled(name, newStatus) {
       const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(name)}`, {
         method: "PATCH",
@@ -3184,12 +3184,12 @@
       }
     }
 
-// 按名编辑模型。
+// Edit a model by name.
     function editModel(name) {
       openModelModal(name);
     }
 
-// 删除模型（二次确认）。
+// Delete a model (confirm first).
     async function deleteModel(name) {
       if (!await openConfirmModal(`确定要删除模型 "${name}" 吗？`, "删除模型")) return;
       const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(name)}`, {
@@ -3214,7 +3214,7 @@
       renderKeysTable();
     }
 
-// 渲染密钥表格。
+// Render the keys table.
     function renderKeysTable(list = state.keys) {
       const tbody = document.getElementById("keysTableBody");
       const empty = document.getElementById("keysEmptyState");
@@ -3279,7 +3279,7 @@
       });
     }
 
-// 过滤密钥表格。
+// Filter the keys table.
     function filterKeysTable(resetPage = false) {
       if (resetPage) paginationState.keys.page = 1;
       const q = (document.getElementById("keySearchInput")?.value || "").toLowerCase();
@@ -3290,7 +3290,7 @@
       renderKeysTable(filtered);
     }
 
-// 打开新建密钥弹窗。
+// Open the create-key modal.
     function openKeyModal() {
       document.getElementById("kFormName").value = "";
       document.getElementById("kFormRateQps").value = "10";
@@ -3327,12 +3327,12 @@
       document.getElementById("keyModal").classList.remove("hidden");
     }
 
-// 关闭密钥弹窗。
+// Close the key modal.
     function closeKeyModal() {
       document.getElementById("keyModal").classList.add("hidden");
     }
 
-// 提交新建密钥。
+// Submit the new key.
     async function handleKeySubmit(e) {
       e.preventDefault();
       const name = document.getElementById("kFormName").value.trim();
@@ -3380,7 +3380,7 @@
       }
     }
 
-// 展示新建密钥明文（仅显示一次）。
+// Show the new key plaintext (one-time display).
     function showNewKeySuccessModal(plaintext) {
       document.getElementById("newKeyPlaintextDisplay").innerText = plaintext;
       document.getElementById("copyKeyIcon").innerText = "📋";
@@ -3388,12 +3388,12 @@
       document.getElementById("newKeySuccessModal").classList.remove("hidden");
     }
 
-// 关闭明文弹窗。
+// Close the plaintext modal.
     function closeNewKeySuccessModal() {
       document.getElementById("newKeySuccessModal").classList.add("hidden");
     }
 
-// 复制明文密钥。
+// Copy the plaintext key.
     function copyPlaintextKey() {
       const key = document.getElementById("newKeyPlaintextDisplay").innerText;
       navigator.clipboard.writeText(key).then(() => {
@@ -3403,7 +3403,7 @@
       });
     }
 
-// 吊销密钥（二次确认）。
+// Revoke a key (confirm first).
     async function revokeKey(id) {
       if (!await openConfirmModal(`确定要吊销 API 密钥 #${id} 吗？此操作不可撤销。`, "吊销密钥")) return;
       const resp = await apiCall(`/admin/v1/keys/${id}`, { method: "DELETE" });
@@ -3424,7 +3424,7 @@
         .replace(/'/g, "&#039;");
     }
 
-// 拉取护栏规则。
+// Fetch guardrail rules.
     async function fetchGuardrails() {
       const tbody = document.getElementById("guardrailsTableBody");
       if (tbody) {
@@ -3439,7 +3439,7 @@
       filterGuardrailsTable(false);
     }
 
-// 更新护栏统计卡。
+// Update guardrail stat cards.
     function updateGuardrailStats() {
       const totalEl = document.getElementById("grStatTotal");
       const kwEl = document.getElementById("grStatKeyword");
@@ -3462,7 +3462,7 @@
       }
     }
 
-// 渲染护栏规则表格。
+// Render the guardrail rules table.
     function renderGuardrailsTable(list = state.guardrails) {
       const tbody = document.getElementById("guardrailsTableBody");
       const empty = document.getElementById("guardrailsEmptyState");
@@ -3515,7 +3515,7 @@
       });
     }
 
-// 过滤护栏表格。
+// Filter the guardrails table.
     function filterGuardrailsTable(resetPage = false) {
       if (resetPage) paginationState.guardrails.page = 1;
       const q = (document.getElementById("grSearchInput")?.value || "").toLowerCase().trim();
@@ -3532,7 +3532,7 @@
       renderGuardrailsTable(filtered);
     }
 
-// 打开护栏弹窗（空则新建）。
+// Open the guardrail modal (blank for create).
     function openGuardrailModal(rule = null) {
       state.editingGuardrailId = rule ? rule.id : null;
       document.getElementById("guardrailModalTitle").innerText = rule ? `编辑风控规则 #${rule.id}` : "新建风控规则";
@@ -3548,13 +3548,13 @@
       setTimeout(() => document.getElementById("grFormPattern").focus(), 50);
     }
 
-// 关闭护栏弹窗。
+// Close the guardrail modal.
     function closeGuardrailModal() {
       document.getElementById("guardrailModal").classList.add("hidden");
       state.editingGuardrailId = null;
     }
 
-// 护栏类型切换联动表单。
+// Guardrail type switch drives the form.
     function onGuardrailTypeChange() {
       const type = document.getElementById("grFormType").value;
       const actionSelect = document.getElementById("grFormAction");
@@ -3581,7 +3581,7 @@
       }
     }
 
-// 按 id 编辑护栏规则。
+// Edit a guardrail rule by id.
     function editGuardrailRule(id) {
       const rule = (state.guardrails || []).find(r => r.id === id);
       if (rule) {
@@ -3589,7 +3589,7 @@
       }
     }
 
-// 提交护栏表单。
+// Submit the guardrail form.
     async function handleGuardrailSubmit(e) {
       e.preventDefault();
       const id = document.getElementById("grFormId").value;
@@ -3628,7 +3628,7 @@
       fetchGuardrails();
     }
 
-// 启停护栏规则。
+// Enable/disable a guardrail rule.
     async function toggleGuardrailRule(id, newEnabled) {
       const resp = await apiCall(`/admin/v1/guardrails/${id}`, {
         method: "PATCH",
@@ -3640,7 +3640,7 @@
       }
     }
 
-// 删除护栏规则。
+// Delete a guardrail rule.
     async function deleteGuardrailRule(id) {
       const rule = (state.guardrails || []).find(r => r.id === id);
       const pat = rule ? rule.pattern : `#${id}`;
@@ -3654,7 +3654,7 @@
       }
     }
 
-// 热重载护栏引擎。
+// Hot-reload the guardrail engine.
     async function reloadGuardrailsEngine() {
       const resp = await apiCall("/admin/v1/guardrails/reload", { method: "POST" });
       if (resp && resp.ok) {
@@ -3663,7 +3663,7 @@
       }
     }
 
-// 植入默认 PII 规则。
+// Seed default PII rules.
     async function seedDefaultPiiRules() {
       const presets = [
         { rule_type: "pii", pattern: "PHONE", action: "mask", category: "privacy", enabled: true },
@@ -3691,7 +3691,7 @@
       fetchGuardrails();
     }
 
-// 护栏沙盒试算。
+// Guardrail sandbox dry-run.
     function testGuardrailsSandbox() {
       const inputEl = document.getElementById("grSandboxInput");
       const resultEl = document.getElementById("grSandboxResult");
@@ -3707,7 +3707,7 @@
       resultEl.classList.remove("hidden");
       const activeRules = (state.guardrails || []).filter(r => r.enabled);
 
-      // PII 正则定义与 C 引擎保持严格一致
+      // PII regexes must stay strictly consistent with the C engine
       const piiPatterns = {
         PHONE: /1[3-9][0-9]{9}/g,
         EMAIL: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
@@ -3715,7 +3715,7 @@
         API_KEY: /(?:sk-[a-zA-Z0-9]{20,}|aig_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,})/g
       };
 
-      // 阶段 1：阻断检查 (Block Rules)
+      // Phase 1: block-rule checks
       for (const r of activeRules) {
         if (r.action === "block") {
           let hit = false;
@@ -3754,7 +3754,7 @@
         }
       }
 
-      // 阶段 2：脱敏替换检查 (Mask Rules)
+      // Phase 2: mask-rule checks
       let transformed = text;
       let maskCount = 0;
       const maskHits = [];
@@ -3809,7 +3809,7 @@
         return;
       }
 
-      // 阶段 3：完全通过
+      // Phase 3: full pass
       resultEl.className = "mt-3 p-3.5 rounded-xl text-xs font-mono border bg-emerald-500/10 border-emerald-500/30 text-emerald-300";
       resultEl.innerHTML = `
         <div class="flex items-center gap-1.5 font-bold text-emerald-400 mb-1">
@@ -3836,7 +3836,7 @@
       populateCostGroupFilters();
     }
 
-// 渲染分组表格。
+// Render the groups table.
     function renderGroupsTable(list = state.groups) {
       const tbody = document.getElementById("groupsTableBody");
       const empty = document.getElementById("groupsEmptyState");
@@ -3874,7 +3874,7 @@
       });
     }
 
-// 打开分组弹窗（空则新建）。
+// Open the group modal (blank for create).
     function openGroupModal(id = null, name = "", monthlyBudget = 0) {
       document.getElementById("gFormId").value = id || "";
       document.getElementById("gFormName").value = name || "";
@@ -3884,12 +3884,12 @@
       setTimeout(() => document.getElementById("gFormName").focus(), 50);
     }
 
-// 关闭分组弹窗。
+// Close the group modal.
     function closeGroupModal() {
       document.getElementById("groupModal").classList.add("hidden");
     }
 
-// 提交分组表单。
+// Submit the group form.
     async function handleGroupSubmit(e) {
       e.preventDefault();
       const id = document.getElementById("gFormId").value;
@@ -3926,7 +3926,7 @@
       }
     }
 
-// 删除分组（二次确认）。
+// Delete a group (confirm first).
     async function deleteGroup(id, name) {
       const ok = await openConfirmModal(`确定要删除部门分组 "${name}" 吗？注意：该分组下的所有密钥需先转移或解除绑定。`, "删除部门分组");
       if (!ok) return;
@@ -3947,7 +3947,7 @@
       gSelect.value = curr;
     }
 
-// 初始化费用日期范围。
+// Init the cost date range.
     function initCostDates() {
       const now = new Date();
       const toStr = now.toISOString().slice(0, 10);
@@ -3959,7 +3959,7 @@
       if (toEl && !toEl.value) toEl.value = toStr;
     }
 
-// 拉取费用归因数据。
+// Fetch cost attribution data.
     async function fetchCostData() {
       const tbody = document.getElementById("costTableBody");
       if (!tbody) return;
@@ -3991,7 +3991,7 @@
       renderCostTable(state.costRows, by);
     }
 
-// 渲染费用表格。
+// Render the cost table.
     function renderCostTable(rows, by) {
       const tbody = document.getElementById("costTableBody");
       const empty = document.getElementById("costEmptyState");
@@ -4089,13 +4089,13 @@
     }
 
     let usageFetchTimer = null;
-// 防抖拉取用量数据。
+// Debounced usage data fetch.
     function debouncedUsageFetch() {
       clearTimeout(usageFetchTimer);
       usageFetchTimer = setTimeout(() => fetchUsageData(), 400);
     }
 
-// 填充模型筛选下拉。
+// Populate the model filter dropdown.
     function populateModelFilters() {
       const sel = document.getElementById("usageModelFilter");
       sel.innerHTML = `<option value="">全部模型</option>`;
@@ -4107,7 +4107,7 @@
       });
     }
 
-// 拉取用量数据。
+// Fetch usage data.
     async function fetchUsageData(silent = false) {
       let queryParams = [];
       const preset = document.getElementById("usageDatePreset").value;
@@ -4172,7 +4172,7 @@
       }
     }
 
-// 渲染用量表格。
+// Render the usage table.
     function renderUsageTable() {
       const tbody = document.getElementById("usageTableBody");
       const empty = document.getElementById("usageEmptyState");
@@ -4204,7 +4204,7 @@
       });
     }
 
-// 过滤请求明细表。
+// Filter the request detail table.
     function filterUsageRequestsTable(resetPage = false) {
       if (resetPage) paginationState.requests.page = 1;
       const q = (document.getElementById("reqSearchInput")?.value || "").toLowerCase().trim();
@@ -4226,7 +4226,7 @@
       renderUsageRequestsTable(filtered);
     }
 
-// 渲染请求明细表。
+// Render the request detail table.
     function renderUsageRequestsTable(list = state.requestRows) {
       const tbody = document.getElementById("requestsTableBody");
       const empty = document.getElementById("requestsEmptyState");
@@ -4296,7 +4296,7 @@
       }
     }
 
-// 按模型打开调试台。
+// Open the playground for a model.
     function openPlaygroundForModel(name) {
       switchTab("playground");
       setTimeout(() => {
@@ -4304,7 +4304,7 @@
       }, 50);
     }
 
-// 自动填充调试用 key。
+// Auto-fill the debug key.
     function autoFillPlaygroundKey() {
       const activeKey = state.keys.find(k => !k.revoked);
       if (activeKey) {
@@ -4314,7 +4314,7 @@
       }
     }
 
-// 发起调试请求（含流式）。
+// Send a debug request (streaming supported).
     async function runPlaygroundRequest() {
       const model = document.getElementById("playModelSelect").value;
       const key = document.getElementById("playApiKeyInput").value.trim();
@@ -4341,7 +4341,7 @@
 
       outArea.innerHTML = "";
       inspector.innerText = "";
-      // 用户消息气泡 + 助手回复气泡（流式内容追加进助手气泡）
+      // User bubble + assistant bubble (streamed chunks append into the assistant bubble)
       const userBubble = document.createElement("div");
       userBubble.className = "msg-user";
       userBubble.textContent = usr;
@@ -4458,14 +4458,14 @@ ${errText}`;
       }
     }
 
-// 停止调试流。
+// Stop the debug stream.
     function stopPlaygroundStream() {
       if (state.streamAbortController) {
         state.streamAbortController.abort();
       }
     }
 
-// 清空调试响应。
+// Clear the debug response.
     function clearPlaygroundResponse() {
       document.getElementById("playOutputArea").innerHTML = '<span class="text-slate-600 italic">响应将实时显示在这里...</span>';
       document.getElementById("inspectorPanel").innerText = "";
@@ -4473,7 +4473,7 @@ ${errText}`;
       document.getElementById("playLatencyStat").classList.add("hidden");
     }
 
-// 开关请求检查器。
+// Toggle the request inspector.
     function toggleInspector() {
       const panel = document.getElementById("inspectorPanel");
       const arrow = document.getElementById("inspectorArrow");
@@ -4503,7 +4503,7 @@ ${errText}`;
       }
     }
 
-// 过滤指标列表。
+// Filter the metrics list.
     function filterMetrics() {
       const q = (document.getElementById("metricFilterInput").value || "").toLowerCase();
       const pre = document.getElementById("metricsPre");
@@ -4539,7 +4539,7 @@ ${errText}`;
       }
     }
 
-// 初始化实时看板。
+// Init the live dashboard.
     function initLiveDashboard() {
       if (!state.liveEventSource) {
         connectLiveStream();
@@ -4550,7 +4550,7 @@ ${errText}`;
       }
     }
 
-// 连接 SSE 实时流。
+// Connect the SSE live stream.
     function connectLiveStream() {
       if (state.liveEventSource) {
         try { state.liveEventSource.close(); } catch(e){}
@@ -4632,7 +4632,7 @@ ${errText}`;
       });
     }
 
-// 开关实时流。
+// Toggle the live stream.
     function toggleLiveStream() {
       state.liveStreamingPaused = !state.liveStreamingPaused;
       const icon = document.getElementById("btnLiveToggleIcon");
@@ -4648,20 +4648,20 @@ ${errText}`;
       }
     }
 
-// 清空实时瀑布。
+// Clear the live waterfall.
     function clearLiveWaterfall() {
       state.liveRequests = [];
       renderLiveWaterfall();
       showToast("实时瀑布流已清空", "info");
     }
 
-// 过滤实时瀑布。
+// Filter the live waterfall.
     function filterLiveWaterfall() {
       state.liveWaterfallFilter = document.getElementById("liveWaterfallFilter").value;
       renderLiveWaterfall();
     }
 
-// 处理实时请求事件。
+// Handle a live request event.
     function handleLiveRequestEvent(req) {
       req.ts = Date.now();
       state.liveRecentWindow.push(req);
@@ -4714,7 +4714,7 @@ ${errText}`;
       }
     }
 
-// 渲染实时瀑布。
+// Render the live waterfall.
     function renderLiveWaterfall() {
       const tbody = document.getElementById("liveWaterfallTbody");
       if (!tbody) return;
@@ -4774,7 +4774,7 @@ ${errText}`;
       }).join("");
     }
 
-// 打开请求详情弹窗。
+// Open the request detail modal.
     function openLiveReqDetailModal(index) {
       const req = state.liveRequests[index];
       if (!req) return;
@@ -4786,13 +4786,13 @@ ${errText}`;
       if (modal) modal.classList.remove("hidden");
     }
 
-// 关闭请求详情弹窗。
+// Close the request detail modal.
     function closeLiveReqDetailModal() {
       const modal = document.getElementById("liveReqDetailModal");
       if (modal) modal.classList.add("hidden");
     }
 
-// 处理熔断器事件。
+// Handle a circuit-breaker event.
     function handleLiveCircuitBreakerEvent(cb) {
       state.liveAlerts.unshift({
         type: "cb",
@@ -4806,7 +4806,7 @@ ${errText}`;
       showToast(`🚨 熔断状态变更: ${cb.model} ➜ ${cb.to_state} (${cb.reason || ""})`, isTrip ? "error" : "warning");
     }
 
-// 处理探针事件。
+// Handle a probe event.
     function handleLiveHealthProbeEvent(hp) {
       if (!state.liveProviders) state.liveProviders = {};
       state.liveProviders[hp.provider] = {
@@ -4828,7 +4828,7 @@ ${errText}`;
       }
     }
 
-// 处理预算告警事件。
+// Handle a budget alert event.
     function handleLiveBudgetAlertEvent(ba) {
       state.liveAlerts.unshift({
         type: "budget",
@@ -4840,7 +4840,7 @@ ${errText}`;
       showToast(`💰 预算超额: ${ba.entity_type} #${ba.entity_id} 支出 $${ba.spent} 已超额度 $${ba.budget}`, "warning");
     }
 
-// 渲染实时告警。
+// Render live alerts.
     function renderLiveAlerts() {
       const countEl = document.getElementById("liveAlertCount");
       const listEl = document.getElementById("liveAlertList");
@@ -4889,7 +4889,7 @@ ${errText}`;
       }).join("");
     }
 
-// 拉取供应商健康快照。
+// Fetch the provider health snapshot.
     async function fetchProviderHealth() {
       try {
         const resp = await apiCall("/admin/v1/providers/health");
@@ -4907,7 +4907,7 @@ ${errText}`;
       }
     }
 
-// 渲染供应商健康列表。
+// Render the provider health list.
     function renderLiveProviders() {
       const grid = document.getElementById("liveProviderGrid");
       const summary = document.getElementById("liveProviderSummary");
@@ -4977,7 +4977,7 @@ ${errText}`;
       }).join("");
     }
 
-// 触发全量探针。
+// Trigger a full probe.
     async function triggerFullProbe() {
       const btn = document.getElementById("btnFullProbe");
       const icon = document.getElementById("btnFullProbeIcon");
@@ -5020,7 +5020,7 @@ ${errText}`;
       }
     }
 
-// 探针单个供应商。
+// Probe a single provider.
     async function probeSingleProvider(providerName, btn) {
       const origText = btn ? btn.innerText : "";
       if (btn) {
@@ -5045,19 +5045,19 @@ ${errText}`;
 
     // --- Confirm Modal ---
     let confirmModalResolve = null;
-// 打开通用确认框。
+// Open the generic confirm dialog.
     function openConfirmModal(message, title = "请确认") {
       document.getElementById("confirmModalTitle").innerText = title;
       document.getElementById("confirmModalMessage").innerText = message;
       document.getElementById("confirmModal").classList.remove("hidden");
       return new Promise(resolve => { confirmModalResolve = resolve; });
     }
-// 确认框返回值。
+// Confirm dialog return value.
     function resolveConfirmModal(val) {
       document.getElementById("confirmModal").classList.add("hidden");
       if (confirmModalResolve) { confirmModalResolve(val); confirmModalResolve = null; }
     }
-// 关闭确认框。
+// Close the confirm dialog.
     function closeConfirmModal() {
       resolveConfirmModal(false);
     }
@@ -5106,14 +5106,14 @@ ${errText}`;
       }
     }
 
-// 拉取缓存统计。
+// Fetch cache stats.
     async function fetchCacheStats() {
       try {
         const resp = await apiCall("/admin/v1/cache/stats");
         if (!resp || !resp.ok) return;
         const data = await resp.json();
 
-        // 内存占用
+        // Memory usage
         const usedMB = ((data.bytes_used || 0) / (1024 * 1024)).toFixed(2);
         const maxMB = ((data.bytes_max || 0) / (1024 * 1024)).toFixed(0);
         const memPct = data.bytes_max > 0 ? Math.min(100, (data.bytes_used / data.bytes_max * 100)).toFixed(1) : 0;
@@ -5124,7 +5124,7 @@ ${errText}`;
         if (memMaxEl) memMaxEl.innerText = `上限 ${maxMB} MB`;
         if (memBar) memBar.style.width = `${memPct}%`;
 
-        // 条目数
+        // Entry count
         const count = data.entries_count || 0;
         const maxEntries = data.max_entries || 10000;
         const entriesPct = maxEntries > 0 ? Math.min(100, (count / maxEntries * 100)).toFixed(1) : 0;
@@ -5135,7 +5135,7 @@ ${errText}`;
         if (entriesMaxEl) entriesMaxEl.innerText = `容量 ${maxEntries.toLocaleString()}`;
         if (entriesBar) entriesBar.style.width = `${entriesPct}%`;
 
-        // 命中率
+        // Hit rate
         const hitRate = (data.hit_rate_percent || 0).toFixed(1);
         const hits = data.hits_total || 0;
         const misses = data.misses_total || 0;
@@ -5144,7 +5144,7 @@ ${errText}`;
         if (hitRateEl) hitRateEl.innerHTML = `${hitRate}<span class="text-base font-normal text-slate-400 ml-1">%</span>`;
         if (hitsMissesEl) hitsMissesEl.innerText = `${hits.toLocaleString()} 命中 / ${misses.toLocaleString()} 未命中`;
 
-        // 节约 Tokens
+        // Tokens saved
         const savedPrompt = data.saved_prompt_tokens || 0;
         const savedComp = data.saved_completion_tokens || 0;
         const savedTokensTotal = savedPrompt + savedComp;
@@ -5153,12 +5153,12 @@ ${errText}`;
         if (savedTokensEl) savedTokensEl.innerText = savedTokensTotal.toLocaleString();
         if (savedTokensDetail) savedTokensDetail.innerText = `${savedPrompt.toLocaleString()} 提示 / ${savedComp.toLocaleString()} 补全`;
 
-        // 节约成本
+        // Cost saved
         const savedCost = (data.saved_cost_usd || 0).toFixed(4);
         const savedCostEl = document.getElementById("cacheStatSavedCost");
         if (savedCostEl) savedCostEl.innerText = `$${savedCost}`;
 
-        // 同步 Live 大屏卡片
+        // Sync the Live dashboard cards
         const liveHitEl = document.getElementById("liveStatCacheHitRate");
         const liveCostEl = document.getElementById("liveStatCacheSavedCost");
         if (liveHitEl) liveHitEl.innerHTML = `${hitRate}<span class="text-base font-normal text-slate-400 ml-1">%</span>`;
@@ -5171,7 +5171,7 @@ ${errText}`;
       }
     }
 
-// 渲染缓存分片表。
+// Render the cache shard table.
     function renderCacheShardsTable(shards) {
       const tbody = document.getElementById("cacheShardsTbody");
       if (!tbody) return;
@@ -5211,7 +5211,7 @@ ${errText}`;
       }).join("");
     }
 
-// 按模型清理缓存。
+// Purge cache by model.
     async function triggerCachePurge(model) {
       const targetDesc = model ? `模型 "${model}" 的缓存` : "所有缓存条目";
       const confirmed = await openConfirmModal(`确定要清空 ${targetDesc} 吗？此操作将立即释放对应的内存缓存。`, "确认清空缓存");
@@ -5235,7 +5235,7 @@ ${errText}`;
       }
     }
 
-// 按输入框内容清理缓存。
+// Purge cache by input-box content.
     function triggerCachePurgeByInput() {
       const input = document.getElementById("cachePurgeModelInput");
       const model = input ? input.value.trim() : "";
