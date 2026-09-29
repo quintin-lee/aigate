@@ -3,8 +3,8 @@
  */
 
 /**
- * @defgroup group_upstream 上游层
- * @brief 上游：模型路由、供应商适配、客户端。
+ * @defgroup group_upstream Upstream layer
+ * @brief Upstream: model routing, provider adapters, and client.
  */
 #ifndef AIGATE_PROVIDER_ADAPTER_H
 #define AIGATE_PROVIDER_ADAPTER_H
@@ -20,7 +20,7 @@ typedef struct stream_bridge stream_bridge_t;
 
 /** @brief Provider vtable: URL/body build, response parse, SSE bridge ops. */
 typedef struct provider_adapter {
-    const char* name; /**< 供应商标签 */
+    const char* name; /**< Provider label. */
 
     /** @brief Check if this adapter handles the given provider label. */
     bool (*supports)(const char* provider);
@@ -103,7 +103,7 @@ typedef struct provider_adapter {
                                     long*       out_output_tokens,
                                     long*       out_cached_tokens,
                                     long*       out_reasoning_tokens);
-} provider_adapter_t; /**< 供应商虚表类型（见 provider_adapter 结构）。 */
+} provider_adapter_t; /**< Provider vtable type (see the provider_adapter struct). */
 
 /** @brief Look up the provider adapter by provider name; returns NULL if unsupported. */
 const provider_adapter_t* provider_find(const char* provider);
@@ -114,10 +114,10 @@ const provider_adapter_t* provider_find(const char* provider);
  * @p out->extra_header holds "anthropic-version" for the anthropic
  * family (fixed value "2023-06-01"); empty string otherwise. */
 typedef struct {
-    char url[1024]; /**< 探测 URL */
-    char auth_header[32]; /**< 鉴权头名 */
+    char url[1024]; /**< Probe URL. */
+    char auth_header[32]; /**< Auth header name. */
     int  bearer; /**< 1 = prefix the key value with "Bearer " */
-    char extra_header[32]; /**< 额外头名（anthropic 系为 anthropic-version） */
+    char extra_header[32]; /**< Extra header name (anthropic-version for the Anthropic family). */
 } provider_probe_plan_t;
 
 /** @brief Map a provider_type + endpoint to a GET /models probe plan.

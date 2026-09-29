@@ -1,5 +1,5 @@
 /** @file upstream_client.c
- *  @brief libcurl 上游 HTTP 客户端：线程复用 easy 句柄、共享 DNS/SSL 会话、非流式/流式/探针三种调用。 */
+ *  @brief libcurl upstream HTTP client: per-thread reused easy handles, shared DNS/SSL sessions, and three call modes (non-streaming / streaming / probe). */
 #include "upstream_client.h"
 #include "aigate_log.h"
 
@@ -12,14 +12,14 @@
 #include <strings.h>
 #include <time.h>
 
-/** curl 共享句柄（DNS/SSL 会话跨 easy 句柄复用，g_curl_once 初始化）。 */
+/** curl share handle (DNS/SSL sessions reused across easy handles, initialized by g_curl_once). */
 static CURLSH*         g_curl_sh = NULL;
-/** curl 共享 DNS 缓存锁。 */
+/** curl shared DNS cache lock. */
 static pthread_mutex_t g_curl_sh_dns_mtx = PTHREAD_MUTEX_INITIALIZER;
-/** curl 共享 SSL 会话锁。 */
+/** curl shared SSL session lock. */
 static pthread_mutex_t g_curl_sh_ssl_mtx = PTHREAD_MUTEX_INITIALIZER;
 
-/** @brief curl_share 加锁回调：DNS/SSL 会话槽分别上对应互斥锁。 */
+/** @brief curl_share lock callback: locks the matching mutex for the DNS/SSL session slot. */
 static void
 curl_sh_lock(CURL* handle, curl_lock_data data, curl_lock_access access, void* userptr)
 {
@@ -33,7 +33,7 @@ curl_sh_lock(CURL* handle, curl_lock_data data, curl_lock_access access, void* u
     }
 }
 
-/** @brief curl_share 解锁回调：与 curl_sh_lock 配对。 */
+/** @brief curl_share unlock callback: pairs with curl_sh_lock. */
 static void
 curl_sh_unlock(CURL* handle, curl_lock_data data, void* userptr)
 {
@@ -46,9 +46,9 @@ curl_sh_unlock(CURL* handle, curl_lock_data data, void* userptr)
     }
 }
 
-/** 进程级 curl 全局初始化 once 守卫。 */
+/** Process-wide curl global-init once guard. */
 static pthread_once_t g_curl_once = PTHREAD_ONCE_INIT;
-/** @brief 进程级 curl 全局初始化（pthread_once）：global_init + 共享 DNS/SSL 会话句柄。 */
+/** @brief Process-wide curl global init (pthread_once): global_init + shared DNS/SSL session handles. */
 static void
 curl_init_once(void)
 {
@@ -62,12 +62,12 @@ curl_init_once(void)
     }
 }
 
-/** 线程本地 easy 句柄 key（析构回收该线程复用句柄）。 */
+/** Thread-local easy handle key (reclaims the thread's reused handle on destruction). */
 static pthread_key_t  g_curl_tkey;
-/** 线程 key 初始化 once 守卫。 */
+/** Thread key init once guard. */
 static pthread_once_t g_curl_tkey_once = PTHREAD_ONCE_INIT;
 
-/** @brief 线程退出时回收该线程的复用 easy 句柄（pthread_key 析构）。 */
+/** @brief Reclaim the thread's reused easy handle on thread exit (pthread_key destructor). */
 static void
 curl_thread_cleanup(void* val)
 {
@@ -76,7 +76,7 @@ curl_thread_cleanup(void* val)
     }
 }
 
-/** @brief 创建线程局部 easy 句柄槽（pthread_once）。 */
+/** @brief Create the thread-local easy handle slot (pthread_once). */
 static void
 curl_tkey_init(void)
 {
@@ -85,8 +85,8 @@ curl_tkey_init(void)
 
 /* Per-thread CURL handle: reused across calls to amortize init.
  * Automatically cleaned up on worker thread exit. */
-/** @brief 取本线程复用的 easy 句柄（首次 lazy 创建，线程退出自动回收）。
- *  @return 句柄；curl_easy_init 失败返回 NULL。 */
+/** @brief Get this thread's reused easy handle (lazily created on first use, auto-reclaimed on thread exit).
+ *  @return The handle; NULL if curl_easy_init fails. */
 static CURL*
 thread_curl(void)
 {
@@ -101,7 +101,7 @@ thread_curl(void)
     return c;
 }
 
-/** @brief 每次调用前统一 easy 选项：挂共享句柄、HTTP/2+TLS、TCP keepalive。 */
+/** @brief Normalize easy options before each call: attach the share handle, HTTP/2+TLS, TCP keepalive. */
 static void
 curl_apply_common_opts(CURL* c)
 {
@@ -116,18 +116,18 @@ curl_apply_common_opts(CURL* c)
 
 /** @brief Non-streaming response accumulator (whole body in memory). */
 struct resp_buf {
-    char*  data; /**< 累积的响应体 */
-    size_t len; /**< 已用字节 */
-    size_t cap; /**< 缓冲容量 */
+    char*  data; /**< Accumulated response body. */
+    size_t len; /**< Bytes used. */
+    size_t cap; /**< Buffer capacity. */
 };
 
-/** @brief 非流式响应累积上限（32MB）：防恶意/ misconfigured 上游撑爆 worker 内存，超限按传输错误（-502）上报。
- *  @note 流式错误体累积同样受此上限约束。 */
+/** @brief Non-streaming response accumulation cap (32MB): keeps a malicious/misconfigured upstream from blowing up worker memory; overruns are reported as transport errors (-502).
+ *  @note Streaming error-body accumulation is bound by the same cap. */
 #define UPSTREAM_RESP_MAX (32 * 1024 * 1024)
 
 /* libcurl write callback: data first, userdata last. */
-/** @brief 非流式 write 回调：累积响应体（32MB 上限，超限/分配失败返回 0 中断传输）。
- *  @return 消费字节数；返回 0 中断传输。 */
+/** @brief Non-streaming write callback: accumulates the response body (32MB cap; returns 0 to abort the transfer on overrun/allocation failure).
+ *  @return Bytes consumed; 0 aborts the transfer. */
 static size_t
 append_body(char* buf, size_t size, size_t nmemb, void* ud)
 {
@@ -274,7 +274,7 @@ upstream_call(const char* url,
                              out_body_len);
 }
 
-/** @brief 单调时钟纳秒（探针延迟计时）。 */
+/** @brief Monotonic clock in nanoseconds (probe latency timing). */
 static uint64_t
 mono_ns(void)
 {
@@ -284,7 +284,7 @@ mono_ns(void)
 }
 
 /* libcurl write callback: accept all data, discard. */
-/** @brief 探针 write 回调：只计大小不存体。@return 恒 size*nmemb。 */
+/** @brief Probe write callback: counts bytes without storing the body. @return Always size*nmemb. */
 static size_t
 discard_body(char* buf, size_t size, size_t nmemb, void* ud)
 {
@@ -376,26 +376,26 @@ upstream_probe(const char* url,
     return rc;
 }
 
-/** @brief 流式传输上下文（write 回调状态）：分片转发 + 静默超时 + 错误体捕获。 */
+/** @brief Streaming transfer context (write callback state): chunk forwarding + silence timeout + error-body capture. */
 struct stream_ctx {
-    upstream_chunk_fn on_chunk; /**< 逐分片回调（借用） */
-    void*             user_data; /**< 回调透传数据（借用） */
-    uint64_t          last_chunk_mono_ns; /**< 末分片单调时间（静默超时基准） */
-    uint64_t          silence_timeout_ns; /**< 分片间静默超时（纳秒） */
-    int               aborted; /**< 非零=回调要求中断 */
-    CURL*             curl; /**< 本次 easy 句柄（借用） */
-    int               status; /**< 首包 HTTP 状态码 */
+    upstream_chunk_fn on_chunk; /**< Per-chunk callback (borrowed). */
+    void*             user_data; /**< Callback passthrough data (borrowed). */
+    uint64_t          last_chunk_mono_ns; /**< Last-chunk monotonic time (silence-timeout baseline). */
+    uint64_t          silence_timeout_ns; /**< Inter-chunk silence timeout (nanoseconds). */
+    int               aborted; /**< Nonzero = callback requested abort. */
+    CURL*             curl; /**< This call's easy handle (borrowed). */
+    int               status; /**< First-packet HTTP status code. */
     /* Error-body capture: when the upstream answers 4xx/5xx before the first
      * SSE chunk, the body is accumulated here so the caller can surface the
      * upstream's own error instead of a generic 502. Capped like the
      * non-streaming buffer. */
-    char*  err_body; /**< 4xx/5xx 预 SSE 错误体累积缓冲 */
-    size_t err_len; /**< 错误体已用字节 */
-    size_t err_cap; /**< 错误体缓冲容量 */
+    char*  err_body; /**< 4xx/5xx pre-SSE error-body accumulation buffer. */
+    size_t err_len; /**< Error-body bytes used. */
+    size_t err_cap; /**< Error-body buffer capacity. */
 };
 
-/** @brief 流式 write 回调：首包记状态码；4xx/5xx 累积错误体，其余分片交 on_chunk（回调非零即中断）。
- *  @return 消费字节数；返回 0 中断传输。 */
+/** @brief Streaming write callback: records the status code on the first packet; accumulates error bodies for 4xx/5xx, hands other chunks to on_chunk (nonzero callback return aborts).
+ *  @return Bytes consumed; 0 aborts the transfer. */
 static size_t
 stream_write_cb(char* buf, size_t size, size_t nmemb, void* ud)
 {
@@ -438,7 +438,7 @@ stream_write_cb(char* buf, size_t size, size_t nmemb, void* ud)
     return total;
 }
 
-/** @brief 流式进度回调：分片静默超 silence_timeout 即中断。@return 0 继续；1 中断。 */
+/** @brief Streaming progress callback: aborts once chunk silence exceeds silence_timeout. @return 0 to continue; 1 to abort. */
 static int
 stream_xferinfo_cb(
     void* clientp, curl_off_t dltotal, curl_off_t dlnow, curl_off_t ultotal, curl_off_t ulnow)

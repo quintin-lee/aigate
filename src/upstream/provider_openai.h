@@ -12,7 +12,7 @@
 #include "pg_store.h"
 #include "provider_adapter.h"
 
-/** @brief OpenAI 兼容供应商虚表实例（见 provider_adapter 虚表）。 */
+/** @brief OpenAI-compatible provider vtable instance (see the provider_adapter vtable). */
 extern const provider_adapter_t g_provider_openai;
 
 /** @brief 1 when @p provider label is handled by this adapter. */

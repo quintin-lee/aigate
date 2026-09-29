@@ -102,15 +102,15 @@ provider_openai_build(const model_rec_t* route,
 
 /* ------------------------------------------------------------ adapter impl */
 
-/** @brief 适配器 supports 桩：委托 provider_openai_supports。 */
+/** @brief Adapter supports stub: delegates to provider_openai_supports. */
 static bool
 adapter_openai_supports(const char* provider)
 {
     return provider_openai_supports(provider) != 0;
 }
 
-/** @brief 适配器 build_chat 桩：拼 `/chat/completions` URL + 透传请求体（无额外头）。
- *  @return 0 成功；-1 URL 越界/分配失败。 */
+/** @brief Adapter build_chat stub: assembles the `/chat/completions` URL + passes the request body through (no extra headers).
+ *  @return 0 on success; -1 on URL overflow / allocation failure. */
 static int
 openai_build_chat(const model_rec_t* route,
                   const char*        in_body,
@@ -127,8 +127,8 @@ openai_build_chat(const model_rec_t* route,
         route, "/chat/completions", in_body, url_out, url_cap, out_body, out_body_len);
 }
 
-/** @brief 适配器 parse_chat_response 桩：提 usage token（prompt/completion/cached）后原样透传响应体。
- *  @return 0 成功；-1 分配失败。 */
+/** @brief Adapter parse_chat_response stub: extracts usage tokens (prompt/completion/cached), then passes the response body through verbatim.
+ *  @return 0 on success; -1 on allocation failure. */
 static int
 openai_parse_chat_response(const char* raw_body,
                            size_t      raw_len,
@@ -194,22 +194,22 @@ openai_parse_chat_response(const char* raw_body,
     return 0;
 }
 
-/** @brief OpenAI 直通流桥状态机（首包才发 SSE 头）。 */
+/** @brief OpenAI passthrough streaming bridge state machine (sends the SSE header only on the first packet). */
 typedef struct {
-    aigate_response_ctx* rc; /**< 下游响应上下文（借用） */
-    bool                 headers_sent; /**< 下游头已发出 */
+    aigate_response_ctx* rc; /**< Downstream response context (borrowed). */
+    bool                 headers_sent; /**< Downstream headers already sent. */
     char                 line_buf
-        [8192]; /**< SSE 行缓冲；超 8KB 行截断（P3-6），超长 delta 丢失 token 计数 */
-    size_t line_len; /**< 行缓冲已用字节 */
-    char   model[128]; /**< 模型名 */
-    long   prompt_tokens; /**< 累计 prompt token */
-    long   completion_tokens; /**< 累计 completion token */
-    long   cached_tokens; /**< 累计缓存命中 token */
-    long   reasoning_tokens; /**< 累计 reasoning token */
-} openai_bridge_t; /**< OpenAI 直通流桥类型（见上）。 */
+        [8192]; /**< SSE line buffer; lines over 8KB are truncated (P3-6), overlong deltas lose token counts. */
+    size_t line_len; /**< Line buffer bytes used. */
+    char   model[128]; /**< Model name. */
+    long   prompt_tokens; /**< Accumulated prompt tokens. */
+    long   completion_tokens; /**< Accumulated completion tokens. */
+    long   cached_tokens; /**< Accumulated cache-hit tokens. */
+    long   reasoning_tokens; /**< Accumulated reasoning tokens. */
+} openai_bridge_t; /**< OpenAI passthrough streaming bridge type (see above). */
 
-/** @brief 新建 OpenAI 直通流桥（首包才发 SSE 头）。
- *  @return 桥；OOM 返回 NULL。 */
+/** @brief Create an OpenAI passthrough streaming bridge (sends the SSE header only on the first packet).
+ *  @return The bridge; NULL on OOM. */
 static stream_bridge_t*
 openai_bridge_new(aigate_response_ctx* rc, const char* model)
 {
@@ -222,7 +222,7 @@ openai_bridge_new(aigate_response_ctx* rc, const char* model)
     return (stream_bridge_t*)b;
 }
 
-/** @brief 解析直通流中含 `"usage"` 的 SSE 行，累计 prompt/completion/cached/reasoning token（兼容 input/output 别名）。 */
+/** @brief Parse `"usage"`-bearing SSE lines in the passthrough stream, accumulating prompt/completion/cached/reasoning tokens (input/output aliases supported). */
 static void
 openai_stream_process_line(openai_bridge_t* acc, const char* line)
 {
@@ -295,8 +295,8 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
     json_decref(root);
 }
 
-/** @brief 直通流 feed：首包发 SSE 头，原样转发分片并逐行累计 usage。
- *  @return 0 成功；-1 下游写失败。 */
+/** @brief Passthrough stream feed: sends the SSE header on the first packet, forwards chunks verbatim, and accumulates usage per line.
+ *  @return 0 on success; -1 on downstream write failure. */
 static int
 openai_bridge_feed(void* bridge, const void* chunk, size_t len)
 {
@@ -352,7 +352,7 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
     return 0;
 }
 
-/** @brief 终结直通流（空写 fin 标记）。@return 下游写结果。 */
+/** @brief Terminate the passthrough stream (empty write as the fin marker). @return Downstream write result. */
 static int
 openai_bridge_finish(stream_bridge_t* b)
 {
@@ -363,7 +363,7 @@ openai_bridge_finish(stream_bridge_t* b)
     return 0;
 }
 
-/** @brief 直通流是否已发头。 */
+/** @brief Whether the passthrough stream has sent headers. */
 static bool
 openai_bridge_headers_sent(stream_bridge_t* b)
 {
@@ -371,7 +371,7 @@ openai_bridge_headers_sent(stream_bridge_t* b)
     return acc->headers_sent;
 }
 
-/** @brief 取直通流累计的 prompt/completion/cached token（任一 out 可 NULL）。 */
+/** @brief Get the passthrough stream's accumulated prompt/completion/cached tokens (any out may be NULL). */
 static void
 openai_bridge_get_tokens(stream_bridge_t* b, long* out_ptok, long* out_ctok, long* out_cached_tok)
 {
@@ -410,7 +410,7 @@ provider_openai_bridge_get_tokens(stream_bridge_t* b,
 }
 
 
-/** @brief 释放直通流桥。 */
+/** @brief Free the passthrough streaming bridge. */
 static void
 openai_bridge_free(stream_bridge_t* b)
 {
@@ -489,7 +489,7 @@ provider_openai_parse_embeddings(const char* raw_body,
     return 0;
 }
 
-/** Responses API 认证头线程本地缓存（"Bearer <key>"，避 per-request snprintf）。 */
+/** Responses API auth header thread-local cache ("Bearer <key>", avoids per-request snprintf). */
 static _Thread_local char s_responses_bearer_auth[2048];
 
 int
@@ -537,7 +537,7 @@ provider_openai_build_responses(const model_rec_t* route,
     return 0;
 }
 
-/** @brief 从 Responses API 响应（含嵌套 `response.usage`）提 input/output/cached/reasoning token（缺失字段保持 out 原值）。 */
+/** @brief Extract input/output/cached/reasoning tokens from a Responses API response (including nested `response.usage`); missing fields leave out values untouched. */
 static void
 extract_responses_usage_from_json(json_t* root,
                                   long*   out_input_tokens,
@@ -658,7 +658,7 @@ provider_openai_parse_responses_usage(const char* body,
     return 0;
 }
 
-/** @brief OpenAI 兼容供应商虚表实例（见 provider_adapter 虚表）。 */
+/** @brief OpenAI-compatible provider vtable instance (see the provider_adapter vtable). */
 const provider_adapter_t g_provider_openai = {
     .name = "openai",
     .supports = adapter_openai_supports,

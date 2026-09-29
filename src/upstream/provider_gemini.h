@@ -12,7 +12,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-/** @brief Gemini 供应商虚表实例（见 provider_adapter 虚表）。 */
+/** @brief Gemini provider vtable instance (see the provider_adapter vtable). */
 extern const provider_adapter_t g_provider_gemini;
 
 /** @brief 1 when provider is "gemini" or "google". */
@@ -60,19 +60,19 @@ int gemini_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok
 
 /** @brief Lightweight passive line-buffered sniffer for Gemini SSE streams. */
 typedef struct gemini_sniffer {
-    char   line_buf[8192]; /**< SSE 行缓冲 */
-    size_t line_len; /**< 行缓冲已用字节 */
-    long   prompt_tokens; /**< 累计 prompt token */
-    long   candidates_tokens; /**< 累计 candidates token */
-    long   cached_tokens; /**< 累计缓存命中 token */
+    char   line_buf[8192]; /**< SSE line buffer. */
+    size_t line_len; /**< Line buffer bytes used. */
+    long   prompt_tokens; /**< Accumulated prompt tokens. */
+    long   candidates_tokens; /**< Accumulated candidates tokens. */
+    long   cached_tokens; /**< Accumulated cache-hit tokens. */
 } gemini_sniffer_t;
 
-/** @brief 嗅探器清零（行缓冲与 token 累计）。 */
+/** @brief Reset the sniffer (line buffer and token counters). */
 void gemini_sniffer_init(gemini_sniffer_t* s);
-/** @brief 逐分片喂 SSE 数据，按行解析 usageMetadata 累计 token。
- *  @return 0 成功（签名兼容保留）。 */
+/** @brief Feed SSE data chunk by chunk, parsing usageMetadata lines to accumulate tokens.
+ *  @return 0 on success (kept for signature compatibility). */
 int  gemini_sniffer_feed(gemini_sniffer_t* s, const void* chunk, size_t len);
-/** @brief 取累计的 prompt/candidates/cached token（任一 out 可 NULL）。 */
+/** @brief Get accumulated prompt/candidates/cached tokens (any out may be NULL). */
 void gemini_sniffer_get_tokens(const gemini_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached);
 
 #endif /* AIGATE_PROVIDER_GEMINI_H */

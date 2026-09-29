@@ -5,14 +5,14 @@
 #include <stdio.h>
 #include <string.h>
 #include <strings.h>
-/** @brief 供应商虚表 extern 声明（定义见各 provider_*.c，文档见对应头文件）。 */
+/** @brief Supplier vtable externs (defined in each provider_*.c, documented in the matching header). */
 extern const provider_adapter_t g_provider_openai;
 /** @copydoc g_provider_openai */
 extern const provider_adapter_t g_provider_anthropic;
 /** @copydoc g_provider_openai */
 extern const provider_adapter_t g_provider_gemini;
 
-/** 供应商适配器注册表（NULL 结尾，按 supports(provider) 顺序匹配）。 */
+/** Supplier adapter registry (NULL-terminated, matched in supports(provider) order). */
 static const provider_adapter_t* s_adapters[] = {
     &g_provider_openai, &g_provider_anthropic, &g_provider_gemini, NULL};
 
