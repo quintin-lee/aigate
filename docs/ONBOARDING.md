@@ -26,7 +26,7 @@ cmake -B build -S . && cmake --build build -j && ctest --test-dir build
 
 ## 2. 配置速查表
 
-完整变量清单见根目录 [.env.example](../.env.example)。常用项：
+常用项速查（全量语义见 [CONFIGURATION.md](CONFIGURATION.md)，源头为 `src/core/config.c`）：
 
 | 变量 | 默认 | 说明 |
 |---|---|---|

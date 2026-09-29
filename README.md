@@ -24,6 +24,8 @@ sudo apt-get install -y build-essential cmake pkg-config python3 \
   libcurl4-openssl-dev libssl-dev libpq-dev libjansson-dev zlib1g-dev
 ```
 
+注：与 Dockerfile 构建阶段差 `ca-certificates`/`libhiredis-dev`（系统路径；按此行安装走 FetchContent 兜底，同样可编）。
+
 hiredis / hdr_histogram / civetweb 走 FetchContent，`third_party/` 下有离线
 tarball，无网也能配。python3 仅构建时用（`scripts/embed_html.py` 把
 `web/admin.html` 烘焙进二进制）。
@@ -47,7 +49,7 @@ export AIGATE_REDIS_URL="redis://127.0.0.1:6379"
 ./build/aigate
 ```
 
-完整变量清单见 `.env.example`。
+完整变量清单见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
 
 ## 测试
 
@@ -63,5 +65,6 @@ export AIGATE_REDIS_URL="redis://127.0.0.1:6379"
 - [docs/README.md](docs/README.md) — 全仓目录地图
 - [docs/ONBOARDING.md](docs/ONBOARDING.md) — 新人一站式上手（构建/配置/首个请求/排障）
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — 构建变体、加模块/加测试、代码风格
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — 全量配置语义（14 个网关变量/越界行为/归属划分）
 - [docs/architecture/](docs/architecture/) — 架构笔记
 - [docs/superpowers/](docs/superpowers/) — specs / plans / reports

@@ -3,6 +3,7 @@
 > 新人先看：根 [README.md](../README.md)（快速开始）→
 > [DEVELOPMENT.md](DEVELOPMENT.md)（构建变体、加模块/加测试）。
 > 一站式新人上手包见 [ONBOARDING.md](ONBOARDING.md)。
+> 配置详解：[CONFIGURATION.md](CONFIGURATION.md)（全量语义，以源码为准）。
 
 ## Top-level directories
 
