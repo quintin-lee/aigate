@@ -284,7 +284,7 @@ struct test_fdb {
     int         flush_calls;
 };
 
-/** @brief fake 查 key 回调。 */
+/** @brief Fake key-lookup callback. */
 static int
 fget_key_cb(void* ctx, const char* key_hash, key_rec_t* out)
 {
@@ -300,7 +300,7 @@ fget_key_cb(void* ctx, const char* key_hash, key_rec_t* out)
     return 1;
 }
 
-/** @brief fake 查模型回调。 */
+/** @brief Fake model-lookup callback. */
 static int
 fget_model_cb(void* ctx, const char* name, model_rec_t* out)
 {
@@ -314,7 +314,7 @@ fget_model_cb(void* ctx, const char* name, model_rec_t* out)
     return -1;
 }
 
-/** @brief fake 用量落库回调。 */
+/** @brief Fake usage-persistence callback. */
 static int
 fflush_cb(void* ctx, const usage_row_t* rows, int n)
 {
@@ -326,7 +326,7 @@ fflush_cb(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
-/** @brief fake 上游请求桩。 */
+/** @brief Fake upstream request stub. */
 static int
 f_req_stub(void* ctx, ...)
 {
@@ -341,7 +341,7 @@ struct test_resp_cap {
     int    status;
 };
 
-/** @brief 捕获响应头回调。 */
+/** @brief Response-header capture callback. */
 static int
 cap_hdr_cb(void* impl, const char* name, const char* value)
 {
@@ -350,7 +350,7 @@ cap_hdr_cb(void* impl, const char* name, const char* value)
     return 0;
 }
 
-/** @brief 捕获响应体回调。 */
+/** @brief Response-body capture callback. */
 static int
 cap_write_cb(void* impl, const void* buf, size_t len, bool fin)
 {

@@ -4,7 +4,7 @@
 #include "secrets.h"
 #include <string.h>
 
-/** @brief 生成 32 字节测试主密钥。 */
+/** @brief Generate a 32-byte test master key. */
 static void
 make_master(uint8_t m[32])
 {

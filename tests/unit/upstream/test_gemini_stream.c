@@ -16,7 +16,7 @@ typedef struct {
     int    status;
 } gemini_sink_t;
 
-/** @brief 流式响应头捕获。 */
+/** @brief Streaming response-header capture. */
 static int
 gemini_sink_set_hdr(void* impl, const char* name, const char* value)
 {
@@ -26,7 +26,7 @@ gemini_sink_set_hdr(void* impl, const char* name, const char* value)
     return 0;
 }
 
-/** @brief 流式响应体捕获。 */
+/** @brief Streaming response-body capture. */
 static int
 gemini_sink_write(void* impl, const void* buf, size_t len, bool fin)
 {
@@ -135,7 +135,7 @@ TEST_CASE(test_gemini_streaming_fragmented_tcp)
     g_provider_gemini.stream_bridge_free(b);
 }
 
-/** @brief 恒失败的流式写入桩。 */
+/** @brief Always-failing streaming write stub. */
 static int
 gemini_sink_write_fail(void* impl, const void* buf, size_t len, bool fin)
 {

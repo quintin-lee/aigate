@@ -9,7 +9,7 @@
 #include <unistd.h>
 #include <pthread.h>
 
-/** @brief 指纹归一化用例：空白/大小写折叠。 */
+/** @brief Fingerprint-normalization case: whitespace/case folding. */
 static void
 test_fingerprint_normalization(void)
 {
@@ -29,7 +29,7 @@ test_fingerprint_normalization(void)
     assert(strcmp(k1, k3) != 0);
 }
 
-/** @brief 缓存存取与 TTL 过期用例。 */
+/** @brief Cache put/get and TTL-expiry case. */
 static void
 test_cache_set_get_ttl(void)
 {
@@ -63,7 +63,7 @@ test_cache_set_get_ttl(void)
     response_cache_free(rc);
 }
 
-/** @brief 缓存 LRU 淘汰用例。 */
+/** @brief Cache LRU-eviction case. */
 static void
 test_cache_lru_eviction(void)
 {
@@ -97,7 +97,7 @@ test_cache_lru_eviction(void)
     response_cache_free(rc);
 }
 
-/** @brief 缓存 purge 清理用例。 */
+/** @brief Cache purge case. */
 static void
 test_cache_purge(void)
 {
@@ -142,7 +142,7 @@ typedef struct {
     int               thread_id;
 } worker_arg_t;
 
-/** @brief 缓存并发 worker 线程入口。 */
+/** @brief Cache concurrent worker thread entry. */
 static void*
 concurrency_worker(void* varg)
 {
@@ -162,7 +162,7 @@ concurrency_worker(void* varg)
     return NULL;
 }
 
-/** @brief 缓存并发读写用例。 */
+/** @brief Cache concurrent read/write case. */
 static void
 test_cache_concurrency(void)
 {

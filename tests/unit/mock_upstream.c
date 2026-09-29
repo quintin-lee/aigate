@@ -39,7 +39,7 @@ struct mock_upstream {
     pthread_mutex_t mtx; /* guards recorded fields + flag reads */
 };
 
-/** @brief Accept 循环：按请求路径回固定响应，并记录末次请求的路径与 body 供断言。 */
+/** @brief Accept loop: return canned responses by request path, and record the last request's path and body for assertions. */
 static void*
 server_thread(void* arg)
 {

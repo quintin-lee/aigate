@@ -10,7 +10,7 @@ TEST_CASE(test_log_smoke)
     AIGATE_LOG_ERROR("sample error %s", "x");
 }
 
-/** @brief 日志并发 worker 线程入口。 */
+/** @brief Log concurrent worker thread entry. */
 static void*
 log_worker(void* arg)
 {

@@ -13,7 +13,7 @@ struct akg_db {
     key_rec_t recs[4];
 };
 
-/** @brief fake 查 key：命中返回 1，未命中返回 0。 */
+/** @brief Fake key lookup: return 1 on hit, 0 on miss. */
 static int
 akg_get_key(void* ctx, const char* key_hash, key_rec_t* out)
 {
@@ -41,7 +41,7 @@ akg_get_key(void* ctx, const char* key_hash, key_rec_t* out)
     return 1; /* definite miss, not a storage error */
 }
 
-/** @brief fake 通配桩：恒返回成功。 */
+/** @brief Fake wildcard stub: always succeeds. */
 static int
 akg_other(void* ctx, ...)
 {
@@ -49,7 +49,7 @@ akg_other(void* ctx, ...)
     return -1;
 }
 
-/** @brief 组装 auth_key 测试用 pg_ops 虚表。 */
+/** @brief Assemble the pg_ops vtable for auth_key tests. */
 static pg_ops_t
 build_akg_ops(struct akg_db* db)
 {

@@ -21,7 +21,7 @@ struct failover_resp {
     bool headers_sent;
 };
 
-/** @brief fake 响应头写入。 */
+/** @brief Fake response-header write. */
 static int
 fresp_set_header(void* impl, const char* name, const char* value)
 {
@@ -32,7 +32,7 @@ fresp_set_header(void* impl, const char* name, const char* value)
     return 0;
 }
 
-/** @brief fake 响应体写入。 */
+/** @brief Fake response-body write. */
 static int
 fresp_write(void* impl, const void* buf, size_t len, bool fin)
 {
@@ -51,7 +51,7 @@ struct failover_db {
     model_rec_t model;
 };
 
-/** @brief fake 查 key。 */
+/** @brief Fake key lookup. */
 static int
 fo_get_key(void* ctx, const char* key_hash, key_rec_t* out)
 {
@@ -65,7 +65,7 @@ fo_get_key(void* ctx, const char* key_hash, key_rec_t* out)
     return 1;
 }
 
-/** @brief fake 查模型。 */
+/** @brief Fake model lookup. */
 static int
 fo_get_model(void* ctx, const char* name, model_rec_t* out)
 {
@@ -77,7 +77,7 @@ fo_get_model(void* ctx, const char* name, model_rec_t* out)
     return -1;
 }
 
-/** @brief fake 空操作桩。 */
+/** @brief Fake no-op stub. */
 static int
 fo_noop(void* ctx, ...)
 {
@@ -85,7 +85,7 @@ fo_noop(void* ctx, ...)
     return 0;
 }
 
-/** @brief 组装 failover 测试用 pg_ops 虚表。 */
+/** @brief Assemble the pg_ops vtable for failover tests. */
 static pg_ops_t
 build_failover_ops(struct failover_db* db)
 {
@@ -103,7 +103,7 @@ build_failover_ops(struct failover_db* db)
     return ops;
 }
 
-/** @brief 搭建双上游 failover 测试环境。 */
+/** @brief Set up the dual-upstream failover test environment. */
 static void
 setup_failover_env(struct failover_db* db,
                    aigate_core*        ac,

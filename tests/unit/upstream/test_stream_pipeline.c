@@ -31,7 +31,7 @@ struct fdb {
     int         flush_calls;
 };
 
-/** @brief fake 查 key。 */
+/** @brief Fake key lookup. */
 static int
 fget_key(void* ctx, const char* key_hash, key_rec_t* out)
 {
@@ -51,7 +51,7 @@ fget_key(void* ctx, const char* key_hash, key_rec_t* out)
     return 1;
 }
 
-/** @brief fake 查模型。 */
+/** @brief Fake model lookup. */
 static int
 fget_model(void* ctx, const char* name, model_rec_t* out)
 {
@@ -65,7 +65,7 @@ fget_model(void* ctx, const char* name, model_rec_t* out)
     return -1;
 }
 
-/** @brief fake 用量落库。 */
+/** @brief Fake usage persistence. */
 static int
 f_flush_rows(void* ctx, const usage_row_t* rows, int n)
 {
@@ -77,7 +77,7 @@ f_flush_rows(void* ctx, const usage_row_t* rows, int n)
     return 0;
 }
 
-/** @brief fake 上游请求桩。 */
+/** @brief Fake upstream request stub. */
 static int
 f_req_stub(void* ctx, ...)
 {
@@ -85,7 +85,7 @@ f_req_stub(void* ctx, ...)
     return 0;
 }
 
-/** @brief 组装管线测试用 pg_ops 虚表。 */
+/** @brief Assemble the pg_ops vtable for pipeline tests. */
 static void
 fbuild_ops(struct fdb* db, pg_ops_t* ops)
 {
@@ -99,7 +99,7 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
         (int (*)(void*, long, time_t, usage_request_row_t*, int, int*))f_req_stub;
 }
 
-/** @brief 向内存库追加测试 key。 */
+/** @brief Append a test key to the in-memory store. */
 static void
 fkey_add(struct fdb* db, int slot, long key_id, const char* bearer, int qps, long quota)
 {
@@ -123,7 +123,7 @@ struct cap {
     int    status;
 };
 
-/** @brief 捕获响应头。 */
+/** @brief Capture response headers. */
 static int
 cap_set_header(void* impl, const char* name, const char* value)
 {
@@ -132,7 +132,7 @@ cap_set_header(void* impl, const char* name, const char* value)
     return 0;
 }
 
-/** @brief 捕获响应体。 */
+/** @brief Capture response bodies. */
 static int
 cap_write(void* impl, const void* buf, size_t len, bool fin)
 {
@@ -146,7 +146,7 @@ cap_write(void* impl, const void* buf, size_t len, bool fin)
     return 0;
 }
 
-/** @brief 由 cap 缓冲构造响应上下文。 */
+/** @brief Build a response context from the cap buffer. */
 static aigate_response_ctx
 cap_rc(struct cap* c)
 {
@@ -158,14 +158,14 @@ cap_rc(struct cap* c)
     return rc;
 }
 
-/** @brief 检查捕获头是否含某子串。 */
+/** @brief Check whether the captured headers contain a substring. */
 static int
 cap_has_header(const struct cap* c, const char* needle)
 {
     return strstr(c->hdrs, needle) != NULL;
 }
 
-/** @brief 在用量行中按 key/模型找行。 */
+/** @brief Find the row by key/model among usage rows. */
 static int
 find_row(const usage_row_t* rows, int n, long key_id, const char* model)
 {
