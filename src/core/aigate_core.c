@@ -341,14 +341,15 @@ enum {
 
 /** @brief Streaming cache accumulator: passes chunks to client while accumulating choices[0].delta.content for cache backfill. */
 typedef struct stream_cache_acc {
-    aigate_response_ctx* orig_rc;        /**< Real response context (borrowed). */
-    char*                accum_content;  /**< Accumulated full body (max 512KiB). */
-    size_t               accum_len;      /**< Accumulated byte count. */
-    size_t               accum_cap;      /**< accum_content capacity. */
-    char                 line_buf[4096]; /**< SSE line buffer. */
-    size_t               line_len;       /**< Valid line buffer length. */
-    char                 id[64];         /**< Response id (from first data line). */
-    long                 created;        /**< Response created timestamp. */
+    aigate_response_ctx* orig_rc;       /**< Real response context (borrowed). */
+    char*                accum_content; /**< Accumulated full body (max 512KiB). */
+    size_t               accum_len;     /**< Accumulated byte count. */
+    size_t               accum_cap;     /**< accum_content capacity. */
+    char*                line_buf;      /**< Growable SSE line buffer (was line_buf[4096]). */
+    size_t               line_cap;      /**< line_buf capacity. */
+    size_t               line_len;      /**< Valid line buffer length. */
+    char                 id[64];        /**< Response id (from first data line). */
+    long                 created;       /**< Response created timestamp. */
     bool overflow; /**< Over-limit/alloc failure: passthrough only, no more accumulation. */
 } stream_cache_acc_t;
 
@@ -617,6 +618,110 @@ stream_cache_acc_set_header(void* impl, const char* name, const char* value)
     return 0;
 }
 
+/** @brief Ensure the SSE line buffer holds at least `need` bytes (doubling from 4KiB, hard cap 1MiB).
+ *
+ *  On cap breach or alloc failure sets overflow (passthrough-only, line discarded) and returns false.
+ *  @return true if capacity now suffices. */
+static bool
+acc_line_reserve(stream_cache_acc_t* acc, size_t need)
+{
+    if (need <= acc->line_cap) {
+        return true;
+    }
+    size_t cap = (acc->line_cap != 0) ? acc->line_cap : 4096;
+    while (cap < need) {
+        cap *= 2;
+    }
+    if (cap > 1024 * 1024) {
+        acc->overflow = true;
+        return false;
+    }
+    char* nb = realloc(acc->line_buf, cap);
+    if (nb == NULL) {
+        acc->overflow = true;
+        return false;
+    }
+    acc->line_buf = nb;
+    acc->line_cap = cap;
+    return true;
+}
+
+/** @brief Ensure the accumulation buffer holds `extra` more bytes (doubling from 4KiB, hard cap 512KiB).
+ *
+ *  On cap breach or alloc failure sets overflow (passthrough-only) and returns false.
+ *  @return true if capacity now suffices. */
+static bool
+acc_reserve_content(stream_cache_acc_t* acc, size_t extra)
+{
+    if (acc->accum_len + extra + 1 <= acc->accum_cap) {
+        return true;
+    }
+    size_t new_cap = acc->accum_cap ? acc->accum_cap * 2 : 4096;
+    while (new_cap < acc->accum_len + extra + 1) {
+        new_cap *= 2;
+    }
+    if (new_cap > 512 * 1024) {
+        acc->overflow = true;
+        return false;
+    }
+    char* nb = realloc(acc->accum_content, new_cap);
+    if (nb == NULL) {
+        acc->overflow = true;
+        return false;
+    }
+    acc->accum_content = nb;
+    acc->accum_cap = new_cap;
+    return true;
+}
+
+/** @brief Parse one complete SSE line and fold its delta content into the stream accumulator.
+ *
+ *  Skips non-`data:` lines and `[DONE]`; captures id/created once and appends
+ *  choices[0].delta.content (growable up to 512KiB, then sets overflow).
+ *  @param acc  Stream accumulator (non-NULL).
+ *  @param line Complete NUL-terminated SSE line, without trailing newline. */
+static void
+accumulate_sse_line(stream_cache_acc_t* acc, const char* line)
+{
+    if (strncmp(line, "data: ", 6) == 0 && strcmp(line, "data: [DONE]") != 0) {
+        json_t* root = json_loads(line + 6, 0, NULL);
+        if (root != NULL && json_is_object(root)) {
+            if (acc->id[0] == '\0') {
+                json_t* jid = json_object_get(root, "id");
+                if (jid != NULL && json_is_string(jid)) {
+                    snprintf(acc->id, sizeof(acc->id), "%s", json_string_value(jid));
+                }
+            }
+            if (acc->created == 0) {
+                json_t* jc = json_object_get(root, "created");
+                if (jc != NULL && json_is_integer(jc)) {
+                    acc->created = (long)json_integer_value(jc);
+                }
+            }
+            json_t* choices = json_object_get(root, "choices");
+            if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+                json_t* c0 = json_array_get(choices, 0);
+                json_t* delta = json_object_get(c0, "delta");
+                if (delta != NULL && json_is_object(delta)) {
+                    json_t* jcnt = json_object_get(delta, "content");
+                    if (jcnt != NULL && json_is_string(jcnt)) {
+                        const char* ctext = json_string_value(jcnt);
+                        size_t      clen = strlen(ctext);
+                        if (clen > 0 && acc_reserve_content(acc, clen)) {
+                            if (!acc->overflow && acc->accum_content != NULL) {
+                                memcpy(acc->accum_content + acc->accum_len, ctext, clen);
+                                acc->accum_len += clen;
+                                acc->accum_content[acc->accum_len] = '\0';
+                            }
+                        }
+                    }
+                }
+            }
+            json_decref(root);
+        }
+    }
+}
+
 /** @brief Streaming cache accumulator's write shim: passes chunks to client while parsing SSE lines.
  *
  *  Extracts id/created and choices[0].delta.content from each `data:` JSON line
@@ -646,75 +751,18 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
         const char* nl = memchr(p, '\n', (size_t)(end - p));
         if (nl != NULL) {
             size_t seg = (size_t)(nl - p);
-            if (acc->line_len + seg < sizeof(acc->line_buf) - 1) {
+            if (acc_line_reserve(acc, acc->line_len + seg + 1)) {
                 memcpy(acc->line_buf + acc->line_len, p, seg);
                 acc->line_len += seg;
                 acc->line_buf[acc->line_len] = '\0';
 
-                if (strncmp(acc->line_buf, "data: ", 6) == 0 &&
-                    strcmp(acc->line_buf, "data: [DONE]") != 0) {
-                    json_t* root = json_loads(acc->line_buf + 6, 0, NULL);
-                    if (root != NULL && json_is_object(root)) {
-                        if (acc->id[0] == '\0') {
-                            json_t* jid = json_object_get(root, "id");
-                            if (jid != NULL && json_is_string(jid)) {
-                                snprintf(acc->id, sizeof(acc->id), "%s", json_string_value(jid));
-                            }
-                        }
-                        if (acc->created == 0) {
-                            json_t* jc = json_object_get(root, "created");
-                            if (jc != NULL && json_is_integer(jc)) {
-                                acc->created = (long)json_integer_value(jc);
-                            }
-                        }
-                        json_t* choices = json_object_get(root, "choices");
-                        if (choices != NULL && json_is_array(choices) &&
-                            json_array_size(choices) > 0) {
-                            json_t* c0 = json_array_get(choices, 0);
-                            json_t* delta = json_object_get(c0, "delta");
-                            if (delta != NULL && json_is_object(delta)) {
-                                json_t* jcnt = json_object_get(delta, "content");
-                                if (jcnt != NULL && json_is_string(jcnt)) {
-                                    const char* ctext = json_string_value(jcnt);
-                                    size_t      clen = strlen(ctext);
-                                    if (clen > 0) {
-                                        if (acc->accum_len + clen + 1 > acc->accum_cap) {
-                                            size_t new_cap =
-                                                acc->accum_cap ? acc->accum_cap * 2 : 4096;
-                                            while (new_cap < acc->accum_len + clen + 1) {
-                                                new_cap *= 2;
-                                            }
-                                            if (new_cap > 512 * 1024) {
-                                                acc->overflow = true;
-                                            } else {
-                                                char* nb = realloc(acc->accum_content, new_cap);
-                                                if (nb != NULL) {
-                                                    acc->accum_content = nb;
-                                                    acc->accum_cap = new_cap;
-                                                } else {
-                                                    acc->overflow = true;
-                                                }
-                                            }
-                                        }
-                                        if (!acc->overflow && acc->accum_content != NULL) {
-                                            memcpy(
-                                                acc->accum_content + acc->accum_len, ctext, clen);
-                                            acc->accum_len += clen;
-                                            acc->accum_content[acc->accum_len] = '\0';
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        json_decref(root);
-                    }
-                }
+                accumulate_sse_line(acc, acc->line_buf);
             }
             acc->line_len = 0;
             p = nl + 1;
         } else {
             size_t seg = (size_t)(end - p);
-            if (acc->line_len + seg < sizeof(acc->line_buf) - 1) {
+            if (acc_line_reserve(acc, acc->line_len + seg + 1)) {
                 memcpy(acc->line_buf + acc->line_len, p, seg);
                 acc->line_len += seg;
                 acc->line_buf[acc->line_len] = '\0';
@@ -1261,6 +1309,8 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                 if (acc.accum_content != NULL) {
                     free(acc.accum_content);
                 }
+                free(acc.line_buf);
+                acc.line_buf = NULL;
 
                 if (!is_failover && status >= 400) {
                     if (sbody != NULL && urc == 0) {
@@ -1339,6 +1389,8 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                 if (acc.accum_content != NULL) {
                     free(acc.accum_content);
                 }
+                free(acc.line_buf);
+                acc.line_buf = NULL;
                 json_decref(jbody);
                 key_rec_free(&krec);
                 return 0;
@@ -1413,6 +1465,8 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             if (acc.accum_content != NULL) {
                 free(acc.accum_content);
             }
+            free(acc.line_buf);
+            acc.line_buf = NULL;
             adapter->stream_bridge_free(bridge);
 
             json_decref(jbody);
@@ -3243,6 +3297,125 @@ handle_chat_sync(chat_req_t* q)
 }
 
 /** @brief Streaming chat failover loop (SSE + cache accumulation). */
+/** @brief Handle a streaming attempt that ended before headers were sent.
+ *
+ *  Records circuit-breaker failure, releases bridge/accumulator, then either surfaces
+ *  the upstream 4xx body, asks to retry the next candidate, or falls through to the
+ *  generic 502. Always consumes `sbody`.
+ *  @return -1 caller must return *ret_rv; 1 retry next candidate; 0 fall through. */
+static int
+handle_stream_preheaders(chat_req_t*               q,
+                         upstream_target_t*        target,
+                         int                       ci,
+                         const provider_adapter_t* adapter,
+                         stream_bridge_t*          bridge,
+                         stream_cache_acc_t*       acc,
+                         char*                     sbody,
+                         size_t                    slen,
+                         int                       status,
+                         int                       urc,
+                         bool                      is_failover,
+                         uint64_t                  total_lat,
+                         int*                      ret_rv)
+{
+    cb_record_failure(q->ac->cb, q->model, target->endpoint, status);
+    adapter->stream_bridge_free(bridge);
+    if (acc->accum_content != NULL) {
+        free(acc->accum_content);
+    }
+    free(acc->line_buf);
+    acc->line_buf = NULL;
+
+    if (!is_failover && status >= 400) {
+        /* Pre-headers 4xx: surface the upstream's own error body
+         * (mirrors the non-streaming passthrough). Only when a
+         * body was actually received (urc == 0). */
+        if (sbody != NULL && urc == 0) {
+            record_usage_and_event(q->ac,
+                                   q->krec.key_id,
+                                   q->model,
+                                   status,
+                                   0,
+                                   0,
+                                   0,
+                                   0,
+                                   total_lat,
+                                   target->provider,
+                                   q->guardrail_act,
+                                   0.0);
+            *ret_rv = aigate_write_json(q->rc, status, sbody, slen);
+            free(sbody);
+            return -1;
+        }
+        free(sbody);
+        return 0; /* no error body: fall through to the generic 502 */
+    }
+
+    if (ci + 1 < q->n_candidates) {
+        failover_warn("streaming failover", q->model, target, &q->candidates[ci + 1], status, urc);
+        free(sbody);
+        return 1;
+    }
+    free(sbody);
+    return 0;
+}
+
+/** @brief Store a completed SSE stream into the response cache (no-op unless cacheable).
+ *
+ *  Packs id/model/created/content/token usage into a chat.completion JSON and sets it
+ *  under q->cache_key. Pure backfill: never touches the downstream response. */
+static void
+cache_store_stream(
+    chat_req_t* q, stream_cache_acc_t* acc, long ptok, long ctok, int status, double req_cost)
+{
+    if (q->ac->rc != NULL && q->cache_key[0] != '\0' && !q->no_store && !acc->overflow &&
+        (status == 0 || status == 200) && acc->accum_content != NULL && acc->accum_len > 0) {
+        json_t* full_resp =
+            json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:s}], s:{s:i, s:i, s:i}}",
+                      "id",
+                      acc->id[0] ? acc->id : "chatcmpl-stream",
+                      "object",
+                      "chat.completion",
+                      "created",
+                      (json_int_t)(acc->created > 0 ? acc->created : time(NULL)),
+                      "model",
+                      q->model,
+                      "choices",
+                      "index",
+                      0,
+                      "message",
+                      "role",
+                      "assistant",
+                      "content",
+                      acc->accum_content,
+                      "finish_reason",
+                      "stop",
+                      "usage",
+                      "prompt_tokens",
+                      (int)ptok,
+                      "completion_tokens",
+                      (int)ctok,
+                      "total_tokens",
+                      (int)(ptok + ctok));
+        if (full_resp != NULL) {
+            char* full_json = json_dumps(full_resp, JSON_COMPACT);
+            if (full_json != NULL) {
+                response_cache_set(q->ac->rc,
+                                   q->cache_key,
+                                   q->model,
+                                   full_json,
+                                   strlen(full_json),
+                                   ptok,
+                                   ctok,
+                                   req_cost,
+                                   0);
+                free(full_json);
+            }
+            json_decref(full_resp);
+        }
+    }
+}
+
 static int
 handle_chat_stream(chat_req_t* q)
 {
@@ -3339,44 +3512,26 @@ handle_chat_stream(chat_req_t* q)
         bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
 
         if (!headers_sent) {
-            cb_record_failure(q->ac->cb, q->model, target->endpoint, status);
-            adapter->stream_bridge_free(bridge);
-            if (acc.accum_content != NULL) {
-                free(acc.accum_content);
+            int ph_rv = 0;
+            int ph = handle_stream_preheaders(q,
+                                              target,
+                                              ci,
+                                              adapter,
+                                              bridge,
+                                              &acc,
+                                              sbody,
+                                              slen,
+                                              status,
+                                              urc,
+                                              is_failover,
+                                              total_lat,
+                                              &ph_rv);
+            if (ph < 0) {
+                return ph_rv;
             }
-
-            if (!is_failover && status >= 400) {
-                /* Pre-headers 4xx: surface the upstream's own error body
-                 * (mirrors the non-streaming passthrough). Only when a
-                 * body was actually received (urc == 0). */
-                if (sbody != NULL && urc == 0) {
-                    record_usage_and_event(q->ac,
-                                           q->krec.key_id,
-                                           q->model,
-                                           status,
-                                           0,
-                                           0,
-                                           0,
-                                           0,
-                                           total_lat,
-                                           target->provider,
-                                           q->guardrail_act,
-                                           0.0);
-                    int rv = aigate_write_json(q->rc, status, sbody, slen);
-                    free(sbody);
-                    return rv;
-                }
-                free(sbody);
-                break; /* no error body: fall through to the generic 502 */
-            }
-
-            if (ci + 1 < q->n_candidates) {
-                failover_warn(
-                    "streaming failover", q->model, target, &q->candidates[ci + 1], status, urc);
-                free(sbody);
+            if (ph > 0) {
                 continue;
             }
-            free(sbody);
             break;
         }
 
@@ -3403,6 +3558,8 @@ handle_chat_stream(chat_req_t* q)
             if (acc.accum_content != NULL) {
                 free(acc.accum_content);
             }
+            free(acc.line_buf);
+            acc.line_buf = NULL;
             return 0;
         }
 
@@ -3427,55 +3584,12 @@ handle_chat_stream(chat_req_t* q)
         }
         rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
 
-        if (q->ac->rc != NULL && q->cache_key[0] != '\0' && !q->no_store && !acc.overflow &&
-            (status == 0 || status == 200) && acc.accum_content != NULL && acc.accum_len > 0) {
-            json_t* full_resp =
-                json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:s}], s:{s:i, s:i, s:i}}",
-                          "id",
-                          acc.id[0] ? acc.id : "chatcmpl-stream",
-                          "object",
-                          "chat.completion",
-                          "created",
-                          (json_int_t)(acc.created > 0 ? acc.created : time(NULL)),
-                          "model",
-                          q->model,
-                          "choices",
-                          "index",
-                          0,
-                          "message",
-                          "role",
-                          "assistant",
-                          "content",
-                          acc.accum_content,
-                          "finish_reason",
-                          "stop",
-                          "usage",
-                          "prompt_tokens",
-                          (int)ptok,
-                          "completion_tokens",
-                          (int)ctok,
-                          "total_tokens",
-                          (int)(ptok + ctok));
-            if (full_resp != NULL) {
-                char* full_json = json_dumps(full_resp, JSON_COMPACT);
-                if (full_json != NULL) {
-                    response_cache_set(q->ac->rc,
-                                       q->cache_key,
-                                       q->model,
-                                       full_json,
-                                       strlen(full_json),
-                                       ptok,
-                                       ctok,
-                                       req_cost,
-                                       0);
-                    free(full_json);
-                }
-                json_decref(full_resp);
-            }
-        }
+        cache_store_stream(q, &acc, ptok, ctok, status, req_cost);
         if (acc.accum_content != NULL) {
             free(acc.accum_content);
         }
+        free(acc.line_buf);
+        acc.line_buf = NULL;
         adapter->stream_bridge_free(bridge);
 
         return 0;

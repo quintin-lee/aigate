@@ -2681,6 +2681,64 @@ def test_response_cache_streaming_dual_replay(gateway):
     assert len(data3["choices"]) > 0
 
 
+def test_response_cache_stream_long_line(gateway):
+    """Test over-4K single SSE line is accumulated without truncation (growable line_buf)."""
+    import uuid
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    mock_url = gateway["mock_upstream"]
+
+    admin_headers = {"Authorization": f"Bearer {admin_token}", "Content-Type": "application/json"}
+    uid = uuid.uuid4().hex[:6]
+    model_name = f"long-line-model-{uid}"
+
+    # Register model
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={"name": model_name, "provider": "openai", "endpoint": mock_url},
+    )
+    assert resp.status_code == 201
+
+    # Create client key
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={"name": f"long-line-client-{uid}", "allowed_models": [model_name]},
+    )
+    assert resp.status_code == 201
+    api_key = resp.json()["plaintext"]
+    client_headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+
+    prompt = f"long line probe LONG_LINE_6K (uid={uid})"
+    stream_body = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": True,
+    }
+    non_stream_body = {
+        "model": model_name,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": False,
+    }
+
+    # 1. streaming MISS，累积含 6K 单行
+    r1 = requests.post(f"{base_url}/v1/chat/completions", headers=client_headers, json=stream_body, stream=True)
+    assert r1.status_code == 200
+    assert r1.headers.get("X-Cache") == "MISS"
+    lines1 = [line.decode("utf-8") for line in r1.iter_lines() if line]
+    assert any("data: [DONE]" in l for l in lines1)
+
+    # 2. 非流式同 prompt HIT：缓存体必须含完整 6K 内容（修前此处因截断失败）
+    r2 = requests.post(f"{base_url}/v1/chat/completions", headers=client_headers, json=non_stream_body)
+    assert r2.status_code == 200
+    assert r2.headers.get("X-Cache") == "HIT"
+    data2 = r2.json()
+    content = data2["choices"][0]["message"]["content"]
+    assert len(content) >= 6000
+    assert "X" * 6000 in content
+
+
 def test_admin_cache_stats_and_purge(gateway):
     """Test GET /admin/v1/cache/stats and POST /admin/v1/cache/purge in end-to-end gateway."""
     base_url = gateway["base_url"]

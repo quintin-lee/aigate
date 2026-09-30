@@ -359,6 +359,22 @@ class MockUpstreamHandler(http.server.BaseHTTPRequestHandler):
                     self.wfile.flush()
                     return
                 else:
+                    msgs = body_json.get("messages", []) if body_json else []
+                    prompt_text = " ".join(
+                        m.get("content", "") for m in msgs if isinstance(m, dict)
+                    )
+                    if "LONG_LINE_6K" in prompt_text:
+                        big = "X" * 6000
+                        c_big = {
+                            "id": "chatcmpl-stream",
+                            "object": "chat.completion.chunk",
+                            "created": 1726700000,
+                            "model": req_model,
+                            "choices": [{"index": 0, "delta": {"content": big}, "finish_reason": None}],
+                        }
+                        self.wfile.write(f"data: {json.dumps(c_big)}\n\n".encode("utf-8"))
+                        self.wfile.flush()
+                        time.sleep(0.01)
                     # Chunk 1
                     c1 = {
                         "id": "chatcmpl-stream",
