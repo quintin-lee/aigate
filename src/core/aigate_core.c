@@ -1,6 +1,7 @@
 /** @file aigate_core.c
  *  @brief Pipeline implementation (see aigate_core.h). */
 #include "aigate_core.h"
+#include "aigate_core_internal.h"
 #include "aigate_log.h"
 #include "metrics.h"
 #include "model_router.h"
@@ -21,7 +22,7 @@
 
 /** @brief Current monotonic time in nanoseconds, for latency measurement (immune to system clock jumps).
  *  @return Nanoseconds since CLOCK_MONOTONIC epoch. */
-static uint64_t
+uint64_t
 mono_ns(void)
 {
     struct timespec ts;
@@ -62,7 +63,7 @@ aigate_core_reload_guardrails(aigate_core* ac)
  *  @param prompt     Total input tokens; @param completion output tokens.
  *  @param cached     Cache-hit tokens among input, priced at cached_mtok_discount (default 1.0).
  *  @return Cost = (unhit_input*in_price + cached_input*in_price*discount + output*out_price) / 1e6; returns 0.0 if pricing missing/invalid. */
-static double
+double
 calc_req_cost(const model_rec_t* route, long prompt, long completion, long cached)
 {
     if (route == NULL || route->pricing_json[0] == '\0') {
@@ -97,7 +98,7 @@ calc_req_cost(const model_rec_t* route, long prompt, long completion, long cache
 
 /** @brief Record one request: usage meter (um_record_full) + request event (event_bus_publish_request).
  *  @param ac  core instance; returns immediately if NULL. Remaining params: key/model/status/token counts/latency/cost. */
-static void
+void
 record_usage_and_event(aigate_core* ac,
                        long         key_id,
                        const char*  model,
@@ -324,58 +325,8 @@ aigate_write_gemini_error(aigate_response_ctx* rc,
     return rv;
 }
 
-/* pipeline exit codes */
-enum {
-    PIPE_OK = 0,
-    PIPE_AUTH = 401,
-    PIPE_FORBIDDEN = 403,
-    PIPE_RATE = 429,
-    PIPE_MODEL = 404,
-    PIPE_UPSTREAM = 502,
-    PIPE_UNSUPPORTED = 501,
-};
-
-/* ========================================================================= */
-/* Streaming SSE Cache Replay & Accumulator Engine                          */
-/* ========================================================================= */
-
-/** @brief Streaming cache accumulator: passes chunks to client while accumulating choices[0].delta.content for cache backfill. */
-typedef struct stream_cache_acc {
-    aigate_response_ctx* orig_rc;       /**< Real response context (borrowed). */
-    char*                accum_content; /**< Accumulated full body (max 512KiB). */
-    size_t               accum_len;     /**< Accumulated byte count. */
-    size_t               accum_cap;     /**< accum_content capacity. */
-    char*                line_buf;      /**< Growable SSE line buffer (was line_buf[4096]). */
-    size_t               line_cap;      /**< line_buf capacity. */
-    size_t               line_len;      /**< Valid line buffer length. */
-    char                 id[64];        /**< Response id (from first data line). */
-    long                 created;       /**< Response created timestamp. */
-    bool overflow; /**< Over-limit/alloc failure: passthrough only, no more accumulation. */
-} stream_cache_acc_t;
-
-/** @brief Chat pipeline per-request context: owns jbody/krec/sanitized_body. */
-typedef struct {
-    aigate_core*         ac;
-    aigate_request_ctx*  rq;
-    aigate_response_ctx* rc;
-    key_rec_t            krec;
-    json_t*              jbody;
-    const char*          model;
-    model_rec_t          route;
-    upstream_target_t    candidates[MAX_TARGETS_PER_MODEL];
-    int                  n_candidates;
-    char*                sanitized_body;
-    size_t               sanitized_len;
-    const void*          eff_body;
-    size_t               eff_len;
-    char                 guardrail_act[16];
-    char                 cache_key[65];
-    bool                 bypass_cache;
-    bool                 no_store;
-} chat_req_t;
-
 /** @brief Release owned request resources (mirrors the historical triple-cleanup). */
-static void
+void
 chat_req_cleanup(chat_req_t* q)
 {
     if (q->jbody != NULL) {
@@ -389,7 +340,7 @@ chat_req_cleanup(chat_req_t* q)
 
 /** @brief Auth → QPS → daily quota → monthly budget gates.
  *  @return 0 when all gates pass; non-zero when an error was already written. */
-static int
+int
 gate_request(chat_req_t* q)
 {
     aigate_core*         ac = q->ac;
@@ -465,7 +416,7 @@ gate_request(chat_req_t* q)
 }
 
 /** @brief GET /v1/models handler. @return 1 when the path was handled, 0 to continue. */
-static int
+int
 handle_models_list(chat_req_t* q)
 {
     aigate_request_ctx*  rq = q->rq;
@@ -527,7 +478,7 @@ handle_models_list(chat_req_t* q)
 
 /** @brief Body model parse → allowlist → router resolve → candidates → guardrails.
  *  @return 0 on success with q filled; non-zero when an error was already written. */
-static int
+int
 resolve_chat_target(chat_req_t* q)
 {
     aigate_core*         ac = q->ac;
@@ -605,7 +556,7 @@ resolve_chat_target(chat_req_t* q)
 
 /** @brief Streaming cache accumulator's set_header shim: forces status=200 then passes to real response.
  *  @return Downstream set_header return; 0 if no downstream. */
-static int
+int
 stream_cache_acc_set_header(void* impl, const char* name, const char* value)
 {
     stream_cache_acc_t* acc = (stream_cache_acc_t*)impl;
@@ -728,7 +679,7 @@ accumulate_sse_line(stream_cache_acc_t* acc, const char* line)
  *  and appends to accumulation buffer (max 512KiB; sets overflow on limit/alloc failure,
  *  then passthrough only). Used for cache backfill.
  *  @return Downstream write return; -1 if acc or orig_rc is NULL. */
-static int
+int
 stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
 {
     stream_cache_acc_t* acc = (stream_cache_acc_t*)impl;
@@ -777,7 +728,7 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
 
 /** @brief Replay a cached hit as SSE: writes X-Cache:HIT/Age headers and pushes OpenAI-format chunks.
  *  @return 0 on success (also reserves key quota); non-zero on invalid cache body etc., caller falls back to upstream. */
-static int
+int
 cache_stream_replay(aigate_core*         ac,
                     aigate_response_ctx* rc,
                     cache_entry_t*       ce,
@@ -978,7 +929,7 @@ cache_stream_replay(aigate_core*         ac,
 
 /** @brief OpenAI /responses end-to-end pipeline: auth → rate limit → daily quota → guardrails → cache → upstream → write back.
  *  @return Always 0; all errors written directly to @p rc (OpenAI-shaped error body). */
-static int
+int
 handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)
 {
     /* --- auth --- */
@@ -1707,7 +1658,7 @@ anthropic_stream_chunk_cb(void* user_data, const void* chunk, size_t len)
 
 /** @brief Anthropic /v1/messages end-to-end pipeline (stages same as handle_responses, error body is Anthropic-shaped).
  *  @return Always 0; errors written directly to @p rc. */
-static int
+int
 handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)
 {
     /* --- auth --- */
@@ -2300,7 +2251,7 @@ gemini_stream_chunk_cb(void* user_data, const void* chunk, size_t len)
 
 /** @brief Gemini generate end-to-end pipeline (stages same as handle_responses, errors are Google RPC-shaped status).
  *  @return Always 0; errors written directly to @p rc. */
-static int
+int
 handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)
 {
     /* --- auth --- */
@@ -2769,7 +2720,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 }
 
 /** @brief Fill a per-target route copy from base route + upstream target. */
-static void
+void
 fill_cur_route(const model_rec_t* route, const upstream_target_t* t, model_rec_t* out)
 {
     *out = *route;
@@ -2785,7 +2736,7 @@ fill_cur_route(const model_rec_t* route, const upstream_target_t* t, model_rec_t
 }
 
 /** @brief Post-success settlement: usage event + budget record + daily token reserve. */
-static void
+void
 settle_success(chat_req_t* q,
                int         status,
                long        ptok,
@@ -2816,7 +2767,7 @@ settle_success(chat_req_t* q,
 }
 
 /** @brief Failover warning log + failover metric. */
-static void
+void
 failover_warn(const char*              label,
               const char*              model,
               const upstream_target_t* from,
@@ -2837,7 +2788,7 @@ failover_warn(const char*              label,
 }
 
 /** @brief /v1/embeddings failover loop. @return 1 when the path was handled. */
-static int
+int
 handle_embeddings(chat_req_t* q)
 {
     if (q->rq->path == NULL || strcmp(q->rq->path, "/v1/embeddings") != 0) {
@@ -3015,7 +2966,7 @@ handle_embeddings(chat_req_t* q)
  *  @param[out] is_streaming set from body "stream" flag.
  *  @return 1 when the response was already written (HIT or unsupported);
  *          0 to continue to upstream; <0 never (reserved). */
-static int
+int
 prepare_chat_cache(chat_req_t* q, bool* is_streaming)
 {
     int n_chat_supported = 0;
@@ -3106,7 +3057,7 @@ prepare_chat_cache(chat_req_t* q, bool* is_streaming)
 }
 
 /** @brief /v1/chat/completions non-streaming failover loop. @return transport rc. */
-static int
+int
 handle_chat_sync(chat_req_t* q)
 {
     /* --- upstream non-streaming call with failover loop --- */
@@ -3364,7 +3315,7 @@ handle_stream_preheaders(chat_req_t*               q,
  *
  *  Packs id/model/created/content/token usage into a chat.completion JSON and sets it
  *  under q->cache_key. Pure backfill: never touches the downstream response. */
-static void
+void
 cache_store_stream(
     chat_req_t* q, stream_cache_acc_t* acc, long ptok, long ctok, int status, double req_cost)
 {
@@ -3416,7 +3367,7 @@ cache_store_stream(
     }
 }
 
-static int
+int
 handle_chat_stream(chat_req_t* q)
 {
     uint64_t    total_lat = 0;
