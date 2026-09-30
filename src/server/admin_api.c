@@ -474,6 +474,44 @@ gen_key_plaintext(char plain[KEY_PLAIN_CAP], char hash_out[KEY_HASH_CAP])
     return 0;
 }
 
+static int
+parse_prompt_mode(const json_t* v, int default_mode)
+{
+    if (v == NULL) {
+        return default_mode;
+    }
+    if (json_is_string(v)) {
+        const char* s = json_string_value(v);
+        if (strcmp(s, "append") == 0) {
+            return 1;
+        }
+        if (strcmp(s, "override") == 0) {
+            return 2;
+        }
+        return 0; /* prepend */
+    }
+    if (json_is_integer(v)) {
+        int val = (int)json_integer_value(v);
+        if (val >= 0 && val <= 2) {
+            return val;
+        }
+    }
+    return default_mode;
+}
+
+static const char*
+prompt_mode_str(int mode)
+{
+    switch (mode) {
+    case 1:
+        return "append";
+    case 2:
+        return "override";
+    default:
+        return "prepend";
+    }
+}
+
 /** @brief POST /admin/v1/keys: create an API key, plaintext returned only this once (only the hash is stored).
  *  @return 0 with status/body filled; -1 only on JSON serialization failure. */
 static int
@@ -564,6 +602,14 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     if (jtok_b != NULL && json_is_integer(jtok_b)) {
         k.monthly_token_budget = json_integer_value(jtok_b);
     }
+    json_t* jspr = json_object_get(jbody, "system_prompt");
+    if (jspr != NULL && json_is_string(jspr)) {
+        snprintf(k.system_prompt, sizeof k.system_prompt, "%s", json_string_value(jspr));
+    }
+    json_t* jpm = json_object_get(jbody, "prompt_mode");
+    if (jpm != NULL) {
+        k.prompt_mode = parse_prompt_mode(jpm, 0);
+    }
 
     char plain[48], hash[65];
     if (gen_key_plaintext(plain, hash) != 0) {
@@ -597,6 +643,10 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     json_object_set_new(out, "guardrails_enabled", json_boolean(k.guardrails_enabled));
     json_object_set_new(out, "monthly_cost_budget", json_real(k.monthly_cost_budget));
     json_object_set_new(out, "monthly_token_budget", json_integer(k.monthly_token_budget));
+    json_object_set_new(out,
+                        "system_prompt",
+                        k.system_prompt[0] != '\0' ? json_string(k.system_prompt) : json_null());
+    json_object_set_new(out, "prompt_mode", json_string(prompt_mode_str(k.prompt_mode)));
     return finish_json(status, body, len, 201, out);
 }
 
@@ -649,6 +699,11 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* qu
         json_object_set_new(o, "guardrails_enabled", json_boolean(recs[i].guardrails_enabled));
         json_object_set_new(o, "monthly_cost_budget", json_real(recs[i].monthly_cost_budget));
         json_object_set_new(o, "monthly_token_budget", json_integer(recs[i].monthly_token_budget));
+        json_object_set_new(o,
+                            "system_prompt",
+                            recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt)
+                                                             : json_null());
+        json_object_set_new(o, "prompt_mode", json_string(prompt_mode_str(recs[i].prompt_mode)));
         json_array_append_new(arr, o);
         key_rec_free(&recs[i]);
     }
@@ -820,6 +875,26 @@ key_patch(
             return finish_error(
                 status, body, len, 400, "bad_request", "monthly_token_budget must be integer");
         }
+    }
+    v = json_object_get(jbody, "system_prompt");
+    if (v != NULL) {
+        if (json_is_string(v)) {
+            snprintf(k.system_prompt, sizeof k.system_prompt, "%s", json_string_value(v));
+            mask |= KMASK_SYSTEM_PROMPT;
+        } else if (json_is_null(v)) {
+            k.system_prompt[0] = '\0';
+            mask |= KMASK_SYSTEM_PROMPT;
+        } else {
+            key_rec_free(&k);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "system_prompt must be string or null");
+        }
+    }
+    v = json_object_get(jbody, "prompt_mode");
+    if (v != NULL) {
+        k.prompt_mode = parse_prompt_mode(v, 0);
+        mask |= KMASK_PROMPT_MODE;
     }
     json_decref(jbody);
 
@@ -1002,6 +1077,14 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     } else {
         snprintf(m.pricing_json, sizeof m.pricing_json, "{}");
     }
+    json_t* jspr = json_object_get(jbody, "system_prompt");
+    if (jspr != NULL && json_is_string(jspr)) {
+        snprintf(m.system_prompt, sizeof m.system_prompt, "%s", json_string_value(jspr));
+    }
+    json_t* jpm = json_object_get(jbody, "prompt_mode");
+    if (jpm != NULL) {
+        m.prompt_mode = parse_prompt_mode(jpm, 0);
+    }
     m.enabled = 1;
 
     int rc = pg_store_ops(adm->ps)->create_key != NULL
@@ -1016,6 +1099,10 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     json_t* out = json_object();
     json_object_set_new(out, "name", json_string(m.name));
     json_object_set_new(out, "created", json_true());
+    json_object_set_new(out,
+                        "system_prompt",
+                        m.system_prompt[0] != '\0' ? json_string(m.system_prompt) : json_null());
+    json_object_set_new(out, "prompt_mode", json_string(prompt_mode_str(m.prompt_mode)));
     return finish_json(status, body, len, 201, out);
 }
 
@@ -1092,6 +1179,11 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
             json_array_append_new(tgts_arr, to);
         }
         json_object_set_new(o, "targets", tgts_arr);
+        json_object_set_new(o,
+                            "system_prompt",
+                            recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt)
+                                                             : json_null());
+        json_object_set_new(o, "prompt_mode", json_string(prompt_mode_str(recs[i].prompt_mode)));
 
         json_array_append_new(arr, o);
         model_rec_free(&recs[i]);
@@ -1201,6 +1293,26 @@ model_patch(
         snprintf(m.pricing_json, sizeof m.pricing_json, "%s", packed);
         free(packed);
         mask |= MMASK_PRICING;
+    }
+    v = json_object_get(jbody, "system_prompt");
+    if (v != NULL) {
+        if (json_is_string(v)) {
+            snprintf(m.system_prompt, sizeof m.system_prompt, "%s", json_string_value(v));
+            mask |= MMASK_SYSTEM_PROMPT;
+        } else if (json_is_null(v)) {
+            m.system_prompt[0] = '\0';
+            mask |= MMASK_SYSTEM_PROMPT;
+        } else {
+            model_rec_free(&existing);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "system_prompt must be string or null");
+        }
+    }
+    v = json_object_get(jbody, "prompt_mode");
+    if (v != NULL) {
+        m.prompt_mode = parse_prompt_mode(v, 0);
+        mask |= MMASK_PROMPT_MODE;
     }
     json_decref(jbody);
 

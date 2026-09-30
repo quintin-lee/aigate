@@ -3310,3 +3310,141 @@ test_admin_cache_stats_and_purge(void)
     response_cache_free(rc);
     teardown_admin(ps, &core, &db);
 }
+
+TEST_CASE(test_admin_prompt_template_crud)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int          status = 0;
+    char*        body = NULL;
+    size_t       len = 0;
+    json_error_t jerr;
+
+    /* 1. Create model with system_prompt and prompt_mode */
+    const char* m_req =
+        "{\"name\":\"tmpl-model\",\"endpoint\":\"http://127.0.0.1:8000\",\"system_prompt\":\"Sys "
+        "${model}\",\"prompt_mode\":\"append\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/models",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   m_req,
+                   strlen(m_req),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "create model with prompt template -> 201");
+    json_t* mj = json_loads(body, 0, &jerr);
+    TEST_ASSERT(mj != NULL, "parse model create response");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(mj, "system_prompt")), "Sys ${model}") ==
+                    0,
+                "model system_prompt returned");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(mj, "prompt_mode")), "append") == 0,
+                "model prompt_mode returned");
+    json_decref(mj);
+    free(body);
+
+    /* 2. List models and verify */
+    admin_dispatch(
+        &adm, "/admin/v1/models", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(status == 200, "list models -> 200");
+    json_t* ml = json_loads(body, 0, &jerr);
+    TEST_ASSERT(ml != NULL, "parse model list response");
+    json_t* marr = json_object_get(ml, "models");
+    TEST_ASSERT(json_is_array(marr), "models is array");
+    int found_m = 0;
+    for (size_t i = 0; i < json_array_size(marr); i++) {
+        json_t* item = json_array_get(marr, i);
+        if (strcmp(json_string_value(json_object_get(item, "name")), "tmpl-model") == 0) {
+            found_m = 1;
+            TEST_ASSERT(strcmp(json_string_value(json_object_get(item, "system_prompt")),
+                               "Sys ${model}") == 0,
+                        "list system_prompt match");
+            TEST_ASSERT(strcmp(json_string_value(json_object_get(item, "prompt_mode")), "append") ==
+                            0,
+                        "list prompt_mode match");
+        }
+    }
+    TEST_ASSERT(found_m, "tmpl-model found in list");
+    json_decref(ml);
+    free(body);
+
+    /* 3. Patch model */
+    const char* m_patch = "{\"system_prompt\":\"Overridden\",\"prompt_mode\":\"override\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/models/tmpl-model",
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   m_patch,
+                   strlen(m_patch),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "patch model -> 200");
+    free(body);
+
+    model_rec_t probed_m;
+    TEST_ASSERT(fake_get_model(&db, "tmpl-model", &probed_m) == 0, "probed model ok");
+    TEST_ASSERT(strcmp(probed_m.system_prompt, "Overridden") == 0, "patched system_prompt in db");
+    TEST_ASSERT(probed_m.prompt_mode == 2, "patched prompt_mode in db");
+
+    /* 4. Create key with system_prompt and prompt_mode */
+    const char* k_req =
+        "{\"name\":\"tmpl-key\",\"system_prompt\":\"Key prompt for ${key_name}\",\"prompt_mode\":"
+        "\"prepend\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/keys",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   k_req,
+                   strlen(k_req),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "create key with prompt template -> 201");
+    json_t* kj = json_loads(body, 0, &jerr);
+    TEST_ASSERT(kj != NULL, "parse key create response");
+    long kid = (long)json_integer_value(json_object_get(kj, "key_id"));
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(kj, "system_prompt")),
+                       "Key prompt for ${key_name}") == 0,
+                "key system_prompt returned");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(kj, "prompt_mode")), "prepend") == 0,
+                "key prompt_mode returned");
+    json_decref(kj);
+    free(body);
+
+    /* 5. Patch key */
+    char k_patch_buf[256];
+    snprintf(k_patch_buf, sizeof k_patch_buf, "/admin/v1/keys/%ld", kid);
+    const char* k_patch = "{\"system_prompt\":\"Updated key prompt\",\"prompt_mode\":\"append\"}";
+    admin_dispatch(&adm,
+                   k_patch_buf,
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   k_patch,
+                   strlen(k_patch),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "patch key -> 200");
+    free(body);
+
+    key_rec_t probed_k;
+    TEST_ASSERT(fake_get_key_by_id(&db, kid, &probed_k) == 0, "probed key ok");
+    TEST_ASSERT(strcmp(probed_k.system_prompt, "Updated key prompt") == 0,
+                "patched key system_prompt in db");
+    TEST_ASSERT(probed_k.prompt_mode == 1, "patched key prompt_mode in db");
+    key_rec_free(&probed_k);
+
+    teardown_admin(ps, &core, &db);
+}
