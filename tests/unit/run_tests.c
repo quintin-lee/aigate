@@ -464,6 +464,9 @@ main(void)
     extern void test_admin_cache_stats_and_purge(void);
     test_register("admin_cache_stats_and_purge", test_admin_cache_stats_and_purge);
 
+    extern void test_prompt_template_suite(void);
+    test_register("prompt_template_suite", test_prompt_template_suite);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
