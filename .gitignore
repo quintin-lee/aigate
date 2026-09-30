@@ -6,6 +6,7 @@ build/
 .codegraph/
 .cursor/
 .omp/
+.omo/
 Testing/
 docs/.superpowers/
 __pycache__/
