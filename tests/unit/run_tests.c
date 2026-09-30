@@ -388,6 +388,13 @@ main(void)
     test_register("gemini_multi_tool_calls_response", test_gemini_multi_tool_calls_response);
     test_register("gemini_sse_function_call_stream", test_gemini_sse_function_call_stream);
 
+    extern void test_gemini_vision_single_image(void);
+    extern void test_gemini_vision_unknown_mime_fallback(void);
+    extern void test_gemini_vision_text_only_string(void);
+    test_register("gemini_vision_single_image", test_gemini_vision_single_image);
+    test_register("gemini_vision_unknown_mime_fallback", test_gemini_vision_unknown_mime_fallback);
+    test_register("gemini_vision_text_only_string", test_gemini_vision_text_only_string);
+
     extern void test_openai_embeddings_build(void);
     extern void test_openai_embeddings_parse(void);
     extern void test_gemini_embeddings_build_single(void);

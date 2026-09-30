@@ -10,7 +10,36 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
+
+/** @brief Infer image MIME type from URL path extension. Defaults to image/jpeg. */
+static const char*
+gemini_infer_mime_type(const char* url)
+{
+    if (!url) {
+        return "image/jpeg";
+    }
+    const char* q = strchr(url, '?');
+    size_t      path_len = q ? (size_t)(q - url) : strlen(url);
+    if (path_len >= 4 && strncasecmp(url + path_len - 4, ".png", 4) == 0) {
+        return "image/png";
+    }
+    if (path_len >= 5 && strncasecmp(url + path_len - 5, ".jpeg", 5) == 0) {
+        return "image/jpeg";
+    }
+    if (path_len >= 4 && strncasecmp(url + path_len - 4, ".jpg", 4) == 0) {
+        return "image/jpeg";
+    }
+    if (path_len >= 5 && strncasecmp(url + path_len - 5, ".webp", 5) == 0) {
+        return "image/webp";
+    }
+    if (path_len >= 4 && strncasecmp(url + path_len - 4, ".gif", 4) == 0) {
+        return "image/gif";
+    }
+    AIGATE_LOG_WARN("gemini_infer_mime_type: cannot infer from url, defaulting to image/jpeg");
+    return "image/jpeg";
+}
 
 int
 provider_gemini_supports(const char* provider)
@@ -228,13 +257,52 @@ provider_gemini_build(const model_rec_t* route,
                     json_object_set_new(entry, "parts", parts);
                     json_array_append_new(contents, entry);
                 } else {
-                    /* plain text message */
+                    /* user or assistant plain message / multimodal parts */
                     json_t* entry = json_object();
                     json_object_set_new(entry, "role", json_string(gemini_role));
                     json_t* parts = json_array();
-                    json_t* part = json_object();
-                    json_object_set_new(part, "text", json_string(plain_content));
-                    json_array_append_new(parts, part);
+
+                    if (jcontent && json_is_array(jcontent)) {
+                        size_t  pi;
+                        json_t* p;
+                        json_array_foreach(jcontent, pi, p)
+                        {
+                            json_t*     jtype = json_object_get(p, "type");
+                            const char* ptype =
+                                (jtype && json_is_string(jtype)) ? json_string_value(jtype) : "";
+                            if (strcmp(ptype, "text") == 0) {
+                                json_t* jt = json_object_get(p, "text");
+                                if (jt && json_is_string(jt)) {
+                                    json_t* tp = json_object();
+                                    json_object_set_new(
+                                        tp, "text", json_string(json_string_value(jt)));
+                                    json_array_append_new(parts, tp);
+                                }
+                            } else if (strcmp(ptype, "image_url") == 0) {
+                                json_t* jiu = json_object_get(p, "image_url");
+                                json_t* ju = jiu ? json_object_get(jiu, "url") : NULL;
+                                if (ju && json_is_string(ju)) {
+                                    const char* u = json_string_value(ju);
+                                    const char* mime = gemini_infer_mime_type(u);
+                                    json_t*     fd = json_object();
+                                    json_object_set_new(fd, "fileUri", json_string(u));
+                                    json_object_set_new(fd, "mimeType", json_string(mime));
+                                    json_t* fdp = json_object();
+                                    json_object_set_new(fdp, "fileData", fd);
+                                    json_array_append_new(parts, fdp);
+                                } else {
+                                    AIGATE_LOG_WARN("image_url part missing url");
+                                }
+                            } else {
+                                AIGATE_LOG_WARN("gemini: unsupported content part type '%s'",
+                                                ptype);
+                            }
+                        }
+                    } else {
+                        json_t* part = json_object();
+                        json_object_set_new(part, "text", json_string(plain_content));
+                        json_array_append_new(parts, part);
+                    }
                     json_object_set_new(entry, "parts", parts);
                     json_array_append_new(contents, entry);
                 }
