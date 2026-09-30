@@ -33,7 +33,7 @@
 - Create: `src/core/aigate_core_internal.h`
 - Modify: `src/core/aigate_core.c:20-80, 270-380, 600-800, 2770-2840, 3360-3420`
 
-- [ ] **Step 1: Create `src/core/aigate_core_internal.h`**
+- [x] **Step 1: Create `src/core/aigate_core_internal.h`**
 
 Create `src/core/aigate_core_internal.h`:
 
@@ -155,7 +155,7 @@ int handle_chat_stream(chat_req_t* q);
 #endif /* AIGATE_CORE_INTERNAL_H */
 ```
 
-- [ ] **Step 2: Include `aigate_core_internal.h` in `src/core/aigate_core.c` and make shared helpers non-static**
+- [x] **Step 2: Include `aigate_core_internal.h` in `src/core/aigate_core.c` and make shared helpers non-static**
 
 In `src/core/aigate_core.c`:
 1. Add `#include "aigate_core_internal.h"` at top.
@@ -175,7 +175,7 @@ In `src/core/aigate_core.c`:
    - `cache_stream_replay`
    - `cache_store_stream`
 
-- [ ] **Step 3: Compile and run test suite to verify no breakage**
+- [x] **Step 3: Compile and run test suite to verify no breakage**
 
 Run:
 ```bash
@@ -184,7 +184,7 @@ cd .build && ctest --output-on-failure
 ```
 Expected: 100% tests passed (197/197 passed).
 
-- [ ] **Step 4: Commit Task 1**
+- [x] **Step 4: Commit Task 1**
 
 ```bash
 git add src/core/aigate_core_internal.h src/core/aigate_core.c
@@ -199,7 +199,7 @@ git commit -m "refactor(core): ♻️ introduce aigate_core_internal.h shared he
 - Create: `src/core/pipeline_embeddings.c`
 - Modify: `src/core/aigate_core.c`
 
-- [ ] **Step 1: Create `src/core/pipeline_embeddings.c`**
+- [x] **Step 1: Create `src/core/pipeline_embeddings.c`**
 
 Create `src/core/pipeline_embeddings.c` containing the embeddings pipeline logic extracted from `aigate_core.c`:
 
@@ -382,11 +382,11 @@ handle_embeddings(chat_req_t* q)
 }
 ```
 
-- [ ] **Step 2: Remove `handle_embeddings` from `src/core/aigate_core.c`**
+- [x] **Step 2: Remove `handle_embeddings` from `src/core/aigate_core.c`**
 
 Delete the `handle_embeddings` definition (lines ~2841-3018) from `src/core/aigate_core.c`.
 
-- [ ] **Step 3: Compile and run test suite**
+- [x] **Step 3: Compile and run test suite**
 
 Run:
 ```bash
@@ -395,7 +395,7 @@ cd .build && ctest --output-on-failure
 ```
 Expected: 100% tests passed.
 
-- [ ] **Step 4: Commit Task 2**
+- [x] **Step 4: Commit Task 2**
 
 ```bash
 git add src/core/pipeline_embeddings.c src/core/aigate_core.c
@@ -410,7 +410,7 @@ git commit -m "refactor(core): ♻️ extract pipeline_embeddings.c"
 - Create: `src/core/pipeline_native.c`
 - Modify: `src/core/aigate_core.c`
 
-- [ ] **Step 1: Create `src/core/pipeline_native.c`**
+- [x] **Step 1: Create `src/core/pipeline_native.c`**
 
 Create `src/core/pipeline_native.c` containing:
 - `build_anthropic_url`, `anthropic_stream_ctx_t`, `anthropic_stream_chunk_cb`, `handle_anthropic_messages`
@@ -1081,11 +1081,11 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 }
 ```
 
-- [ ] **Step 2: Remove native Anthropic and Gemini functions from `src/core/aigate_core.c`**
+- [x] **Step 2: Remove native Anthropic and Gemini functions from `src/core/aigate_core.c`**
 
 Delete lines ~1651 to 2770 from `src/core/aigate_core.c`.
 
-- [ ] **Step 3: Compile and run test suite**
+- [x] **Step 3: Compile and run test suite**
 
 Run:
 ```bash
@@ -1094,7 +1094,7 @@ cd .build && ctest --output-on-failure
 ```
 Expected: 100% tests passed.
 
-- [ ] **Step 4: Commit Task 3**
+- [x] **Step 4: Commit Task 3**
 
 ```bash
 git add src/core/pipeline_native.c src/core/aigate_core.c
@@ -1109,7 +1109,7 @@ git commit -m "refactor(core): ♻️ extract pipeline_native.c"
 - Create: `src/core/pipeline_responses.c`
 - Modify: `src/core/aigate_core.c`
 
-- [ ] **Step 1: Create `src/core/pipeline_responses.c`**
+- [x] **Step 1: Create `src/core/pipeline_responses.c`**
 
 Extract `handle_responses` from `src/core/aigate_core.c` into `src/core/pipeline_responses.c`:
 
@@ -1553,11 +1553,11 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 }
 ```
 
-- [ ] **Step 2: Remove `handle_responses` from `src/core/aigate_core.c`**
+- [x] **Step 2: Remove `handle_responses` from `src/core/aigate_core.c`**
 
 Delete lines ~982 to 1650 from `src/core/aigate_core.c`.
 
-- [ ] **Step 3: Compile and run test suite**
+- [x] **Step 3: Compile and run test suite**
 
 Run:
 ```bash
@@ -1566,7 +1566,7 @@ cd .build && ctest --output-on-failure
 ```
 Expected: 100% tests passed.
 
-- [ ] **Step 4: Commit Task 4**
+- [x] **Step 4: Commit Task 4**
 
 ```bash
 git add src/core/pipeline_responses.c src/core/aigate_core.c
@@ -1581,7 +1581,7 @@ git commit -m "refactor(core): ♻️ extract pipeline_responses.c"
 - Create: `src/core/pipeline_chat.c`
 - Modify: `src/core/aigate_core.c`
 
-- [ ] **Step 1: Create `src/core/pipeline_chat.c`**
+- [x] **Step 1: Create `src/core/pipeline_chat.c`**
 
 Extract `handle_models_list`, `prepare_chat_cache`, `handle_stream_preheaders`, `handle_chat_sync`, and `handle_chat_stream` into `src/core/pipeline_chat.c`:
 
@@ -2115,7 +2115,7 @@ handle_chat_stream(chat_req_t* q)
 }
 ```
 
-- [ ] **Step 2: Clean up `src/core/aigate_core.c` into concise controller**
+- [x] **Step 2: Clean up `src/core/aigate_core.c` into concise controller**
 
 In `src/core/aigate_core.c`:
 1. Remove `handle_models_list`, `prepare_chat_cache`, `handle_stream_preheaders`, `handle_chat_sync`, and `handle_chat_stream`.
@@ -2191,7 +2191,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
 }
 ```
 
-- [ ] **Step 3: Compile and run test suite**
+- [x] **Step 3: Compile and run test suite**
 
 Run:
 ```bash
@@ -2200,7 +2200,7 @@ cd .build && ctest --output-on-failure
 ```
 Expected: 100% tests passed.
 
-- [ ] **Step 4: Check line count of `src/core/aigate_core.c`**
+- [x] **Step 4: Check line count of `src/core/aigate_core.c`**
 
 Run:
 ```bash
@@ -2208,7 +2208,7 @@ wc -l src/core/aigate_core.c src/core/pipeline_*.c
 ```
 Expected: `src/core/aigate_core.c` has ~600 lines or fewer (down from 3674 lines).
 
-- [ ] **Step 5: Commit Task 5**
+- [x] **Step 5: Commit Task 5**
 
 ```bash
 git add src/core/pipeline_chat.c src/core/aigate_core.c
