@@ -99,6 +99,9 @@ if(AIGATE_SANITIZERS)
 endif()
 target_link_libraries(aigate PRIVATE libaigate civetweb-c-library)
 
+# Reformat the sources with clang-format before they are compiled.
+include(cmake/format.cmake)
+aigate_clang_format_on_build(libaigate aigate)
 
 enable_testing()
 include(CTest)
