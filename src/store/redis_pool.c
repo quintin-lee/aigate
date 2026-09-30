@@ -11,14 +11,14 @@
 
 /** @brief Redis connection pool: fixed-capacity stack + mutex/condition variable. */
 struct redis_pool {
-    char            url[512];  /**< Connection string. */
-    int             capacity;  /**< Pool capacity (connection limit). */
-    int             timeout_ms;/**< Connection-acquire timeout in milliseconds. */
-    int             count;     /**< Total connections created (idle + checked out). */
-    int             idle_count;/**< Available connections in the stack. */
-    redisContext**  stack;     /**< Idle connection stack. */
-    pthread_mutex_t lock;      /**< Pool mutex. */
-    pthread_cond_t  cond;      /**< Return-notification condition variable. */
+    char            url[512];   /**< Connection string. */
+    int             capacity;   /**< Pool capacity (connection limit). */
+    int             timeout_ms; /**< Connection-acquire timeout in milliseconds. */
+    int             count;      /**< Total connections created (idle + checked out). */
+    int             idle_count; /**< Available connections in the stack. */
+    redisContext**  stack;      /**< Idle connection stack. */
+    pthread_mutex_t lock;       /**< Pool mutex. */
+    pthread_cond_t  cond;       /**< Return-notification condition variable. */
 };
 
 redis_pool_t*

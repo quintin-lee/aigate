@@ -25,13 +25,13 @@ struct lru_node {
 
 /** @brief LRU map instance: recency list + hash table under one mutex. */
 struct lru {
-    pthread_mutex_t   mtx;      /**< Guards everything below. */
-    size_t            capacity; /**< Max live entries. */
-    size_t            count;    /**< Current live entries. */
-    lru_evict_fn      on_evict; /**< Displaced-value callback (may be NULL). */
-    struct lru_node*  head; /**< Recency list: most recent. */
-    struct lru_node*  tail; /**< Recency list: least recent. */
-    struct lru_node** table;    /**< Bucket array. */
+    pthread_mutex_t   mtx;       /**< Guards everything below. */
+    size_t            capacity;  /**< Max live entries. */
+    size_t            count;     /**< Current live entries. */
+    lru_evict_fn      on_evict;  /**< Displaced-value callback (may be NULL). */
+    struct lru_node*  head;      /**< Recency list: most recent. */
+    struct lru_node*  tail;      /**< Recency list: least recent. */
+    struct lru_node** table;     /**< Bucket array. */
     size_t            table_cap; /**< Bucket count (power of two). */
 };
 

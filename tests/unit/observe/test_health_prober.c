@@ -9,7 +9,7 @@
 
 TEST_CASE(test_health_prober_lifecycle)
 {
-    event_bus_t* eb = event_bus_new();
+    event_bus_t*     eb = event_bus_new();
     health_prober_t* hp = health_prober_new(NULL, NULL, eb, 60);
     TEST_ASSERT(hp != NULL, "health_prober_new failed");
 
@@ -24,29 +24,33 @@ TEST_CASE(test_health_prober_lifecycle)
 TEST_CASE(test_health_prober_state_transitions)
 {
     event_bus_t* eb = event_bus_new();
-    int sub = event_bus_subscribe(eb);
+    int          sub = event_bus_subscribe(eb);
     TEST_ASSERT(sub > 0, "event_bus_subscribe failed");
 
     health_prober_t* hp = health_prober_new(NULL, NULL, eb, 60);
     TEST_ASSERT(hp != NULL, "health_prober_new failed");
 
     /* 1. First probe 200 with 120ms -> HEALTHY */
-    health_prober_record_result(hp, 1, "openai", "https://api.openai.com/v1", "openai", 200, 120, 0);
+    health_prober_record_result(
+        hp, 1, "openai", "https://api.openai.com/v1", "openai", 200, 120, 0);
 
     event_item_t item;
-    int rc = event_bus_pop(eb, sub, &item, 100);
+    int          rc = event_bus_pop(eb, sub, &item, 100);
     TEST_ASSERT(rc == 1, "expected health_probe event on initial status");
     TEST_ASSERT(item.type == EVENT_HEALTH_PROBE, "event type mismatch");
     TEST_ASSERT(strstr(item.payload, "\"status\":\"HEALTHY\"") != NULL, "status should be HEALTHY");
 
     /* 2. High latency 2200ms -> DEGRADED */
-    health_prober_record_result(hp, 1, "openai", "https://api.openai.com/v1", "openai", 200, 2200, 0);
+    health_prober_record_result(
+        hp, 1, "openai", "https://api.openai.com/v1", "openai", 200, 2200, 0);
     rc = event_bus_pop(eb, sub, &item, 100);
     TEST_ASSERT(rc == 1, "expected health_probe event on degradation");
-    TEST_ASSERT(strstr(item.payload, "\"status\":\"DEGRADED\"") != NULL, "status should be DEGRADED");
+    TEST_ASSERT(strstr(item.payload, "\"status\":\"DEGRADED\"") != NULL,
+                "status should be DEGRADED");
 
     /* 3. HTTP 401 Invalid Key -> DOWN immediately */
-    health_prober_record_result(hp, 1, "openai", "https://api.openai.com/v1", "openai", 401, 100, 0);
+    health_prober_record_result(
+        hp, 1, "openai", "https://api.openai.com/v1", "openai", 401, 100, 0);
     rc = event_bus_pop(eb, sub, &item, 100);
     TEST_ASSERT(rc == 1, "expected health_probe event on DOWN");
     TEST_ASSERT(strstr(item.payload, "\"status\":\"DOWN\"") != NULL, "status should be DOWN");
@@ -55,7 +59,8 @@ TEST_CASE(test_health_prober_state_transitions)
     health_prober_record_result(hp, 1, "openai", "https://api.openai.com/v1", "openai", 200, 95, 0);
     rc = event_bus_pop(eb, sub, &item, 100);
     TEST_ASSERT(rc == 1, "expected health_probe event on recovery");
-    TEST_ASSERT(strstr(item.payload, "\"status\":\"HEALTHY\"") != NULL, "status should be recovered to HEALTHY");
+    TEST_ASSERT(strstr(item.payload, "\"status\":\"HEALTHY\"") != NULL,
+                "status should be recovered to HEALTHY");
 
     health_prober_free(hp);
     event_bus_free(eb);
@@ -66,10 +71,13 @@ TEST_CASE(test_health_prober_json_serialization)
     health_prober_t* hp = health_prober_new(NULL, NULL, NULL, 60);
     TEST_ASSERT(hp != NULL, "health_prober_new failed");
 
-    health_prober_record_result(hp, 1, "openai", "https://api.openai.com/v1", "openai", 200, 110, 0);
-    health_prober_record_result(hp, 2, "anthropic", "https://api.anthropic.com", "anthropic", 503, 1500, 0);
+    health_prober_record_result(
+        hp, 1, "openai", "https://api.openai.com/v1", "openai", 200, 110, 0);
+    health_prober_record_result(
+        hp, 2, "anthropic", "https://api.anthropic.com", "anthropic", 503, 1500, 0);
     /* 2nd 503 -> DOWN */
-    health_prober_record_result(hp, 2, "anthropic", "https://api.anthropic.com", "anthropic", 503, 1600, 0);
+    health_prober_record_result(
+        hp, 2, "anthropic", "https://api.anthropic.com", "anthropic", 503, 1600, 0);
 
     char* json_str = health_prober_to_json(hp);
     TEST_ASSERT(json_str != NULL, "json output NULL");

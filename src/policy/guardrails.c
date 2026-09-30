@@ -63,7 +63,7 @@ ac_trie_insert(ac_trie_t* trie, const char* keyword)
         unsigned char c = (unsigned char)keyword[i];
         if (trie->nodes[curr].next[c] == -1) {
             if (trie->node_count >= trie->node_cap) {
-                size_t new_cap = trie->node_cap * 2;
+                size_t     new_cap = trie->node_cap * 2;
                 ac_node_t* new_nodes = realloc(trie->nodes, sizeof(ac_node_t) * new_cap);
                 if (new_nodes == NULL) {
                     return -1;
@@ -164,13 +164,13 @@ ac_trie_search(const ac_trie_t* trie, const char* text, size_t len)
 
 /** @brief Guardrails engine instance: rwlock/block+exempt tries/PII regex group/ready flag. */
 struct guardrails_ctx {
-    pthread_rwlock_t rwlock; /**< Rule hot-reload rwlock. */
-    ac_trie_t*       ac_block; /**< Blocklist keyword trie. */
-    ac_trie_t*       ac_exempt; /**< Exempt keyword trie. */
-    regex_t          re_api_key; /**< API key regex. */
-    regex_t          re_email; /**< Email regex. */
-    regex_t          re_id_card; /**< ID card number regex. */
-    regex_t          re_phone; /**< Phone number regex. */
+    pthread_rwlock_t rwlock;      /**< Rule hot-reload rwlock. */
+    ac_trie_t*       ac_block;    /**< Blocklist keyword trie. */
+    ac_trie_t*       ac_exempt;   /**< Exempt keyword trie. */
+    regex_t          re_api_key;  /**< API key regex. */
+    regex_t          re_email;    /**< Email regex. */
+    regex_t          re_id_card;  /**< ID card number regex. */
+    regex_t          re_phone;    /**< Phone number regex. */
     int              regex_ready; /**< Regex compilation ready flag. */
 };
 
@@ -186,9 +186,13 @@ guardrails_create(void)
     ctx->ac_exempt = ac_trie_create();
 
     /* Compile POSIX regular expressions for PII scanning */
-    regcomp(&ctx->re_api_key, "sk-[a-zA-Z0-9]{20,}|aig_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}", REG_EXTENDED);
+    regcomp(&ctx->re_api_key,
+            "sk-[a-zA-Z0-9]{20,}|aig_[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{20,}",
+            REG_EXTENDED);
     regcomp(&ctx->re_email, "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}", REG_EXTENDED);
-    regcomp(&ctx->re_id_card, "[1-9][0-9]{5}(18|19|20)[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])[0-9]{3}[0-9Xx]", REG_EXTENDED);
+    regcomp(&ctx->re_id_card,
+            "[1-9][0-9]{5}(18|19|20)[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])[0-9]{3}[0-9Xx]",
+            REG_EXTENDED);
     regcomp(&ctx->re_phone, "1[3-9][0-9]{9}", REG_EXTENDED);
     ctx->regex_ready = 1;
 
@@ -255,23 +259,27 @@ guardrails_load_rules(guardrails_ctx_t* ctx, const guardrail_rule_t* rules, size
  *  @param out_changed Optional, always written with whether a replacement happened.
  *  @return New string (caller frees); NULL when src is NULL, src copy as OOM fallback. */
 static char*
-replace_regex(const regex_t* re, const char* src, const char* repl, int check_digit_boundary, int* out_changed)
+replace_regex(const regex_t* re,
+              const char*    src,
+              const char*    repl,
+              int            check_digit_boundary,
+              int*           out_changed)
 {
     if (src == NULL) {
         return NULL;
     }
-    regmatch_t pmatch[1];
+    regmatch_t  pmatch[1];
     const char* cursor = src;
-    size_t src_len = strlen(src);
-    size_t repl_len = strlen(repl);
+    size_t      src_len = strlen(src);
+    size_t      repl_len = strlen(repl);
 
     size_t cap = src_len + 64;
-    char* buf = malloc(cap);
+    char*  buf = malloc(cap);
     if (buf == NULL) {
         return strdup(src);
     }
     size_t len = 0;
-    int any_match = 0;
+    int    any_match = 0;
 
     while (*cursor != '\0') {
         if (regexec(re, cursor, 1, pmatch, 0) != 0) {
@@ -355,7 +363,7 @@ guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t len, in
         return NULL;
     }
 
-    int local_changed = 0;
+    int   local_changed = 0;
     char* s1 = replace_regex(&ctx->re_api_key, text, "[API_KEY]", 0, &local_changed);
     char* s2 = replace_regex(&ctx->re_email, s1, "[EMAIL]", 0, &local_changed);
     free(s1);
@@ -378,14 +386,13 @@ guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t len, in
 }
 
 guardrails_action_t
-guardrails_inspect_inbound(
-    guardrails_ctx_t* ctx,
-    const char*       raw_body,
-    size_t            raw_len,
-    char**            sanitized_body,
-    size_t*           sanitized_len,
-    char*             blocked_keyword,
-    size_t            blocked_keyword_sz)
+guardrails_inspect_inbound(guardrails_ctx_t* ctx,
+                           const char*       raw_body,
+                           size_t            raw_len,
+                           char**            sanitized_body,
+                           size_t*           sanitized_len,
+                           char*             blocked_keyword,
+                           size_t            blocked_keyword_sz)
 {
     if (ctx == NULL || raw_body == NULL || raw_len == 0) {
         if (sanitized_body != NULL) {
@@ -424,41 +431,48 @@ guardrails_inspect_inbound(
 
     /* 2. PII scanning & sanitization */
     json_error_t err;
-    json_t* root = json_loads(raw_body, 0, &err);
+    json_t*      root = json_loads(raw_body, 0, &err);
     if (root != NULL && json_is_object(root)) {
         int json_changed = 0;
 
         /* 2a. Inspect "messages" array */
         json_t* j_msgs = json_object_get(root, "messages");
         if (j_msgs != NULL && json_is_array(j_msgs)) {
-            size_t idx;
+            size_t  idx;
             json_t* msg;
-            json_array_foreach(j_msgs, idx, msg) {
+            json_array_foreach(j_msgs, idx, msg)
+            {
                 if (!json_is_object(msg)) {
                     continue;
                 }
                 json_t* j_content = json_object_get(msg, "content");
                 if (j_content != NULL && json_is_string(j_content)) {
-                    int c_changed = 0;
-                    char* masked = guardrails_mask_pii_text(
-                        ctx, json_string_value(j_content), strlen(json_string_value(j_content)), &c_changed);
+                    int   c_changed = 0;
+                    char* masked = guardrails_mask_pii_text(ctx,
+                                                            json_string_value(j_content),
+                                                            strlen(json_string_value(j_content)),
+                                                            &c_changed);
                     if (c_changed && masked != NULL) {
                         json_object_set_new(msg, "content", json_string(masked));
                         free(masked);
                         json_changed = 1;
                     }
                 } else if (j_content != NULL && json_is_array(j_content)) {
-                    size_t p_idx;
+                    size_t  p_idx;
                     json_t* part;
-                    json_array_foreach(j_content, p_idx, part) {
+                    json_array_foreach(j_content, p_idx, part)
+                    {
                         if (!json_is_object(part)) {
                             continue;
                         }
                         json_t* j_text = json_object_get(part, "text");
                         if (j_text != NULL && json_is_string(j_text)) {
-                            int c_changed = 0;
-                            char* masked = guardrails_mask_pii_text(
-                                ctx, json_string_value(j_text), strlen(json_string_value(j_text)), &c_changed);
+                            int   c_changed = 0;
+                            char* masked =
+                                guardrails_mask_pii_text(ctx,
+                                                         json_string_value(j_text),
+                                                         strlen(json_string_value(j_text)),
+                                                         &c_changed);
                             if (c_changed && masked != NULL) {
                                 json_object_set_new(part, "text", json_string(masked));
                                 free(masked);
@@ -473,7 +487,7 @@ guardrails_inspect_inbound(
         /* 2b. Inspect "prompt" */
         json_t* j_prompt = json_object_get(root, "prompt");
         if (j_prompt != NULL && json_is_string(j_prompt)) {
-            int c_changed = 0;
+            int   c_changed = 0;
             char* masked = guardrails_mask_pii_text(
                 ctx, json_string_value(j_prompt), strlen(json_string_value(j_prompt)), &c_changed);
             if (c_changed && masked != NULL) {
@@ -486,7 +500,7 @@ guardrails_inspect_inbound(
         /* 2c. Inspect "system" */
         json_t* j_sys = json_object_get(root, "system");
         if (j_sys != NULL && json_is_string(j_sys)) {
-            int c_changed = 0;
+            int   c_changed = 0;
             char* masked = guardrails_mask_pii_text(
                 ctx, json_string_value(j_sys), strlen(json_string_value(j_sys)), &c_changed);
             if (c_changed && masked != NULL) {
@@ -499,25 +513,30 @@ guardrails_inspect_inbound(
         /* 2d. Inspect "contents" (Gemini format) */
         json_t* j_contents = json_object_get(root, "contents");
         if (j_contents != NULL && json_is_array(j_contents)) {
-            size_t c_idx;
+            size_t  c_idx;
             json_t* c_item;
-            json_array_foreach(j_contents, c_idx, c_item) {
+            json_array_foreach(j_contents, c_idx, c_item)
+            {
                 if (!json_is_object(c_item)) {
                     continue;
                 }
                 json_t* j_parts = json_object_get(c_item, "parts");
                 if (j_parts != NULL && json_is_array(j_parts)) {
-                    size_t p_idx;
+                    size_t  p_idx;
                     json_t* part;
-                    json_array_foreach(j_parts, p_idx, part) {
+                    json_array_foreach(j_parts, p_idx, part)
+                    {
                         if (!json_is_object(part)) {
                             continue;
                         }
                         json_t* j_text = json_object_get(part, "text");
                         if (j_text != NULL && json_is_string(j_text)) {
-                            int c_changed = 0;
-                            char* masked = guardrails_mask_pii_text(
-                                ctx, json_string_value(j_text), strlen(json_string_value(j_text)), &c_changed);
+                            int   c_changed = 0;
+                            char* masked =
+                                guardrails_mask_pii_text(ctx,
+                                                         json_string_value(j_text),
+                                                         strlen(json_string_value(j_text)),
+                                                         &c_changed);
                             if (c_changed && masked != NULL) {
                                 json_object_set_new(part, "text", json_string(masked));
                                 free(masked);
@@ -549,7 +568,7 @@ guardrails_inspect_inbound(
             json_decref(root);
         }
         /* Fallback for non-JSON text payloads */
-        int c_changed = 0;
+        int   c_changed = 0;
         char* masked = guardrails_mask_pii_text(ctx, raw_body, raw_len, &c_changed);
         if (c_changed && masked != NULL) {
             if (sanitized_body != NULL) {

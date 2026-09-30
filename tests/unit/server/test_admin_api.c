@@ -1401,7 +1401,8 @@ TEST_CASE(test_admin_usage_requests_query)
     TEST_ASSERT(json_integer_value(json_object_get(r0, "http_status")) == 200, "http_status 200");
     TEST_ASSERT(strcmp(json_string_value(json_object_get(r0, "model")), "gpt-4o") == 0, "model");
     TEST_ASSERT(json_integer_value(json_object_get(r0, "prompt_tokens")) == 500, "prompt_tokens");
-    TEST_ASSERT(json_integer_value(json_object_get(r0, "reasoning_tokens")) == 45, "reasoning_tokens");
+    TEST_ASSERT(json_integer_value(json_object_get(r0, "reasoning_tokens")) == 45,
+                "reasoning_tokens");
     TEST_ASSERT(fabs(json_real_value(json_object_get(r0, "latency_ms")) - 123.0) < 0.01,
                 "latency_ms 123");
     json_decref(j);
@@ -2813,8 +2814,8 @@ test_admin_key_budgets_and_guardrails(void)
     size_t len = 0;
 
     /* 1. Create key with guardrails_enabled=false, monthly_cost_budget=15.5, monthly_token_budget=100000 */
-    const char* post_body =
-        "{\"name\":\"budget-key\",\"guardrails_enabled\":false,\"monthly_cost_budget\":15.5,\"monthly_token_budget\":100000}";
+    const char* post_body = "{\"name\":\"budget-key\",\"guardrails_enabled\":false,\"monthly_cost_"
+                            "budget\":15.5,\"monthly_token_budget\":100000}";
     admin_dispatch(&adm,
                    "/admin/v1/keys",
                    "POST",
@@ -2831,7 +2832,8 @@ test_admin_key_budgets_and_guardrails(void)
     TEST_ASSERT(j != NULL, "valid json out");
     long key_id = (long)json_integer_value(json_object_get(j, "key_id"));
     TEST_ASSERT(key_id > 0, "key_id > 0");
-    TEST_ASSERT(json_is_false(json_object_get(j, "guardrails_enabled")), "guardrails_enabled false");
+    TEST_ASSERT(json_is_false(json_object_get(j, "guardrails_enabled")),
+                "guardrails_enabled false");
     TEST_ASSERT(fabs(json_real_value(json_object_get(j, "monthly_cost_budget")) - 15.5) < 1e-6,
                 "monthly_cost_budget 15.5");
     TEST_ASSERT(json_integer_value(json_object_get(j, "monthly_token_budget")) == 100000,
@@ -2840,16 +2842,8 @@ test_admin_key_budgets_and_guardrails(void)
     free(body);
 
     /* 2. List keys and verify fields */
-    admin_dispatch(&adm,
-                   "/admin/v1/keys",
-                   "GET",
-                   NULL,
-                   "admin-secret-token",
-                   NULL,
-                   0,
-                   &status,
-                   &body,
-                   &len);
+    admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(status == 200, "key list -> 200");
     j = json_loads(body, 0, &jerr);
     json_t* arr = json_object_get(j, "keys");
@@ -2867,8 +2861,8 @@ test_admin_key_budgets_and_guardrails(void)
     /* 3. Patch key: update budgets and toggle guardrails */
     char patch_uri[64];
     snprintf(patch_uri, sizeof patch_uri, "/admin/v1/keys/%ld", key_id);
-    const char* patch_body =
-        "{\"guardrails_enabled\":true,\"monthly_cost_budget\":25.0,\"monthly_token_budget\":200000}";
+    const char* patch_body = "{\"guardrails_enabled\":true,\"monthly_cost_budget\":25.0,\"monthly_"
+                             "token_budget\":200000}";
     admin_dispatch(&adm,
                    patch_uri,
                    "PATCH",
@@ -2883,16 +2877,8 @@ test_admin_key_budgets_and_guardrails(void)
     free(body);
 
     /* 4. List keys again: verify updated values */
-    admin_dispatch(&adm,
-                   "/admin/v1/keys",
-                   "GET",
-                   NULL,
-                   "admin-secret-token",
-                   NULL,
-                   0,
-                   &status,
-                   &body,
-                   &len);
+    admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(status == 200, "key list -> 200");
     j = json_loads(body, 0, &jerr);
     arr = json_object_get(j, "keys");
@@ -2948,16 +2934,8 @@ test_admin_group_budget(void)
     free(body);
 
     /* 2. List groups: verify monthly_budget_usd */
-    admin_dispatch(&adm,
-                   "/admin/v1/groups",
-                   "GET",
-                   NULL,
-                   "admin-secret-token",
-                   NULL,
-                   0,
-                   &status,
-                   &body,
-                   &len);
+    admin_dispatch(
+        &adm, "/admin/v1/groups", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(status == 200, "group list -> 200");
     j = json_loads(body, 0, &jerr);
     json_t* arr = json_object_get(j, "groups");
@@ -2986,16 +2964,8 @@ test_admin_group_budget(void)
     free(body);
 
     /* 4. List groups: verify updated budget */
-    admin_dispatch(&adm,
-                   "/admin/v1/groups",
-                   "GET",
-                   NULL,
-                   "admin-secret-token",
-                   NULL,
-                   0,
-                   &status,
-                   &body,
-                   &len);
+    admin_dispatch(
+        &adm, "/admin/v1/groups", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(status == 200, "group list -> 200");
     j = json_loads(body, 0, &jerr);
     arr = json_object_get(j, "groups");
@@ -3054,8 +3024,8 @@ test_admin_guardrails_crud_and_reload(void)
     free(body);
 
     /* 3. Create rule 1: keyword block */
-    const char* r1_body =
-        "{\"pattern\":\"leak_secret\",\"rule_type\":\"keyword\",\"action\":\"block\",\"category\":\"safety\"}";
+    const char* r1_body = "{\"pattern\":\"leak_secret\",\"rule_type\":\"keyword\",\"action\":"
+                          "\"block\",\"category\":\"safety\"}";
     admin_dispatch(&adm,
                    "/admin/v1/guardrails",
                    "POST",
@@ -3083,8 +3053,8 @@ test_admin_guardrails_crud_and_reload(void)
     free(body);
 
     /* 4. Create rule 2: pii mask */
-    const char* r2_body =
-        "{\"pattern\":\"[PHONE]\",\"rule_type\":\"pii\",\"action\":\"mask\",\"category\":\"privacy\"}";
+    const char* r2_body = "{\"pattern\":\"[PHONE]\",\"rule_type\":\"pii\",\"action\":\"mask\","
+                          "\"category\":\"privacy\"}";
     admin_dispatch(&adm,
                    "/admin/v1/guardrails",
                    "POST",
@@ -3161,16 +3131,8 @@ test_admin_guardrails_crud_and_reload(void)
     free(body);
 
     /* 8. Delete rule 1 */
-    admin_dispatch(&adm,
-                   patch_uri,
-                   "DELETE",
-                   NULL,
-                   "admin-secret-token",
-                   NULL,
-                   0,
-                   &status,
-                   &body,
-                   &len);
+    admin_dispatch(
+        &adm, patch_uri, "DELETE", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(status == 200, "guardrail delete -> 200");
     json_t* jdel = json_loads(body, 0, &jerr);
     TEST_ASSERT(json_is_true(json_object_get(jdel, "deleted")), "deleted true");
@@ -3178,16 +3140,8 @@ test_admin_guardrails_crud_and_reload(void)
     free(body);
 
     /* 9. Delete non-existent rule 1 -> 404 */
-    admin_dispatch(&adm,
-                   patch_uri,
-                   "DELETE",
-                   NULL,
-                   "admin-secret-token",
-                   NULL,
-                   0,
-                   &status,
-                   &body,
-                   &len);
+    admin_dispatch(
+        &adm, patch_uri, "DELETE", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(status == 404, "guardrail delete 404");
     free(body);
 
@@ -3291,16 +3245,8 @@ test_admin_cache_stats_and_purge(void)
     size_t len = 0;
 
     /* 1. 401 Unauthorized check */
-    admin_dispatch(&adm,
-                   "/admin/v1/cache/stats",
-                   "GET",
-                   NULL,
-                   "wrong-token",
-                   NULL,
-                   0,
-                   &status,
-                   &body,
-                   &len);
+    admin_dispatch(
+        &adm, "/admin/v1/cache/stats", "GET", NULL, "wrong-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(status == 401, "cache/stats without token -> 401");
     free(body);
 
@@ -3317,7 +3263,7 @@ test_admin_cache_stats_and_purge(void)
                    &len);
     TEST_ASSERT(status == 200, "cache/stats -> 200");
     json_error_t jerr;
-    json_t* js = json_loads(body, 0, &jerr);
+    json_t*      js = json_loads(body, 0, &jerr);
     TEST_ASSERT(js != NULL, "json parse cache stats failed");
     TEST_ASSERT(json_is_boolean(json_object_get(js, "enabled")), "enabled is boolean");
     TEST_ASSERT(json_is_integer(json_object_get(js, "shards")), "shards is integer");

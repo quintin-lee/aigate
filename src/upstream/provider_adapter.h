@@ -114,9 +114,9 @@ const provider_adapter_t* provider_find(const char* provider);
  * @p out->extra_header holds "anthropic-version" for the anthropic
  * family (fixed value "2023-06-01"); empty string otherwise. */
 typedef struct {
-    char url[1024]; /**< Probe URL. */
-    char auth_header[32]; /**< Auth header name. */
-    int  bearer; /**< 1 = prefix the key value with "Bearer " */
+    char url[1024];        /**< Probe URL. */
+    char auth_header[32];  /**< Auth header name. */
+    int  bearer;           /**< 1 = prefix the key value with "Bearer " */
     char extra_header[32]; /**< Extra header name (anthropic-version for the Anthropic family). */
 } provider_probe_plan_t;
 

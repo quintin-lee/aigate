@@ -46,7 +46,8 @@ TEST_CASE(test_budget_enforce_key_cost_limit)
     budget_enforce_record(mgr, 10, 0, 4.00, 100);
     int rc = budget_enforce_check(mgr, 10, 0, 10.0, 0, 0.0, err_msg, sizeof err_msg);
     TEST_ASSERT(rc == -1, "10.50 of 10.0 must fail");
-    TEST_ASSERT(strstr(err_msg, "Monthly cost budget") != NULL, "error message specifies cost budget");
+    TEST_ASSERT(strstr(err_msg, "Monthly cost budget") != NULL,
+                "error message specifies cost budget");
     TEST_ASSERT(strstr(err_msg, "10.00") != NULL, "error message specifies limit");
 
     /* Other key unaffected */
@@ -74,7 +75,8 @@ TEST_CASE(test_budget_enforce_key_token_limit)
     budget_enforce_record(mgr, 20, 0, 0.50, 20500);
     int rc = budget_enforce_check(mgr, 20, 0, 0.0, 100000, 0.0, err_msg, sizeof err_msg);
     TEST_ASSERT(rc == -1, "100.5k of 100k must fail");
-    TEST_ASSERT(strstr(err_msg, "Monthly token budget") != NULL, "error message specifies token budget");
+    TEST_ASSERT(strstr(err_msg, "Monthly token budget") != NULL,
+                "error message specifies token budget");
 
     budget_enforce_destroy(mgr);
 }

@@ -16,10 +16,10 @@
 
 /** @brief Model router state (owned by the core; one per process). */
 typedef struct model_router {
-    lru_t*   routes; /**< model_name → model_rec_t* (heap values, freed on eviction) */
-    pg_ops_t ops; /**< Borrowed ops table. */
-    void*    ops_ctx; /**< Ops context (borrowed). */
-    uint8_t  master[32]; /**< Master key (32 bytes, for decrypting pg: refs). */
+    lru_t*   routes;      /**< model_name → model_rec_t* (heap values, freed on eviction) */
+    pg_ops_t ops;         /**< Borrowed ops table. */
+    void*    ops_ctx;     /**< Ops context (borrowed). */
+    uint8_t  master[32];  /**< Master key (32 bytes, for decrypting pg: refs). */
     int      have_master; /**< 1 when AIGATE_MASTER_KEY was provided */
 } model_router_t;
 

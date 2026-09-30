@@ -101,7 +101,7 @@ TEST_CASE(test_guardrails_pii_masking)
 
     /* 1. Phone number masking */
     const char* t_phone = "我的电话是13812345678";
-    char* res = guardrails_mask_pii_text(ctx, t_phone, strlen(t_phone), &changed);
+    char*       res = guardrails_mask_pii_text(ctx, t_phone, strlen(t_phone), &changed);
     TEST_ASSERT(changed == 1, "phone changed");
     TEST_ASSERT(res != NULL, "phone res not null");
     TEST_ASSERT(strcmp(res, "我的电话是[PHONE]") == 0, "phone masked");
@@ -174,11 +174,11 @@ TEST_CASE(test_guardrails_inbound_json_inspection)
     TEST_ASSERT(guardrails_load_rules(ctx, rules, 2) == 0, "load rules");
 
     /* 1. Inbound JSON with PII */
-    const char* json_pii =
-        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"我的电话是13912345678\"}]}";
-    char*  sanitized = NULL;
-    size_t san_len = 0;
-    char   blocked_kw[64] = {0};
+    const char* json_pii = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
+                           "\"我的电话是13912345678\"}]}";
+    char*       sanitized = NULL;
+    size_t      san_len = 0;
+    char        blocked_kw[64] = {0};
 
     guardrails_action_t act = guardrails_inspect_inbound(
         ctx, json_pii, strlen(json_pii), &sanitized, &san_len, blocked_kw, sizeof blocked_kw);
@@ -218,4 +218,3 @@ TEST_CASE(test_guardrails_inbound_json_inspection)
 
     guardrails_destroy(ctx);
 }
-

@@ -95,18 +95,18 @@ static int g_lockout_window_s = 300;
 /* Optional Redis pool for distributed lockout (NULL = in-process only). */
 static redis_pool_t* g_lockout_pool = NULL;
 /** Distributed lockout Lua script SHA (loaded with g_lockout_pool init; empty string means not loaded). */
-static char          g_lockout_sha[48] = { 0 };
+static char g_lockout_sha[48] = {0};
 
 /** @brief One in-process admin-lockout hash slot. */
 typedef struct {
     char           ip[32];     /**< keyed client IP text */
-    _Atomic long   fails;     /**< failures inside the current window */
-    _Atomic time_t first_fail;/**< window start (seconds since epoch) */
-    int            in_use;    /**< slot occupied flag */
+    _Atomic long   fails;      /**< failures inside the current window */
+    _Atomic time_t first_fail; /**< window start (seconds since epoch) */
+    int            in_use;     /**< slot occupied flag */
 } lockout_slot_t;
 
 /** Local admin lockout counter slots (sharded by IP, guarded by g_lockout_mtx). */
-static lockout_slot_t  g_lockout[LOCKOUT_SLOTS];
+static lockout_slot_t g_lockout[LOCKOUT_SLOTS];
 /** Local lockout slot mutex. */
 static pthread_mutex_t g_lockout_mtx = PTHREAD_MUTEX_INITIALIZER;
 
@@ -139,7 +139,7 @@ lockout_hit(const char* ip)
             return 1;
         }
         redisReply* reply = (redisReply*)redisCommand(c, "GET %s", redis_key);
-        int hit = 0;
+        int         hit = 0;
         if (reply != NULL && reply->type == REDIS_REPLY_STRING) {
             long fails = strtol(reply->str, NULL, 10);
             hit = (fails >= g_lockout_fails) ? 1 : 0;
@@ -180,8 +180,8 @@ lockout_fail(const char* ip)
         char max_buf[16], win_buf[16];
         snprintf(max_buf, sizeof(max_buf), "%d", g_lockout_fails);
         snprintf(win_buf, sizeof(win_buf), "%d", g_lockout_window_s);
-        const char* keys[1] = { redis_key };
-        const char* argv[2] = { max_buf, win_buf };
+        const char* keys[1] = {redis_key};
+        const char* argv[2] = {max_buf, win_buf};
         redisReply* reply =
             redis_eval_sha(c, g_lockout_sha, SCRIPT_ADMIN_LOCKOUT, 1, keys, argv, 2);
         if (reply != NULL) {
@@ -1819,13 +1819,15 @@ provider_health_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
 {
     if (adm->hp == NULL) {
         *status = 200;
-        *body = strdup("{\"providers\":[],\"total\":0,\"healthy\":0,\"degraded\":0,\"down\":0,\"paused\":0,\"checked_at\":0}");
+        *body = strdup("{\"providers\":[],\"total\":0,\"healthy\":0,\"degraded\":0,\"down\":0,"
+                       "\"paused\":0,\"checked_at\":0}");
         *len = *body ? strlen(*body) : 0;
         return 0;
     }
     char* json_str = health_prober_to_json(adm->hp);
     if (json_str == NULL) {
-        return finish_error(status, body, len, 500, "internal_error", "health serialization failed");
+        return finish_error(
+            status, body, len, 500, "internal_error", "health serialization failed");
     }
     *status = 200;
     *body = json_str;
@@ -1844,7 +1846,8 @@ provider_probe_trigger(admin_ctx_t* adm, int* status, char** body, size_t* len)
     health_prober_probe_all(adm->hp);
     char* json_str = health_prober_to_json(adm->hp);
     if (json_str == NULL) {
-        return finish_error(status, body, len, 500, "internal_error", "health serialization failed");
+        return finish_error(
+            status, body, len, 500, "internal_error", "health serialization failed");
     }
     *status = 200;
     *body = json_str;
@@ -2059,7 +2062,7 @@ group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
         json_decref(jbody);
         return finish_error(status, body, len, 400, "bad_request", "name too long (max 64 chars)");
     }
-    double monthly_budget_usd = 0.0;
+    double  monthly_budget_usd = 0.0;
     json_t* jmb = json_object_get(jbody, "monthly_budget_usd");
     if (jmb != NULL) {
         if (json_is_number(jmb)) {
@@ -2165,13 +2168,13 @@ group_patch(
         return finish_error(status, body, len, 400, "bad_request", "invalid json body");
     }
     const char* name = jstring(jbody, "name", NULL);
-    json_t* jbudget = json_object_get(jbody, "monthly_budget_usd");
+    json_t*     jbudget = json_object_get(jbody, "monthly_budget_usd");
     if ((name == NULL || name[0] == '\0') && jbudget == NULL) {
         json_decref(jbody);
         return finish_error(
             status, body, len, 400, "bad_request", "name or monthly_budget_usd is required");
     }
-    char group_name[128] = { 0 };
+    char            group_name[128] = {0};
     const pg_ops_t* ops = pg_store_ops(adm->ps);
     if (name != NULL && name[0] != '\0') {
         if (strlen(name) > 64) {
@@ -2183,7 +2186,8 @@ group_patch(
         int rc = ops->patch_group(ops->ctx, id, group_name);
         if (rc == -2) {
             json_decref(jbody);
-            return finish_error(status, body, len, 409, "group_exists", "group name already exists");
+            return finish_error(
+                status, body, len, 409, "group_exists", "group name already exists");
         }
         if (rc == 1) {
             json_decref(jbody);
@@ -2213,7 +2217,8 @@ group_patch(
         }
         if (rc != 0) {
             json_decref(jbody);
-            return finish_error(status, body, len, 500, "internal_error", "group budget patch failed");
+            return finish_error(
+                status, body, len, 500, "internal_error", "group budget patch failed");
         }
         if (adm->ac != NULL && adm->ac->be != NULL) {
             budget_enforce_set_group_budget(adm->ac->be, id, budget);
@@ -2326,13 +2331,13 @@ calculate_model_cost(const char*        model_name,
 
 /** @brief Per-model cost accumulator used while folding usage rows. */
 struct model_agg {
-    long group_id;       /**< owning group id (0 = ungrouped) */
-    char group_name[128];/**< resolved group display name */
-    char model[128];     /**< model route name */
-    long prompt;         /**< summed prompt tokens */
-    long completion;     /**< summed completion tokens */
-    long cached;         /**< summed cache-hit tokens */
-    long requests;       /**< summed request count */
+    long group_id;        /**< owning group id (0 = ungrouped) */
+    char group_name[128]; /**< resolved group display name */
+    char model[128];      /**< model route name */
+    long prompt;          /**< summed prompt tokens */
+    long completion;      /**< summed completion tokens */
+    long cached;          /**< summed cache-hit tokens */
+    long requests;        /**< summed request count */
 };
 
 char*
@@ -2613,7 +2618,8 @@ cost_query(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
 /* ------------------------------------------------------------ guardrails */
 
 static int
-guardrails_rule_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+guardrails_rule_create(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
 {
     json_t* jbody = parse_body(req_body, 0);
     if (jbody == NULL) {
@@ -2627,12 +2633,12 @@ guardrails_rule_create(admin_ctx_t* adm, int* status, char** body, size_t* len, 
     }
     if (strlen(pattern) >= 512) {
         json_decref(jbody);
-        return finish_error(status, body, len, 400, "bad_request", "pattern too long (max 511 chars)");
+        return finish_error(
+            status, body, len, 400, "bad_request", "pattern too long (max 511 chars)");
     }
 
     const char* rule_type = jstring(jbody, "rule_type", "keyword");
-    if (strcmp(rule_type, "keyword") != 0 &&
-        strcmp(rule_type, "regex") != 0 &&
+    if (strcmp(rule_type, "keyword") != 0 && strcmp(rule_type, "regex") != 0 &&
         strcmp(rule_type, "pii") != 0) {
         json_decref(jbody);
         return finish_error(
@@ -2652,7 +2658,7 @@ guardrails_rule_create(admin_ctx_t* adm, int* status, char** body, size_t* len, 
             status, body, len, 400, "bad_request", "category too long (max 63 chars)");
     }
 
-    int enabled = 1;
+    int     enabled = 1;
     json_t* jen = json_object_get(jbody, "enabled");
     if (jen != NULL) {
         if (json_is_boolean(jen)) {
@@ -2763,7 +2769,7 @@ guardrails_rule_update(
         return finish_error(status, body, len, 400, "bad_request", "invalid rule id");
     }
 
-    const pg_ops_t* ops = pg_store_ops(adm->ps);
+    const pg_ops_t*  ops = pg_store_ops(adm->ps);
     guardrail_rule_t existing;
     memset(&existing, 0, sizeof existing);
     int              found = 0;
@@ -2905,11 +2911,13 @@ static int
 cache_stats_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
 {
     if (adm->rc == NULL) {
-        return finish_error(status, body, len, 503, "unavailable", "response cache not initialized");
+        return finish_error(
+            status, body, len, 503, "unavailable", "response cache not initialized");
     }
     char* json_str = response_cache_get_stats_json(adm->rc);
     if (json_str == NULL) {
-        return finish_error(status, body, len, 500, "internal_error", "failed to serialize cache stats");
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to serialize cache stats");
     }
     *status = 200;
     *body = json_str;
@@ -2923,10 +2931,11 @@ static int
 cache_purge_trigger(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* req_body)
 {
     if (adm->rc == NULL) {
-        return finish_error(status, body, len, 503, "unavailable", "response cache not initialized");
+        return finish_error(
+            status, body, len, 503, "unavailable", "response cache not initialized");
     }
     const char* model = NULL;
-    json_t* root = NULL;
+    json_t*     root = NULL;
     if (req_body != NULL && req_body[0] != '\0') {
         json_error_t err;
         root = json_loads(req_body, 0, &err);

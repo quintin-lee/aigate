@@ -14,9 +14,12 @@ static void
 test_fingerprint_normalization(void)
 {
     printf("running test_fingerprint_normalization...\n");
-    const char* req1 = "{\"model\":\"GPT-4O\",\"messages\":[{\"role\":\"user\",\"content\":\"hello world\"}],\"temperature\":0.7}";
-    const char* req2 = "{\"temperature\":0.7000,\"messages\":[{\"role\":\"user\",\"content\":\"hello world\"}],\"model\":\"gpt-4o\"}";
-    const char* req3 = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"different text\"}],\"temperature\":0.7}";
+    const char* req1 = "{\"model\":\"GPT-4O\",\"messages\":[{\"role\":\"user\",\"content\":\"hello "
+                       "world\"}],\"temperature\":0.7}";
+    const char* req2 = "{\"temperature\":0.7000,\"messages\":[{\"role\":\"user\",\"content\":"
+                       "\"hello world\"}],\"model\":\"gpt-4o\"}";
+    const char* req3 = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
+                       "\"different text\"}],\"temperature\":0.7}";
 
     char k1[65], k2[65], k3[65];
     assert(response_cache_fingerprint("GPT-4o", req1, strlen(req1), k1) == 0);
@@ -147,8 +150,8 @@ static void*
 concurrency_worker(void* varg)
 {
     worker_arg_t* arg = varg;
-    char key[65];
-    char body[128];
+    char          key[65];
+    char          body[128];
     for (int i = 0; i < 200; i++) {
         snprintf(key, sizeof(key), "%02x%062d", arg->thread_id % 16, i % 10);
         snprintf(body, sizeof(body), "{\"thread\":%d,\"iter\":%d}", arg->thread_id, i);
@@ -170,7 +173,7 @@ test_cache_concurrency(void)
     response_cache_t* rc = response_cache_new(10 * 1024 * 1024, 2000, 3600);
     assert(rc != NULL);
 
-    pthread_t threads[8];
+    pthread_t    threads[8];
     worker_arg_t args[8];
     for (int i = 0; i < 8; i++) {
         args[i].rc = rc;

@@ -43,7 +43,7 @@ aigate_core_reload_guardrails(aigate_core* ac)
         const pg_ops_t* ops = pg_store_ops(ac->ps);
         if (ops != NULL && ops->list_guardrails_rules != NULL) {
             guardrail_rule_t rules[256];
-            int n_rules = 0;
+            int              n_rules = 0;
             if (ops->list_guardrails_rules(ops->ctx, rules, 256, &n_rules) == 0 && n_rules > 0) {
                 guardrails_load_rules(new_gr, rules, (size_t)n_rules);
             }
@@ -69,7 +69,7 @@ calc_req_cost(const model_rec_t* route, long prompt, long completion, long cache
         return 0.0;
     }
     json_error_t jerr;
-    json_t* jp = json_loads(route->pricing_json, 0, &jerr);
+    json_t*      jp = json_loads(route->pricing_json, 0, &jerr);
     if (jp == NULL || !json_is_object(jp)) {
         if (jp != NULL) {
             json_decref(jp);
@@ -82,10 +82,10 @@ calc_req_cost(const model_rec_t* route, long prompt, long completion, long cache
         json_decref(jp);
         return 0.0;
     }
-    double in_mtok = json_number_value(jin);
-    double out_mtok = json_number_value(jout);
+    double  in_mtok = json_number_value(jin);
+    double  out_mtok = json_number_value(jout);
     json_t* jdisc = json_object_get(jp, "cached_mtok_discount");
-    double cached_discount =
+    double  cached_discount =
         (jdisc != NULL && json_is_number(jdisc)) ? json_number_value(jdisc) : 1.0;
     json_decref(jp);
 
@@ -128,16 +128,8 @@ record_usage_and_event(aigate_core* ac,
                        guardrail_act);
     }
     if (ac->eb != NULL) {
-        event_bus_publish_request(ac->eb,
-                                  key_id,
-                                  model,
-                                  provider,
-                                  status,
-                                  lat_ns,
-                                  ptok,
-                                  ctok,
-                                  req_cost,
-                                  guardrail_act);
+        event_bus_publish_request(
+            ac->eb, key_id, model, provider, status, lat_ns, ptok, ctok, req_cost, guardrail_act);
     }
 }
 
@@ -349,16 +341,266 @@ enum {
 
 /** @brief Streaming cache accumulator: passes chunks to client while accumulating choices[0].delta.content for cache backfill. */
 typedef struct stream_cache_acc {
-    aigate_response_ctx* orig_rc;      /**< Real response context (borrowed). */
-    char*                accum_content; /**< Accumulated full body (max 512KiB). */
-    size_t               accum_len;    /**< Accumulated byte count. */
-    size_t               accum_cap;    /**< accum_content capacity. */
+    aigate_response_ctx* orig_rc;        /**< Real response context (borrowed). */
+    char*                accum_content;  /**< Accumulated full body (max 512KiB). */
+    size_t               accum_len;      /**< Accumulated byte count. */
+    size_t               accum_cap;      /**< accum_content capacity. */
     char                 line_buf[4096]; /**< SSE line buffer. */
-    size_t               line_len;     /**< Valid line buffer length. */
-    char                 id[64];       /**< Response id (from first data line). */
-    long                 created;      /**< Response created timestamp. */
-    bool                 overflow;     /**< Over-limit/alloc failure: passthrough only, no more accumulation. */
+    size_t               line_len;       /**< Valid line buffer length. */
+    char                 id[64];         /**< Response id (from first data line). */
+    long                 created;        /**< Response created timestamp. */
+    bool overflow; /**< Over-limit/alloc failure: passthrough only, no more accumulation. */
 } stream_cache_acc_t;
+
+/** @brief Chat pipeline per-request context: owns jbody/krec/sanitized_body. */
+typedef struct {
+    aigate_core*         ac;
+    aigate_request_ctx*  rq;
+    aigate_response_ctx* rc;
+    key_rec_t            krec;
+    json_t*              jbody;
+    const char*          model;
+    model_rec_t          route;
+    upstream_target_t    candidates[MAX_TARGETS_PER_MODEL];
+    int                  n_candidates;
+    char*                sanitized_body;
+    size_t               sanitized_len;
+    const void*          eff_body;
+    size_t               eff_len;
+    char                 guardrail_act[16];
+    char                 cache_key[65];
+    bool                 bypass_cache;
+    bool                 no_store;
+} chat_req_t;
+
+/** @brief Release owned request resources (mirrors the historical triple-cleanup). */
+static void
+chat_req_cleanup(chat_req_t* q)
+{
+    if (q->jbody != NULL) {
+        json_decref(q->jbody);
+        q->jbody = NULL;
+    }
+    key_rec_free(&q->krec);
+    free(q->sanitized_body);
+    q->sanitized_body = NULL;
+}
+
+/** @brief Auth → QPS → daily quota → monthly budget gates.
+ *  @return 0 when all gates pass; non-zero when an error was already written. */
+static int
+gate_request(chat_req_t* q)
+{
+    aigate_core*         ac = q->ac;
+    aigate_request_ctx*  rq = q->rq;
+    aigate_response_ctx* rc = q->rc;
+
+    /* --- auth --- */
+    int arc = auth_key_resolve(&ac->keys, rq->bearer, &q->krec);
+    if (arc != 0) {
+        aigate_write_error(rc, PIPE_AUTH, "auth_error", "invalid api key");
+        return -1;
+    }
+
+    /* --- rate limit (before /v1/models and model routing so every data-plane
+     *  request, including GET /v1/models, counts against the key's QPS) --- */
+    long retry_ms = 0;
+    int  rrc = rl_allow_request(ac->rl, q->krec.key_id, q->krec.rate_qps, &retry_ms);
+    if (rrc != 0) {
+        if (retry_ms == -1) {
+            /* Redis fail-closed sentinel: distributed state unavailable → 503 */
+            aigate_write_error(rc, 503, "server_error", "distributed_state_unavailable");
+            return -1;
+        }
+        long ra_s = (retry_ms + 999) / 1000;
+        if (ra_s < 1) {
+            ra_s = 1;
+        }
+        char ra[32];
+        snprintf(ra, sizeof ra, "%ld", ra_s);
+        rc->set_header(rc->impl, "Retry-After", ra);
+        aigate_write_error(rc, PIPE_RATE, "rate_limit", "rate limit exceeded");
+        return -1;
+    }
+    /* --- daily token quota gate (after the QPS gate, before /v1/models so
+     *  the limit applies uniformly to all data-plane traffic) --- */
+    if (q->krec.daily_token_quota > 0) {
+        long rem = rl_remaining_daily(ac->rl, q->krec.key_id, q->krec.daily_token_quota);
+        if (rem == LONG_MIN) {
+            /* Redis fail-closed sentinel: distributed state unavailable → 503 */
+            aigate_write_error(rc, 503, "server_error", "distributed_state_unavailable");
+            return -1;
+        }
+        if (rem <= 0) {
+            time_t now = time(NULL);
+            time_t next = (time_t)(now - (now % 86400)) + 86400; /* next UTC midnight */
+            char   ra[32];
+            snprintf(ra, sizeof ra, "%ld", (long)(next - now));
+            rc->set_header(rc->impl, "Retry-After", ra);
+            aigate_write_error(rc, PIPE_RATE, "daily_quota_exceeded", "daily token quota exceeded");
+            return -1;
+        }
+    }
+
+    /* --- monthly budget limit gate --- */
+    if (ac->be != NULL) {
+        char b_err[256] = {0};
+        if (budget_enforce_check(ac->be,
+                                 q->krec.key_id,
+                                 q->krec.group_id,
+                                 q->krec.monthly_cost_budget,
+                                 q->krec.monthly_token_budget,
+                                 0.0,
+                                 b_err,
+                                 sizeof b_err) != 0) {
+            aigate_write_error(rc,
+                               PIPE_RATE,
+                               "budget_exceeded",
+                               b_err[0] ? b_err : "monthly budget limit exceeded");
+            return -1;
+        }
+    }
+    return 0;
+}
+
+/** @brief GET /v1/models handler. @return 1 when the path was handled, 0 to continue. */
+static int
+handle_models_list(chat_req_t* q)
+{
+    aigate_request_ctx*  rq = q->rq;
+    aigate_response_ctx* rc = q->rc;
+
+    /* --- handle GET /v1/models (data plane: list allowed enabled models) --- */
+    if (rq->path != NULL && strcmp(rq->path, "/v1/models") == 0) {
+        if (rq->method != NULL && strcmp(rq->method, "GET") == 0) {
+            model_rec_t* recs = calloc(256, sizeof(model_rec_t));
+            if (recs == NULL) {
+                aigate_write_error(rc, 500, "internal_error", "out of memory");
+                return -1;
+            }
+            int             n = 0;
+            const pg_ops_t* ops = q->ac->ps != NULL ? pg_store_ops(q->ac->ps) : NULL;
+            if (ops != NULL && ops->list_models != NULL) {
+                if (ops->list_models(ops->ctx, recs, 256, &n) != 0) {
+                    /* Storage failure: distinguish "no models" from "PG is
+                     * down" so callers do not mistake an outage for an empty
+                     * catalog. */
+                    free(recs);
+                    aigate_write_error(rc, 503, "internal_error", "model list unavailable");
+                    return -1;
+                }
+            }
+            json_t* arr = json_array();
+            for (int i = 0; i < n; i++) {
+                if (recs[i].enabled && key_allows_model(&q->krec, recs[i].name)) {
+                    json_t* obj = json_object();
+                    json_object_set_new(obj, "id", json_string(recs[i].name));
+                    json_object_set_new(obj, "object", json_string("model"));
+                    json_object_set_new(obj, "created", json_integer(0));
+                    json_object_set_new(
+                        obj,
+                        "owned_by",
+                        json_string(recs[i].provider[0] ? recs[i].provider : "system"));
+                    json_array_append_new(arr, obj);
+                }
+                model_rec_free(&recs[i]);
+            }
+            free(recs);
+            json_t* root = json_object();
+            json_object_set_new(root, "object", json_string("list"));
+            json_object_set_new(root, "data", arr);
+            char* packed = json_dumps(root, JSON_COMPACT);
+            json_decref(root);
+            if (packed == NULL) {
+                aigate_write_error(rc, 500, "internal_error", "json encode failed");
+                return -1;
+            }
+            int rv = aigate_write_json(rc, 200, packed, strlen(packed));
+            free(packed);
+            (void)rv;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** @brief Body model parse → allowlist → router resolve → candidates → guardrails.
+ *  @return 0 on success with q filled; non-zero when an error was already written. */
+static int
+resolve_chat_target(chat_req_t* q)
+{
+    aigate_core*         ac = q->ac;
+    aigate_request_ctx*  rq = q->rq;
+    aigate_response_ctx* rc = q->rc;
+
+    /* --- model + allowlist (parsed from request body) --- */
+    json_t* jbody = NULL;
+    if (rq->body != NULL && rq->body_len > 0) {
+        jbody = json_loads((const char*)rq->body, 0, NULL);
+    }
+    q->jbody = jbody;
+    q->model = "";
+    if (jbody != NULL) {
+        json_t* jm = json_object_get(jbody, "model");
+        if (jm != NULL && json_is_string(jm)) {
+            q->model = json_string_value(jm);
+        }
+    }
+    if (q->model[0] == '\0' || !key_allows_model(&q->krec, q->model)) {
+        aigate_write_error(rc, PIPE_FORBIDDEN, "auth_error", "model not allowed for this key");
+        return -1;
+    }
+
+    /* --- route --- */
+    if (model_router_resolve(ac->router, q->model, &q->route) != 0) {
+        aigate_write_error(rc, PIPE_MODEL, "model_not_found", "model not found");
+        return -1;
+    }
+
+    /* --- candidate targets selection --- */
+    q->n_candidates = 0;
+    if (model_router_select_candidates(
+            ac->cb, &q->route, q->candidates, MAX_TARGETS_PER_MODEL, &q->n_candidates) != 0 ||
+        q->n_candidates == 0) {
+        aigate_write_error(
+            rc, PIPE_MODEL, "no_healthy_upstream", "no upstream targets available for model");
+        return -1;
+    }
+
+    /* --- guardrails inspection --- */
+    char matched_rule[128] = {0};
+    q->sanitized_body = NULL;
+    q->sanitized_len = 0;
+    q->eff_body = rq->body;
+    q->eff_len = rq->body_len;
+
+    if (q->krec.guardrails_enabled && ac->gr != NULL && rq->body != NULL && rq->body_len > 0) {
+        guardrails_action_t gr_res = guardrails_inspect_inbound(ac->gr,
+                                                                (const char*)rq->body,
+                                                                rq->body_len,
+                                                                &q->sanitized_body,
+                                                                &q->sanitized_len,
+                                                                matched_rule,
+                                                                sizeof matched_rule);
+        if (gr_res == GUARDRAILS_BLOCKED) {
+            char block_msg[256];
+            snprintf(block_msg,
+                     sizeof block_msg,
+                     "Blocked by safety guardrail rule: %s",
+                     matched_rule[0] ? matched_rule : "blocked content");
+            aigate_write_error(rc, 400, "content_policy_violation", block_msg);
+            record_usage_and_event(
+                ac, q->krec.key_id, q->model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
+            return -1;
+        }
+        if (gr_res == GUARDRAILS_MASKED && q->sanitized_body != NULL) {
+            q->eff_body = q->sanitized_body;
+            snprintf(q->guardrail_act, sizeof q->guardrail_act, "masked");
+        }
+    }
+    q->eff_len = (q->sanitized_body != NULL) ? q->sanitized_len : rq->body_len;
+    return 0;
+}
 
 /** @brief Streaming cache accumulator's set_header shim: forces status=200 then passes to real response.
  *  @return Downstream set_header return; 0 if no downstream. */
@@ -426,17 +668,19 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
                             }
                         }
                         json_t* choices = json_object_get(root, "choices");
-                        if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+                        if (choices != NULL && json_is_array(choices) &&
+                            json_array_size(choices) > 0) {
                             json_t* c0 = json_array_get(choices, 0);
                             json_t* delta = json_object_get(c0, "delta");
                             if (delta != NULL && json_is_object(delta)) {
                                 json_t* jcnt = json_object_get(delta, "content");
                                 if (jcnt != NULL && json_is_string(jcnt)) {
                                     const char* ctext = json_string_value(jcnt);
-                                    size_t clen = strlen(ctext);
+                                    size_t      clen = strlen(ctext);
                                     if (clen > 0) {
                                         if (acc->accum_len + clen + 1 > acc->accum_cap) {
-                                            size_t new_cap = acc->accum_cap ? acc->accum_cap * 2 : 4096;
+                                            size_t new_cap =
+                                                acc->accum_cap ? acc->accum_cap * 2 : 4096;
                                             while (new_cap < acc->accum_len + clen + 1) {
                                                 new_cap *= 2;
                                             }
@@ -453,7 +697,8 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
                                             }
                                         }
                                         if (!acc->overflow && acc->accum_content != NULL) {
-                                            memcpy(acc->accum_content + acc->accum_len, ctext, clen);
+                                            memcpy(
+                                                acc->accum_content + acc->accum_len, ctext, clen);
                                             acc->accum_len += clen;
                                             acc->accum_content[acc->accum_len] = '\0';
                                         }
@@ -538,19 +783,28 @@ cache_stream_replay(aigate_core*         ac,
 
     /* 1. Initial chunk with role */
     json_t* role_obj = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:n}]}",
-                                 "id", id_str,
-                                 "object", "chat.completion.chunk",
-                                 "created", (json_int_t)created_ts,
-                                 "model", model_str,
+                                 "id",
+                                 id_str,
+                                 "object",
+                                 "chat.completion.chunk",
+                                 "created",
+                                 (json_int_t)created_ts,
+                                 "model",
+                                 model_str,
                                  "choices",
-                                 "index", 0,
-                                 "delta", "role", "assistant", "content", "",
+                                 "index",
+                                 0,
+                                 "delta",
+                                 "role",
+                                 "assistant",
+                                 "content",
+                                 "",
                                  "finish_reason");
     if (role_obj != NULL) {
         char* role_json = json_dumps(role_obj, JSON_COMPACT);
         if (role_json != NULL) {
             char line[2048];
-            int n = snprintf(line, sizeof(line), "data: %s\n\n", role_json);
+            int  n = snprintf(line, sizeof(line), "data: %s\n\n", role_json);
             if (rc->write != NULL) {
                 rc->write(rc->impl, line, n, false);
             }
@@ -572,19 +826,26 @@ cache_stream_replay(aigate_core*         ac,
         piece[step] = '\0';
 
         json_t* chunk_obj = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s}, s:n}]}",
-                                      "id", id_str,
-                                      "object", "chat.completion.chunk",
-                                      "created", (json_int_t)created_ts,
-                                      "model", model_str,
+                                      "id",
+                                      id_str,
+                                      "object",
+                                      "chat.completion.chunk",
+                                      "created",
+                                      (json_int_t)created_ts,
+                                      "model",
+                                      model_str,
                                       "choices",
-                                      "index", 0,
-                                      "delta", "content", piece,
+                                      "index",
+                                      0,
+                                      "delta",
+                                      "content",
+                                      piece,
                                       "finish_reason");
         if (chunk_obj != NULL) {
             char* chunk_json = json_dumps(chunk_obj, JSON_COMPACT);
             if (chunk_json != NULL) {
                 char line[2048];
-                int n = snprintf(line, sizeof(line), "data: %s\n\n", chunk_json);
+                int  n = snprintf(line, sizeof(line), "data: %s\n\n", chunk_json);
                 if (rc->write != NULL) {
                     rc->write(rc->impl, line, n, false);
                 }
@@ -597,23 +858,32 @@ cache_stream_replay(aigate_core*         ac,
 
     /* 3. Finish chunk with finish_reason and usage */
     json_t* fin_obj = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{}, s:s}], s:{s:i, s:i, s:i}}",
-                                "id", id_str,
-                                "object", "chat.completion.chunk",
-                                "created", (json_int_t)created_ts,
-                                "model", model_str,
+                                "id",
+                                id_str,
+                                "object",
+                                "chat.completion.chunk",
+                                "created",
+                                (json_int_t)created_ts,
+                                "model",
+                                model_str,
                                 "choices",
-                                "index", 0,
+                                "index",
+                                0,
                                 "delta",
-                                "finish_reason", "stop",
+                                "finish_reason",
+                                "stop",
                                 "usage",
-                                "prompt_tokens", (int)ce->prompt_tokens,
-                                "completion_tokens", (int)ce->completion_tokens,
-                                "total_tokens", (int)(ce->prompt_tokens + ce->completion_tokens));
+                                "prompt_tokens",
+                                (int)ce->prompt_tokens,
+                                "completion_tokens",
+                                (int)ce->completion_tokens,
+                                "total_tokens",
+                                (int)(ce->prompt_tokens + ce->completion_tokens));
     if (fin_obj != NULL) {
         char* fin_json = json_dumps(fin_obj, JSON_COMPACT);
         if (fin_json != NULL) {
             char line[2048];
-            int n = snprintf(line, sizeof(line), "data: %s\n\n", fin_json);
+            int  n = snprintf(line, sizeof(line), "data: %s\n\n", fin_json);
             if (rc->write != NULL) {
                 rc->write(rc->impl, line, n, false);
             }
@@ -645,9 +915,14 @@ cache_stream_replay(aigate_core*         ac,
                            guardrail_act,
                            ce->cost_usd);
     if (ac->be != NULL) {
-        budget_enforce_record(ac->be, krec->key_id, krec->group_id, ce->cost_usd, ce->prompt_tokens + ce->completion_tokens);
+        budget_enforce_record(ac->be,
+                              krec->key_id,
+                              krec->group_id,
+                              ce->cost_usd,
+                              ce->prompt_tokens + ce->completion_tokens);
     }
-    rl_reserve_tokens(ac->rl, krec->key_id, krec->daily_token_quota, ce->prompt_tokens + ce->completion_tokens);
+    rl_reserve_tokens(
+        ac->rl, krec->key_id, krec->daily_token_quota, ce->prompt_tokens + ce->completion_tokens);
 
     response_cache_release_entry(ce);
     return 0;
@@ -660,7 +935,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 {
     /* --- auth --- */
     key_rec_t krec;
-    int arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
+    int       arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
     if (arc != 0) {
         aigate_write_error(rc, PIPE_AUTH, "auth_error", "invalid api key");
         key_rec_free(&krec);
@@ -669,7 +944,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
     /* --- rate limit --- */
     long retry_ms = 0;
-    int rrc = rl_allow_request(ac->rl, krec.key_id, krec.rate_qps, &retry_ms);
+    int  rrc = rl_allow_request(ac->rl, krec.key_id, krec.rate_qps, &retry_ms);
     if (rrc != 0) {
         if (retry_ms == -1) {
             aigate_write_error(rc, 503, "server_error", "distributed_state_unavailable");
@@ -701,7 +976,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
         if (rem <= 0) {
             time_t now = time(NULL);
             time_t next = (time_t)(now - (now % 86400)) + 86400; /* next UTC midnight */
-            char ra[32];
+            char   ra[32];
             snprintf(ra, sizeof ra, "%ld", (long)(next - now));
             if (rc->set_header != NULL) {
                 rc->set_header(rc->impl, "Retry-After", ra);
@@ -715,10 +990,17 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
     /* --- monthly budget limit gate --- */
     if (ac->be != NULL) {
         char b_err[256] = {0};
-        if (budget_enforce_check(ac->be, krec.key_id, krec.group_id,
-                                 krec.monthly_cost_budget, krec.monthly_token_budget,
-                                 0.0, b_err, sizeof b_err) != 0) {
-            aigate_write_error(rc, PIPE_RATE, "budget_exceeded",
+        if (budget_enforce_check(ac->be,
+                                 krec.key_id,
+                                 krec.group_id,
+                                 krec.monthly_cost_budget,
+                                 krec.monthly_token_budget,
+                                 0.0,
+                                 b_err,
+                                 sizeof b_err) != 0) {
+            aigate_write_error(rc,
+                               PIPE_RATE,
+                               "budget_exceeded",
                                b_err[0] ? b_err : "monthly budget limit exceeded");
             key_rec_free(&krec);
             return 0;
@@ -727,7 +1009,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
     /* --- model + allowlist (parsed from request body) --- */
     const char* model = "";
-    json_t* jbody = NULL;
+    json_t*     jbody = NULL;
     if (rq->body != NULL && rq->body_len > 0) {
         jbody = json_loads((const char*)rq->body, 0, NULL);
     }
@@ -761,8 +1043,10 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
     /* --- strict provider check --- */
     if (strcmp(route.provider, "openai") != 0) {
-        aigate_write_error(rc, 400, "unsupported_endpoint",
-            "/v1/responses requires an openai-compatible provider");
+        aigate_write_error(rc,
+                           400,
+                           "unsupported_endpoint",
+                           "/v1/responses requires an openai-compatible provider");
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
@@ -770,7 +1054,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
     /* --- candidate targets selection --- */
     upstream_target_t candidates[MAX_TARGETS_PER_MODEL];
-    int n_candidates = 0;
+    int               n_candidates = 0;
     if (model_router_select_candidates(
             ac->cb, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
         n_candidates == 0) {
@@ -794,8 +1078,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
     if (rq->cache_control != NULL) {
         if (strstr(rq->cache_control, "no-cache") != NULL ||
             strstr(rq->cache_control, "max-age=0") != NULL ||
-            strcmp(rq->cache_control, "true") == 0 ||
-            strcmp(rq->cache_control, "1") == 0) {
+            strcmp(rq->cache_control, "true") == 0 || strcmp(rq->cache_control, "1") == 0) {
             bypass_cache = true;
         }
         if (strstr(rq->cache_control, "no-store") != NULL) {
@@ -835,9 +1118,16 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                                        NULL,
                                        ce->cost_usd);
                 if (ac->be != NULL) {
-                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, ce->cost_usd, ce->prompt_tokens + ce->completion_tokens);
+                    budget_enforce_record(ac->be,
+                                          krec.key_id,
+                                          krec.group_id,
+                                          ce->cost_usd,
+                                          ce->prompt_tokens + ce->completion_tokens);
                 }
-                rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ce->prompt_tokens + ce->completion_tokens);
+                rl_reserve_tokens(ac->rl,
+                                  krec.key_id,
+                                  krec.daily_token_quota,
+                                  ce->prompt_tokens + ce->completion_tokens);
                 int rv = aigate_write_json(rc, 200, ce->response_body, ce->response_len);
                 response_cache_release_entry(ce);
                 json_decref(jbody);
@@ -856,31 +1146,40 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
         }
     }
 
-    uint64_t total_lat = 0;
+    uint64_t    total_lat = 0;
     const char* last_provider = route.provider;
 
     if (is_streaming) {
         for (int ci = 0; ci < n_candidates; ci++) {
-            upstream_target_t* target = &candidates[ci];
+            upstream_target_t*        target = &candidates[ci];
             const provider_adapter_t* adapter = provider_find(target->provider);
             if (adapter == NULL || adapter->build_responses == NULL) {
                 continue;
             }
 
             model_rec_t cur_route = route;
-            snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s",
-                     (int)sizeof cur_route.provider - 1, target->provider);
-            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s",
-                     (int)sizeof cur_route.endpoint - 1, target->endpoint);
-            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s",
-                     (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
+            snprintf(cur_route.provider,
+                     sizeof cur_route.provider,
+                     "%.*s",
+                     (int)sizeof cur_route.provider - 1,
+                     target->provider);
+            snprintf(cur_route.endpoint,
+                     sizeof cur_route.endpoint,
+                     "%.*s",
+                     (int)sizeof cur_route.endpoint - 1,
+                     target->endpoint);
+            snprintf(cur_route.upstream_key,
+                     sizeof cur_route.upstream_key,
+                     "%.*s",
+                     (int)sizeof cur_route.upstream_key - 1,
+                     target->upstream_key);
             last_provider = target->provider;
 
-            char url[1024];
-            char* out_body = NULL;
-            size_t out_body_len = 0;
+            char        url[1024];
+            char*       out_body = NULL;
+            size_t      out_body_len = 0;
             const char* extra_hdrs[4][2] = {{0}};
-            int n_extra_hdrs = 0;
+            int         n_extra_hdrs = 0;
 
             if (adapter->build_responses(&cur_route,
                                          rq->body != NULL ? (const char*)rq->body : "",
@@ -903,30 +1202,32 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             proxy_rc.set_header = stream_cache_acc_set_header;
             proxy_rc.write = stream_cache_acc_write;
 
-            stream_bridge_t* bridge = adapter->stream_bridge_new != NULL ?
-                                      adapter->stream_bridge_new(&proxy_rc, model) : NULL;
+            stream_bridge_t* bridge = adapter->stream_bridge_new != NULL
+                                          ? adapter->stream_bridge_new(&proxy_rc, model)
+                                          : NULL;
             if (bridge == NULL) {
                 free(out_body);
                 continue;
             }
 
-            int status = 0;
-            char* sbody = NULL;
-            size_t slen = 0;
+            int      status = 0;
+            char*    sbody = NULL;
+            size_t   slen = 0;
             uint64_t t0 = mono_ns();
-            long silence_timeout_ms = ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
-            int urc = upstream_stream_call(url,
-                                           cur_route.upstream_key,
-                                           extra_hdrs,
-                                           n_extra_hdrs,
-                                           out_body,
-                                           out_body_len,
-                                           silence_timeout_ms,
-                                           (upstream_chunk_fn)adapter->stream_bridge_feed,
-                                           bridge,
-                                           &status,
-                                           &sbody,
-                                           &slen);
+            long     silence_timeout_ms =
+                ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
+            int  urc = upstream_stream_call(url,
+                                            cur_route.upstream_key,
+                                            extra_hdrs,
+                                            n_extra_hdrs,
+                                            out_body,
+                                            out_body_len,
+                                            silence_timeout_ms,
+                                            (upstream_chunk_fn)adapter->stream_bridge_feed,
+                                            bridge,
+                                            &status,
+                                            &sbody,
+                                            &slen);
             bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
 
             if (n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {
@@ -963,7 +1264,18 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
                 if (!is_failover && status >= 400) {
                     if (sbody != NULL && urc == 0) {
-                        record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
+                        record_usage_and_event(ac,
+                                               krec.key_id,
+                                               model,
+                                               status,
+                                               0,
+                                               0,
+                                               0,
+                                               0,
+                                               total_lat,
+                                               target->provider,
+                                               NULL,
+                                               0.0);
                         int rv = aigate_write_json(rc, status, sbody, slen);
                         free(sbody);
                         json_decref(jbody);
@@ -975,7 +1287,9 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
                 }
 
                 if (ci + 1 < n_candidates) {
-                    AIGATE_LOG_WARN("responses streaming failover for model %s to %s", model, candidates[ci + 1].provider);
+                    AIGATE_LOG_WARN("responses streaming failover for model %s to %s",
+                                    model,
+                                    candidates[ci + 1].provider);
                     metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
                     free(sbody);
                     continue;
@@ -990,17 +1304,33 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             if (urc != 0) {
                 const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
                                                     : "stream interrupted: transport error";
-                char sse_err[256];
-                snprintf(sse_err, sizeof sse_err,
-                         "data: {\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
-                         "data: [DONE]\n\n", err_msg);
+                char        sse_err[256];
+                snprintf(
+                    sse_err,
+                    sizeof sse_err,
+                    "data: "
+                    "{\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
+                    "data: [DONE]\n\n",
+                    err_msg);
                 if (rc->write != NULL) {
                     rc->write(rc->impl, sse_err, strlen(sse_err), true);
                 }
                 double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-                record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider, NULL, req_cost);
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       PIPE_UPSTREAM,
+                                       ptok,
+                                       ctok,
+                                       cached_tok,
+                                       reasoning_tok,
+                                       total_lat,
+                                       target->provider,
+                                       NULL,
+                                       req_cost);
                 if (ac->be != NULL) {
-                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+                    budget_enforce_record(
+                        ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
                 }
                 if (ptok + ctok > 0) {
                     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
@@ -1017,7 +1347,18 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             cb_record_success(ac->cb, model, target->endpoint);
             adapter->stream_bridge_finish(bridge);
             double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-            record_usage_and_event(ac, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider, NULL, req_cost);
+            record_usage_and_event(ac,
+                                   krec.key_id,
+                                   model,
+                                   status > 0 ? status : 200,
+                                   ptok,
+                                   ctok,
+                                   cached_tok,
+                                   reasoning_tok,
+                                   total_lat,
+                                   target->provider,
+                                   NULL,
+                                   req_cost);
             if (ac->be != NULL) {
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
@@ -1025,23 +1366,45 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
             if (ac->rc != NULL && cache_key[0] != '\0' && !no_store && !acc.overflow &&
                 (status == 0 || status == 200) && acc.accum_content != NULL && acc.accum_len > 0) {
-                json_t* full_resp = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:s}], s:{s:i, s:i, s:i}}",
-                                              "id", acc.id[0] ? acc.id : "chatcmpl-stream",
-                                              "object", "chat.completion",
-                                              "created", (json_int_t)(acc.created > 0 ? acc.created : time(NULL)),
-                                              "model", model,
-                                              "choices",
-                                              "index", 0,
-                                              "message", "role", "assistant", "content", acc.accum_content,
-                                              "finish_reason", "stop",
-                                              "usage",
-                                              "prompt_tokens", (int)ptok,
-                                              "completion_tokens", (int)ctok,
-                                              "total_tokens", (int)(ptok + ctok));
+                json_t* full_resp = json_pack(
+                    "{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:s}], s:{s:i, s:i, s:i}}",
+                    "id",
+                    acc.id[0] ? acc.id : "chatcmpl-stream",
+                    "object",
+                    "chat.completion",
+                    "created",
+                    (json_int_t)(acc.created > 0 ? acc.created : time(NULL)),
+                    "model",
+                    model,
+                    "choices",
+                    "index",
+                    0,
+                    "message",
+                    "role",
+                    "assistant",
+                    "content",
+                    acc.accum_content,
+                    "finish_reason",
+                    "stop",
+                    "usage",
+                    "prompt_tokens",
+                    (int)ptok,
+                    "completion_tokens",
+                    (int)ctok,
+                    "total_tokens",
+                    (int)(ptok + ctok));
                 if (full_resp != NULL) {
                     char* full_json = json_dumps(full_resp, JSON_COMPACT);
                     if (full_json != NULL) {
-                        response_cache_set(ac->rc, cache_key, model, full_json, strlen(full_json), ptok, ctok, req_cost, 0);
+                        response_cache_set(ac->rc,
+                                           cache_key,
+                                           model,
+                                           full_json,
+                                           strlen(full_json),
+                                           ptok,
+                                           ctok,
+                                           req_cost,
+                                           0);
                         free(full_json);
                     }
                     json_decref(full_resp);
@@ -1061,7 +1424,8 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
         }
         aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
+        record_usage_and_event(
+            ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
@@ -1069,26 +1433,36 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
     /* Non-streaming */
     for (int ci = 0; ci < n_candidates; ci++) {
-        upstream_target_t* target = &candidates[ci];
+        upstream_target_t*        target = &candidates[ci];
         const provider_adapter_t* adapter = provider_find(target->provider);
-        if (adapter == NULL || adapter->build_responses == NULL || adapter->parse_responses_response == NULL) {
+        if (adapter == NULL || adapter->build_responses == NULL ||
+            adapter->parse_responses_response == NULL) {
             continue;
         }
 
         model_rec_t cur_route = route;
-        snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s",
-                 (int)sizeof cur_route.provider - 1, target->provider);
-        snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s",
-                 (int)sizeof cur_route.endpoint - 1, target->endpoint);
-        snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s",
-                 (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
+        snprintf(cur_route.provider,
+                 sizeof cur_route.provider,
+                 "%.*s",
+                 (int)sizeof cur_route.provider - 1,
+                 target->provider);
+        snprintf(cur_route.endpoint,
+                 sizeof cur_route.endpoint,
+                 "%.*s",
+                 (int)sizeof cur_route.endpoint - 1,
+                 target->endpoint);
+        snprintf(cur_route.upstream_key,
+                 sizeof cur_route.upstream_key,
+                 "%.*s",
+                 (int)sizeof cur_route.upstream_key - 1,
+                 target->upstream_key);
         last_provider = target->provider;
 
-        char url[1024];
-        char* out_body = NULL;
-        size_t out_body_len = 0;
+        char        url[1024];
+        char*       out_body = NULL;
+        size_t      out_body_len = 0;
         const char* extra_hdrs[4][2] = {{0}};
-        int n_extra_hdrs = 0;
+        int         n_extra_hdrs = 0;
 
         if (adapter->build_responses(&cur_route,
                                      rq->body != NULL ? (const char*)rq->body : "",
@@ -1102,20 +1476,20 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             continue;
         }
 
-        int status = 0;
-        char* ubody = NULL;
-        size_t ulen = 0;
+        int      status = 0;
+        char*    ubody = NULL;
+        size_t   ulen = 0;
         uint64_t t0 = mono_ns();
-        int urc = upstream_call_ext(url,
-                                    cur_route.upstream_key,
-                                    extra_hdrs,
-                                    n_extra_hdrs,
-                                    out_body,
-                                    out_body_len,
-                                    ac->default_timeout_ms,
-                                    &status,
-                                    &ubody,
-                                    &ulen);
+        int      urc = upstream_call_ext(url,
+                                         cur_route.upstream_key,
+                                         extra_hdrs,
+                                         n_extra_hdrs,
+                                         out_body,
+                                         out_body_len,
+                                         ac->default_timeout_ms,
+                                         &status,
+                                         &ubody,
+                                         &ulen);
 
         if (n_candidates == 1 && urc == 0 && status >= 500) {
             free(ubody);
@@ -1141,18 +1515,29 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
         if (!is_failover && status < 400) {
             cb_record_success(ac->cb, model, target->endpoint);
             long ptok = 0, ctok = 0, cached_tok = 0, reasoning_tok = 0;
-            adapter->parse_responses_response(ubody ? ubody : "", ulen,
-                                              &ptok, &ctok, &cached_tok, &reasoning_tok);
+            adapter->parse_responses_response(
+                ubody ? ubody : "", ulen, &ptok, &ctok, &cached_tok, &reasoning_tok);
 
             double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-            record_usage_and_event(ac, krec.key_id, model, status,
-                                   ptok, ctok, cached_tok, reasoning_tok, total_lat, target->provider, NULL, req_cost);
+            record_usage_and_event(ac,
+                                   krec.key_id,
+                                   model,
+                                   status,
+                                   ptok,
+                                   ctok,
+                                   cached_tok,
+                                   reasoning_tok,
+                                   total_lat,
+                                   target->provider,
+                                   NULL,
+                                   req_cost);
             if (ac->be != NULL) {
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
             rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
 
-            if (ac->rc != NULL && cache_key[0] != '\0' && status == 200 && ubody != NULL && !no_store && ulen <= 1048576) {
+            if (ac->rc != NULL && cache_key[0] != '\0' && status == 200 && ubody != NULL &&
+                !no_store && ulen <= 1048576) {
                 response_cache_set(ac->rc, cache_key, model, ubody, ulen, ptok, ctok, req_cost, 0);
             }
 
@@ -1167,7 +1552,18 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
 
         if (!is_failover && status >= 400) {
             if (ubody != NULL && urc == 0) {
-                record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       status,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       NULL,
+                                       0.0);
                 int rv = aigate_write_json(rc, status, ubody, ulen);
                 free(ubody);
                 json_decref(jbody);
@@ -1180,7 +1576,8 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
         free(ubody);
 
         if (ci + 1 < n_candidates) {
-            AIGATE_LOG_WARN("responses failover for model %s to %s", model, candidates[ci + 1].provider);
+            AIGATE_LOG_WARN(
+                "responses failover for model %s to %s", model, candidates[ci + 1].provider);
             metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
             continue;
         }
@@ -1190,7 +1587,8 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
         rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
     aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-    record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
+    record_usage_and_event(
+        ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
     json_decref(jbody);
     key_rec_free(&krec);
     return 0;
@@ -1260,7 +1658,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 {
     /* --- auth --- */
     key_rec_t krec;
-    int arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
+    int       arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
     if (arc != 0) {
         aigate_write_anthropic_error(rc, 401, "authentication_error", "invalid api key");
         key_rec_free(&krec);
@@ -1269,7 +1667,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 
     /* --- rate limit --- */
     long retry_ms = 0;
-    int rrc = rl_allow_request(ac->rl, krec.key_id, krec.rate_qps, &retry_ms);
+    int  rrc = rl_allow_request(ac->rl, krec.key_id, krec.rate_qps, &retry_ms);
     if (rrc != 0) {
         if (retry_ms == -1) {
             aigate_write_anthropic_error(rc, 503, "api_error", "distributed_state_unavailable");
@@ -1301,7 +1699,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
         if (rem <= 0) {
             time_t now = time(NULL);
             time_t next = (time_t)(now - (now % 86400)) + 86400; /* next UTC midnight */
-            char ra[32];
+            char   ra[32];
             snprintf(ra, sizeof ra, "%ld", (long)(next - now));
             if (rc->set_header != NULL) {
                 rc->set_header(rc->impl, "Retry-After", ra);
@@ -1315,11 +1713,16 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
     /* --- monthly budget limit gate --- */
     if (ac->be != NULL) {
         char b_err[256] = {0};
-        if (budget_enforce_check(ac->be, krec.key_id, krec.group_id,
-                                 krec.monthly_cost_budget, krec.monthly_token_budget,
-                                 0.0, b_err, sizeof b_err) != 0) {
-            aigate_write_anthropic_error(rc, 429, "rate_limit_error",
-                                         b_err[0] ? b_err : "monthly budget limit exceeded");
+        if (budget_enforce_check(ac->be,
+                                 krec.key_id,
+                                 krec.group_id,
+                                 krec.monthly_cost_budget,
+                                 krec.monthly_token_budget,
+                                 0.0,
+                                 b_err,
+                                 sizeof b_err) != 0) {
+            aigate_write_anthropic_error(
+                rc, 429, "rate_limit_error", b_err[0] ? b_err : "monthly budget limit exceeded");
             key_rec_free(&krec);
             return 0;
         }
@@ -1327,7 +1730,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 
     /* --- model + allowlist (parsed from request body) --- */
     const char* model = "";
-    json_t* jbody = NULL;
+    json_t*     jbody = NULL;
     if (rq->body != NULL && rq->body_len > 0) {
         jbody = json_loads((const char*)rq->body, 0, NULL);
     }
@@ -1344,7 +1747,8 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
         return 0;
     }
     if (!key_allows_model(&krec, model)) {
-        aigate_write_anthropic_error(rc, 403, "authentication_error", "model not allowed for this key");
+        aigate_write_anthropic_error(
+            rc, 403, "authentication_error", "model not allowed for this key");
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
@@ -1361,7 +1765,10 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 
     /* --- strict provider check --- */
     if (strcmp(route.provider, "anthropic") != 0) {
-        aigate_write_anthropic_error(rc, 400, "invalid_request_error",
+        aigate_write_anthropic_error(
+            rc,
+            400,
+            "invalid_request_error",
             "/v1/messages requires an anthropic provider (unsupported_endpoint)");
         json_decref(jbody);
         key_rec_free(&krec);
@@ -1370,7 +1777,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 
     /* --- candidate targets selection --- */
     upstream_target_t candidates[MAX_TARGETS_PER_MODEL];
-    int n_candidates = 0;
+    int               n_candidates = 0;
     if (model_router_select_candidates(
             ac->cb, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
         n_candidates == 0) {
@@ -1389,28 +1796,37 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
         }
     }
 
-    uint64_t total_lat = 0;
+    uint64_t    total_lat = 0;
     const char* last_provider = route.provider;
     const char* raw_body = rq->body != NULL ? (const char*)rq->body : "";
-    size_t raw_len = rq->body_len;
+    size_t      raw_len = rq->body_len;
 
     if (is_streaming) {
         for (int ci = 0; ci < n_candidates; ci++) {
             upstream_target_t* target = &candidates[ci];
-            model_rec_t cur_route = route;
-            snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s",
-                     (int)sizeof cur_route.provider - 1, target->provider);
-            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s",
-                     (int)sizeof cur_route.endpoint - 1, target->endpoint);
-            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s",
-                     (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
+            model_rec_t        cur_route = route;
+            snprintf(cur_route.provider,
+                     sizeof cur_route.provider,
+                     "%.*s",
+                     (int)sizeof cur_route.provider - 1,
+                     target->provider);
+            snprintf(cur_route.endpoint,
+                     sizeof cur_route.endpoint,
+                     "%.*s",
+                     (int)sizeof cur_route.endpoint - 1,
+                     target->endpoint);
+            snprintf(cur_route.upstream_key,
+                     sizeof cur_route.upstream_key,
+                     "%.*s",
+                     (int)sizeof cur_route.upstream_key - 1,
+                     target->upstream_key);
             last_provider = target->provider;
 
             char url[1024];
             build_anthropic_url(cur_route.endpoint, url, sizeof url);
 
             const char* extra_hdrs[4][2] = {{0}};
-            int n_extra_hdrs = 0;
+            int         n_extra_hdrs = 0;
             if (cur_route.upstream_key[0] != '\0') {
                 extra_hdrs[n_extra_hdrs][0] = "x-api-key";
                 extra_hdrs[n_extra_hdrs][1] = cur_route.upstream_key;
@@ -1425,11 +1841,12 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
             sctx.rc = rc;
             anthropic_sniffer_init(&sctx.sniffer);
 
-            int status = 0;
-            char* sbody = NULL;
-            size_t slen = 0;
+            int      status = 0;
+            char*    sbody = NULL;
+            size_t   slen = 0;
             uint64_t t0 = mono_ns();
-            long silence_timeout_ms = ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
+            long     silence_timeout_ms =
+                ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
             int urc = upstream_stream_call(url,
                                            cur_route.upstream_key,
                                            extra_hdrs,
@@ -1471,7 +1888,18 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 
                 if (!is_failover && status >= 400) {
                     if (sbody != NULL && urc == 0) {
-                        record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
+                        record_usage_and_event(ac,
+                                               krec.key_id,
+                                               model,
+                                               status,
+                                               0,
+                                               0,
+                                               0,
+                                               0,
+                                               total_lat,
+                                               target->provider,
+                                               NULL,
+                                               0.0);
                         int rv = aigate_write_json(rc, status, sbody, slen);
                         free(sbody);
                         json_decref(jbody);
@@ -1483,7 +1911,9 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
                 }
 
                 if (ci + 1 < n_candidates) {
-                    AIGATE_LOG_WARN("anthropic stream failover for model %s to %s", model, candidates[ci + 1].provider);
+                    AIGATE_LOG_WARN("anthropic stream failover for model %s to %s",
+                                    model,
+                                    candidates[ci + 1].provider);
                     metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
                     free(sbody);
                     continue;
@@ -1498,17 +1928,32 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
             if (urc != 0) {
                 const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
                                                     : "stream interrupted: transport error";
-                char sse_err[256];
-                snprintf(sse_err, sizeof sse_err,
-                         "event: error\r\ndata: {\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"%s\"}}\r\n\r\n",
+                char        sse_err[256];
+                snprintf(sse_err,
+                         sizeof sse_err,
+                         "event: error\r\ndata: "
+                         "{\"type\":\"error\",\"error\":{\"type\":\"api_error\",\"message\":\"%s\"}"
+                         "}\r\n\r\n",
                          err_msg);
                 if (rc->write != NULL) {
                     rc->write(rc->impl, sse_err, strlen(sse_err), true);
                 }
                 double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-                record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, 0, total_lat, target->provider, NULL, req_cost);
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       PIPE_UPSTREAM,
+                                       ptok,
+                                       ctok,
+                                       cached_tok,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       NULL,
+                                       req_cost);
                 if (ac->be != NULL) {
-                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+                    budget_enforce_record(
+                        ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
                 }
                 if (ptok + ctok > 0) {
                     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
@@ -1523,7 +1968,18 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
                 rc->write(rc->impl, "", 0, true);
             }
             double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-            record_usage_and_event(ac, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, 0, total_lat, target->provider, NULL, req_cost);
+            record_usage_and_event(ac,
+                                   krec.key_id,
+                                   model,
+                                   status > 0 ? status : 200,
+                                   ptok,
+                                   ctok,
+                                   cached_tok,
+                                   0,
+                                   total_lat,
+                                   target->provider,
+                                   NULL,
+                                   req_cost);
             if (ac->be != NULL) {
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
@@ -1538,7 +1994,8 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
             rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
         }
         aigate_write_anthropic_error(rc, 502, "api_error", "upstream request failed");
-        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
+        record_usage_and_event(
+            ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
         json_decref(jbody);
         key_rec_free(&krec);
         return 0;
@@ -1547,20 +2004,29 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
     /* non-streaming */
     for (int ci = 0; ci < n_candidates; ci++) {
         upstream_target_t* target = &candidates[ci];
-        model_rec_t cur_route = route;
-        snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s",
-                 (int)sizeof cur_route.provider - 1, target->provider);
-        snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s",
-                 (int)sizeof cur_route.endpoint - 1, target->endpoint);
-        snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s",
-                 (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
+        model_rec_t        cur_route = route;
+        snprintf(cur_route.provider,
+                 sizeof cur_route.provider,
+                 "%.*s",
+                 (int)sizeof cur_route.provider - 1,
+                 target->provider);
+        snprintf(cur_route.endpoint,
+                 sizeof cur_route.endpoint,
+                 "%.*s",
+                 (int)sizeof cur_route.endpoint - 1,
+                 target->endpoint);
+        snprintf(cur_route.upstream_key,
+                 sizeof cur_route.upstream_key,
+                 "%.*s",
+                 (int)sizeof cur_route.upstream_key - 1,
+                 target->upstream_key);
         last_provider = target->provider;
 
         char url[1024];
         build_anthropic_url(cur_route.endpoint, url, sizeof url);
 
         const char* extra_hdrs[4][2] = {{0}};
-        int n_extra_hdrs = 0;
+        int         n_extra_hdrs = 0;
         if (cur_route.upstream_key[0] != '\0') {
             extra_hdrs[n_extra_hdrs][0] = "x-api-key";
             extra_hdrs[n_extra_hdrs][1] = cur_route.upstream_key;
@@ -1570,20 +2036,20 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
         extra_hdrs[n_extra_hdrs][1] = "2023-06-01";
         n_extra_hdrs++;
 
-        int status = 0;
-        char* ubody = NULL;
-        size_t ulen = 0;
+        int      status = 0;
+        char*    ubody = NULL;
+        size_t   ulen = 0;
         uint64_t t0 = mono_ns();
-        int urc = upstream_call_ext(url,
-                                    cur_route.upstream_key,
-                                    extra_hdrs,
-                                    n_extra_hdrs,
-                                    raw_body,
-                                    raw_len,
-                                    ac->default_timeout_ms,
-                                    &status,
-                                    &ubody,
-                                    &ulen);
+        int      urc = upstream_call_ext(url,
+                                         cur_route.upstream_key,
+                                         extra_hdrs,
+                                         n_extra_hdrs,
+                                         raw_body,
+                                         raw_len,
+                                         ac->default_timeout_ms,
+                                         &status,
+                                         &ubody,
+                                         &ulen);
 
         if (n_candidates == 1 && urc == 0 && status >= 500) {
             free(ubody);
@@ -1642,7 +2108,18 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
 
         if (!is_failover && status >= 400) {
             if (ubody != NULL && urc == 0) {
-                record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       status,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       NULL,
+                                       0.0);
                 if (rc->set_header != NULL) {
                     rc->set_header(rc->impl, "X-Upstream-Provider", target->provider);
                 }
@@ -1658,7 +2135,8 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
         free(ubody);
 
         if (ci + 1 < n_candidates) {
-            AIGATE_LOG_WARN("anthropic failover for model %s to %s", model, candidates[ci + 1].provider);
+            AIGATE_LOG_WARN(
+                "anthropic failover for model %s to %s", model, candidates[ci + 1].provider);
             metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
             continue;
         }
@@ -1668,7 +2146,8 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
         rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
     aigate_write_anthropic_error(rc, 502, "api_error", "upstream request failed");
-    record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
+    record_usage_and_event(
+        ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
     json_decref(jbody);
     key_rec_free(&krec);
     return 0;
@@ -1706,7 +2185,8 @@ extract_gemini_model(const char* path, char* model_buf, size_t cap)
 
 /** @brief Build Gemini upstream URL: empty endpoint defaults to generativelanguage; strips trailing /v1beta|/v1; streaming uses `:streamGenerateContent?alt=sse`, else `:generateContent`. */
 static void
-build_gemini_url(const char* endpoint, const char* model, bool is_streaming, char* url_out, size_t url_cap)
+build_gemini_url(
+    const char* endpoint, const char* model, bool is_streaming, char* url_out, size_t url_cap)
 {
     const char* ep = endpoint;
     if (ep == NULL || ep[0] == '\0' || strcmp(ep, "/") == 0) {
@@ -1725,7 +2205,8 @@ build_gemini_url(const char* endpoint, const char* model, bool is_streaming, cha
     }
 
     if (is_streaming) {
-        snprintf(url_out, url_cap, "%s/v1beta/models/%s:streamGenerateContent?alt=sse", base_ep, model);
+        snprintf(
+            url_out, url_cap, "%s/v1beta/models/%s:streamGenerateContent?alt=sse", base_ep, model);
     } else {
         snprintf(url_out, url_cap, "%s/v1beta/models/%s:generateContent", base_ep, model);
     }
@@ -1770,7 +2251,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 {
     /* --- auth --- */
     key_rec_t krec;
-    int arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
+    int       arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
     if (arc != 0) {
         aigate_write_gemini_error(rc, 401, "UNAUTHENTICATED", "invalid api key");
         key_rec_free(&krec);
@@ -1779,7 +2260,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 
     /* --- rate limit --- */
     long retry_ms = 0;
-    int rrc = rl_allow_request(ac->rl, krec.key_id, krec.rate_qps, &retry_ms);
+    int  rrc = rl_allow_request(ac->rl, krec.key_id, krec.rate_qps, &retry_ms);
     if (rrc != 0) {
         if (retry_ms == -1) {
             aigate_write_gemini_error(rc, 503, "UNAVAILABLE", "distributed_state_unavailable");
@@ -1811,7 +2292,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
         if (rem <= 0) {
             time_t now = time(NULL);
             time_t next = (time_t)(now - (now % 86400)) + 86400; /* next UTC midnight */
-            char ra[32];
+            char   ra[32];
             snprintf(ra, sizeof ra, "%ld", (long)(next - now));
             if (rc->set_header != NULL) {
                 rc->set_header(rc->impl, "Retry-After", ra);
@@ -1825,11 +2306,16 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
     /* --- monthly budget limit gate --- */
     if (ac->be != NULL) {
         char b_err[256] = {0};
-        if (budget_enforce_check(ac->be, krec.key_id, krec.group_id,
-                                 krec.monthly_cost_budget, krec.monthly_token_budget,
-                                 0.0, b_err, sizeof b_err) != 0) {
-            aigate_write_gemini_error(rc, 429, "RESOURCE_EXHAUSTED",
-                                      b_err[0] ? b_err : "monthly budget limit exceeded");
+        if (budget_enforce_check(ac->be,
+                                 krec.key_id,
+                                 krec.group_id,
+                                 krec.monthly_cost_budget,
+                                 krec.monthly_token_budget,
+                                 0.0,
+                                 b_err,
+                                 sizeof b_err) != 0) {
+            aigate_write_gemini_error(
+                rc, 429, "RESOURCE_EXHAUSTED", b_err[0] ? b_err : "monthly budget limit exceeded");
             key_rec_free(&krec);
             return 0;
         }
@@ -1838,7 +2324,8 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
     /* --- model from URL path --- */
     char model[128] = {0};
     if (extract_gemini_model(rq->path, model, sizeof model) != 0) {
-        aigate_write_gemini_error(rc, 400, "INVALID_ARGUMENT", "failed to extract model from URL path");
+        aigate_write_gemini_error(
+            rc, 400, "INVALID_ARGUMENT", "failed to extract model from URL path");
         key_rec_free(&krec);
         return 0;
     }
@@ -1859,7 +2346,10 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 
     /* --- strict provider check --- */
     if (strcmp(route.provider, "gemini") != 0 && strcmp(route.provider, "google") != 0) {
-        aigate_write_gemini_error(rc, 400, "INVALID_ARGUMENT",
+        aigate_write_gemini_error(
+            rc,
+            400,
+            "INVALID_ARGUMENT",
             "Gemini endpoints require a gemini or google provider (unsupported_endpoint)");
         key_rec_free(&krec);
         return 0;
@@ -1867,7 +2357,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 
     /* --- candidate targets selection --- */
     upstream_target_t candidates[MAX_TARGETS_PER_MODEL];
-    int n_candidates = 0;
+    int               n_candidates = 0;
     if (model_router_select_candidates(
             ac->cb, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
         n_candidates == 0) {
@@ -1877,31 +2367,40 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
         return 0;
     }
 
-    bool is_streaming = (strstr(rq->path, ":streamGenerateContent") != NULL ||
-                         strstr(rq->path, "alt=sse") != NULL);
+    bool is_streaming =
+        (strstr(rq->path, ":streamGenerateContent") != NULL || strstr(rq->path, "alt=sse") != NULL);
 
-    uint64_t total_lat = 0;
+    uint64_t    total_lat = 0;
     const char* last_provider = route.provider;
     const char* raw_body = rq->body != NULL ? (const char*)rq->body : "";
-    size_t raw_len = rq->body_len;
+    size_t      raw_len = rq->body_len;
 
     if (is_streaming) {
         for (int ci = 0; ci < n_candidates; ci++) {
             upstream_target_t* target = &candidates[ci];
-            model_rec_t cur_route = route;
-            snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s",
-                     (int)sizeof cur_route.provider - 1, target->provider);
-            snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s",
-                     (int)sizeof cur_route.endpoint - 1, target->endpoint);
-            snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s",
-                     (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
+            model_rec_t        cur_route = route;
+            snprintf(cur_route.provider,
+                     sizeof cur_route.provider,
+                     "%.*s",
+                     (int)sizeof cur_route.provider - 1,
+                     target->provider);
+            snprintf(cur_route.endpoint,
+                     sizeof cur_route.endpoint,
+                     "%.*s",
+                     (int)sizeof cur_route.endpoint - 1,
+                     target->endpoint);
+            snprintf(cur_route.upstream_key,
+                     sizeof cur_route.upstream_key,
+                     "%.*s",
+                     (int)sizeof cur_route.upstream_key - 1,
+                     target->upstream_key);
             last_provider = target->provider;
 
             char url[1024];
             build_gemini_url(cur_route.endpoint, model, true, url, sizeof url);
 
             const char* extra_hdrs[4][2] = {{0}};
-            int n_extra_hdrs = 0;
+            int         n_extra_hdrs = 0;
             if (cur_route.upstream_key[0] != '\0') {
                 extra_hdrs[n_extra_hdrs][0] = "x-goog-api-key";
                 extra_hdrs[n_extra_hdrs][1] = cur_route.upstream_key;
@@ -1913,11 +2412,12 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
             sctx.rc = rc;
             gemini_sniffer_init(&sctx.sniffer);
 
-            int status = 0;
-            char* sbody = NULL;
-            size_t slen = 0;
+            int      status = 0;
+            char*    sbody = NULL;
+            size_t   slen = 0;
             uint64_t t0 = mono_ns();
-            long silence_timeout_ms = ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
+            long     silence_timeout_ms =
+                ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
             int urc = upstream_stream_call(url,
                                            cur_route.upstream_key,
                                            extra_hdrs,
@@ -1959,7 +2459,18 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 
                 if (!is_failover && status >= 400) {
                     if (sbody != NULL && urc == 0) {
-                        record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
+                        record_usage_and_event(ac,
+                                               krec.key_id,
+                                               model,
+                                               status,
+                                               0,
+                                               0,
+                                               0,
+                                               0,
+                                               total_lat,
+                                               target->provider,
+                                               NULL,
+                                               0.0);
                         int rv = aigate_write_json(rc, status, sbody, slen);
                         free(sbody);
                         key_rec_free(&krec);
@@ -1970,7 +2481,9 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
                 }
 
                 if (ci + 1 < n_candidates) {
-                    AIGATE_LOG_WARN("gemini stream failover for model %s to %s", model, candidates[ci + 1].provider);
+                    AIGATE_LOG_WARN("gemini stream failover for model %s to %s",
+                                    model,
+                                    candidates[ci + 1].provider);
                     metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
                     free(sbody);
                     continue;
@@ -1985,17 +2498,32 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
             if (urc != 0) {
                 const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
                                                     : "stream interrupted: transport error";
-                char sse_err[256];
-                snprintf(sse_err, sizeof sse_err,
-                         "data: {\"error\":{\"code\":502,\"message\":\"%s\",\"status\":\"UNAVAILABLE\"}}\n\n",
-                         err_msg);
+                char        sse_err[256];
+                snprintf(
+                    sse_err,
+                    sizeof sse_err,
+                    "data: "
+                    "{\"error\":{\"code\":502,\"message\":\"%s\",\"status\":\"UNAVAILABLE\"}}\n\n",
+                    err_msg);
                 if (rc->write != NULL) {
                     rc->write(rc->impl, sse_err, strlen(sse_err), true);
                 }
                 double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-                record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, ptok, ctok, cached_tok, 0, total_lat, target->provider, NULL, req_cost);
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       PIPE_UPSTREAM,
+                                       ptok,
+                                       ctok,
+                                       cached_tok,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       NULL,
+                                       req_cost);
                 if (ac->be != NULL) {
-                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+                    budget_enforce_record(
+                        ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
                 }
                 if (ptok + ctok > 0) {
                     rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
@@ -2009,7 +2537,18 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
                 rc->write(rc->impl, "", 0, true);
             }
             double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-            record_usage_and_event(ac, krec.key_id, model, status > 0 ? status : 200, ptok, ctok, cached_tok, 0, total_lat, target->provider, NULL, req_cost);
+            record_usage_and_event(ac,
+                                   krec.key_id,
+                                   model,
+                                   status > 0 ? status : 200,
+                                   ptok,
+                                   ctok,
+                                   cached_tok,
+                                   0,
+                                   total_lat,
+                                   target->provider,
+                                   NULL,
+                                   req_cost);
             if (ac->be != NULL) {
                 budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
             }
@@ -2023,7 +2562,8 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
             rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
         }
         aigate_write_gemini_error(rc, 502, "UNAVAILABLE", "upstream request failed");
-        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
+        record_usage_and_event(
+            ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
         key_rec_free(&krec);
         return 0;
     }
@@ -2031,40 +2571,49 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
     /* non-streaming */
     for (int ci = 0; ci < n_candidates; ci++) {
         upstream_target_t* target = &candidates[ci];
-        model_rec_t cur_route = route;
-        snprintf(cur_route.provider, sizeof cur_route.provider, "%.*s",
-                 (int)sizeof cur_route.provider - 1, target->provider);
-        snprintf(cur_route.endpoint, sizeof cur_route.endpoint, "%.*s",
-                 (int)sizeof cur_route.endpoint - 1, target->endpoint);
-        snprintf(cur_route.upstream_key, sizeof cur_route.upstream_key, "%.*s",
-                 (int)sizeof cur_route.upstream_key - 1, target->upstream_key);
+        model_rec_t        cur_route = route;
+        snprintf(cur_route.provider,
+                 sizeof cur_route.provider,
+                 "%.*s",
+                 (int)sizeof cur_route.provider - 1,
+                 target->provider);
+        snprintf(cur_route.endpoint,
+                 sizeof cur_route.endpoint,
+                 "%.*s",
+                 (int)sizeof cur_route.endpoint - 1,
+                 target->endpoint);
+        snprintf(cur_route.upstream_key,
+                 sizeof cur_route.upstream_key,
+                 "%.*s",
+                 (int)sizeof cur_route.upstream_key - 1,
+                 target->upstream_key);
         last_provider = target->provider;
 
         char url[1024];
         build_gemini_url(cur_route.endpoint, model, false, url, sizeof url);
 
         const char* extra_hdrs[4][2] = {{0}};
-        int n_extra_hdrs = 0;
+        int         n_extra_hdrs = 0;
         if (cur_route.upstream_key[0] != '\0') {
             extra_hdrs[n_extra_hdrs][0] = "x-goog-api-key";
             extra_hdrs[n_extra_hdrs][1] = cur_route.upstream_key;
             n_extra_hdrs++;
         }
 
-        int status = 0;
-        char* ubody = NULL;
-        size_t ulen = 0;
+        int      status = 0;
+        char*    ubody = NULL;
+        size_t   ulen = 0;
         uint64_t t0 = mono_ns();
-        int urc = upstream_call_ext(url,
-                                    cur_route.upstream_key,
-                                    extra_hdrs,
-                                    n_extra_hdrs,
-                                    raw_body,
-                                    raw_len,
-                                    ac->default_timeout_ms,
-                                    &status,
-                                    &ubody,
-                                    &ulen);
+        int      urc = upstream_call_ext(url,
+                                         cur_route.upstream_key,
+                                         extra_hdrs,
+                                         n_extra_hdrs,
+                                         raw_body,
+                                         raw_len,
+                                         ac->default_timeout_ms,
+                                         &status,
+                                         &ubody,
+                                         &ulen);
 
         if (n_candidates == 1 && urc == 0 && status >= 500) {
             free(ubody);
@@ -2122,7 +2671,18 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
 
         if (!is_failover && status >= 400) {
             if (ubody != NULL && urc == 0) {
-                record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, NULL, 0.0);
+                record_usage_and_event(ac,
+                                       krec.key_id,
+                                       model,
+                                       status,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       NULL,
+                                       0.0);
                 if (rc->set_header != NULL) {
                     rc->set_header(rc->impl, "X-Upstream-Provider", target->provider);
                 }
@@ -2137,7 +2697,8 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
         free(ubody);
 
         if (ci + 1 < n_candidates) {
-            AIGATE_LOG_WARN("gemini failover for model %s to %s", model, candidates[ci + 1].provider);
+            AIGATE_LOG_WARN(
+                "gemini failover for model %s to %s", model, candidates[ci + 1].provider);
             metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
             continue;
         }
@@ -2147,12 +2708,609 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
         rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
     aigate_write_gemini_error(rc, 502, "UNAVAILABLE", "upstream request failed");
-    record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
+    record_usage_and_event(
+        ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, NULL, 0.0);
     key_rec_free(&krec);
     return 0;
 }
 
+/** @brief Fill a per-target route copy from base route + upstream target. */
+static void
+fill_cur_route(const model_rec_t* route, const upstream_target_t* t, model_rec_t* out)
+{
+    *out = *route;
+    snprintf(
+        out->provider, sizeof out->provider, "%.*s", (int)sizeof out->provider - 1, t->provider);
+    snprintf(
+        out->endpoint, sizeof out->endpoint, "%.*s", (int)sizeof out->endpoint - 1, t->endpoint);
+    snprintf(out->upstream_key,
+             sizeof out->upstream_key,
+             "%.*s",
+             (int)sizeof out->upstream_key - 1,
+             t->upstream_key);
+}
+
+/** @brief Post-success settlement: usage event + budget record + daily token reserve. */
+static void
+settle_success(chat_req_t* q,
+               int         status,
+               long        ptok,
+               long        ctok,
+               long        cached_tok,
+               uint64_t    lat,
+               const char* provider,
+               double      cost)
+{
+    record_usage_and_event(q->ac,
+                           q->krec.key_id,
+                           q->model,
+                           status,
+                           ptok,
+                           ctok,
+                           cached_tok,
+                           0,
+                           lat,
+                           provider,
+                           q->guardrail_act,
+                           cost);
+    if (q->ac->be != NULL) {
+        budget_enforce_record(q->ac->be, q->krec.key_id, q->krec.group_id, cost, ptok + ctok);
+    }
+    if (ptok + ctok > 0) {
+        rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
+    }
+}
+
+/** @brief Failover warning log + failover metric. */
+static void
+failover_warn(const char*              label,
+              const char*              model,
+              const upstream_target_t* from,
+              const upstream_target_t* to,
+              int                      status,
+              int                      urc)
+{
+    AIGATE_LOG_WARN("%s for model %s from %s (%s) to %s (%s) due to status %d (urc %d)",
+                    label,
+                    model,
+                    from->provider,
+                    from->endpoint,
+                    to->provider,
+                    to->endpoint,
+                    status,
+                    urc);
+    metrics_inc_failover(model, from->provider, to->provider);
+}
+
+/** @brief /v1/embeddings failover loop. @return 1 when the path was handled. */
+static int
+handle_embeddings(chat_req_t* q)
+{
+    if (q->rq->path == NULL || strcmp(q->rq->path, "/v1/embeddings") != 0) {
+        return 0;
+    }
+    int n_supported = 0;
+    for (int ci = 0; ci < q->n_candidates; ci++) {
+        const provider_adapter_t* adapter = provider_find(q->candidates[ci].provider);
+        if (adapter != NULL && adapter->build_embeddings != NULL &&
+            adapter->parse_embeddings_response != NULL) {
+            n_supported++;
+        }
+    }
+    if (n_supported == 0) {
+        aigate_write_error(
+            q->rc, 400, "unsupported_endpoint", "model or provider does not support embeddings");
+        chat_req_cleanup(q);
+        return 0;
+    }
+
+    uint64_t    total_lat = 0;
+    const char* last_provider = q->route.provider;
+
+    for (int ci = 0; ci < q->n_candidates; ci++) {
+        upstream_target_t*        target = &q->candidates[ci];
+        const provider_adapter_t* adapter = provider_find(target->provider);
+        if (adapter == NULL || adapter->build_embeddings == NULL ||
+            adapter->parse_embeddings_response == NULL) {
+            continue;
+        }
+
+        model_rec_t cur_route = q->route;
+        fill_cur_route(&q->route, target, &cur_route);
+        last_provider = target->provider;
+
+        char        url[1024];
+        char*       merged = NULL;
+        size_t      mlen = 0;
+        const char* extra_hdrs[4][2] = {{0}};
+        int         n_extra_hdrs = 0;
+
+        if (adapter->build_embeddings(&cur_route,
+                                      q->eff_body != NULL ? (const char*)q->eff_body : NULL,
+                                      url,
+                                      sizeof url,
+                                      extra_hdrs,
+                                      &n_extra_hdrs,
+                                      &merged,
+                                      &mlen) != 0) {
+            free(merged);
+            continue;
+        }
+
+        int      status = 0;
+        char*    ubody = NULL;
+        size_t   ulen = 0;
+        uint64_t t0 = mono_ns();
+        int      urc = upstream_call_ext(url,
+                                         cur_route.upstream_key,
+                                         extra_hdrs,
+                                         n_extra_hdrs,
+                                         merged,
+                                         mlen,
+                                         q->ac->default_timeout_ms,
+                                         &status,
+                                         &ubody,
+                                         &ulen);
+
+        if (q->n_candidates == 1 && urc == 0 && status >= 500) {
+            free(ubody);
+            ubody = NULL;
+            struct timespec sl = {0, 200 * 1000000}; /* 200ms */
+            nanosleep(&sl, NULL);
+            urc = upstream_call_ext(url,
+                                    cur_route.upstream_key,
+                                    extra_hdrs,
+                                    n_extra_hdrs,
+                                    merged,
+                                    mlen,
+                                    q->ac->default_timeout_ms,
+                                    &status,
+                                    &ubody,
+                                    &ulen);
+        }
+        uint64_t lat = mono_ns() - t0;
+        total_lat += lat;
+        free(merged);
+
+        bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
+        if (!is_failover && status < 400) {
+            cb_record_success(q->ac->cb, q->model, target->endpoint);
+            char*  parsed_body = NULL;
+            size_t parsed_len = 0;
+            long   ptok = 0;
+            int    parsed_status = status;
+            if (adapter->parse_embeddings_response(ubody ? ubody : "",
+                                                   ulen,
+                                                   q->model,
+                                                   &parsed_status,
+                                                   &parsed_body,
+                                                   &parsed_len,
+                                                   &ptok) != 0) {
+                free(ubody);
+                aigate_write_error(
+                    q->rc, 502, "upstream_error", "failed to parse upstream embeddings response");
+                chat_req_cleanup(q);
+                return 0;
+            }
+            free(ubody);
+
+            double req_cost = calc_req_cost(&q->route, ptok, 0, 0);
+            settle_success(q, parsed_status, ptok, 0, 0, total_lat, target->provider, req_cost);
+
+            int rv =
+                aigate_write_json(q->rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
+            free(parsed_body);
+            chat_req_cleanup(q);
+            return rv;
+        }
+
+        cb_record_failure(q->ac->cb, q->model, target->endpoint, status);
+
+        if (!is_failover && status >= 400) {
+            if (ubody != NULL && urc == 0) {
+                record_usage_and_event(q->ac,
+                                       q->krec.key_id,
+                                       q->model,
+                                       status,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       q->guardrail_act,
+                                       0.0);
+                int rv = aigate_write_json(q->rc, status, ubody, ulen);
+                free(ubody);
+                chat_req_cleanup(q);
+                return rv;
+            }
+            free(ubody);
+            break;
+        }
+        free(ubody);
+
+        if (ci + 1 < q->n_candidates) {
+            failover_warn(
+                "failover embeddings", q->model, target, &q->candidates[ci + 1], status, urc);
+            continue;
+        }
+    }
+
+    if (q->rc->set_header != NULL) {
+        q->rc->set_header(q->rc->impl, "X-Upstream-Provider", last_provider);
+    }
+    aigate_write_error(
+        q->rc, PIPE_UPSTREAM, "upstream_error", "upstream embeddings request failed");
+    record_usage_and_event(q->ac,
+                           q->krec.key_id,
+                           q->model,
+                           PIPE_UPSTREAM,
+                           0,
+                           0,
+                           0,
+                           0,
+                           total_lat,
+                           last_provider,
+                           q->guardrail_act,
+                           0.0);
+    chat_req_cleanup(q);
+    return 0;
+}
+/** @brief Chat capability check + cache-control parse + cache lookup.
+ *  @param[out] is_streaming set from body "stream" flag.
+ *  @return 1 when the response was already written (HIT or unsupported);
+ *          0 to continue to upstream; <0 never (reserved). */
+static int
+prepare_chat_cache(chat_req_t* q, bool* is_streaming)
+{
+    int n_chat_supported = 0;
+    for (int ci = 0; ci < q->n_candidates; ci++) {
+        const provider_adapter_t* adapter = provider_find(q->candidates[ci].provider);
+        if (adapter != NULL && adapter->build_chat != NULL) {
+            n_chat_supported++;
+        }
+    }
+    if (n_chat_supported == 0) {
+        aigate_write_error(q->rc,
+                           PIPE_UNSUPPORTED,
+                           "unsupported_provider",
+                           "provider not supported by this build");
+        return 1;
+    }
+
+    /* Check if streaming */
+    json_t* jstream = (q->jbody != NULL) ? json_object_get(q->jbody, "stream") : NULL;
+    *is_streaming = (jstream != NULL && json_is_true(jstream));
+
+    if (q->rq->cache_control != NULL) {
+        if (strstr(q->rq->cache_control, "no-cache") != NULL ||
+            strstr(q->rq->cache_control, "max-age=0") != NULL ||
+            strcmp(q->rq->cache_control, "true") == 0 || strcmp(q->rq->cache_control, "1") == 0) {
+            q->bypass_cache = true;
+        }
+        if (strstr(q->rq->cache_control, "no-store") != NULL) {
+            q->bypass_cache = true;
+            q->no_store = true;
+        }
+    }
+
+    if (q->ac->rc != NULL && !q->bypass_cache) {
+        response_cache_fingerprint(q->model, (const char*)q->eff_body, q->eff_len, q->cache_key);
+    }
+    if (q->rc->set_header != NULL && q->ac->rc != NULL && q->bypass_cache) {
+        q->rc->set_header(q->rc->impl, "X-Cache", "MISS");
+    }
+    if (q->ac->rc != NULL && q->cache_key[0] != '\0') {
+        cache_entry_t* ce = response_cache_get(q->ac->rc, q->cache_key);
+        if (ce != NULL) {
+            if (!*is_streaming) {
+                if (q->rc->set_header != NULL) {
+                    q->rc->set_header(q->rc->impl, "X-Cache", "HIT");
+                    q->rc->set_header(q->rc->impl, "X-Cache-Lookup-Time", "0.10ms");
+                    char age_str[32];
+                    snprintf(age_str, sizeof(age_str), "%ld", (long)(time(NULL) - ce->created_at));
+                    q->rc->set_header(q->rc->impl, "Age", age_str);
+                }
+                record_usage_and_event(q->ac,
+                                       q->krec.key_id,
+                                       q->model,
+                                       200,
+                                       ce->prompt_tokens,
+                                       ce->completion_tokens,
+                                       0,
+                                       0,
+                                       100000ULL,
+                                       "cache",
+                                       q->guardrail_act,
+                                       ce->cost_usd);
+                if (q->ac->be != NULL) {
+                    budget_enforce_record(q->ac->be,
+                                          q->krec.key_id,
+                                          q->krec.group_id,
+                                          ce->cost_usd,
+                                          ce->prompt_tokens + ce->completion_tokens);
+                }
+                rl_reserve_tokens(q->ac->rl,
+                                  q->krec.key_id,
+                                  q->krec.daily_token_quota,
+                                  ce->prompt_tokens + ce->completion_tokens);
+                aigate_write_json(q->rc, 200, ce->response_body, ce->response_len);
+                response_cache_release_entry(ce);
+                return 1;
+            } else {
+                cache_stream_replay(q->ac, q->rc, ce, q->model, &q->krec, q->guardrail_act);
+                return 1;
+            }
+        } else {
+            if (q->rc->set_header != NULL) {
+                q->rc->set_header(q->rc->impl, "X-Cache", "MISS");
+            }
+        }
+    }
+    return 0;
+}
+
+/** @brief Streaming chat failover loop (SSE + cache accumulation). */
+static int
+handle_chat_stream(chat_req_t* q)
+{
+    uint64_t    total_lat = 0;
+    const char* last_provider = q->route.provider;
+
+    for (int ci = 0; ci < q->n_candidates; ci++) {
+        upstream_target_t*        target = &q->candidates[ci];
+        const provider_adapter_t* adapter = provider_find(target->provider);
+        if (adapter == NULL || adapter->build_chat == NULL || adapter->stream_bridge_new == NULL) {
+            continue;
+        }
+
+        model_rec_t cur_route = q->route;
+        fill_cur_route(&q->route, target, &cur_route);
+        last_provider = target->provider;
+
+        char        url[1024];
+        char*       merged = NULL;
+        size_t      mlen = 0;
+        const char* extra_hdrs[4][2] = {{0}};
+        int         n_extra_hdrs = 0;
+
+        if (adapter->build_chat(&cur_route,
+                                q->eff_body != NULL ? (const char*)q->eff_body : NULL,
+                                url,
+                                sizeof url,
+                                extra_hdrs,
+                                &n_extra_hdrs,
+                                &merged,
+                                &mlen) != 0) {
+            free(merged);
+            continue;
+        }
+
+        stream_cache_acc_t acc;
+        memset(&acc, 0, sizeof(acc));
+        acc.orig_rc = q->rc;
+
+        aigate_response_ctx proxy_rc = *q->rc;
+        proxy_rc.impl = &acc;
+        proxy_rc.set_header = stream_cache_acc_set_header;
+        proxy_rc.write = stream_cache_acc_write;
+
+        stream_bridge_t* bridge = adapter->stream_bridge_new(&proxy_rc, q->model);
+        if (bridge == NULL) {
+            free(merged);
+            continue;
+        }
+
+        int      status = 0;
+        char*    sbody = NULL;
+        size_t   slen = 0;
+        uint64_t t0 = mono_ns();
+        long     silence_timeout_ms =
+            q->ac->default_timeout_ms > 0 ? (long)q->ac->default_timeout_ms : 30000L;
+        int  urc = upstream_stream_call(url,
+                                        cur_route.upstream_key,
+                                        extra_hdrs,
+                                        n_extra_hdrs,
+                                        merged,
+                                        mlen,
+                                        silence_timeout_ms,
+                                        (upstream_chunk_fn)adapter->stream_bridge_feed,
+                                        bridge,
+                                        &status,
+                                        &sbody,
+                                        &slen);
+        bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
+
+        if (q->n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {
+            struct timespec sl = {0, 200 * 1000000}; /* 200ms */
+            nanosleep(&sl, NULL);
+            free(sbody); /* the retry re-captures into the same pointers */
+            sbody = NULL;
+            urc = upstream_stream_call(url,
+                                       cur_route.upstream_key,
+                                       extra_hdrs,
+                                       n_extra_hdrs,
+                                       merged,
+                                       mlen,
+                                       silence_timeout_ms,
+                                       (upstream_chunk_fn)adapter->stream_bridge_feed,
+                                       bridge,
+                                       &status,
+                                       &sbody,
+                                       &slen);
+            headers_sent = adapter->stream_bridge_headers_sent(bridge);
+        }
+        uint64_t lat = mono_ns() - t0;
+        total_lat += lat;
+        free(merged);
+
+        bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
+
+        if (!headers_sent) {
+            cb_record_failure(q->ac->cb, q->model, target->endpoint, status);
+            adapter->stream_bridge_free(bridge);
+            if (acc.accum_content != NULL) {
+                free(acc.accum_content);
+            }
+
+            if (!is_failover && status >= 400) {
+                /* Pre-headers 4xx: surface the upstream's own error body
+                 * (mirrors the non-streaming passthrough). Only when a
+                 * body was actually received (urc == 0). */
+                if (sbody != NULL && urc == 0) {
+                    record_usage_and_event(q->ac,
+                                           q->krec.key_id,
+                                           q->model,
+                                           status,
+                                           0,
+                                           0,
+                                           0,
+                                           0,
+                                           total_lat,
+                                           target->provider,
+                                           q->guardrail_act,
+                                           0.0);
+                    int rv = aigate_write_json(q->rc, status, sbody, slen);
+                    free(sbody);
+                    return rv;
+                }
+                free(sbody);
+                break; /* no error body: fall through to the generic 502 */
+            }
+
+            if (ci + 1 < q->n_candidates) {
+                failover_warn(
+                    "streaming failover", q->model, target, &q->candidates[ci + 1], status, urc);
+                free(sbody);
+                continue;
+            }
+            free(sbody);
+            break;
+        }
+
+        long ptok = 0, ctok = 0, cached_tok = 0;
+        adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
+
+        if (urc != 0) {
+            const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
+                                                : "stream interrupted: transport error";
+            char        sse_err[256];
+            snprintf(sse_err,
+                     sizeof sse_err,
+                     "data: "
+                     "{\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
+                     "data: [DONE]\n\n",
+                     err_msg);
+            if (q->rc->write != NULL) {
+                q->rc->write(q->rc->impl, sse_err, strlen(sse_err), true);
+            }
+            double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
+            settle_success(
+                q, PIPE_UPSTREAM, ptok, ctok, cached_tok, total_lat, target->provider, req_cost);
+            adapter->stream_bridge_free(bridge);
+            if (acc.accum_content != NULL) {
+                free(acc.accum_content);
+            }
+            return 0;
+        }
+
+        cb_record_success(q->ac->cb, q->model, target->endpoint);
+        adapter->stream_bridge_finish(bridge);
+        double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
+        record_usage_and_event(q->ac,
+                               q->krec.key_id,
+                               q->model,
+                               status > 0 ? status : 200,
+                               ptok,
+                               ctok,
+                               cached_tok,
+                               0,
+                               total_lat,
+                               target->provider,
+                               q->guardrail_act,
+                               req_cost);
+        if (q->ac->be != NULL) {
+            budget_enforce_record(
+                q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
+        }
+        rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
+
+        if (q->ac->rc != NULL && q->cache_key[0] != '\0' && !q->no_store && !acc.overflow &&
+            (status == 0 || status == 200) && acc.accum_content != NULL && acc.accum_len > 0) {
+            json_t* full_resp =
+                json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:s}], s:{s:i, s:i, s:i}}",
+                          "id",
+                          acc.id[0] ? acc.id : "chatcmpl-stream",
+                          "object",
+                          "chat.completion",
+                          "created",
+                          (json_int_t)(acc.created > 0 ? acc.created : time(NULL)),
+                          "model",
+                          q->model,
+                          "choices",
+                          "index",
+                          0,
+                          "message",
+                          "role",
+                          "assistant",
+                          "content",
+                          acc.accum_content,
+                          "finish_reason",
+                          "stop",
+                          "usage",
+                          "prompt_tokens",
+                          (int)ptok,
+                          "completion_tokens",
+                          (int)ctok,
+                          "total_tokens",
+                          (int)(ptok + ctok));
+            if (full_resp != NULL) {
+                char* full_json = json_dumps(full_resp, JSON_COMPACT);
+                if (full_json != NULL) {
+                    response_cache_set(q->ac->rc,
+                                       q->cache_key,
+                                       q->model,
+                                       full_json,
+                                       strlen(full_json),
+                                       ptok,
+                                       ctok,
+                                       req_cost,
+                                       0);
+                    free(full_json);
+                }
+                json_decref(full_resp);
+            }
+        }
+        if (acc.accum_content != NULL) {
+            free(acc.accum_content);
+        }
+        adapter->stream_bridge_free(bridge);
+
+        return 0;
+    }
+
+    if (q->rc->set_header != NULL) {
+        q->rc->set_header(q->rc->impl, "X-Upstream-Provider", last_provider);
+    }
+    aigate_write_error(q->rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
+    record_usage_and_event(q->ac,
+                           q->krec.key_id,
+                           q->model,
+                           PIPE_UPSTREAM,
+                           0,
+                           0,
+                           0,
+                           0,
+                           total_lat,
+                           last_provider,
+                           q->guardrail_act,
+                           0.0);
+    return 0;
+}
+
 int
+
 aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc)
 {
     if (rq->path != NULL && strcmp(rq->path, "/v1/responses") == 0) {
@@ -2163,774 +3321,63 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return handle_anthropic_messages(ac, rq, rc);
     }
 
-    if (rq->path != NULL &&
-        (strstr(rq->path, ":generateContent") != NULL ||
-         strstr(rq->path, ":streamGenerateContent") != NULL)) {
+    if (rq->path != NULL && (strstr(rq->path, ":generateContent") != NULL ||
+                             strstr(rq->path, ":streamGenerateContent") != NULL)) {
         return handle_gemini_generate(ac, rq, rc);
     }
 
-    /* --- auth --- */
-    key_rec_t krec;
-    int       arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
-    if (arc != 0) {
-        aigate_write_error(rc, PIPE_AUTH, "auth_error", "invalid api key");
-        key_rec_free(&krec);
+    chat_req_t chatq;
+    memset(&chatq, 0, sizeof(chatq));
+    chatq.ac = ac;
+    chatq.rq = rq;
+    chatq.rc = rc;
+    if (gate_request(&chatq) != 0) {
+        chat_req_cleanup(&chatq);
         return 0;
     }
 
-    /* --- rate limit (before /v1/models and model routing so every data-plane
-     *  request, including GET /v1/models, counts against the key's QPS) --- */
-    long retry_ms = 0;
-    int  rrc = rl_allow_request(ac->rl, krec.key_id, krec.rate_qps, &retry_ms);
-    if (rrc != 0) {
-        if (retry_ms == -1) {
-            /* Redis fail-closed sentinel: distributed state unavailable → 503 */
-            aigate_write_error(rc, 503, "server_error", "distributed_state_unavailable");
-            key_rec_free(&krec);
-            return 0;
+    {
+        int handled = handle_models_list(&chatq);
+        if (handled != 0) {
+            chat_req_cleanup(&chatq);
+            return handled > 0 ? 0 : handled;
         }
-        long ra_s = (retry_ms + 999) / 1000;
-        if (ra_s < 1) {
-            ra_s = 1;
-        }
-        char ra[32];
-        snprintf(ra, sizeof ra, "%ld", ra_s);
-        rc->set_header(rc->impl, "Retry-After", ra);
-        aigate_write_error(rc, PIPE_RATE, "rate_limit", "rate limit exceeded");
-        key_rec_free(&krec);
+    }
+
+    if (resolve_chat_target(&chatq) != 0) {
+        chat_req_cleanup(&chatq);
         return 0;
     }
-    /* --- daily token quota gate (after the QPS gate, before /v1/models so
-     *  the limit applies uniformly to all data-plane traffic) --- */
-    if (krec.daily_token_quota > 0) {
-        long rem = rl_remaining_daily(ac->rl, krec.key_id, krec.daily_token_quota);
-        if (rem == LONG_MIN) {
-            /* Redis fail-closed sentinel: distributed state unavailable → 503 */
-            aigate_write_error(rc, 503, "server_error", "distributed_state_unavailable");
-            key_rec_free(&krec);
-            return 0;
-        }
-        if (rem <= 0) {
-            time_t now = time(NULL);
-            time_t next = (time_t)(now - (now % 86400)) + 86400; /* next UTC midnight */
-            char   ra[32];
-            snprintf(ra, sizeof ra, "%ld", (long)(next - now));
-            rc->set_header(rc->impl, "Retry-After", ra);
-            aigate_write_error(rc, PIPE_RATE, "daily_quota_exceeded", "daily token quota exceeded");
-            key_rec_free(&krec);
-            return 0;
-        }
-    }
-
-    /* --- monthly budget limit gate --- */
-    if (ac->be != NULL) {
-        char b_err[256] = {0};
-        if (budget_enforce_check(ac->be, krec.key_id, krec.group_id,
-                                 krec.monthly_cost_budget, krec.monthly_token_budget,
-                                 0.0, b_err, sizeof b_err) != 0) {
-            aigate_write_error(rc, PIPE_RATE, "budget_exceeded",
-                               b_err[0] ? b_err : "monthly budget limit exceeded");
-            key_rec_free(&krec);
-            return 0;
-        }
-    }
-
-    /* --- handle GET /v1/models (data plane: list allowed enabled models) --- */
-    if (rq->path != NULL && strcmp(rq->path, "/v1/models") == 0) {
-        if (rq->method != NULL && strcmp(rq->method, "GET") == 0) {
-            model_rec_t* recs = calloc(256, sizeof(model_rec_t));
-            if (recs == NULL) {
-                key_rec_free(&krec);
-                return aigate_write_error(rc, 500, "internal_error", "out of memory");
-            }
-            int             n = 0;
-            const pg_ops_t* ops = ac->ps != NULL ? pg_store_ops(ac->ps) : NULL;
-            if (ops != NULL && ops->list_models != NULL) {
-                if (ops->list_models(ops->ctx, recs, 256, &n) != 0) {
-                    /* Storage failure: distinguish "no models" from "PG is
-                     * down" so callers do not mistake an outage for an empty
-                     * catalog. */
-                    free(recs);
-                    key_rec_free(&krec);
-                    return aigate_write_error(rc, 503, "internal_error", "model list unavailable");
-                }
-            }
-            json_t* arr = json_array();
-            for (int i = 0; i < n; i++) {
-                if (recs[i].enabled && key_allows_model(&krec, recs[i].name)) {
-                    json_t* obj = json_object();
-                    json_object_set_new(obj, "id", json_string(recs[i].name));
-                    json_object_set_new(obj, "object", json_string("model"));
-                    json_object_set_new(obj, "created", json_integer(0));
-                    json_object_set_new(
-                        obj,
-                        "owned_by",
-                        json_string(recs[i].provider[0] ? recs[i].provider : "system"));
-                    json_array_append_new(arr, obj);
-                }
-                model_rec_free(&recs[i]);
-            }
-            free(recs);
-            json_t* root = json_object();
-            json_object_set_new(root, "object", json_string("list"));
-            json_object_set_new(root, "data", arr);
-            char* packed = json_dumps(root, JSON_COMPACT);
-            json_decref(root);
-            key_rec_free(&krec);
-            if (packed == NULL) {
-                return aigate_write_error(rc, 500, "internal_error", "json encode failed");
-            }
-            int rv = aigate_write_json(rc, 200, packed, strlen(packed));
-            free(packed);
-            return rv;
-        }
-    }
-
-    /* --- model + allowlist (parsed from request body) --- */
-    const char* model = "";
-    json_t*     jbody = NULL;
-    if (rq->body != NULL && rq->body_len > 0) {
-        jbody = json_loads((const char*)rq->body, 0, NULL);
-    }
-    if (jbody != NULL) {
-        json_t* jm = json_object_get(jbody, "model");
-        if (jm != NULL && json_is_string(jm)) {
-            model = json_string_value(jm);
-        }
-    }
-    if (model[0] == '\0' || !key_allows_model(&krec, model)) {
-        aigate_write_error(rc, PIPE_FORBIDDEN, "auth_error", "model not allowed for this key");
-        json_decref(jbody);
-        key_rec_free(&krec);
-        return 0;
-    }
-
-    /* --- route --- */
-    model_rec_t route;
-    if (model_router_resolve(ac->router, model, &route) != 0) {
-        aigate_write_error(rc, PIPE_MODEL, "model_not_found", "model not found");
-        json_decref(jbody);
-        key_rec_free(&krec);
-        return 0;
-    }
-
-    /* --- candidate targets selection --- */
-    upstream_target_t candidates[MAX_TARGETS_PER_MODEL];
-    int               n_candidates = 0;
-    if (model_router_select_candidates(
-            ac->cb, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
-        n_candidates == 0) {
-        aigate_write_error(
-            rc, PIPE_MODEL, "no_healthy_upstream", "no upstream targets available for model");
-        json_decref(jbody);
-        key_rec_free(&krec);
-        return 0;
-    }
-
-    /* --- guardrails inspection --- */
-    char*       sanitized_body = NULL;
-    size_t      sanitized_len = 0;
-    char        matched_rule[128] = {0};
-    char        guardrail_act[16] = {0};
-    const void* eff_body = rq->body;
-
-    if (krec.guardrails_enabled && ac->gr != NULL && rq->body != NULL && rq->body_len > 0) {
-        guardrails_action_t gr_res = guardrails_inspect_inbound(
-            ac->gr, (const char*)rq->body, rq->body_len,
-            &sanitized_body, &sanitized_len,
-            matched_rule, sizeof matched_rule);
-        if (gr_res == GUARDRAILS_BLOCKED) {
-            char block_msg[256];
-            snprintf(block_msg, sizeof block_msg,
-                     "Blocked by safety guardrail rule: %s",
-                     matched_rule[0] ? matched_rule : "blocked content");
-            aigate_write_error(rc, 400, "content_policy_violation", block_msg);
-            record_usage_and_event(ac, krec.key_id, model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
-            json_decref(jbody);
-            key_rec_free(&krec);
-            return 0;
-        }
-        if (gr_res == GUARDRAILS_MASKED && sanitized_body != NULL) {
-            eff_body = sanitized_body;
-            snprintf(guardrail_act, sizeof guardrail_act, "masked");
-        }
-    }
-    size_t eff_len = (sanitized_body != NULL) ? sanitized_len : rq->body_len;
 
     /* --- handle /v1/embeddings --- */
     if (rq->path != NULL && strcmp(rq->path, "/v1/embeddings") == 0) {
-        int n_supported = 0;
-        for (int ci = 0; ci < n_candidates; ci++) {
-            const provider_adapter_t* adapter = provider_find(candidates[ci].provider);
-            if (adapter != NULL && adapter->build_embeddings != NULL &&
-                adapter->parse_embeddings_response != NULL) {
-                n_supported++;
-            }
-        }
-        if (n_supported == 0) {
-            aigate_write_error(
-                rc, 400, "unsupported_endpoint", "model or provider does not support embeddings");
-            free(sanitized_body);
-            json_decref(jbody);
-            key_rec_free(&krec);
-            return 0;
-        }
+        return handle_embeddings(&chatq);
+    }
 
-        uint64_t    total_lat = 0;
-        const char* last_provider = route.provider;
-
-        for (int ci = 0; ci < n_candidates; ci++) {
-            upstream_target_t*        target = &candidates[ci];
-            const provider_adapter_t* adapter = provider_find(target->provider);
-            if (adapter == NULL || adapter->build_embeddings == NULL ||
-                adapter->parse_embeddings_response == NULL) {
-                continue;
-            }
-
-            model_rec_t cur_route = route;
-            snprintf(cur_route.provider,
-                     sizeof cur_route.provider,
-                     "%.*s",
-                     (int)sizeof cur_route.provider - 1,
-                     target->provider);
-            snprintf(cur_route.endpoint,
-                     sizeof cur_route.endpoint,
-                     "%.*s",
-                     (int)sizeof cur_route.endpoint - 1,
-                     target->endpoint);
-            snprintf(cur_route.upstream_key,
-                     sizeof cur_route.upstream_key,
-                     "%.*s",
-                     (int)sizeof cur_route.upstream_key - 1,
-                     target->upstream_key);
-            last_provider = target->provider;
-
-            char        url[1024];
-            char*       merged = NULL;
-            size_t      mlen = 0;
-            const char* extra_hdrs[4][2] = {{0}};
-            int         n_extra_hdrs = 0;
-
-            if (adapter->build_embeddings(&cur_route,
-                                          eff_body != NULL ? (const char*)eff_body : NULL,
-                                          url,
-                                          sizeof url,
-                                          extra_hdrs,
-                                          &n_extra_hdrs,
-                                          &merged,
-                                          &mlen) != 0) {
-                free(merged);
-                continue;
-            }
-
-            int      status = 0;
-            char*    ubody = NULL;
-            size_t   ulen = 0;
-            uint64_t t0 = mono_ns();
-            int      urc = upstream_call_ext(url,
-                                             cur_route.upstream_key,
-                                             extra_hdrs,
-                                             n_extra_hdrs,
-                                             merged,
-                                             mlen,
-                                             ac->default_timeout_ms,
-                                             &status,
-                                             &ubody,
-                                             &ulen);
-
-            if (n_candidates == 1 && urc == 0 && status >= 500) {
-                free(ubody);
-                ubody = NULL;
-                struct timespec sl = {0, 200 * 1000000}; /* 200ms */
-                nanosleep(&sl, NULL);
-                urc = upstream_call_ext(url,
-                                        cur_route.upstream_key,
-                                        extra_hdrs,
-                                        n_extra_hdrs,
-                                        merged,
-                                        mlen,
-                                        ac->default_timeout_ms,
-                                        &status,
-                                        &ubody,
-                                        &ulen);
-            }
-            uint64_t lat = mono_ns() - t0;
-            total_lat += lat;
-            free(merged);
-
-            bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
-            if (!is_failover && status < 400) {
-                cb_record_success(ac->cb, model, target->endpoint);
-                char*  parsed_body = NULL;
-                size_t parsed_len = 0;
-                long   ptok = 0;
-                int    parsed_status = status;
-                if (adapter->parse_embeddings_response(ubody ? ubody : "",
-                                                       ulen,
-                                                       model,
-                                                       &parsed_status,
-                                                       &parsed_body,
-                                                       &parsed_len,
-                                                       &ptok) != 0) {
-                    free(ubody);
-                    aigate_write_error(
-                        rc, 502, "upstream_error", "failed to parse upstream embeddings response");
-                    free(sanitized_body);
-                    json_decref(jbody);
-                    key_rec_free(&krec);
-                    return 0;
-                }
-                free(ubody);
-
-                double req_cost = calc_req_cost(&route, ptok, 0, 0);
-                record_usage_and_event(ac,
-                                       krec.key_id,
-                                       model,
-                                       parsed_status,
-                                       ptok,
-                                       0,
-                                       0,
-                                       0,
-                                       total_lat,
-                                       target->provider,
-                                       guardrail_act,
-                                       req_cost);
-                if (ac->be != NULL) {
-                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok);
-                }
-                if (ptok > 0) {
-                    rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok);
-                }
-
-                int rv = aigate_write_json(
-                    rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
-                free(parsed_body);
-                json_decref(jbody);
-                key_rec_free(&krec);
-                free(sanitized_body);
-                return rv;
-            }
-
-            cb_record_failure(ac->cb, model, target->endpoint, status);
-
-            if (!is_failover && status >= 400) {
-                if (ubody != NULL && urc == 0) {
-                    record_usage_and_event(
-                        ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, guardrail_act, 0.0);
-                    int rv = aigate_write_json(rc, status, ubody, ulen);
-                    free(ubody);
-                    json_decref(jbody);
-                    key_rec_free(&krec);
-                    free(sanitized_body);
-                    return rv;
-                }
-                free(ubody);
-                break;
-            }
-            free(ubody);
-
-            if (ci + 1 < n_candidates) {
-                AIGATE_LOG_WARN("failover embeddings for model %s from %s (%s) to %s (%s) due to "
-                                "status %d (urc %d)",
-                                model,
-                                target->provider,
-                                target->endpoint,
-                                candidates[ci + 1].provider,
-                                candidates[ci + 1].endpoint,
-                                status,
-                                urc);
-                metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
-                continue;
-            }
-        }
-
-        if (rc->set_header != NULL) {
-            rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
-        }
-        aigate_write_error(
-            rc, PIPE_UPSTREAM, "upstream_error", "upstream embeddings request failed");
-        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act, 0.0);
-        json_decref(jbody);
-        key_rec_free(&krec);
-        free(sanitized_body);
+    bool is_streaming = false;
+    int  cache_handled = prepare_chat_cache(&chatq, &is_streaming);
+    if (cache_handled != 0) {
+        chat_req_cleanup(&chatq);
         return 0;
-    }
-
-    int n_chat_supported = 0;
-    for (int ci = 0; ci < n_candidates; ci++) {
-        const provider_adapter_t* adapter = provider_find(candidates[ci].provider);
-        if (adapter != NULL && adapter->build_chat != NULL) {
-            n_chat_supported++;
-        }
-    }
-    if (n_chat_supported == 0) {
-        aigate_write_error(
-            rc, PIPE_UNSUPPORTED, "unsupported_provider", "provider not supported by this build");
-        free(sanitized_body);
-        json_decref(jbody);
-        key_rec_free(&krec);
-        return 0;
-    }
-
-    /* Check if streaming */
-    json_t* jstream = (jbody != NULL) ? json_object_get(jbody, "stream") : NULL;
-    bool    is_streaming = (jstream != NULL && json_is_true(jstream));
-
-    bool bypass_cache = false;
-    bool no_store = false;
-    if (rq->cache_control != NULL) {
-        if (strstr(rq->cache_control, "no-cache") != NULL ||
-            strstr(rq->cache_control, "max-age=0") != NULL ||
-            strcmp(rq->cache_control, "true") == 0 ||
-            strcmp(rq->cache_control, "1") == 0) {
-            bypass_cache = true;
-        }
-        if (strstr(rq->cache_control, "no-store") != NULL) {
-            bypass_cache = true;
-            no_store = true;
-        }
-    }
-
-    char cache_key[65] = {0};
-    if (ac->rc != NULL && !bypass_cache) {
-        response_cache_fingerprint(model, (const char*)eff_body, eff_len, cache_key);
-    }
-    if (rc->set_header != NULL && ac->rc != NULL && bypass_cache) {
-        rc->set_header(rc->impl, "X-Cache", "MISS");
-    }
-    if (ac->rc != NULL && cache_key[0] != '\0') {
-        cache_entry_t* ce = response_cache_get(ac->rc, cache_key);
-        if (ce != NULL) {
-            if (!is_streaming) {
-                if (rc->set_header != NULL) {
-                    rc->set_header(rc->impl, "X-Cache", "HIT");
-                    rc->set_header(rc->impl, "X-Cache-Lookup-Time", "0.10ms");
-                    char age_str[32];
-                    snprintf(age_str, sizeof(age_str), "%ld", (long)(time(NULL) - ce->created_at));
-                    rc->set_header(rc->impl, "Age", age_str);
-                }
-                record_usage_and_event(ac,
-                                       krec.key_id,
-                                       model,
-                                       200,
-                                       ce->prompt_tokens,
-                                       ce->completion_tokens,
-                                       0,
-                                       0,
-                                       100000ULL,
-                                       "cache",
-                                       guardrail_act,
-                                       ce->cost_usd);
-                if (ac->be != NULL) {
-                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, ce->cost_usd, ce->prompt_tokens + ce->completion_tokens);
-                }
-                rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ce->prompt_tokens + ce->completion_tokens);
-                int rv = aigate_write_json(rc, 200, ce->response_body, ce->response_len);
-                response_cache_release_entry(ce);
-                json_decref(jbody);
-                key_rec_free(&krec);
-                free(sanitized_body);
-                return rv;
-            } else {
-                int rv = cache_stream_replay(ac, rc, ce, model, &krec, guardrail_act);
-                json_decref(jbody);
-                key_rec_free(&krec);
-                free(sanitized_body);
-                return rv;
-            }
-        } else {
-            if (rc->set_header != NULL) {
-                rc->set_header(rc->impl, "X-Cache", "MISS");
-            }
-        }
     }
 
     if (is_streaming) {
-        uint64_t    total_lat = 0;
-        const char* last_provider = route.provider;
-
-        for (int ci = 0; ci < n_candidates; ci++) {
-            upstream_target_t*        target = &candidates[ci];
-            const provider_adapter_t* adapter = provider_find(target->provider);
-            if (adapter == NULL || adapter->build_chat == NULL ||
-                adapter->stream_bridge_new == NULL) {
-                continue;
-            }
-
-            model_rec_t cur_route = route;
-            snprintf(cur_route.provider,
-                     sizeof cur_route.provider,
-                     "%.*s",
-                     (int)sizeof cur_route.provider - 1,
-                     target->provider);
-            snprintf(cur_route.endpoint,
-                     sizeof cur_route.endpoint,
-                     "%.*s",
-                     (int)sizeof cur_route.endpoint - 1,
-                     target->endpoint);
-            snprintf(cur_route.upstream_key,
-                     sizeof cur_route.upstream_key,
-                     "%.*s",
-                     (int)sizeof cur_route.upstream_key - 1,
-                     target->upstream_key);
-            last_provider = target->provider;
-
-            char        url[1024];
-            char*       merged = NULL;
-            size_t      mlen = 0;
-            const char* extra_hdrs[4][2] = {{0}};
-            int         n_extra_hdrs = 0;
-
-            if (adapter->build_chat(&cur_route,
-                                    eff_body != NULL ? (const char*)eff_body : NULL,
-                                    url,
-                                    sizeof url,
-                                    extra_hdrs,
-                                    &n_extra_hdrs,
-                                    &merged,
-                                    &mlen) != 0) {
-                free(merged);
-                continue;
-            }
-
-            stream_cache_acc_t acc;
-            memset(&acc, 0, sizeof(acc));
-            acc.orig_rc = rc;
-
-            aigate_response_ctx proxy_rc = *rc;
-            proxy_rc.impl = &acc;
-            proxy_rc.set_header = stream_cache_acc_set_header;
-            proxy_rc.write = stream_cache_acc_write;
-
-            stream_bridge_t* bridge = adapter->stream_bridge_new(&proxy_rc, model);
-            if (bridge == NULL) {
-                free(merged);
-                continue;
-            }
-
-            int      status = 0;
-            char*    sbody = NULL;
-            size_t   slen = 0;
-            uint64_t t0 = mono_ns();
-            long     silence_timeout_ms =
-                ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
-            int  urc = upstream_stream_call(url,
-                                            cur_route.upstream_key,
-                                            extra_hdrs,
-                                            n_extra_hdrs,
-                                            merged,
-                                            mlen,
-                                            silence_timeout_ms,
-                                            (upstream_chunk_fn)adapter->stream_bridge_feed,
-                                            bridge,
-                                            &status,
-                                            &sbody,
-                                            &slen);
-            bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
-
-            if (n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {
-                struct timespec sl = {0, 200 * 1000000}; /* 200ms */
-                nanosleep(&sl, NULL);
-                free(sbody); /* the retry re-captures into the same pointers */
-                sbody = NULL;
-                urc = upstream_stream_call(url,
-                                           cur_route.upstream_key,
-                                           extra_hdrs,
-                                           n_extra_hdrs,
-                                           merged,
-                                           mlen,
-                                           silence_timeout_ms,
-                                           (upstream_chunk_fn)adapter->stream_bridge_feed,
-                                           bridge,
-                                           &status,
-                                           &sbody,
-                                           &slen);
-                headers_sent = adapter->stream_bridge_headers_sent(bridge);
-            }
-            uint64_t lat = mono_ns() - t0;
-            total_lat += lat;
-            free(merged);
-
-            bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
-
-            if (!headers_sent) {
-                cb_record_failure(ac->cb, model, target->endpoint, status);
-                adapter->stream_bridge_free(bridge);
-                if (acc.accum_content != NULL) {
-                    free(acc.accum_content);
-                }
-
-                if (!is_failover && status >= 400) {
-                    /* Pre-headers 4xx: surface the upstream's own error body
-                     * (mirrors the non-streaming passthrough). Only when a
-                     * body was actually received (urc == 0). */
-                    if (sbody != NULL && urc == 0) {
-                        record_usage_and_event(ac,
-                                               krec.key_id,
-                                               model,
-                                               status,
-                                               0,
-                                               0,
-                                               0,
-                                               0,
-                                               total_lat,
-                                               target->provider,
-                                               guardrail_act,
-                                               0.0);
-                        int rv = aigate_write_json(rc, status, sbody, slen);
-                        free(sbody);
-                        json_decref(jbody);
-                        key_rec_free(&krec);
-                        free(sanitized_body);
-                        return rv;
-                    }
-                    free(sbody);
-                    break; /* no error body: fall through to the generic 502 */
-                }
-
-                if (ci + 1 < n_candidates) {
-                    AIGATE_LOG_WARN("streaming failover for model %s from %s (%s) to %s (%s) due "
-                                     "to status %d (urc %d)",
-                                     model,
-                                     target->provider,
-                                     target->endpoint,
-                                     candidates[ci + 1].provider,
-                                     candidates[ci + 1].endpoint,
-                                     status,
-                                     urc);
-                    metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
-                    free(sbody);
-                    continue;
-                }
-                free(sbody);
-                break;
-            }
-
-            long ptok = 0, ctok = 0, cached_tok = 0;
-            adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
-
-            if (urc != 0) {
-                const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"
-                                                    : "stream interrupted: transport error";
-                char        sse_err[256];
-                snprintf(
-                    sse_err,
-                    sizeof sse_err,
-                    "data: "
-                    "{\"error\":{\"message\":\"%s\",\"type\":\"upstream_error\",\"code\":502}}\n\n"
-                    "data: [DONE]\n\n",
-                    err_msg);
-                if (rc->write != NULL) {
-                    rc->write(rc->impl, sse_err, strlen(sse_err), true);
-                }
-                double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-                record_usage_and_event(ac,
-                                       krec.key_id,
-                                       model,
-                                       PIPE_UPSTREAM,
-                                       ptok,
-                                       ctok,
-                                       cached_tok,
-                                       0,
-                                       total_lat,
-                                       target->provider,
-                                       guardrail_act,
-                                       req_cost);
-                if (ac->be != NULL) {
-                    budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
-                }
-                if (ptok + ctok > 0) {
-                    rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
-                }
-                adapter->stream_bridge_free(bridge);
-                if (acc.accum_content != NULL) {
-                    free(acc.accum_content);
-                }
-                json_decref(jbody);
-                key_rec_free(&krec);
-                free(sanitized_body);
-                return 0;
-            }
-
-            cb_record_success(ac->cb, model, target->endpoint);
-            adapter->stream_bridge_finish(bridge);
-            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
-            record_usage_and_event(ac,
-                                   krec.key_id,
-                                   model,
-                                   status > 0 ? status : 200,
-                                   ptok,
-                                   ctok,
-                                   cached_tok,
-                                   0,
-                                   total_lat,
-                                   target->provider,
-                                   guardrail_act,
-                                   req_cost);
-            if (ac->be != NULL) {
-                budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
-            }
-            rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
-
-            if (ac->rc != NULL && cache_key[0] != '\0' && !no_store && !acc.overflow &&
-                (status == 0 || status == 200) && acc.accum_content != NULL && acc.accum_len > 0) {
-                json_t* full_resp = json_pack("{s:s, s:s, s:I, s:s, s:[{s:i, s:{s:s, s:s}, s:s}], s:{s:i, s:i, s:i}}",
-                                              "id", acc.id[0] ? acc.id : "chatcmpl-stream",
-                                              "object", "chat.completion",
-                                              "created", (json_int_t)(acc.created > 0 ? acc.created : time(NULL)),
-                                              "model", model,
-                                              "choices",
-                                              "index", 0,
-                                              "message", "role", "assistant", "content", acc.accum_content,
-                                              "finish_reason", "stop",
-                                              "usage",
-                                              "prompt_tokens", (int)ptok,
-                                              "completion_tokens", (int)ctok,
-                                              "total_tokens", (int)(ptok + ctok));
-                if (full_resp != NULL) {
-                    char* full_json = json_dumps(full_resp, JSON_COMPACT);
-                    if (full_json != NULL) {
-                        response_cache_set(ac->rc, cache_key, model, full_json, strlen(full_json), ptok, ctok, req_cost, 0);
-                        free(full_json);
-                    }
-                    json_decref(full_resp);
-                }
-            }
-            if (acc.accum_content != NULL) {
-                free(acc.accum_content);
-            }
-            adapter->stream_bridge_free(bridge);
-
-            json_decref(jbody);
-            key_rec_free(&krec);
-            free(sanitized_body);
-            return 0;
-        }
-
-        if (rc->set_header != NULL) {
-            rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
-        }
-        aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-        record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act, 0.0);
-        json_decref(jbody);
-        key_rec_free(&krec);
-        free(sanitized_body);
-        return 0;
+        return handle_chat_stream(&chatq);
     }
 
     /* --- upstream non-streaming call with failover loop --- */
     uint64_t    total_lat = 0;
-    const char* last_provider = route.provider;
+    const char* last_provider = chatq.route.provider;
 
-    for (int ci = 0; ci < n_candidates; ci++) {
-        upstream_target_t*        target = &candidates[ci];
+    for (int ci = 0; ci < chatq.n_candidates; ci++) {
+        upstream_target_t*        target = &chatq.candidates[ci];
         const provider_adapter_t* adapter = provider_find(target->provider);
         if (adapter == NULL || adapter->build_chat == NULL ||
             adapter->parse_chat_response == NULL) {
             continue;
         }
 
-        model_rec_t cur_route = route;
+        model_rec_t cur_route = chatq.route;
         snprintf(cur_route.provider,
                  sizeof cur_route.provider,
                  "%.*s",
@@ -2955,7 +3402,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         int         n_extra_hdrs = 0;
 
         if (adapter->build_chat(&cur_route,
-                                eff_body != NULL ? (const char*)eff_body : NULL,
+                                chatq.eff_body != NULL ? (const char*)chatq.eff_body : NULL,
                                 url,
                                 sizeof url,
                                 extra_hdrs,
@@ -2981,7 +3428,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                                          &ubody,
                                          &ulen);
 
-        if (n_candidates == 1 && urc == 0 && status >= 500) {
+        if (chatq.n_candidates == 1 && urc == 0 && status >= 500) {
             free(ubody);
             ubody = NULL;
             struct timespec sl = {0, 200 * 1000000}; /* 200ms */
@@ -3003,14 +3450,14 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
 
         bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
         if (!is_failover && status < 400) {
-            cb_record_success(ac->cb, model, target->endpoint);
+            cb_record_success(ac->cb, chatq.model, target->endpoint);
             char*  parsed_body = NULL;
             size_t parsed_len = 0;
             long   ptok = 0, ctok = 0, cached_tok = 0;
             int    parsed_status = status;
             if (adapter->parse_chat_response(ubody ? ubody : "",
                                              ulen,
-                                             model,
+                                             chatq.model,
                                              &parsed_status,
                                              &parsed_body,
                                              &parsed_len,
@@ -3019,17 +3466,15 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                                              &cached_tok) != 0) {
                 free(ubody);
                 aigate_write_error(rc, 502, "upstream_error", "failed to parse upstream response");
-                json_decref(jbody);
-                key_rec_free(&krec);
-                free(sanitized_body);
+                chat_req_cleanup(&chatq);
                 return 0;
             }
             free(ubody);
 
-            double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
+            double req_cost = calc_req_cost(&chatq.route, ptok, ctok, cached_tok);
             record_usage_and_event(ac,
-                                   krec.key_id,
-                                   model,
+                                   chatq.krec.key_id,
+                                   chatq.model,
                                    parsed_status,
                                    ptok,
                                    ctok,
@@ -3037,39 +3482,56 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                                    0,
                                    total_lat,
                                    target->provider,
-                                   guardrail_act,
+                                   chatq.guardrail_act,
                                    req_cost);
             if (ac->be != NULL) {
-                budget_enforce_record(ac->be, krec.key_id, krec.group_id, req_cost, ptok + ctok);
+                budget_enforce_record(
+                    ac->be, chatq.krec.key_id, chatq.krec.group_id, req_cost, ptok + ctok);
             }
-            rl_reserve_tokens(ac->rl, krec.key_id, krec.daily_token_quota, ptok + ctok);
+            rl_reserve_tokens(ac->rl, chatq.krec.key_id, chatq.krec.daily_token_quota, ptok + ctok);
 
-            if (ac->rc != NULL && cache_key[0] != '\0' && parsed_status == 200 && parsed_body != NULL && !no_store && parsed_len <= 1048576) {
-                response_cache_set(ac->rc, cache_key, model, parsed_body, parsed_len, ptok, ctok, req_cost, 0);
+            if (ac->rc != NULL && chatq.cache_key[0] != '\0' && parsed_status == 200 &&
+                parsed_body != NULL && !chatq.no_store && parsed_len <= 1048576) {
+                response_cache_set(ac->rc,
+                                   chatq.cache_key,
+                                   chatq.model,
+                                   parsed_body,
+                                   parsed_len,
+                                   ptok,
+                                   ctok,
+                                   req_cost,
+                                   0);
             }
 
             int rv =
                 aigate_write_json(rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
             free(parsed_body);
-            json_decref(jbody);
-            key_rec_free(&krec);
-            free(sanitized_body);
+            chat_req_cleanup(&chatq);
             return rv;
         }
 
-        cb_record_failure(ac->cb, model, target->endpoint, status);
+        cb_record_failure(ac->cb, chatq.model, target->endpoint, status);
 
         if (!is_failover && status >= 400) {
             /* Non-failover 4xx: surface the upstream's own error body to the
              * client (e.g. OpenAI "invalid request") instead of a generic 502.
              * Only when we actually received a body (urc == 0). */
             if (ubody != NULL && urc == 0) {
-                record_usage_and_event(ac, krec.key_id, model, status, 0, 0, 0, 0, total_lat, target->provider, guardrail_act, 0.0);
+                record_usage_and_event(ac,
+                                       chatq.krec.key_id,
+                                       chatq.model,
+                                       status,
+                                       0,
+                                       0,
+                                       0,
+                                       0,
+                                       total_lat,
+                                       target->provider,
+                                       chatq.guardrail_act,
+                                       0.0);
                 int rv = aigate_write_json(rc, status, ubody, ulen);
                 free(ubody);
-                json_decref(jbody);
-                key_rec_free(&krec);
-                free(sanitized_body);
+                chat_req_cleanup(&chatq);
                 return rv;
             }
             free(ubody);
@@ -3077,17 +3539,17 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         }
         free(ubody);
 
-        if (ci + 1 < n_candidates) {
+        if (ci + 1 < chatq.n_candidates) {
             AIGATE_LOG_WARN(
                 "failover for model %s from %s (%s) to %s (%s) due to status %d (urc %d)",
-                model,
+                chatq.model,
                 target->provider,
                 target->endpoint,
-                candidates[ci + 1].provider,
-                candidates[ci + 1].endpoint,
+                chatq.candidates[ci + 1].provider,
+                chatq.candidates[ci + 1].endpoint,
                 status,
                 urc);
-            metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
+            metrics_inc_failover(chatq.model, target->provider, chatq.candidates[ci + 1].provider);
             continue;
         }
     }
@@ -3096,9 +3558,18 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         rc->set_header(rc->impl, "X-Upstream-Provider", last_provider);
     }
     aigate_write_error(rc, PIPE_UPSTREAM, "upstream_error", "upstream request failed");
-    record_usage_and_event(ac, krec.key_id, model, PIPE_UPSTREAM, 0, 0, 0, 0, total_lat, last_provider, guardrail_act, 0.0);
-    json_decref(jbody);
-    key_rec_free(&krec);
-    free(sanitized_body);
+    record_usage_and_event(ac,
+                           chatq.krec.key_id,
+                           chatq.model,
+                           PIPE_UPSTREAM,
+                           0,
+                           0,
+                           0,
+                           0,
+                           total_lat,
+                           last_provider,
+                           chatq.guardrail_act,
+                           0.0);
+    chat_req_cleanup(&chatq);
     return 0;
 }

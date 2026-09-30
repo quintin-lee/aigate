@@ -239,7 +239,7 @@ extract_credential_from_headers(const char* auth_header,
                 if (p == query_string || *(p - 1) == '&' || *(p - 1) == '?') {
                     p += plen;
                     _Thread_local static char s_qk[256];
-                    size_t len = 0;
+                    size_t                    len = 0;
                     while (*p != '\0' && *p != '&' && len < sizeof(s_qk) - 1) {
                         s_qk[len++] = *p++;
                     }

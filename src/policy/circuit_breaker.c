@@ -20,24 +20,24 @@
 
 /** @brief Per-endpoint breaker state: model/endpoint/tri-state/failure count/open deadline/half-open probe/link. */
 typedef struct cb_entry {
-    char             model[128]; /**< Model name. */
-    char             endpoint[512]; /**< Endpoint URL. */
-    cb_state_t       state; /**< Current tri-state. */
-    int              consecutive_failures; /**< Consecutive failure count. */
-    time_t           open_until; /**< Open-state deadline timestamp. */
+    char             model[128];             /**< Model name. */
+    char             endpoint[512];          /**< Endpoint URL. */
+    cb_state_t       state;                  /**< Current tri-state. */
+    int              consecutive_failures;   /**< Consecutive failure count. */
+    time_t           open_until;             /**< Open-state deadline timestamp. */
     int              half_open_probe_active; /**< Half-open probe in-flight flag. */
-    struct cb_entry* next; /**< Intra-bucket link. */
+    struct cb_entry* next;                   /**< Intra-bucket link. */
 } cb_entry_t;
 
 /** @brief Breaker instance: lock/threshold/cooldown/time source/Redis pool/event bus/shard buckets. */
 struct circuit_breaker {
-    pthread_mutex_t mtx; /**< Instance mutex. */
-    int             failure_threshold; /**< Trip threshold (consecutive failures). */
-    int             cooloff_sec; /**< Cooldown window in seconds. */
-    cb_time_fn      time_fn; /**< Time source (fake clock injectable). */
-    redis_pool_t*   pool; /**< Shared Redis pool (distributed breaking, nullable). */
-    char            sha_cb[48]; /**< Redis Lua script SHA cache. */
-    event_bus_t*    eb; /**< Event bus (state transition events, nullable). */
+    pthread_mutex_t mtx;                 /**< Instance mutex. */
+    int             failure_threshold;   /**< Trip threshold (consecutive failures). */
+    int             cooloff_sec;         /**< Cooldown window in seconds. */
+    cb_time_fn      time_fn;             /**< Time source (fake clock injectable). */
+    redis_pool_t*   pool;                /**< Shared Redis pool (distributed breaking, nullable). */
+    char            sha_cb[48];          /**< Redis Lua script SHA cache. */
+    event_bus_t*    eb;                  /**< Event bus (state transition events, nullable). */
     cb_entry_t*     buckets[CB_BUCKETS]; /**< Endpoint state shard buckets. */
 };
 
@@ -122,7 +122,8 @@ update_state_on_time_locked(circuit_breaker_t* cb, cb_entry_t* e, time_t now)
         AIGATE_LOG_INFO(
             "circuit breaker for %s:%s transitioned to HALF_OPEN", e->model, e->endpoint);
         if (cb != NULL && cb->eb != NULL) {
-            event_bus_publish_cb(cb->eb, e->endpoint, e->model, "OPEN", "HALF_OPEN", "cooloff expired");
+            event_bus_publish_cb(
+                cb->eb, e->endpoint, e->model, "OPEN", "HALF_OPEN", "cooloff expired");
         }
     }
 }
@@ -285,9 +286,7 @@ cb_redis_key(const char* model, const char* endpoint, char* out, size_t cap)
  * @return redisReply* (array[2]) or NULL on error; caller frees
  */
 static redisReply*
-redis_cb_call(circuit_breaker_t* cb,
-              const char*        action,
-              const char*        redis_key)
+redis_cb_call(circuit_breaker_t* cb, const char* action, const char* redis_key)
 {
     redisContext* c = redis_pool_acquire(cb->pool);
     if (c == NULL) {
@@ -304,8 +303,8 @@ redis_cb_call(circuit_breaker_t* cb,
     /* cooldown_ms = cooloff_sec * 1000 */
     snprintf(cool_buf, sizeof(cool_buf), "%lld", (long long)cb->cooloff_sec * 1000LL);
 
-    const char* keys[1] = { redis_key };
-    const char* argv[4] = { action, now_buf, fails_buf, cool_buf };
+    const char* keys[1] = {redis_key};
+    const char* argv[4] = {action, now_buf, fails_buf, cool_buf};
 
     redisReply* reply =
         redis_eval_sha(c, cb->sha_cb, SCRIPT_CIRCUIT_BREAKER_SYNC, 1, keys, argv, 4);
@@ -335,8 +334,8 @@ cb_allow_request(circuit_breaker_t* cb, const char* model, const char* endpoint)
         redisReply* reply = redis_cb_call(cb, "allow", redis_key);
         if (reply == NULL) {
             /* Fail-Closed: Redis unavailable → deny to prevent broken routing */
-            AIGATE_LOG_WARN("circuit breaker redis error for %s:%s (allow), fail-closed deny",
-                            model, endpoint);
+            AIGATE_LOG_WARN(
+                "circuit breaker redis error for %s:%s (allow), fail-closed deny", model, endpoint);
             return false;
         }
         bool allowed = (reply->element[0]->integer == 1);
@@ -384,7 +383,8 @@ cb_record_success(circuit_breaker_t* cb, const char* model, const char* endpoint
         redisReply* reply = redis_cb_call(cb, "success", redis_key);
         if (reply == NULL) {
             AIGATE_LOG_WARN("circuit breaker redis error for %s:%s (success), local state only",
-                            model, endpoint);
+                            model,
+                            endpoint);
         } else {
             freeReplyObject(reply);
         }
@@ -409,7 +409,8 @@ cb_record_success(circuit_breaker_t* cb, const char* model, const char* endpoint
                             e->model,
                             e->endpoint);
             if (cb->eb != NULL) {
-                event_bus_publish_cb(cb->eb, e->endpoint, e->model, "HALF_OPEN", "CLOSED", "probe succeeded");
+                event_bus_publish_cb(
+                    cb->eb, e->endpoint, e->model, "HALF_OPEN", "CLOSED", "probe succeeded");
             }
         }
         e->state = CB_CLOSED;
@@ -436,15 +437,17 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
         cb_redis_key(model, endpoint, redis_key, sizeof(redis_key));
         redisReply* reply = redis_cb_call(cb, "fail", redis_key);
         if (reply == NULL) {
-            AIGATE_LOG_WARN("circuit breaker redis error for %s:%s (fail), local state only",
-                            model, endpoint);
+            AIGATE_LOG_WARN(
+                "circuit breaker redis error for %s:%s (fail), local state only", model, endpoint);
         } else {
             long cb_state = reply->element[1]->integer;
             freeReplyObject(reply);
             if (cb_state == 2) {
                 AIGATE_LOG_WARN(
                     "circuit breaker for %s:%s tripped to OPEN cluster-wide (status %d)",
-                    model, endpoint, http_status);
+                    model,
+                    endpoint,
+                    http_status);
             }
         }
         /* Mirror into local state too */
@@ -491,7 +494,8 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
             http_status,
             (long)e->open_until);
         if (cb->eb != NULL) {
-            event_bus_publish_cb(cb->eb, e->endpoint, e->model, "HALF_OPEN", "OPEN", "probe failed");
+            event_bus_publish_cb(
+                cb->eb, e->endpoint, e->model, "HALF_OPEN", "OPEN", "probe failed");
         }
     } else if (e->state == CB_CLOSED) {
         e->consecutive_failures++;
@@ -507,7 +511,8 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
                             http_status,
                             (long)e->open_until);
             if (cb->eb != NULL) {
-                event_bus_publish_cb(cb->eb, e->endpoint, e->model, "CLOSED", "OPEN", "failures reached threshold");
+                event_bus_publish_cb(
+                    cb->eb, e->endpoint, e->model, "CLOSED", "OPEN", "failures reached threshold");
             }
         }
     } else {

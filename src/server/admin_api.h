@@ -21,13 +21,13 @@ struct response_cache;
 /** @brief Admin plane state: pipeline caches (for invalidation after
  *  mutations), the store, and the SHA-256 hex of the admin token. */
 typedef struct admin_ctx {
-aigate_core*           ac;                   /**< Pipeline state (hot-reload/cache-invalidate entry) */
-pg_store_t*            ps;                   /**< Backing store (borrowed) */
-    const char*            admin_token_hash;     /**< 64 lowercase hex chars + NUL */
-    int                    allow_plaintext_keys; /**< 1 when direct plaintext provider keys are accepted */
-struct health_prober*  hp;                   /**< Health prober (read snapshots, may be NULL) */
-struct event_bus*      eb;                   /**< Event bus (SSE subscription source, may be NULL) */
-struct response_cache* rc;                   /**< Response cache (purge entry, may be NULL) */
+    aigate_core* ac;                   /**< Pipeline state (hot-reload/cache-invalidate entry) */
+    pg_store_t*  ps;                   /**< Backing store (borrowed) */
+    const char*  admin_token_hash;     /**< 64 lowercase hex chars + NUL */
+    int          allow_plaintext_keys; /**< 1 when direct plaintext provider keys are accepted */
+    struct health_prober*  hp;         /**< Health prober (read snapshots, may be NULL) */
+    struct event_bus*      eb;         /**< Event bus (SSE subscription source, may be NULL) */
+    struct response_cache* rc;         /**< Response cache (purge entry, may be NULL) */
 } admin_ctx_t;
 
 /** @brief Validate an admin bearer token against the configured hash. */

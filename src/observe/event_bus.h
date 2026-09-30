@@ -41,31 +41,32 @@ typedef enum {
 
 /** @brief Single event item: type + event name + JSON payload + timestamp. */
 typedef struct {
-    event_type_t type;                        /**< Event type. */
-    char         event_name[32];              /**< Event name. */
-    char         payload[EVENT_MAX_PAYLOAD];  /**< JSON payload. */
-    time_t       ts;                          /**< Timestamp, seconds. */
+    event_type_t type;                       /**< Event type. */
+    char         event_name[32];             /**< Event name. */
+    char         payload[EVENT_MAX_PAYLOAD]; /**< JSON payload. */
+    time_t       ts;                         /**< Timestamp, seconds. */
 } event_item_t;
 
 /** @brief Single subscriber: bounded ring buffer + wait condition variable. */
 typedef struct event_sub {
     event_item_t   queue[EVENT_QUEUE_CAPACITY]; /**< Ring buffer. */
-    int            head;     /**< Read pointer. */
-    int            tail;     /**< Write pointer. */
-    int            count;    /**< Events currently queued. */
-    long           dropped_count; /**< Cumulative drops when the queue is full. */
-    int            active;   /**< 1 active, 0 unsubscribed. */
-    int            id;       /**< Subscriber ID (>0). */
-    pthread_cond_t cond;     /**< New-event arrival signal. */
+    int            head;                        /**< Read pointer. */
+    int            tail;                        /**< Write pointer. */
+    int            count;                       /**< Events currently queued. */
+    long           dropped_count;               /**< Cumulative drops when the queue is full. */
+    int            active;                      /**< 1 active, 0 unsubscribed. */
+    int            id;                          /**< Subscriber ID (>0). */
+    pthread_cond_t cond;                        /**< New-event arrival signal. */
 } event_sub_t;
 
 /** @brief Event bus: subscriber slot table + global lock. */
 typedef struct event_bus {
-    pthread_mutex_t lock;     /**< Guards the subscription table and queues. */
-    event_sub_t     subscribers[MAX_EVENT_SUBSCRIBERS]; /**< Subscriber slots (active marks validity). */
-    int             n_subscribers; /**< Live subscriber count. */
-    int             next_sub_id;   /**< Next subscriber ID. */
-    int             destroyed;     /**< 1 destroyed, pop returns -1. */
+    pthread_mutex_t lock;                   /**< Guards the subscription table and queues. */
+    event_sub_t
+        subscribers[MAX_EVENT_SUBSCRIBERS]; /**< Subscriber slots (active marks validity). */
+    int n_subscribers;                      /**< Live subscriber count. */
+    int next_sub_id;                        /**< Next subscriber ID. */
+    int destroyed;                          /**< 1 destroyed, pop returns -1. */
 } event_bus_t;
 
 /** @brief Create a new event bus. Returns NULL on failure. */

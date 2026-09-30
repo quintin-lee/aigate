@@ -593,7 +593,9 @@ fake_create_group(void* ctx, const char* name, long* out_id)
             db->groups[i].g.created_at = time(NULL);
             db->groups[i].g.monthly_budget_usd = 0.0;
             db->groups[i].g.key_count = 0;
-            if (out_id) *out_id = db->groups[i].g.id;
+            if (out_id) {
+                *out_id = db->groups[i].g.id;
+            }
             return 0;
         }
     }
@@ -682,7 +684,11 @@ fake_count_keys_in_group(void* ctx, long group_id, long* n)
 static int
 fake_query_cost(void* ctx, long since_s, long until_s, cost_row_t* out, int cap, int* n)
 {
-    (void)ctx; (void)since_s; (void)until_s; (void)out; (void)cap;
+    (void)ctx;
+    (void)since_s;
+    (void)until_s;
+    (void)out;
+    (void)cap;
     *n = 0;
     return 0;
 }
@@ -713,7 +719,9 @@ fake_create_guardrails_rule(void* ctx, const guardrail_rule_t* rule, long* out_i
             db->rules[i].r = *rule;
             db->rules[i].r.id = ++db->next_rule_id;
             db->rules[i].r.created_at = time(NULL);
-            if (out_id) *out_id = db->rules[i].r.id;
+            if (out_id) {
+                *out_id = db->rules[i].r.id;
+            }
             return 0;
         }
     }
@@ -1165,7 +1173,10 @@ TEST_CASE(test_pg_fake_key_budget_fields)
     k.guardrails_enabled = 0;
     k.monthly_cost_budget = 250.75;
     k.monthly_token_budget = 1000000;
-    TEST_ASSERT(ops.update_key(ops.ctx, &k, KMASK_GUARDRAILS | KMASK_MONTHLY_COST_BUDGET | KMASK_MONTHLY_TOKEN_BUDGET) == 0,
+    TEST_ASSERT(ops.update_key(ops.ctx,
+                               &k,
+                               KMASK_GUARDRAILS | KMASK_MONTHLY_COST_BUDGET |
+                                   KMASK_MONTHLY_TOKEN_BUDGET) == 0,
                 "update budget fields");
 
     memset(&out, 0, sizeof out);

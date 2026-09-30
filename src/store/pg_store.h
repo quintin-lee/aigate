@@ -18,19 +18,19 @@
 
 /** @brief Client API key record (api_keys row; allowed_models is a copy). */
 typedef struct key_rec {
-    long   key_id; /**< Primary key */
-    char   key_hash[65]; /**< 64 lowercase hex + NUL */
-    char   name[128]; /**< Name */
-    char** allowed_models; /**< NUL-terminated-ish: exactly n_allowed entries */
-    int    n_allowed; /**< 0 = all models allowed */
-    int    rate_qps; /**< 0 = unlimited */
-    long   daily_token_quota; /**< 0 = unlimited */
-    time_t expires_at; /**< Expiration timestamp */
-    int    has_expiry; /**< Whether expiry is set (1 takes effect) */
-    int    revoked; /**< Revocation flag (1 means revoked) */
-    long   group_id; /**< 0 = ungrouped */
-    int    guardrails_enabled; /**< 1 = enabled (default), 0 = disabled */
-    double monthly_cost_budget; /**< 0.0 = unlimited */
+    long   key_id;               /**< Primary key */
+    char   key_hash[65];         /**< 64 lowercase hex + NUL */
+    char   name[128];            /**< Name */
+    char** allowed_models;       /**< NUL-terminated-ish: exactly n_allowed entries */
+    int    n_allowed;            /**< 0 = all models allowed */
+    int    rate_qps;             /**< 0 = unlimited */
+    long   daily_token_quota;    /**< 0 = unlimited */
+    time_t expires_at;           /**< Expiration timestamp */
+    int    has_expiry;           /**< Whether expiry is set (1 takes effect) */
+    int    revoked;              /**< Revocation flag (1 means revoked) */
+    long   group_id;             /**< 0 = ungrouped */
+    int    guardrails_enabled;   /**< 1 = enabled (default), 0 = disabled */
+    double monthly_cost_budget;  /**< 0.0 = unlimited */
     long   monthly_token_budget; /**< 0 = unlimited */
 } key_rec_t;
 
@@ -39,86 +39,86 @@ typedef struct key_rec {
 
 /** @brief Single upstream target: provider, base URL, key reference, and load weight. */
 typedef struct upstream_target {
-    char provider[32]; /**< Provider type */
-    char endpoint[512]; /**< Upstream base URL */
+    char provider[32];           /**< Provider type */
+    char endpoint[512];          /**< Upstream base URL */
     char upstream_key_ref[1024]; /**< "env:NAME" | "pg:<blob>" | "" */
-    char upstream_key[1024]; /**< resolved in-memory */
-    int  weight; /**< weight > 0, default 1 */
-    int  priority; /**< 0 = primary tier, 1 = fallback tier, etc. */
+    char upstream_key[1024];     /**< resolved in-memory */
+    int  weight;                 /**< weight > 0, default 1 */
+    int  priority;               /**< 0 = primary tier, 1 = fallback tier, etc. */
 } upstream_target_t;
 
 /** @brief Model route record (models row + resolved upstream key). */
 typedef struct model_rec {
-    char name[128]; /**< Model name */
-    char provider[32]; /**< primary / fallback default */
-    char endpoint[512]; /**< primary / fallback default */
-    char upstream_key_ref[1024]; /**< "env:NAME" | "pg:<blob>" | "" */
+    char name[128];                 /**< Model name */
+    char provider[32];              /**< primary / fallback default */
+    char endpoint[512];             /**< primary / fallback default */
+    char upstream_key_ref[1024];    /**< "env:NAME" | "pg:<blob>" | "" */
     char default_params_json[1024]; /**< jansson object; default_params win < request */
-    int  enabled; /**< Enabled switch (1 means enabled) */
-    char upstream_key[1024]; /**< filled by model_router, not stored */
+    int  enabled;                   /**< Enabled switch (1 means enabled) */
+    char upstream_key[1024];        /**< filled by model_router, not stored */
 
     /* Multi-target additions */
-    int               n_targets; /**< Target count */
+    int               n_targets;                      /**< Target count */
     upstream_target_t targets[MAX_TARGETS_PER_MODEL]; /**< Multi-target array */
-    char lb_policy[32]; /**< "priority", "round_robin", "weighted", "weighted_round_robin" */
+    char lb_policy[32];      /**< "priority", "round_robin", "weighted", "weighted_round_robin" */
     char pricing_json[1024]; /**< jansson object with in_mtok, out_mtok, cached_mtok_discount */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
 typedef struct usage_row {
-    long   key_id; /**< API key primary key */
-    char   model_name[128]; /**< Model name */
-    time_t day; /**< midnight UTC */
-    long   requests; /**< Daily accumulated request count */
-    long   prompt_tokens; /**< Daily accumulated prompt tokens */
-    long   completion_tokens; /**< Daily accumulated completion tokens */
-    long   errors; /**< Daily accumulated error count */
+    long   key_id;               /**< API key primary key */
+    char   model_name[128];      /**< Model name */
+    time_t day;                  /**< midnight UTC */
+    long   requests;             /**< Daily accumulated request count */
+    long   prompt_tokens;        /**< Daily accumulated prompt tokens */
+    long   completion_tokens;    /**< Daily accumulated completion tokens */
+    long   errors;               /**< Daily accumulated error count */
     long   cached_prompt_tokens; /**< Cache-hit prompt tokens */
 } usage_row_t;
 
 /** @brief One usage_requests (per-request audit) row. */
 typedef struct usage_request_row {
-    long     key_id; /**< API key primary key */
-    char     model_name[128]; /**< Model name */
-    char     provider[32]; /**< Provider type */
-    int      http_status; /**< Upstream HTTP status code */
-    long     prompt_tokens; /**< Prompt token count */
-    long     completion_tokens; /**< Completion token count */
+    long     key_id;               /**< API key primary key */
+    char     model_name[128];      /**< Model name */
+    char     provider[32];         /**< Provider type */
+    int      http_status;          /**< Upstream HTTP status code */
+    long     prompt_tokens;        /**< Prompt token count */
+    long     completion_tokens;    /**< Completion token count */
     long     cached_prompt_tokens; /**< Cache-hit prompt tokens */
-    long     reasoning_tokens; /**< Reasoning token count */
-    uint64_t latency_ns; /**< End-to-end latency in nanoseconds */
-    time_t   ts; /**< Request timestamp */
+    long     reasoning_tokens;     /**< Reasoning token count */
+    uint64_t latency_ns;           /**< End-to-end latency in nanoseconds */
+    time_t   ts;                   /**< Request timestamp */
     char     guardrail_action[16]; /**< Guardrails action taken */
 } usage_request_row_t;
 
 /** @brief Group record (groups row + key count). */
 typedef struct group_rec {
-    long   id; /**< Primary key */
-    char   name[128]; /**< Group name */
-    long   key_count; /**< Key count in the group */
-    time_t created_at; /**< Creation timestamp */
+    long   id;                 /**< Primary key */
+    char   name[128];          /**< Group name */
+    long   key_count;          /**< Key count in the group */
+    time_t created_at;         /**< Creation timestamp */
     double monthly_budget_usd; /**< 0.0 = unlimited */
 } group_rec_t;
 
 /** @brief Guardrail rule record (guardrails_rules row). */
 typedef struct guardrail_rule {
-    long   id; /**< Primary key */
+    long   id;            /**< Primary key */
     char   rule_type[32]; /**< "keyword" | "regex" | "pii" */
-    char   pattern[512]; /**< Match pattern (keyword/regex/text-to-redact signature) */
-    char   action[32]; /**< "block" | "mask" */
-    char   category[64]; /**< "general" | "profanity" | "safety" etc. */
-    int    enabled; /**< 1 = true, 0 = false */
-    time_t created_at; /**< Creation timestamp */
+    char   pattern[512];  /**< Match pattern (keyword/regex/text-to-redact signature) */
+    char   action[32];    /**< "block" | "mask" */
+    char   category[64];  /**< "general" | "profanity" | "safety" etc. */
+    int    enabled;       /**< 1 = true, 0 = false */
+    time_t created_at;    /**< Creation timestamp */
 } guardrail_rule_t;
 
 /** @brief One cost attribution row. */
 typedef struct cost_row {
-    long   group_id; /**< Group id */
+    long   group_id;   /**< Group id */
     char   model[128]; /**< Model name */
-    long   prompt; /**< prompt token */
+    long   prompt;     /**< prompt token */
     long   completion; /**< completion token */
-    long   cached; /**< Cache-hit tokens */
-    long   requests; /**< Request count */
+    long   cached;     /**< Cache-hit tokens */
+    long   requests;   /**< Request count */
     time_t bucket_day; /**< midnight UTC timestamp */
 } cost_row_t;
 
@@ -168,15 +168,15 @@ typedef struct cost_row {
 
 /** @brief Provider record (providers row). */
 typedef struct provider_rec {
-    long   id; /**< Primary key */
-    char   name[64]; /**< Provider name */
+    long   id;                /**< Primary key */
+    char   name[64];          /**< Provider name */
     char   provider_type[32]; /**< Provider type */
-    char   endpoint[512]; /**< Upstream base URL */
-    char   api_key[1024]; /**< Upstream key */
-    char** models; /**< Model list (heap array) */
-    int    n_models; /**< Model count */
-    int    enabled; /**< Enabled switch (1 means enabled) */
-    time_t created_at; /**< Creation timestamp */
+    char   endpoint[512];     /**< Upstream base URL */
+    char   api_key[1024];     /**< Upstream key */
+    char** models;            /**< Model list (heap array) */
+    int    n_models;          /**< Model count */
+    int    enabled;           /**< Enabled switch (1 means enabled) */
+    time_t created_at;        /**< Creation timestamp */
 } provider_rec_t;
 
 /** @brief Uniform persistence operations; real libpq or in-memory fakes.
@@ -190,27 +190,54 @@ typedef struct provider_rec {
 typedef struct pg_ops {
     void* ctx; /**< Implementation-private state */
 
-    int (*get_key_by_hash)(void* ctx, const char* key_hash, key_rec_t* out); /**< Look up a key by hash: 0 hit, 1 definite miss, -1 storage error. */
-    int (*list_keys)(void* ctx, key_rec_t* out, int cap, int* n); /**< List keys (out capacity cap, n returns the count). */
-    int (*get_key_by_id)(void* ctx, long key_id, key_rec_t* out); /**< Look up a key by numeric id. */
+    int (*get_key_by_hash)(
+        void*       ctx,
+        const char* key_hash,
+        key_rec_t*  out); /**< Look up a key by hash: 0 hit, 1 definite miss, -1 storage error. */
+    int (*list_keys)(void*      ctx,
+                     key_rec_t* out,
+                     int        cap,
+                     int*       n);       /**< List keys (out capacity cap, n returns the count). */
+    int (*get_key_by_id)(void*      ctx,
+                         long       key_id,
+                         key_rec_t* out); /**< Look up a key by numeric id. */
     int (*list_models)(void* ctx, model_rec_t* out, int cap, int* n); /**< List model routes. */
-    int (*get_model)(void* ctx, const char* name, model_rec_t* out); /**< Look up a route by model name. */
+    int (*get_model)(void*        ctx,
+                     const char*  name,
+                     model_rec_t* out); /**< Look up a route by model name. */
 
-    int (*create_key)(void* ctx, const key_rec_t* k, long* out_key_id); /**< Create a key, out_key_id returns the primary key. */
-    int (*update_key)(void* ctx, const key_rec_t* k, int mask); /**< Update key fields by KMASK_* mask. */
-    int (*revoke_key)(void* ctx, long key_id); /**< Revoke a key. */
+    int (*create_key)(void*            ctx,
+                      const key_rec_t* k,
+                      long* out_key_id); /**< Create a key, out_key_id returns the primary key. */
+    int (*update_key)(void*            ctx,
+                      const key_rec_t* k,
+                      int              mask);             /**< Update key fields by KMASK_* mask. */
+    int (*revoke_key)(void* ctx, long key_id);            /**< Revoke a key. */
 
     int (*create_model)(void* ctx, const model_rec_t* m); /**< Create a model route. */
-    int (*update_model)(void* ctx, const model_rec_t* m, int mask); /**< Update a model route by MMASK_* mask. */
+    int (*update_model)(void*              ctx,
+                        const model_rec_t* m,
+                        int                mask);     /**< Update a model route by MMASK_* mask. */
     int (*delete_model)(void* ctx, const char* name); /**< Delete a route by model name. */
 
-    int (*list_providers)(void* ctx, provider_rec_t* out, int cap, int* n); /**< List upstream providers. */
-    int (*get_provider)(void* ctx, long id, provider_rec_t* out); /**< Look up a provider by numeric id. */
-    int (*create_provider)(void* ctx, const provider_rec_t* p, long* out_id); /**< Create a provider, out_id returns the primary key. */
-    int (*update_provider)(void* ctx, const provider_rec_t* p, int mask); /**< Update a provider by PMASK_* mask. */
-    int (*delete_provider)(void* ctx, long id); /**< Delete a provider by numeric id. */
+    int (*list_providers)(void*           ctx,
+                          provider_rec_t* out,
+                          int             cap,
+                          int*            n); /**< List upstream providers. */
+    int (*get_provider)(void*           ctx,
+                        long            id,
+                        provider_rec_t* out); /**< Look up a provider by numeric id. */
+    int (*create_provider)(void*                 ctx,
+                           const provider_rec_t* p,
+                           long* out_id); /**< Create a provider, out_id returns the primary key. */
+    int (*update_provider)(void*                 ctx,
+                           const provider_rec_t* p,
+                           int                   mask); /**< Update a provider by PMASK_* mask. */
+    int (*delete_provider)(void* ctx, long id);         /**< Delete a provider by numeric id. */
 
-    int (*flush_usage)(void* ctx, const usage_row_t* rows, int n); /**< Batch-persist daily-usage rows. */
+    int (*flush_usage)(void*              ctx,
+                       const usage_row_t* rows,
+                       int                n); /**< Batch-persist daily-usage rows. */
     int (*query_usage)(void*        ctx,
                        long         key_id,
                        const char*  model,
@@ -218,23 +245,47 @@ typedef struct pg_ops {
                        time_t       to,
                        usage_row_t* out,
                        int          cap,
-                        int*         n); /**< Query daily usage by key/model/time range. */
-    int (*flush_usage_requests)(void* ctx, const usage_request_row_t* rows, int n); /**< Batch-persist per-request audit rows. */
-    int (*query_usage_requests)(
-        void* ctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n); /**< Query per-request audit rows by key/start time. */
+                       int*         n); /**< Query daily usage by key/model/time range. */
+    int (*flush_usage_requests)(void*                      ctx,
+                                const usage_request_row_t* rows,
+                                int n); /**< Batch-persist per-request audit rows. */
+    int (*query_usage_requests)(void*                ctx,
+                                long                 key_id,
+                                time_t               since,
+                                usage_request_row_t* out,
+                                int                  cap,
+                                int* n); /**< Query per-request audit rows by key/start time. */
 
-    int (*create_group)(void* ctx, const char* name, long* out_id); /**< Create a group, out_id returns the primary key. */
+    int (*create_group)(void*       ctx,
+                        const char* name,
+                        long*       out_id); /**< Create a group, out_id returns the primary key. */
     int (*list_groups)(void* ctx, group_rec_t* out, int cap, int* n); /**< List groups. */
     int (*patch_group)(void* ctx, long id, const char* name); /**< Rename a group by numeric id. */
-    int (*patch_group_budget)(void* ctx, long id, double budget); /**< Change a group's monthly budget by numeric id. */
-    int (*delete_group)(void* ctx, long id); /**< Delete a group by numeric id. */
+    int (*patch_group_budget)(void*  ctx,
+                              long   id,
+                              double budget); /**< Change a group's monthly budget by numeric id. */
+    int (*delete_group)(void* ctx, long id);  /**< Delete a group by numeric id. */
     int (*count_keys_in_group)(void* ctx, long group_id, long* n); /**< Count keys in a group. */
-    int (*query_cost)(void* ctx, long since_s, long until_s, cost_row_t* out, int cap, int* n); /**< Query cost-attribution rows by time range. */
+    int (*query_cost)(void*       ctx,
+                      long        since_s,
+                      long        until_s,
+                      cost_row_t* out,
+                      int         cap,
+                      int*        n); /**< Query cost-attribution rows by time range. */
 
-    int (*list_guardrails_rules)(void* ctx, guardrail_rule_t* out, int cap, int* n); /**< List guardrails rules. */
-    int (*create_guardrails_rule)(void* ctx, const guardrail_rule_t* rule, long* out_id); /**< Create a guardrails rule, out_id returns the primary key. */
-    int (*update_guardrails_rule)(void* ctx, const guardrail_rule_t* rule); /**< Full-field update of a guardrails rule by id. */
-    int (*delete_guardrails_rule)(void* ctx, long id); /**< Delete a guardrails rule by numeric id. */
+    int (*list_guardrails_rules)(void*             ctx,
+                                 guardrail_rule_t* out,
+                                 int               cap,
+                                 int*              n); /**< List guardrails rules. */
+    int (*create_guardrails_rule)(
+        void*                   ctx,
+        const guardrail_rule_t* rule,
+        long* out_id); /**< Create a guardrails rule, out_id returns the primary key. */
+    int (*update_guardrails_rule)(
+        void*                   ctx,
+        const guardrail_rule_t* rule);       /**< Full-field update of a guardrails rule by id. */
+    int (*delete_guardrails_rule)(void* ctx,
+                                  long  id); /**< Delete a guardrails rule by numeric id. */
 } pg_ops_t;
 
 /** @brief Storage handle (opaque; holder of a libpq connection or a fake context). */
@@ -279,7 +330,8 @@ int pg_store_list_guardrails_rules(const pg_store_t* ps, guardrail_rule_t* out, 
  *  @param rule Rule content (the id field is ignored).
  *  @param out_id Receives the new rule id.
  *  @return 0 on success; -1 on storage error. */
-int pg_store_create_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule, long* out_id);
+int
+pg_store_create_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule, long* out_id);
 /** @brief Full-field update of a guardrails rule by id.
  *  @return 0 on success; -1 on storage error. */
 int pg_store_update_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule);

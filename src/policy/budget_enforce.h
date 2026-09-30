@@ -28,45 +28,34 @@ int budget_enforce_init_from_db(budget_enforce_mgr_t* mgr);
 /** @brief Fast in-memory budget check against key and group limits.
  *  @return 0 if allowed, -1 if budget exceeded (with err_msg populated).
  */
-int budget_enforce_check(
-    budget_enforce_mgr_t* mgr,
-    int64_t               key_id,
-    int64_t               group_id,
-    double                key_cost_budget,
-    int64_t               key_token_budget,
-    double                group_cost_budget,
-    char*                 err_msg,
-    size_t                err_msg_sz);
+int budget_enforce_check(budget_enforce_mgr_t* mgr,
+                         int64_t               key_id,
+                         int64_t               group_id,
+                         double                key_cost_budget,
+                         int64_t               key_token_budget,
+                         double                group_cost_budget,
+                         char*                 err_msg,
+                         size_t                err_msg_sz);
 
 /** @brief Record incremental usage (cost and tokens) for key and group. */
 void budget_enforce_record(
-    budget_enforce_mgr_t* mgr,
-    int64_t               key_id,
-    int64_t               group_id,
-    double                cost_usd,
-    int64_t               tokens);
+    budget_enforce_mgr_t* mgr, int64_t key_id, int64_t group_id, double cost_usd, int64_t tokens);
 
 /** @brief Reset in-memory budget counters (e.g. for testing or forced rollover). */
 void budget_enforce_reset(budget_enforce_mgr_t* mgr);
 
 /** @brief Query current in-memory usage for a key. */
-int budget_enforce_get_key_usage(
-    budget_enforce_mgr_t* mgr,
-    int64_t               key_id,
-    double*               out_cost,
-    int64_t*              out_tokens);
+int budget_enforce_get_key_usage(budget_enforce_mgr_t* mgr,
+                                 int64_t               key_id,
+                                 double*               out_cost,
+                                 int64_t*              out_tokens);
 
 /** @brief Query current in-memory usage for a group. */
-int budget_enforce_get_group_usage(
-    budget_enforce_mgr_t* mgr,
-    int64_t               group_id,
-    double*               out_cost);
+int budget_enforce_get_group_usage(budget_enforce_mgr_t* mgr, int64_t group_id, double* out_cost);
 
 /** @brief Set/update monthly budget limit for a group. */
-void budget_enforce_set_group_budget(
-    budget_enforce_mgr_t* mgr,
-    int64_t               group_id,
-    double                budget_usd);
+void
+budget_enforce_set_group_budget(budget_enforce_mgr_t* mgr, int64_t group_id, double budget_usd);
 
 struct event_bus;
 /** @brief Attach event bus for publishing budget warning events. */

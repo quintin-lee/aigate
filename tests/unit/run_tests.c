@@ -202,7 +202,8 @@ main(void)
     extern void test_gemini_native_non_gemini_400(void);
     extern void test_gemini_native_stream_pipeline_200(void);
     test_register("anthropic_native_pipeline_200", test_anthropic_native_pipeline_200);
-    test_register("anthropic_native_stream_pipeline_200", test_anthropic_native_stream_pipeline_200);
+    test_register("anthropic_native_stream_pipeline_200",
+                  test_anthropic_native_stream_pipeline_200);
     test_register("anthropic_native_non_anthropic_400", test_anthropic_native_non_anthropic_400);
     test_register("gemini_native_pipeline_200", test_gemini_native_pipeline_200);
     test_register("gemini_native_non_gemini_400", test_gemini_native_non_gemini_400);
@@ -215,7 +216,8 @@ main(void)
     extern void test_openai_responses_parse_usage_nonstream(void);
     extern void test_openai_responses_parse_usage_stream(void);
     test_register("openai_responses_build", test_openai_responses_build);
-    test_register("openai_responses_parse_usage_nonstream", test_openai_responses_parse_usage_nonstream);
+    test_register("openai_responses_parse_usage_nonstream",
+                  test_openai_responses_parse_usage_nonstream);
     test_register("openai_responses_parse_usage_stream", test_openai_responses_parse_usage_stream);
 
     extern void test_probe_plan_openai_family(void);
@@ -327,12 +329,13 @@ main(void)
     extern void test_anthropic_tool_result_message_build(void);
     extern void test_anthropic_sse_tool_call_stream(void);
     extern void test_anthropic_tool_choice_required_mapping(void);
-    test_register("anthropic_tools_request_build",       test_anthropic_tools_request_build);
-    test_register("anthropic_tool_use_response_parse",   test_anthropic_tool_use_response_parse);
-    test_register("anthropic_mixed_text_and_tool_use",   test_anthropic_mixed_text_and_tool_use);
+    test_register("anthropic_tools_request_build", test_anthropic_tools_request_build);
+    test_register("anthropic_tool_use_response_parse", test_anthropic_tool_use_response_parse);
+    test_register("anthropic_mixed_text_and_tool_use", test_anthropic_mixed_text_and_tool_use);
     test_register("anthropic_tool_result_message_build", test_anthropic_tool_result_message_build);
-    test_register("anthropic_sse_tool_call_stream",      test_anthropic_sse_tool_call_stream);
-    test_register("anthropic_tool_choice_required_mapping", test_anthropic_tool_choice_required_mapping);
+    test_register("anthropic_sse_tool_call_stream", test_anthropic_sse_tool_call_stream);
+    test_register("anthropic_tool_choice_required_mapping",
+                  test_anthropic_tool_choice_required_mapping);
 
     extern void admin_ui_content(void);
     test_register("admin_ui_content", admin_ui_content);
@@ -370,12 +373,13 @@ main(void)
     extern void test_gemini_tool_result_name_missing_fallback(void);
     extern void test_gemini_multi_tool_calls_response(void);
     extern void test_gemini_sse_function_call_stream(void);
-    test_register("gemini_tools_request_build",               test_gemini_tools_request_build);
-    test_register("gemini_function_call_response_parse",      test_gemini_function_call_response_parse);
-    test_register("gemini_tool_result_name_lookup",           test_gemini_tool_result_name_lookup);
-    test_register("gemini_tool_result_name_missing_fallback", test_gemini_tool_result_name_missing_fallback);
-    test_register("gemini_multi_tool_calls_response",         test_gemini_multi_tool_calls_response);
-    test_register("gemini_sse_function_call_stream",          test_gemini_sse_function_call_stream);
+    test_register("gemini_tools_request_build", test_gemini_tools_request_build);
+    test_register("gemini_function_call_response_parse", test_gemini_function_call_response_parse);
+    test_register("gemini_tool_result_name_lookup", test_gemini_tool_result_name_lookup);
+    test_register("gemini_tool_result_name_missing_fallback",
+                  test_gemini_tool_result_name_missing_fallback);
+    test_register("gemini_multi_tool_calls_response", test_gemini_multi_tool_calls_response);
+    test_register("gemini_sse_function_call_stream", test_gemini_sse_function_call_stream);
 
     extern void test_openai_embeddings_build(void);
     extern void test_openai_embeddings_parse(void);

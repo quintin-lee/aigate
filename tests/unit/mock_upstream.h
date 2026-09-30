@@ -32,7 +32,6 @@ int mock_upstream_request_count(const mock_upstream_t* mu);
  *  overriding path-based and fail_all rules; 0 restores normal behavior. */
 void mock_upstream_status(mock_upstream_t* mu, int status);
 
-
 /** @brief The most recently received request body (NUL-terminated,
  *  instance-owned; valid until the next request or stop). */
 const char* mock_upstream_last_body(const mock_upstream_t* mu);

@@ -237,15 +237,15 @@ event_bus_publish(event_bus_t* eb,
 
 void
 event_bus_publish_request(event_bus_t* eb,
-                           long         key_id,
-                           const char*  model,
-                           const char*  provider,
-                           int          status,
-                           uint64_t     latency_ns,
-                           long         prompt_tokens,
-                           long         completion_tokens,
-                           double       cost,
-                           const char*  guardrail_act)
+                          long         key_id,
+                          const char*  model,
+                          const char*  provider,
+                          int          status,
+                          uint64_t     latency_ns,
+                          long         prompt_tokens,
+                          long         completion_tokens,
+                          double       cost,
+                          const char*  guardrail_act)
 {
     if (eb == NULL) {
         return;

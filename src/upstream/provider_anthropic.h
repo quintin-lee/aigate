@@ -55,24 +55,25 @@ int provider_anthropic_resp_to_openai(const char* anthropic_resp,
 
 /** @brief State machine for streaming Anthropic SSE to OpenAI SSE chunks. */
 typedef struct anthropic_bridge {
-    aigate_response_ctx* rc; /**< Downstream response context (borrowed). */
-    bool                 headers_sent; /**< Downstream headers already sent. */
-    bool                 aborted; /**< Downstream aborted. */
-    char                 line_buf[8192]; /**< SSE line buffer. */
-    size_t               line_len; /**< Line buffer bytes used. */
+    aigate_response_ctx* rc;                /**< Downstream response context (borrowed). */
+    bool                 headers_sent;      /**< Downstream headers already sent. */
+    bool                 aborted;           /**< Downstream aborted. */
+    char                 line_buf[8192];    /**< SSE line buffer. */
+    size_t               line_len;          /**< Line buffer bytes used. */
     char                 current_event[64]; /**< Current SSE event name. */
-    char                 msg_id[64]; /**< Upstream message id. */
-    char                 model[64]; /**< Model name. */
-    long                 input_tokens; /**< Accumulated input tokens. */
-    long                 output_tokens; /**< Accumulated output tokens. */
-    bool                 done_emitted; /**< [DONE] already emitted. */
+    char                 msg_id[64];        /**< Upstream message id. */
+    char                 model[64];         /**< Model name. */
+    long                 input_tokens;      /**< Accumulated input tokens. */
+    long                 output_tokens;     /**< Accumulated output tokens. */
+    bool                 done_emitted;      /**< [DONE] already emitted. */
     /* Tool calling state (one active tool_use block at a time) */
-    bool   in_tool_use;    /**< Currently accumulating a tool_use content block. */
-    char   tool_id[64];    /**< Current tool call id (from content_block_start). */
-    char   tool_name[128]; /**< Current tool call name. */
-    char*  tool_args_buf;  /**< malloc'd dynamic buffer accumulating input_json_delta; NULL = empty. */
-    size_t tool_args_len;  /**< Bytes used in tool_args_buf. */
-    int    tool_index;     /**< tool_calls array index (increments per completed block). */
+    bool in_tool_use;    /**< Currently accumulating a tool_use content block. */
+    char tool_id[64];    /**< Current tool call id (from content_block_start). */
+    char tool_name[128]; /**< Current tool call name. */
+    char*
+        tool_args_buf; /**< malloc'd dynamic buffer accumulating input_json_delta; NULL = empty. */
+    size_t tool_args_len; /**< Bytes used in tool_args_buf. */
+    int    tool_index;    /**< tool_calls array index (increments per completed block). */
 } anthropic_bridge_t;
 
 /** @brief Initialize bridge with response context. */
@@ -86,24 +87,28 @@ int anthropic_bridge_feed(anthropic_bridge_t* b, const void* chunk, size_t len);
 int anthropic_bridge_finish(anthropic_bridge_t* b);
 
 /** @brief Parse token usage from non-streaming Anthropic response JSON. */
-int anthropic_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok, long* out_cached);
+int
+anthropic_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok, long* out_cached);
 
 /** @brief Lightweight passive line-buffered sniffer for Anthropic SSE streams. */
 typedef struct anthropic_sniffer {
-    char   line_buf[8192]; /**< SSE line buffer. */
-    size_t line_len; /**< Line buffer bytes used. */
+    char   line_buf[8192];    /**< SSE line buffer. */
+    size_t line_len;          /**< Line buffer bytes used. */
     char   current_event[64]; /**< Current SSE event name. */
-    long   input_tokens; /**< Accumulated input tokens. */
-    long   output_tokens; /**< Accumulated output tokens. */
-    long   cached_tokens; /**< Accumulated cache-hit tokens. */
+    long   input_tokens;      /**< Accumulated input tokens. */
+    long   output_tokens;     /**< Accumulated output tokens. */
+    long   cached_tokens;     /**< Accumulated cache-hit tokens. */
 } anthropic_sniffer_t;
 
 /** @brief Reset the sniffer (line buffer and token counters). */
 void anthropic_sniffer_init(anthropic_sniffer_t* s);
 /** @brief Feed SSE data chunk by chunk, parsing message_start/usage event lines per line to accumulate tokens.
  *  @return 0 on success; -1 on downstream write abort (this sniffer always returns 0; kept for signature compatibility). */
-int  anthropic_sniffer_feed(anthropic_sniffer_t* s, const void* chunk, size_t len);
+int anthropic_sniffer_feed(anthropic_sniffer_t* s, const void* chunk, size_t len);
 /** @brief Get accumulated input/output/cached tokens (any out may be NULL). */
-void anthropic_sniffer_get_tokens(const anthropic_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached);
+void anthropic_sniffer_get_tokens(const anthropic_sniffer_t* s,
+                                  long*                      out_ptok,
+                                  long*                      out_ctok,
+                                  long*                      out_cached);
 
 #endif /* AIGATE_PROVIDER_ANTHROPIC_H */

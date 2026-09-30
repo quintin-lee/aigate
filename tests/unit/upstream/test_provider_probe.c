@@ -10,12 +10,12 @@
 /* --- provider_probe_plan: openai family --- */
 TEST_CASE(test_probe_plan_openai_family)
 {
-    static const char* family[] = {"openai", "ollama", "azure",
-                                   "deepseek", "siliconflow", "vllm"};
+    static const char* family[] = {"openai", "ollama", "azure", "deepseek", "siliconflow", "vllm"};
     provider_probe_plan_t plan;
     for (size_t i = 0; i < sizeof family / sizeof family[0]; i++) {
         TEST_ASSERT(provider_probe_plan(family[i], "http://api.openai.com", &plan) == 0,
-                    "%s maps", family[i]);
+                    "%s maps",
+                    family[i]);
         TEST_ASSERT(strcmp(plan.url, "http://api.openai.com/models") == 0, "url");
         TEST_ASSERT(strcmp(plan.auth_header, "Authorization") == 0, "auth hdr");
         TEST_ASSERT(plan.bearer == 1, "bearer");
@@ -47,9 +47,12 @@ TEST_CASE(test_probe_plan_gemini)
     provider_probe_plan_t plan;
     for (int i = 0; i < 2; i++) {
         const char* type = i == 0 ? "gemini" : "google";
-        TEST_ASSERT(provider_probe_plan(type, "https://generativelanguage.googleapis.com", &plan) == 0,
-                    "%s maps", type);
-        TEST_ASSERT(strcmp(plan.url, "https://generativelanguage.googleapis.com/v1beta/models") == 0,
+        TEST_ASSERT(provider_probe_plan(type, "https://generativelanguage.googleapis.com", &plan) ==
+                        0,
+                    "%s maps",
+                    type);
+        TEST_ASSERT(strcmp(plan.url, "https://generativelanguage.googleapis.com/v1beta/models") ==
+                        0,
                     "url");
         TEST_ASSERT(strcmp(plan.auth_header, "x-goog-api-key") == 0, "auth hdr");
         TEST_ASSERT(plan.bearer == 0, "no bearer");
@@ -81,8 +84,8 @@ TEST_CASE(test_probe_transport_ok)
 
     int  us = 0;
     long lat_ns = -1;
-    int  rc = upstream_probe(url, "Authorization", "Bearer sk-test", NULL, NULL,
-                             5000L, &us, &lat_ns);
+    int  rc =
+        upstream_probe(url, "Authorization", "Bearer sk-test", NULL, NULL, 5000L, &us, &lat_ns);
     TEST_ASSERT(rc == 0, "rc %d", rc);
     TEST_ASSERT(us == 200, "status %d", us);
     TEST_ASSERT(lat_ns >= 0, "latency %ld", lat_ns);
@@ -101,8 +104,8 @@ TEST_CASE(test_probe_transport_key_invalid)
     snprintf(url, sizeof url, "%s/models", mock_upstream_base(mu));
 
     int us = 0;
-    int rc = upstream_probe(url, "x-api-key", "sk-bad", "anthropic-version", "2023-06-01",
-                            5000L, &us, NULL);
+    int rc = upstream_probe(
+        url, "x-api-key", "sk-bad", "anthropic-version", "2023-06-01", 5000L, &us, NULL);
     TEST_ASSERT(rc == 0, "rc %d", rc);
     TEST_ASSERT(us == 401, "status %d", us); /* maps to verdict key_invalid */
 

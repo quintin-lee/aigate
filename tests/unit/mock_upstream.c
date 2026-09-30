@@ -126,15 +126,15 @@ server_thread(void* arg)
 
         if (mstatus >= 100 && mstatus <= 599) {
             const char* body = "{\"mock\":\"forced-status\"}";
-            char resp[512];
-            int blen = snprintf(resp,
-                                sizeof resp,
-                                "HTTP/1.1 %d Mock\r\n"
-                                "Content-Type: application/json\r\n"
-                                "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
-                                mstatus,
-                                strlen(body),
-                                body);
+            char        resp[512];
+            int         blen = snprintf(resp,
+                                        sizeof resp,
+                                        "HTTP/1.1 %d Mock\r\n"
+                                        "Content-Type: application/json\r\n"
+                                        "Content-Length: %zu\r\nConnection: close\r\n\r\n%s",
+                                        mstatus,
+                                        strlen(body),
+                                        body);
             write(cfd, resp, (size_t)blen);
             close(cfd);
             continue;
@@ -308,14 +308,19 @@ server_thread(void* arg)
                 "\"totalTokenCount\":16}}\n\n";
             write(cfd, c2, strlen(c2));
         } else if (strcmp(path, "/v1/responses") == 0 || strcmp(path, "/responses") == 0) {
-            const char* body = "{\"id\":\"resp_mock_unit_1\",\"object\":\"response\",\"status\":\"completed\","
-                               "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"hello responses\"}]}],"
-                               "\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"output_tokens_details\":{\"reasoning_tokens\":5}}}";
+            const char* body =
+                "{\"id\":\"resp_mock_unit_1\",\"object\":\"response\",\"status\":\"completed\","
+                "\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":"
+                "\"text\",\"text\":\"hello responses\"}]}],"
+                "\"usage\":{\"input_tokens\":10,\"output_tokens\":20,\"output_tokens_details\":{"
+                "\"reasoning_tokens\":5}}}";
             char resp[2048];
-            int blen = snprintf(resp, sizeof resp,
-                                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
-                                "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
-                                (int)strlen(body), body);
+            int  blen = snprintf(resp,
+                                 sizeof resp,
+                                 "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n"
+                                 "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
+                                 (int)strlen(body),
+                                 body);
             write(cfd, resp, (size_t)blen);
         } else { /* /chat, /chat/completions, default */
             const char* body = "{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion\","

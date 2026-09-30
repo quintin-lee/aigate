@@ -18,23 +18,23 @@
 
 /** @brief Per-key rate-limit bucket: key id/in-use flag/available tokens/capacity/last refill/daily total/date. */
 struct bucket {
-    long     key_id; /**< API key id */
-    int      in_use; /**< Slot occupancy flag. */
+    long     key_id;         /**< API key id */
+    int      in_use;         /**< Slot occupancy flag. */
     double   tokens;         /**< available request tokens */
-    double   capacity; /**< Bucket capacity (QPS ceiling). */
+    double   capacity;       /**< Bucket capacity (QPS ceiling). */
     uint64_t last_refill_ns; /**< CLOCK_MONOTONIC */
-    long     daily_used; /**< Tokens consumed today. */
+    long     daily_used;     /**< Tokens consumed today. */
     time_t   day;            /**< UTC midnight of the accounting window */
 };
 
 /** @brief Limiter instance: lock/open-addressing bucket table/capacity/count/Redis pool/Lua SHA cache. */
 struct ratelimit {
-    pthread_mutex_t mtx; /**< Instance mutex. */
-    struct bucket*  b; /**< Open-addressing bucket table. */
-    size_t          cap; /**< Table capacity. */
-    size_t          count; /**< Occupied slot count. */
-    redis_pool_t*   pool; /**< Shared Redis pool (distributed limiting, nullable). */
-    char            sha_qps[48]; /**< QPS Lua script SHA cache. */
+    pthread_mutex_t mtx;           /**< Instance mutex. */
+    struct bucket*  b;             /**< Open-addressing bucket table. */
+    size_t          cap;           /**< Table capacity. */
+    size_t          count;         /**< Occupied slot count. */
+    redis_pool_t*   pool;          /**< Shared Redis pool (distributed limiting, nullable). */
+    char            sha_qps[48];   /**< QPS Lua script SHA cache. */
     char            sha_quota[48]; /**< Quota Lua script SHA cache. */
 };
 
@@ -201,7 +201,7 @@ rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms)
 
         char key_buf[64];
         snprintf(key_buf, sizeof(key_buf), "aigate:rl:qps:%ld", key_id);
-        const char* keys[1] = { key_buf };
+        const char* keys[1] = {key_buf};
 
         char now_buf[32], qps_buf[32], cap_buf[32], ttl_buf[16];
         snprintf(now_buf, sizeof(now_buf), "%llu", (unsigned long long)now_ms);
@@ -209,7 +209,7 @@ rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms)
         snprintf(cap_buf, sizeof(cap_buf), "%d", qps);
         snprintf(ttl_buf, sizeof(ttl_buf), "3");
 
-        const char* argv[4] = { now_buf, qps_buf, cap_buf, ttl_buf };
+        const char* argv[4] = {now_buf, qps_buf, cap_buf, ttl_buf};
         redisReply* reply =
             redis_eval_sha(c, rl->sha_qps, SCRIPT_QPS_TOKEN_BUCKET, 1, keys, argv, 4);
         if (reply == NULL || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||
@@ -305,14 +305,14 @@ rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
 
         char key_buf[64];
         snprintf(key_buf, sizeof(key_buf), "aigate:quota:%ld:%ld", key_id, (long)day_epoch);
-        const char* keys[1] = { key_buf };
+        const char* keys[1] = {key_buf};
 
         char tokens_buf[32], quota_buf[32], ttl_buf[16];
         snprintf(tokens_buf, sizeof(tokens_buf), "%ld", tokens);
         snprintf(quota_buf, sizeof(quota_buf), "%ld", daily_quota);
         snprintf(ttl_buf, sizeof(ttl_buf), "172800");
 
-        const char* argv[3] = { tokens_buf, quota_buf, ttl_buf };
+        const char* argv[3] = {tokens_buf, quota_buf, ttl_buf};
         redisReply* reply =
             redis_eval_sha(c, rl->sha_quota, SCRIPT_DAILY_QUOTA_CONSUME, 1, keys, argv, 3);
         if (reply == NULL || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||

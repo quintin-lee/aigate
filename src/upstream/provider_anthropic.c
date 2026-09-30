@@ -33,9 +33,9 @@ ant_extract_text(json_t* jcontent)
         return strdup("");
     }
     /* Content-part array: concatenate all type=="text" parts */
-    char*  buf = NULL;
-    size_t buf_len = 0;
-    size_t idx;
+    char*   buf = NULL;
+    size_t  buf_len = 0;
+    size_t  idx;
     json_t* part;
     json_array_foreach(jcontent, idx, part)
     {
@@ -46,9 +46,9 @@ ant_extract_text(json_t* jcontent)
         if (strcmp(json_string_value(jtype), "text") == 0) {
             json_t* jt = json_object_get(part, "text");
             if (jt && json_is_string(jt)) {
-                const char* t    = json_string_value(jt);
+                const char* t = json_string_value(jt);
                 size_t      tlen = strlen(t);
-                char*       nb   = realloc(buf, buf_len + tlen + 1);
+                char*       nb = realloc(buf, buf_len + tlen + 1);
                 if (nb) {
                     buf = nb;
                     memcpy(buf + buf_len, t, tlen);
@@ -57,7 +57,8 @@ ant_extract_text(json_t* jcontent)
                 }
             }
         } else if (strcmp(json_string_value(jtype), "image_url") == 0) {
-            AIGATE_LOG_WARN("image_url content part ignored (vision not supported by Anthropic adapter)");
+            AIGATE_LOG_WARN(
+                "image_url content part ignored (vision not supported by Anthropic adapter)");
         }
     }
     return buf ? buf : strdup("");
@@ -85,8 +86,8 @@ provider_anthropic_build(const model_rec_t* route,
 
     /* Headers: x-api-key, anthropic-version */
     static const char* s_anthropic_ver = "2023-06-01";
-    static const char* s_hdr_version   = "anthropic-version";
-    static const char* s_hdr_apikey    = "x-api-key";
+    static const char* s_hdr_version = "anthropic-version";
+    static const char* s_hdr_apikey = "x-api-key";
 
     int n_hdrs = 0;
     if (route->upstream_key[0] != '\0') {
@@ -112,14 +113,14 @@ provider_anthropic_build(const model_rec_t* route,
 
     /* Model: from request, or route name */
     const char* model_name = route->name;
-    json_t*     jm         = json_object_get(in_req, "model");
+    json_t*     jm = json_object_get(in_req, "model");
     if (jm != NULL && json_is_string(jm)) {
         model_name = json_string_value(jm);
     }
     json_object_set_new(out, "model", json_string(model_name));
 
     /* Extract system messages and non-system messages */
-    json_t* msgs    = json_object_get(in_req, "messages");
+    json_t* msgs = json_object_get(in_req, "messages");
     char*   sys_buf = NULL;
     size_t  sys_len = 0;
     json_t* ant_msgs = json_array();
@@ -129,12 +130,12 @@ provider_anthropic_build(const model_rec_t* route,
         json_t* item;
         json_array_foreach(msgs, idx, item)
         {
-            json_t*     jrole    = json_object_get(item, "role");
+            json_t*     jrole = json_object_get(item, "role");
             json_t*     jcontent = json_object_get(item, "content");
             const char* role = (jrole && json_is_string(jrole)) ? json_string_value(jrole) : "user";
 
             if (strcmp(role, "system") == 0) {
-                char* txt  = ant_extract_text(jcontent);
+                char*  txt = ant_extract_text(jcontent);
                 size_t clen = strlen(txt);
                 if (clen > 0) {
                     if (sys_buf == NULL) {
@@ -147,7 +148,7 @@ provider_anthropic_build(const model_rec_t* route,
                             sys_buf = nbuf;
                             memcpy(sys_buf + sys_len, "\n\n", 2);
                             memcpy(sys_buf + sys_len + 2, txt, clen);
-                            sys_len      = nlen;
+                            sys_len = nlen;
                             sys_buf[sys_len] = '\0';
                         }
                     }
@@ -157,29 +158,29 @@ provider_anthropic_build(const model_rec_t* route,
             } else if (strcmp(role, "tool") == 0) {
                 /* OpenAI tool result → Anthropic tool_result content block */
                 json_t*     jtcid = json_object_get(item, "tool_call_id");
-                const char* tcid  = (jtcid && json_is_string(jtcid)) ? json_string_value(jtcid) : "";
-                char*       txt   = ant_extract_text(jcontent);
-                json_t*     tr    = json_object();
-                json_object_set_new(tr, "type",        json_string("tool_result"));
+                const char* tcid = (jtcid && json_is_string(jtcid)) ? json_string_value(jtcid) : "";
+                char*       txt = ant_extract_text(jcontent);
+                json_t*     tr = json_object();
+                json_object_set_new(tr, "type", json_string("tool_result"));
                 json_object_set_new(tr, "tool_use_id", json_string(tcid));
-                json_object_set_new(tr, "content",     json_string(txt));
+                json_object_set_new(tr, "content", json_string(txt));
                 free(txt);
                 json_t* tr_content = json_array();
                 json_array_append_new(tr_content, tr);
                 json_t* m = json_object();
-                json_object_set_new(m, "role",    json_string("user"));
+                json_object_set_new(m, "role", json_string("user"));
                 json_object_set_new(m, "content", tr_content);
                 json_array_append_new(ant_msgs, m);
 
             } else {
                 /* user or assistant message */
-                const char* ant_role    = (strcmp(role, "assistant") == 0) ? "assistant" : "user";
+                const char* ant_role = (strcmp(role, "assistant") == 0) ? "assistant" : "user";
                 json_t*     jtool_calls = json_object_get(item, "tool_calls");
                 if (strcmp(ant_role, "assistant") == 0 && jtool_calls != NULL &&
                     json_is_array(jtool_calls) && json_array_size(jtool_calls) > 0) {
                     /* assistant message with tool_calls → Anthropic content array */
                     json_t* ant_content = json_array();
-                    char*   txt         = ant_extract_text(jcontent);
+                    char*   txt = ant_extract_text(jcontent);
                     if (txt && txt[0] != '\0') {
                         json_t* tb = json_object();
                         json_object_set_new(tb, "type", json_string("text"));
@@ -191,34 +192,38 @@ provider_anthropic_build(const model_rec_t* route,
                     json_t* tc;
                     json_array_foreach(jtool_calls, ti, tc)
                     {
-                        json_t*     jfn     = json_object_get(tc, "function");
-                        json_t*     jtcid   = json_object_get(tc, "id");
-                        const char* tc_id   = (jtcid && json_is_string(jtcid)) ? json_string_value(jtcid) : "";
-                        const char* fn_name = jfn ? json_string_value(json_object_get(jfn, "name")) : NULL;
-                        const char* fn_args = jfn ? json_string_value(json_object_get(jfn, "arguments")) : NULL;
+                        json_t*     jfn = json_object_get(tc, "function");
+                        json_t*     jtcid = json_object_get(tc, "id");
+                        const char* tc_id =
+                            (jtcid && json_is_string(jtcid)) ? json_string_value(jtcid) : "";
+                        const char* fn_name =
+                            jfn ? json_string_value(json_object_get(jfn, "name")) : NULL;
+                        const char* fn_args =
+                            jfn ? json_string_value(json_object_get(jfn, "arguments")) : NULL;
                         if (!fn_name) {
                             continue;
                         }
-                        json_t* input = (fn_args && fn_args[0]) ? json_loads(fn_args, 0, NULL) : NULL;
+                        json_t* input =
+                            (fn_args && fn_args[0]) ? json_loads(fn_args, 0, NULL) : NULL;
                         if (!input) {
                             input = json_object();
                         }
                         json_t* tub = json_object();
-                        json_object_set_new(tub, "type",  json_string("tool_use"));
-                        json_object_set_new(tub, "id",    json_string(tc_id));
-                        json_object_set_new(tub, "name",  json_string(fn_name));
+                        json_object_set_new(tub, "type", json_string("tool_use"));
+                        json_object_set_new(tub, "id", json_string(tc_id));
+                        json_object_set_new(tub, "name", json_string(fn_name));
                         json_object_set_new(tub, "input", input);
                         json_array_append_new(ant_content, tub);
                     }
                     json_t* m = json_object();
-                    json_object_set_new(m, "role",    json_string("assistant"));
+                    json_object_set_new(m, "role", json_string("assistant"));
                     json_object_set_new(m, "content", ant_content);
                     json_array_append_new(ant_msgs, m);
                 } else {
                     /* plain text message */
                     char*   txt = ant_extract_text(jcontent);
-                    json_t* m   = json_object();
-                    json_object_set_new(m, "role",    json_string(ant_role));
+                    json_t* m = json_object();
+                    json_object_set_new(m, "role", json_string(ant_role));
                     json_object_set_new(m, "content", json_string(txt ? txt : ""));
                     free(txt);
                     json_array_append_new(ant_msgs, m);
@@ -283,7 +288,7 @@ provider_anthropic_build(const model_rec_t* route,
             if (!jfn) {
                 continue;
             }
-            json_t* at    = json_object();
+            json_t* at = json_object();
             json_t* jname = json_object_get(jfn, "name");
             json_t* jdesc = json_object_get(jfn, "description");
             json_t* jparm = json_object_get(jfn, "parameters");
@@ -315,8 +320,8 @@ provider_anthropic_build(const model_rec_t* route,
                 ant_tc = json_pack("{ss}", "type", "none");
             }
         } else if (json_is_object(jtc)) {
-            json_t*     jfn    = json_object_get(jtc, "function");
-            const char* fname  = jfn ? json_string_value(json_object_get(jfn, "name")) : NULL;
+            json_t*     jfn = json_object_get(jtc, "function");
+            const char* fname = jfn ? json_string_value(json_object_get(jfn, "name")) : NULL;
             if (fname) {
                 ant_tc = json_pack("{ssss}", "type", "tool", "name", fname);
             }
@@ -375,7 +380,7 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
 
     /* ID */
     const char* ant_id = "unknown";
-    json_t*     jid    = json_object_get(root, "id");
+    json_t*     jid = json_object_get(root, "id");
     if (jid != NULL && json_is_string(jid)) {
         ant_id = json_string_value(jid);
     }
@@ -384,14 +389,14 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
 
     /* Model */
     const char* model = req_model ? req_model : "claude";
-    json_t*     jm    = json_object_get(root, "model");
+    json_t*     jm = json_object_get(root, "model");
     if (jm != NULL && json_is_string(jm)) {
         model = json_string_value(jm);
     }
 
     /* Stop reason → finish_reason */
     const char* finish_reason = "stop";
-    json_t*     jsr           = json_object_get(root, "stop_reason");
+    json_t*     jsr = json_object_get(root, "stop_reason");
     if (jsr != NULL && json_is_string(jsr)) {
         const char* sr = json_string_value(jsr);
         if (strcmp(sr, "max_tokens") == 0) {
@@ -402,8 +407,8 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
     }
 
     /* Scan content array: collect text and tool_use blocks */
-    char*   content_text   = NULL;
-    size_t  ct_len         = 0;
+    char*   content_text = NULL;
+    size_t  ct_len = 0;
     json_t* tool_calls_arr = json_array();
 
     json_t* jcontent = json_object_get(root, "content");
@@ -421,7 +426,7 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
             if (strcmp(btype, "text") == 0) {
                 json_t* jt = json_object_get(block, "text");
                 if (jt != NULL && json_is_string(jt)) {
-                    const char* t    = json_string_value(jt);
+                    const char* t = json_string_value(jt);
                     size_t      tlen = strlen(t);
                     char*       nbuf = realloc(content_text, ct_len + tlen + 1);
                     if (nbuf != NULL) {
@@ -432,17 +437,18 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
                     }
                 }
             } else if (strcmp(btype, "tool_use") == 0) {
-                json_t*     jtid    = json_object_get(block, "id");
-                json_t*     jtname  = json_object_get(block, "name");
+                json_t*     jtid = json_object_get(block, "id");
+                json_t*     jtname = json_object_get(block, "name");
                 json_t*     jtinput = json_object_get(block, "input");
-                const char* tid     = (jtid   && json_is_string(jtid))   ? json_string_value(jtid)   : "";
-                const char* tname   = (jtname && json_is_string(jtname)) ? json_string_value(jtname) : "";
-                char*       args_str = jtinput ? json_dumps(jtinput, JSON_COMPACT) : strdup("{}");
-                json_t*     tc       = json_object();
-                json_object_set_new(tc, "id",   json_string(tid));
+                const char* tid = (jtid && json_is_string(jtid)) ? json_string_value(jtid) : "";
+                const char* tname =
+                    (jtname && json_is_string(jtname)) ? json_string_value(jtname) : "";
+                char*   args_str = jtinput ? json_dumps(jtinput, JSON_COMPACT) : strdup("{}");
+                json_t* tc = json_object();
+                json_object_set_new(tc, "id", json_string(tid));
                 json_object_set_new(tc, "type", json_string("function"));
                 json_t* fn = json_object();
-                json_object_set_new(fn, "name",      json_string(tname));
+                json_object_set_new(fn, "name", json_string(tname));
                 json_object_set_new(fn, "arguments", json_string(args_str ? args_str : "{}"));
                 free(args_str);
                 json_object_set_new(tc, "function", fn);
@@ -455,20 +461,24 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
     long    ptok = 0, ctok = 0;
     json_t* jusage = json_object_get(root, "usage");
     if (jusage != NULL && json_is_object(jusage)) {
-        json_t* jin  = json_object_get(jusage, "input_tokens");
+        json_t* jin = json_object_get(jusage, "input_tokens");
         json_t* jout = json_object_get(jusage, "output_tokens");
-        if (jin  != NULL && json_is_integer(jin))  { ptok = json_integer_value(jin);  }
-        if (jout != NULL && json_is_integer(jout)) { ctok = json_integer_value(jout); }
+        if (jin != NULL && json_is_integer(jin)) {
+            ptok = json_integer_value(jin);
+        }
+        if (jout != NULL && json_is_integer(jout)) {
+            ctok = json_integer_value(jout);
+        }
     }
     *out_ptok = ptok;
     *out_ctok = ctok;
 
     /* Build OpenAI response */
     json_t* oai = json_object();
-    json_object_set_new(oai, "id",      json_string(oai_id));
-    json_object_set_new(oai, "object",  json_string("chat.completion"));
+    json_object_set_new(oai, "id", json_string(oai_id));
+    json_object_set_new(oai, "object", json_string("chat.completion"));
     json_object_set_new(oai, "created", json_integer((json_int_t)time(NULL)));
-    json_object_set_new(oai, "model",   json_string(model));
+    json_object_set_new(oai, "model", json_string(model));
 
     json_t* choice = json_object();
     json_object_set_new(choice, "index", json_integer(0));
@@ -485,7 +495,7 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
     } else {
         json_decref(tool_calls_arr);
     }
-    json_object_set_new(choice, "message",       msg);
+    json_object_set_new(choice, "message", msg);
     json_object_set_new(choice, "finish_reason", json_string(finish_reason));
 
     json_t* choices = json_array();
@@ -493,9 +503,9 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
     json_object_set_new(oai, "choices", choices);
 
     json_t* usage_obj = json_object();
-    json_object_set_new(usage_obj, "prompt_tokens",     json_integer(ptok));
+    json_object_set_new(usage_obj, "prompt_tokens", json_integer(ptok));
     json_object_set_new(usage_obj, "completion_tokens", json_integer(ctok));
-    json_object_set_new(usage_obj, "total_tokens",      json_integer(ptok + ctok));
+    json_object_set_new(usage_obj, "total_tokens", json_integer(ptok + ctok));
     json_object_set_new(oai, "usage", usage_obj);
 
     free(content_text);
@@ -627,12 +637,16 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
             json_t* jt = json_object_get(jcb, "type");
             if (jt && json_is_string(jt) && strcmp(json_string_value(jt), "tool_use") == 0) {
                 b->in_tool_use = true;
-                json_t* jid   = json_object_get(jcb, "id");
+                json_t* jid = json_object_get(jcb, "id");
                 json_t* jname = json_object_get(jcb, "name");
-                snprintf(b->tool_id,   sizeof b->tool_id,
-                         "%s", (jid   && json_is_string(jid))   ? json_string_value(jid)   : "");
-                snprintf(b->tool_name, sizeof b->tool_name,
-                         "%s", (jname && json_is_string(jname)) ? json_string_value(jname) : "");
+                snprintf(b->tool_id,
+                         sizeof b->tool_id,
+                         "%s",
+                         (jid && json_is_string(jid)) ? json_string_value(jid) : "");
+                snprintf(b->tool_name,
+                         sizeof b->tool_name,
+                         "%s",
+                         (jname && json_is_string(jname)) ? json_string_value(jname) : "");
                 free(b->tool_args_buf);
                 b->tool_args_buf = NULL;
                 b->tool_args_len = 0;
@@ -650,15 +664,21 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
                 json_t* jt = json_object_get(jdel, "text");
                 if (jt != NULL && json_is_string(jt)) {
                     const char* text = json_string_value(jt);
-                    json_t*     cd   = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
-                                                 "id",     id_buf,
-                                                 "object", "chat.completion.chunk",
-                                                 "model",  b->model,
-                                                 "choices",
-                                                 "index",  0,
-                                                 "delta",  "content", text,
-                                                 "finish_reason");
-                    char* pd = json_dumps(cd, JSON_COMPACT);
+                    json_t*     cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                               "id",
+                                               id_buf,
+                                               "object",
+                                               "chat.completion.chunk",
+                                               "model",
+                                               b->model,
+                                               "choices",
+                                               "index",
+                                               0,
+                                               "delta",
+                                               "content",
+                                               text,
+                                               "finish_reason");
+                    char*       pd = json_dumps(cd, JSON_COMPACT);
                     json_decref(cd);
                     if (pd != NULL) {
                         char sse[8192];
@@ -674,7 +694,7 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
                 /* Tool argument partial JSON — accumulate */
                 json_t* jpj = json_object_get(jdel, "partial_json");
                 if (jpj && json_is_string(jpj)) {
-                    const char* pj    = json_string_value(jpj);
+                    const char* pj = json_string_value(jpj);
                     size_t      pjlen = strlen(pj);
                     if (b->tool_args_len + pjlen < 65536) {
                         char* nb = realloc(b->tool_args_buf, b->tool_args_len + pjlen + 1);
@@ -693,27 +713,27 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
     } else if (strcmp(b->current_event, "content_block_stop") == 0) {
         /* Emit tool_calls chunk when a tool_use block completes */
         if (b->in_tool_use && b->tool_id[0] != '\0') {
-            const char* args  = b->tool_args_buf ? b->tool_args_buf : "{}";
+            const char* args = b->tool_args_buf ? b->tool_args_buf : "{}";
             json_t*     chunk = json_object();
-            json_object_set_new(chunk, "id",     json_string(id_buf));
+            json_object_set_new(chunk, "id", json_string(id_buf));
             json_object_set_new(chunk, "object", json_string("chat.completion.chunk"));
-            json_object_set_new(chunk, "model",  json_string(b->model));
+            json_object_set_new(chunk, "model", json_string(b->model));
             json_t* choices = json_array();
-            json_t* choice  = json_object();
+            json_t* choice = json_object();
             json_object_set_new(choice, "index", json_integer(0));
-            json_t* delta  = json_object();
+            json_t* delta = json_object();
             json_t* tc_arr = json_array();
-            json_t* tc     = json_object();
+            json_t* tc = json_object();
             json_object_set_new(tc, "index", json_integer(b->tool_index));
-            json_object_set_new(tc, "id",    json_string(b->tool_id));
-            json_object_set_new(tc, "type",  json_string("function"));
+            json_object_set_new(tc, "id", json_string(b->tool_id));
+            json_object_set_new(tc, "type", json_string("function"));
             json_t* fn = json_object();
-            json_object_set_new(fn, "name",      json_string(b->tool_name));
+            json_object_set_new(fn, "name", json_string(b->tool_name));
             json_object_set_new(fn, "arguments", json_string(args));
             json_object_set_new(tc, "function", fn);
             json_array_append_new(tc_arr, tc);
             json_object_set_new(delta, "tool_calls", tc_arr);
-            json_object_set_new(choice, "delta",         delta);
+            json_object_set_new(choice, "delta", delta);
             json_object_set_new(choice, "finish_reason", json_null());
             json_array_append_new(choices, choice);
             json_object_set_new(chunk, "choices", choices);
@@ -733,7 +753,7 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
         }
     } else if (strcmp(b->current_event, "message_delta") == 0) {
         const char* finish_reason = "stop";
-        json_t*     jdel          = json_object_get(data, "delta");
+        json_t*     jdel = json_object_get(data, "delta");
         if (jdel != NULL && json_is_object(jdel)) {
             json_t* jsr = json_object_get(jdel, "stop_reason");
             if (jsr != NULL && json_is_string(jsr)) {
@@ -999,7 +1019,6 @@ anthropic_stream_bridge_free(stream_bridge_t* b)
     free(b);
 }
 
-
 /** @brief Anthropic provider vtable instance (see the provider_adapter vtable). */
 const provider_adapter_t g_provider_anthropic = {
     .name = "anthropic",
@@ -1019,14 +1038,20 @@ const provider_adapter_t g_provider_anthropic = {
 int
 anthropic_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok, long* out_cached)
 {
-    if (out_ptok) *out_ptok = 0;
-    if (out_ctok) *out_ctok = 0;
-    if (out_cached) *out_cached = 0;
+    if (out_ptok) {
+        *out_ptok = 0;
+    }
+    if (out_ctok) {
+        *out_ctok = 0;
+    }
+    if (out_cached) {
+        *out_cached = 0;
+    }
     if (json_str == NULL || json_str[0] == '\0') {
         return -1;
     }
     json_error_t err;
-    json_t* root = json_loads(json_str, 0, &err);
+    json_t*      root = json_loads(json_str, 0, &err);
     if (root == NULL) {
         return -1;
     }
@@ -1056,7 +1081,9 @@ anthropic_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok,
 void
 anthropic_sniffer_init(anthropic_sniffer_t* s)
 {
-    if (s == NULL) return;
+    if (s == NULL) {
+        return;
+    }
     memset(s, 0, sizeof(*s));
 }
 
@@ -1152,10 +1179,21 @@ anthropic_sniffer_feed(anthropic_sniffer_t* s, const void* chunk, size_t len)
 }
 
 void
-anthropic_sniffer_get_tokens(const anthropic_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached)
+anthropic_sniffer_get_tokens(const anthropic_sniffer_t* s,
+                             long*                      out_ptok,
+                             long*                      out_ctok,
+                             long*                      out_cached)
 {
-    if (s == NULL) return;
-    if (out_ptok) *out_ptok = s->input_tokens;
-    if (out_ctok) *out_ctok = s->output_tokens;
-    if (out_cached) *out_cached = s->cached_tokens;
+    if (s == NULL) {
+        return;
+    }
+    if (out_ptok) {
+        *out_ptok = s->input_tokens;
+    }
+    if (out_ctok) {
+        *out_ctok = s->output_tokens;
+    }
+    if (out_cached) {
+        *out_cached = s->cached_tokens;
+    }
 }

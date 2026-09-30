@@ -60,19 +60,22 @@ int gemini_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok
 
 /** @brief Lightweight passive line-buffered sniffer for Gemini SSE streams. */
 typedef struct gemini_sniffer {
-    char   line_buf[8192]; /**< SSE line buffer. */
-    size_t line_len; /**< Line buffer bytes used. */
-    long   prompt_tokens; /**< Accumulated prompt tokens. */
+    char   line_buf[8192];    /**< SSE line buffer. */
+    size_t line_len;          /**< Line buffer bytes used. */
+    long   prompt_tokens;     /**< Accumulated prompt tokens. */
     long   candidates_tokens; /**< Accumulated candidates tokens. */
-    long   cached_tokens; /**< Accumulated cache-hit tokens. */
+    long   cached_tokens;     /**< Accumulated cache-hit tokens. */
 } gemini_sniffer_t;
 
 /** @brief Reset the sniffer (line buffer and token counters). */
 void gemini_sniffer_init(gemini_sniffer_t* s);
 /** @brief Feed SSE data chunk by chunk, parsing usageMetadata lines to accumulate tokens.
  *  @return 0 on success (kept for signature compatibility). */
-int  gemini_sniffer_feed(gemini_sniffer_t* s, const void* chunk, size_t len);
+int gemini_sniffer_feed(gemini_sniffer_t* s, const void* chunk, size_t len);
 /** @brief Get accumulated prompt/candidates/cached tokens (any out may be NULL). */
-void gemini_sniffer_get_tokens(const gemini_sniffer_t* s, long* out_ptok, long* out_ctok, long* out_cached);
+void gemini_sniffer_get_tokens(const gemini_sniffer_t* s,
+                               long*                   out_ptok,
+                               long*                   out_ctok,
+                               long*                   out_cached);
 
 #endif /* AIGATE_PROVIDER_GEMINI_H */

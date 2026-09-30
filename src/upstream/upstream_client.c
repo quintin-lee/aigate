@@ -13,7 +13,7 @@
 #include <time.h>
 
 /** curl share handle (DNS/SSL sessions reused across easy handles, initialized by g_curl_once). */
-static CURLSH*         g_curl_sh = NULL;
+static CURLSH* g_curl_sh = NULL;
 /** curl shared DNS cache lock. */
 static pthread_mutex_t g_curl_sh_dns_mtx = PTHREAD_MUTEX_INITIALIZER;
 /** curl shared SSL session lock. */
@@ -63,7 +63,7 @@ curl_init_once(void)
 }
 
 /** Thread-local easy handle key (reclaims the thread's reused handle on destruction). */
-static pthread_key_t  g_curl_tkey;
+static pthread_key_t g_curl_tkey;
 /** Thread key init once guard. */
 static pthread_once_t g_curl_tkey_once = PTHREAD_ONCE_INIT;
 
@@ -117,8 +117,8 @@ curl_apply_common_opts(CURL* c)
 /** @brief Non-streaming response accumulator (whole body in memory). */
 struct resp_buf {
     char*  data; /**< Accumulated response body. */
-    size_t len; /**< Bytes used. */
-    size_t cap; /**< Buffer capacity. */
+    size_t len;  /**< Bytes used. */
+    size_t cap;  /**< Buffer capacity. */
 };
 
 /** @brief Non-streaming response accumulation cap (32MB): keeps a malicious/misconfigured upstream from blowing up worker memory; overruns are reported as transport errors (-502).
@@ -378,20 +378,20 @@ upstream_probe(const char* url,
 
 /** @brief Streaming transfer context (write callback state): chunk forwarding + silence timeout + error-body capture. */
 struct stream_ctx {
-    upstream_chunk_fn on_chunk; /**< Per-chunk callback (borrowed). */
+    upstream_chunk_fn on_chunk;  /**< Per-chunk callback (borrowed). */
     void*             user_data; /**< Callback passthrough data (borrowed). */
-    uint64_t          last_chunk_mono_ns; /**< Last-chunk monotonic time (silence-timeout baseline). */
-    uint64_t          silence_timeout_ns; /**< Inter-chunk silence timeout (nanoseconds). */
-    int               aborted; /**< Nonzero = callback requested abort. */
-    CURL*             curl; /**< This call's easy handle (borrowed). */
-    int               status; /**< First-packet HTTP status code. */
+    uint64_t last_chunk_mono_ns; /**< Last-chunk monotonic time (silence-timeout baseline). */
+    uint64_t silence_timeout_ns; /**< Inter-chunk silence timeout (nanoseconds). */
+    int      aborted;            /**< Nonzero = callback requested abort. */
+    CURL*    curl;               /**< This call's easy handle (borrowed). */
+    int      status;             /**< First-packet HTTP status code. */
     /* Error-body capture: when the upstream answers 4xx/5xx before the first
      * SSE chunk, the body is accumulated here so the caller can surface the
      * upstream's own error instead of a generic 502. Capped like the
      * non-streaming buffer. */
     char*  err_body; /**< 4xx/5xx pre-SSE error-body accumulation buffer. */
-    size_t err_len; /**< Error-body bytes used. */
-    size_t err_cap; /**< Error-body buffer capacity. */
+    size_t err_len;  /**< Error-body bytes used. */
+    size_t err_cap;  /**< Error-body buffer capacity. */
 };
 
 /** @brief Streaming write callback: records the status code on the first packet; accumulates error bodies for 4xx/5xx, hands other chunks to on_chunk (nonzero callback return aborts).

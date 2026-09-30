@@ -28,22 +28,28 @@
 
 /** @brief Normalized inbound request (transport fills, pipeline reads). */
 typedef struct aigate_request_ctx {
-    const char* method; /**< "POST" */
-    const char* path;   /**< "/v1/chat/completions" */
-    const char* bearer; /**< client key, raw */
-    const char* client_ip;    /**< Peer IP (for rate limiting/auditing, may be NULL) */
-    const void* body;         /**< Request body (borrowed, not owned) */
-    size_t      body_len;     /**< Request body length in bytes */
+    const char* method;        /**< "POST" */
+    const char* path;          /**< "/v1/chat/completions" */
+    const char* bearer;        /**< client key, raw */
+    const char* client_ip;     /**< Peer IP (for rate limiting/auditing, may be NULL) */
+    const void* body;          /**< Request body (borrowed, not owned) */
+    size_t      body_len;      /**< Request body length in bytes */
     const char* cache_control; /**< Client Cache-Control header, may be NULL */
 } aigate_request_ctx;
 
 /** @brief Outbound response sink (transport implements callbacks). */
 typedef struct aigate_response_ctx {
-    int   status;       /**< HTTP status to write */
-    bool  headers_sent; /**< Headers already flushed (triggered by first write), prevent duplicates */
-    void* impl;         /**< Transport private handle (borrowed) */
-    int (*set_header)(void* impl, const char* name, const char* value); /**< Append response header before flush */
-    int (*write)(void* impl, const void* buf, size_t len, bool fin);    /**< Chunked write after status+headers flushed */
+    int status;       /**< HTTP status to write */
+    bool
+        headers_sent; /**< Headers already flushed (triggered by first write), prevent duplicates */
+    void* impl;       /**< Transport private handle (borrowed) */
+    int (*set_header)(void*       impl,
+                      const char* name,
+                      const char* value); /**< Append response header before flush */
+    int (*write)(void*       impl,
+                 const void* buf,
+                 size_t      len,
+                 bool        fin); /**< Chunked write after status+headers flushed */
 } aigate_response_ctx;
 
 struct health_prober;
@@ -52,18 +58,18 @@ struct response_cache;
 
 /** @brief Gateway pipeline state: policy handles plus config (THE SEAM owner). */
 typedef struct aigate_core {
-    auth_key_cache         keys;              /**< API key cache (includes negative cache) */
-    ratelimit_t*           rl;                /**< Rate limiter, may be NULL (disabled) */
-    model_router_t*        router;            /**< Model routing table */
-    usage_meter_t*         um;                /**< Usage meter, may be NULL (disabled) */
-    circuit_breaker_t*     cb;                /**< Circuit breaker, may be NULL (disabled) */
-    pg_store_t*            ps;                /**< Backing store (borrowed, not owned) */
+    auth_key_cache         keys;               /**< API key cache (includes negative cache) */
+    ratelimit_t*           rl;                 /**< Rate limiter, may be NULL (disabled) */
+    model_router_t*        router;             /**< Model routing table */
+    usage_meter_t*         um;                 /**< Usage meter, may be NULL (disabled) */
+    circuit_breaker_t*     cb;                 /**< Circuit breaker, may be NULL (disabled) */
+    pg_store_t*            ps;                 /**< Backing store (borrowed, not owned) */
     int                    default_timeout_ms; /**< Upstream default timeout, ms */
-    guardrails_ctx_t*      gr;                /**< Guardrails context, may be NULL (disabled) */
-    budget_enforce_mgr_t*  be;                /**< Budget enforcement, may be NULL (disabled) */
-    struct health_prober*  hp;                /**< Health prober, may be NULL */
-    struct event_bus*      eb;                /**< Event bus, may be NULL */
-    struct response_cache* rc;                /**< Response cache, may be NULL (disabled) */
+    guardrails_ctx_t*      gr;                 /**< Guardrails context, may be NULL (disabled) */
+    budget_enforce_mgr_t*  be;                 /**< Budget enforcement, may be NULL (disabled) */
+    struct health_prober*  hp;                 /**< Health prober, may be NULL */
+    struct event_bus*      eb;                 /**< Event bus, may be NULL */
+    struct response_cache* rc;                 /**< Response cache, may be NULL (disabled) */
 } aigate_core;
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */

@@ -58,10 +58,7 @@ prober_resolve_key(health_prober_t* hp, const char* key_ref, char* out_key, size
 }
 
 health_prober_t*
-health_prober_new(pg_store_t*    ps,
-                  const uint8_t* master_key,
-                  event_bus_t*   eb,
-                  int            interval_sec)
+health_prober_new(pg_store_t* ps, const uint8_t* master_key, event_bus_t* eb, int interval_sec)
 {
     health_prober_t* hp = calloc(1, sizeof(*hp));
     if (hp == NULL) {
@@ -261,12 +258,8 @@ health_prober_record_result(health_prober_t* hp,
     pthread_mutex_unlock(&hp->lock);
 
     if (hp->eb != NULL && (old_status != new_status || probe_rc != 0)) {
-        event_bus_publish_health(hp->eb,
-                                 name,
-                                 health_status_str(new_status),
-                                 latency_ms,
-                                 http_status,
-                                 err_buf);
+        event_bus_publish_health(
+            hp->eb, name, health_status_str(new_status), latency_ms, http_status, err_buf);
     }
 }
 
@@ -349,14 +342,8 @@ health_prober_probe_all(health_prober_t* hp)
 
         char key[1080];
         if (prober_resolve_key(hp, p->api_key, key, sizeof key) != 0) {
-            health_prober_record_result(hp,
-                                        p->id,
-                                        p->name,
-                                        p->endpoint,
-                                        p->provider_type,
-                                        401,
-                                        0,
-                                        -502);
+            health_prober_record_result(
+                hp, p->id, p->name, p->endpoint, p->provider_type, 401, 0, -502);
             provider_rec_free(p);
             continue;
         }
@@ -379,7 +366,8 @@ health_prober_probe_all(health_prober_t* hp)
             plan.url, hdr_name, hdr_value, extra_name, extra_value, 5000L, &us, &lat_ns);
         long lat_ms = lat_ns > 0 ? (long)(lat_ns / 1000000L) : 0;
 
-        health_prober_record_result(hp, p->id, p->name, p->endpoint, p->provider_type, us, lat_ms, prc);
+        health_prober_record_result(
+            hp, p->id, p->name, p->endpoint, p->provider_type, us, lat_ms, prc);
         provider_rec_free(p);
     }
 

@@ -242,7 +242,8 @@ TEST_CASE(test_credential_extraction_variants)
     /* 2. Plain token in Authorization header without prefix */
     const char* b2 = "my-secret-key-plain";
     const char* k2 = extract_credential_from_headers(b2, NULL, NULL, NULL);
-    TEST_ASSERT(k2 != NULL && strcmp(k2, "my-secret-key-plain") == 0, "extract plain Authorization header");
+    TEST_ASSERT(k2 != NULL && strcmp(k2, "my-secret-key-plain") == 0,
+                "extract plain Authorization header");
 
     /* 3. x-api-key header (Anthropic) */
     const char* k3 = extract_credential_from_headers(NULL, "sk-ant-test-456", NULL, NULL);
@@ -253,7 +254,8 @@ TEST_CASE(test_credential_extraction_variants)
     TEST_ASSERT(k4 != NULL && strcmp(k4, "AIzaSyTest789") == 0, "extract x-goog-api-key");
 
     /* 5. Query string key= (Gemini) */
-    const char* k5 = extract_credential_from_headers(NULL, NULL, NULL, "alt=sse&key=AIzaSyQuery999&pretty=true");
+    const char* k5 =
+        extract_credential_from_headers(NULL, NULL, NULL, "alt=sse&key=AIzaSyQuery999&pretty=true");
     TEST_ASSERT(k5 != NULL && strcmp(k5, "AIzaSyQuery999") == 0, "extract key from query string");
 
     /* 6. Empty / missing fallback */

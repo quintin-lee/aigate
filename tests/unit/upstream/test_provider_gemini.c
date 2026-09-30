@@ -200,12 +200,13 @@ TEST_CASE(test_gemini_resp_error_unwrapping)
 
 TEST_CASE(test_gemini_sniff_usage_json)
 {
-    const char* json_resp =
-        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello World\"}],\"role\":\"model\"}}],"
-        "\"usageMetadata\":{\"promptTokenCount\":18,\"candidatesTokenCount\":25,\"totalTokenCount\":43,\"cachedContentTokenCount\":8}}";
+    const char* json_resp = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello "
+                            "World\"}],\"role\":\"model\"}}],"
+                            "\"usageMetadata\":{\"promptTokenCount\":18,\"candidatesTokenCount\":"
+                            "25,\"totalTokenCount\":43,\"cachedContentTokenCount\":8}}";
 
     long ptok = 0, ctok = 0, cached = 0;
-    int rc = gemini_sniff_usage_json(json_resp, &ptok, &ctok, &cached);
+    int  rc = gemini_sniff_usage_json(json_resp, &ptok, &ctok, &cached);
     TEST_ASSERT(rc == 0, "gemini sniff json ok");
     TEST_ASSERT(ptok == 18, "ptok 18");
     TEST_ASSERT(ctok == 25, "ctok 25");
@@ -222,7 +223,8 @@ TEST_CASE(test_gemini_sniff_streaming_sse)
 
     const char* chunk2 =
         "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" World\"}]}}],"
-        "\"usageMetadata\":{\"promptTokenCount\":22,\"candidatesTokenCount\":33,\"cachedContentTokenCount\":6}}\n\n";
+        "\"usageMetadata\":{\"promptTokenCount\":22,\"candidatesTokenCount\":33,"
+        "\"cachedContentTokenCount\":6}}\n\n";
 
     gemini_sniffer_feed(&sniffer, chunk1, strlen(chunk1));
     gemini_sniffer_feed(&sniffer, chunk2, strlen(chunk2));

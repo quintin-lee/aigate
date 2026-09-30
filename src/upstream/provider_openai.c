@@ -196,17 +196,17 @@ openai_parse_chat_response(const char* raw_body,
 
 /** @brief OpenAI passthrough streaming bridge state machine (sends the SSE header only on the first packet). */
 typedef struct {
-    aigate_response_ctx* rc; /**< Downstream response context (borrowed). */
+    aigate_response_ctx* rc;           /**< Downstream response context (borrowed). */
     bool                 headers_sent; /**< Downstream headers already sent. */
     char                 line_buf
         [8192]; /**< SSE line buffer; lines over 8KB are truncated (P3-6), overlong deltas lose token counts. */
-    size_t line_len; /**< Line buffer bytes used. */
-    char   model[128]; /**< Model name. */
-    long   prompt_tokens; /**< Accumulated prompt tokens. */
+    size_t line_len;          /**< Line buffer bytes used. */
+    char   model[128];        /**< Model name. */
+    long   prompt_tokens;     /**< Accumulated prompt tokens. */
     long   completion_tokens; /**< Accumulated completion tokens. */
-    long   cached_tokens; /**< Accumulated cache-hit tokens. */
-    long   reasoning_tokens; /**< Accumulated reasoning tokens. */
-} openai_bridge_t; /**< OpenAI passthrough streaming bridge type (see above). */
+    long   cached_tokens;     /**< Accumulated cache-hit tokens. */
+    long   reasoning_tokens;  /**< Accumulated reasoning tokens. */
+} openai_bridge_t;            /**< OpenAI passthrough streaming bridge type (see above). */
 
 /** @brief Create an OpenAI passthrough streaming bridge (sends the SSE header only on the first packet).
  *  @return The bridge; NULL on OOM. */
@@ -409,7 +409,6 @@ provider_openai_bridge_get_tokens(stream_bridge_t* b,
     }
 }
 
-
 /** @brief Free the passthrough streaming bridge. */
 static void
 openai_bridge_free(stream_bridge_t* b)
@@ -517,7 +516,10 @@ provider_openai_build_responses(const model_rec_t* route,
 
     int n_hdrs = 0;
     if (route->upstream_key[0] != '\0') {
-        snprintf(s_responses_bearer_auth, sizeof(s_responses_bearer_auth), "Bearer %s", route->upstream_key);
+        snprintf(s_responses_bearer_auth,
+                 sizeof(s_responses_bearer_auth),
+                 "Bearer %s",
+                 route->upstream_key);
         extra_headers[n_hdrs][0] = "Authorization";
         extra_headers[n_hdrs][1] = s_responses_bearer_auth;
         n_hdrs++;
@@ -606,10 +608,18 @@ provider_openai_parse_responses_usage(const char* body,
                                       long*       out_cached_tokens,
                                       long*       out_reasoning_tokens)
 {
-    if (out_input_tokens) *out_input_tokens = 0;
-    if (out_output_tokens) *out_output_tokens = 0;
-    if (out_cached_tokens) *out_cached_tokens = 0;
-    if (out_reasoning_tokens) *out_reasoning_tokens = 0;
+    if (out_input_tokens) {
+        *out_input_tokens = 0;
+    }
+    if (out_output_tokens) {
+        *out_output_tokens = 0;
+    }
+    if (out_cached_tokens) {
+        *out_cached_tokens = 0;
+    }
+    if (out_reasoning_tokens) {
+        *out_reasoning_tokens = 0;
+    }
 
     if (body == NULL || len == 0) {
         return 0;
@@ -621,13 +631,13 @@ provider_openai_parse_responses_usage(const char* body,
         const char* end = body + len;
         while (p < end) {
             const char* nl = memchr(p, '\n', (size_t)(end - p));
-            size_t line_len = nl ? (size_t)(nl - p) : (size_t)(end - p);
+            size_t      line_len = nl ? (size_t)(nl - p) : (size_t)(end - p);
             if (line_len > 5 && strncmp(p, "data:", 5) == 0) {
                 const char* jstart = memchr(p, '{', line_len);
                 if (jstart != NULL) {
-                    size_t jlen = line_len - (size_t)(jstart - p);
+                    size_t       jlen = line_len - (size_t)(jstart - p);
                     json_error_t err;
-                    json_t* root = json_loadb(jstart, jlen, 0, &err);
+                    json_t*      root = json_loadb(jstart, jlen, 0, &err);
                     if (root != NULL) {
                         extract_responses_usage_from_json(root,
                                                           out_input_tokens,
@@ -645,13 +655,10 @@ provider_openai_parse_responses_usage(const char* body,
 
     /* Non-streaming */
     json_error_t err;
-    json_t* root = json_loadb(body, len, 0, &err);
+    json_t*      root = json_loadb(body, len, 0, &err);
     if (root != NULL) {
-        extract_responses_usage_from_json(root,
-                                          out_input_tokens,
-                                          out_output_tokens,
-                                          out_cached_tokens,
-                                          out_reasoning_tokens);
+        extract_responses_usage_from_json(
+            root, out_input_tokens, out_output_tokens, out_cached_tokens, out_reasoning_tokens);
         json_decref(root);
         return 0;
     }

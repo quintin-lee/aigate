@@ -23,15 +23,15 @@
 
 /** @brief Day-granularity usage accumulation slot: counts for the same key+model+date are merged. */
 typedef struct {
-    int    in_use;         /**< Slot occupancy flag. */
-    long   key_id;         /**< API key numeric id. */
-    char   model[128];     /**< Model name. */
-    time_t day;            /**< UTC date (midnight timestamp). */
-    long   requests;       /**< Request count. */
-    long   prompt;         /**< Input tokens. */
-    long   completion;     /**< Output tokens. */
-    long   errors;         /**< Error count. */
-    long   cached_prompt;  /**< Cache-hit input tokens. */
+    int    in_use;        /**< Slot occupancy flag. */
+    long   key_id;        /**< API key numeric id. */
+    char   model[128];    /**< Model name. */
+    time_t day;           /**< UTC date (midnight timestamp). */
+    long   requests;      /**< Request count. */
+    long   prompt;        /**< Input tokens. */
+    long   completion;    /**< Output tokens. */
+    long   errors;        /**< Error count. */
+    long   cached_prompt; /**< Cache-hit input tokens. */
 } um_acc_t;
 
 /** @brief Single-provider latency histogram slot. */
@@ -43,24 +43,24 @@ typedef struct {
 
 /** @brief Usage meter internal state: atomic counters + daily accumulation table + audit ring + background flush thread. */
 struct usage_meter {
-    pg_store_t*          ps;                 /**< PG store (flush target, may be NULL). */
-    ratelimit_t*         rl;                 /**< Rate limiter (reset on date rollover, may be NULL). */
-    time_t               last_rollover_day;  /**< Last quota-rollover date. */
-    pthread_mutex_t      mtx;                /**< Accumulation-table/audit-ring mutex. */
-    um_acc_t             accs[UM_ACC_CAP];   /**< Daily usage accumulation slots. */
-    um_prov_t            provs[UM_MAX_PROVS];/**< Provider latency histogram slots. */
-    atomic_long          reqs;               /**< Lifetime request count. */
-    atomic_long          errs;               /**< Lifetime error count. */
-    atomic_long          toks;               /**< Lifetime token count. */
-    atomic_long          cached_toks;        /**< Lifetime cached-token count. */
-    pthread_t            worker;             /**< Background flush thread handle. */
-    int                  have_worker;        /**< Whether the thread has been created. */
-    int                  flush_interval_s;   /**< Flush interval in seconds (<=0 disables the thread). */
-    int                  stop;               /**< Thread exit flag. */
-    usage_request_row_t* req_ring;           /**< Audit ring buffer. */
-    int                  req_head;           /**< Audit ring head sequence. */
-    int                  req_tail;           /**< Audit ring tail sequence. */
-    atomic_int           req_dropped;        /**< Audit ring overflow drop count. */
+    pg_store_t*     ps;                  /**< PG store (flush target, may be NULL). */
+    ratelimit_t*    rl;                  /**< Rate limiter (reset on date rollover, may be NULL). */
+    time_t          last_rollover_day;   /**< Last quota-rollover date. */
+    pthread_mutex_t mtx;                 /**< Accumulation-table/audit-ring mutex. */
+    um_acc_t        accs[UM_ACC_CAP];    /**< Daily usage accumulation slots. */
+    um_prov_t       provs[UM_MAX_PROVS]; /**< Provider latency histogram slots. */
+    atomic_long     reqs;                /**< Lifetime request count. */
+    atomic_long     errs;                /**< Lifetime error count. */
+    atomic_long     toks;                /**< Lifetime token count. */
+    atomic_long     cached_toks;         /**< Lifetime cached-token count. */
+    pthread_t       worker;              /**< Background flush thread handle. */
+    int             have_worker;         /**< Whether the thread has been created. */
+    int             flush_interval_s; /**< Flush interval in seconds (<=0 disables the thread). */
+    int             stop;             /**< Thread exit flag. */
+    usage_request_row_t* req_ring;    /**< Audit ring buffer. */
+    int                  req_head;    /**< Audit ring head sequence. */
+    int                  req_tail;    /**< Audit ring tail sequence. */
+    atomic_int           req_dropped; /**< Audit ring overflow drop count. */
 };
 
 /** @brief Today's UTC midnight (date boundary for usage accumulation buckets). */

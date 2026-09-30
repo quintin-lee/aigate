@@ -154,8 +154,10 @@ static int
 f_list_guardrails(void* ctx, guardrail_rule_t* out, int cap, int* n)
 {
     struct fdb* db = ctx;
-    int cnt = db->n_guardrails;
-    if (cnt > cap) cnt = cap;
+    int         cnt = db->n_guardrails;
+    if (cnt > cap) {
+        cnt = cap;
+    }
     for (int i = 0; i < cnt; i++) {
         out[i] = db->guardrails[i];
     }
@@ -420,9 +422,11 @@ TEST_CASE(test_core_pipeline)
     mock_upstream_fail_all(mu, 1);
     struct cap c6;
     memset(&c6, 0, sizeof c6);
-    run_with_body(&ac, "good-key",
-                  "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"err-prompt\"}]}",
-                  &c6);
+    run_with_body(
+        &ac,
+        "good-key",
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"err-prompt\"}]}",
+        &c6);
     TEST_ASSERT(c6.status == 502, "502 on upstream 500, got %d", c6.status);
     TEST_ASSERT(cap_has_header(&c6, "X-Upstream-Provider: openai"), "X-Upstream-Provider header");
     TEST_ASSERT(strstr(c6.body, "upstream request failed") != NULL, "502 body");
@@ -841,7 +845,8 @@ run_anthropic_messages(aigate_core* ac, const char* bearer, const char* body, st
 
 /** @brief Drive one Gemini generate call; return the response body (borrowed). */
 static const char*
-run_gemini_generate(aigate_core* ac, const char* bearer, const char* path, const char* body, struct cap* out)
+run_gemini_generate(
+    aigate_core* ac, const char* bearer, const char* path, const char* body, struct cap* out)
 {
     aigate_request_ctx rq;
     memset(&rq, 0, sizeof rq);
@@ -883,7 +888,8 @@ TEST_CASE(test_anthropic_native_pipeline_200)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* req_body = "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}";
+    const char* req_body = "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"Hello\"}]}";
     run_anthropic_messages(&ac, "test-key", req_body, &c);
     TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
     TEST_ASSERT(strstr(c.body, "msg_mock_123") != NULL, "contains msg_mock_123");
@@ -917,7 +923,8 @@ TEST_CASE(test_anthropic_native_non_anthropic_400)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* req_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}";
+    const char* req_body =
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}";
     run_anthropic_messages(&ac, "test-key", req_body, &c);
     TEST_ASSERT(c.status == 400, "status 400 for non-anthropic, got %d", c.status);
     TEST_ASSERT(strstr(c.body, "\"type\":\"error\"") != NULL, "contains type error");
@@ -953,7 +960,8 @@ TEST_CASE(test_anthropic_native_stream_pipeline_200)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* req_body = "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Hello\"}]}";
+    const char* req_body = "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{"
+                           "\"role\":\"user\",\"content\":\"Hello\"}]}";
     run_anthropic_messages(&ac, "test-key", req_body, &c);
     TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
     TEST_ASSERT(strstr(c.hdrs, "text/event-stream") != NULL, "headers have text/event-stream");
@@ -992,7 +1000,8 @@ TEST_CASE(test_gemini_native_pipeline_200)
     struct cap c;
     memset(&c, 0, sizeof c);
     const char* req_body = "{\"contents\":[{\"parts\":[{\"text\":\"Hello\"}]}]}";
-    run_gemini_generate(&ac, "test-key", "/v1beta/models/gemini-1.5-flash:generateContent", req_body, &c);
+    run_gemini_generate(
+        &ac, "test-key", "/v1beta/models/gemini-1.5-flash:generateContent", req_body, &c);
     TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
     TEST_ASSERT(strstr(c.body, "Hello from Gemini") != NULL, "contains gemini text");
 
@@ -1061,7 +1070,11 @@ TEST_CASE(test_gemini_native_stream_pipeline_200)
     struct cap c;
     memset(&c, 0, sizeof c);
     const char* req_body = "{\"contents\":[{\"parts\":[{\"text\":\"Hello\"}]}]}";
-    run_gemini_generate(&ac, "test-key", "/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse", req_body, &c);
+    run_gemini_generate(&ac,
+                        "test-key",
+                        "/v1beta/models/gemini-1.5-flash:streamGenerateContent?alt=sse",
+                        req_body,
+                        &c);
     TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
     TEST_ASSERT(strstr(c.hdrs, "text/event-stream") != NULL, "headers have text/event-stream");
     TEST_ASSERT(strstr(c.body, "from Gemini SSE") != NULL, "contains SSE text");
@@ -1106,10 +1119,12 @@ TEST_CASE(test_core_guardrail_block)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* bad_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hello badword here\"}]}";
+    const char* bad_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
+                           "\"hello badword here\"}]}";
     run_with_body(&ac, "test-key", bad_body, &c);
     TEST_ASSERT(c.status == 400, "status 400 on blocked keyword, got %d", c.status);
-    TEST_ASSERT(strstr(c.body, "content_policy_violation") != NULL, "has content_policy_violation in error");
+    TEST_ASSERT(strstr(c.body, "content_policy_violation") != NULL,
+                "has content_policy_violation in error");
     TEST_ASSERT(strstr(c.body, "badword") != NULL, "mentions badword");
 
     aigate_core_shutdown(&ac);
@@ -1144,7 +1159,8 @@ TEST_CASE(test_core_guardrail_pii_masking)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* pii_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"reach me at 13800138000 or user@test.com\"}]}";
+    const char* pii_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
+                           "\"reach me at 13800138000 or user@test.com\"}]}";
     run_with_body(&ac, "test-key", pii_body, &c);
     TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
 
@@ -1206,5 +1222,3 @@ TEST_CASE(test_core_monthly_budget_cost_limit)
     freed_db(&db);
     mock_upstream_stop(mu);
 }
-
-

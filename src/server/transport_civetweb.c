@@ -20,23 +20,23 @@
 
 /** @brief CivetWeb transport instance state. */
 struct transport_civetweb {
-    struct mg_context* ctx;                 /**< CivetWeb context handle */
-    aigate_core*       ac;                  /**< pipeline core (borrowed) */
-    pg_store_t*        ps;                  /**< backing store (borrowed) */
-    char               admin_token_hash[65];/**< SHA-256 hex of admin token + NUL */
-    char               metrics_acl[256];    /**< /metrics IP allowlist text */
-    admin_ctx_t        adm;                 /**< admin plane state */
-    long               max_body_bytes;      /**< max /v1 request body in bytes */
+    struct mg_context* ctx;                  /**< CivetWeb context handle */
+    aigate_core*       ac;                   /**< pipeline core (borrowed) */
+    pg_store_t*        ps;                   /**< backing store (borrowed) */
+    char               admin_token_hash[65]; /**< SHA-256 hex of admin token + NUL */
+    char               metrics_acl[256];     /**< /metrics IP allowlist text */
+    admin_ctx_t        adm;                  /**< admin plane state */
+    long               max_body_bytes;       /**< max /v1 request body in bytes */
 };
 
 /** @brief Per-request response state for the CivetWeb adapter. */
 struct cw_response_state {
-    struct mg_connection* conn;         /**< active CivetWeb connection */
-    int                   status;       /**< HTTP status staged for flush */
-    bool                  headers_sent; /**< status line already flushed */
-    char                  header_buf[4096];/**< accumulated header block */
-    size_t                header_len;   /**< bytes used in header_buf */
-    aigate_response_ctx*  rc;           /**< pipeline response context */
+    struct mg_connection* conn;             /**< active CivetWeb connection */
+    int                   status;           /**< HTTP status staged for flush */
+    bool                  headers_sent;     /**< status line already flushed */
+    char                  header_buf[4096]; /**< accumulated header block */
+    size_t                header_len;       /**< bytes used in header_buf */
+    aigate_response_ctx*  rc;               /**< pipeline response context */
 };
 
 /** @brief Map an HTTP status code to its reason phrase; unlisted codes return "Response". */
@@ -277,7 +277,8 @@ handle_admin(struct mg_connection* conn, void* cbdata)
         }
 
         char init_ping[128];
-        snprintf(init_ping, sizeof init_ping, "event: ping\ndata: {\"ts\":%ld}\n\n", (long)time(NULL));
+        snprintf(
+            init_ping, sizeof init_ping, "event: ping\ndata: {\"ts\":%ld}\n\n", (long)time(NULL));
         if (mg_send_chunk(conn, init_ping, (unsigned int)strlen(init_ping)) < 0) {
             event_bus_unsubscribe(cw->adm.eb, sub_id);
             return 1;
@@ -285,7 +286,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
 
         while (1) {
             event_item_t item;
-            int prc = event_bus_pop(cw->adm.eb, sub_id, &item, 15000);
+            int          prc = event_bus_pop(cw->adm.eb, sub_id, &item, 15000);
             if (prc < 0) {
                 break;
             }
@@ -299,11 +300,8 @@ handle_admin(struct mg_connection* conn, void* cbdata)
             }
 
             char sse_msg[EVENT_MAX_PAYLOAD + 128];
-            int n = snprintf(sse_msg,
-                             sizeof sse_msg,
-                             "event: %s\ndata: %s\n\n",
-                             item.event_name,
-                             item.payload);
+            int  n = snprintf(
+                sse_msg, sizeof sse_msg, "event: %s\ndata: %s\n\n", item.event_name, item.payload);
             if (n > 0) {
                 if (mg_send_chunk(conn, sse_msg, (unsigned int)n) < 0) {
                     break;

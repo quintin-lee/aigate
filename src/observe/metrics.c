@@ -15,19 +15,19 @@
 
 /** @brief Failover migration counter entry: model + source/target provider + atomic count + in-use flag. */
 typedef struct {
-    char        model[128];  /**< Model name. */
+    char        model[128];    /**< Model name. */
     char        from_prov[32]; /**< Source provider. */
     char        to_prov[32];   /**< Target provider. */
-    atomic_long count; /**< Migration count (atomic). */
-    int         in_use; /**< Slot occupancy flag. */
+    atomic_long count;         /**< Migration count (atomic). */
+    int         in_use;        /**< Slot occupancy flag. */
 } failover_metric_entry_t;
 
 /** Failover metrics table (model from_prov→to_prov counts, guarded by g_failover_mtx). */
 static failover_metric_entry_t g_failovers[METRICS_MAX_FAILOVERS];
 /** Failover metrics table mutex. */
-static pthread_mutex_t         g_failover_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t g_failover_mtx = PTHREAD_MUTEX_INITIALIZER;
 /** Whether the table-full drop warning was already logged (warn once, avoids log flooding). */
-static _Atomic int             g_failover_warned = 0;
+static _Atomic int g_failover_warned = 0;
 
 /** @brief Latency histogram bucket count (matches BUCKET_LE length). */
 #define NUM_BUCKETS 6

@@ -24,16 +24,16 @@
 
 /** @brief PG store handle: ops table + context (owned pq_ctx or external fake context). */
 struct pg_store {
-    pg_ops_t ops;  /**< Operation table (libpq real implementation or fake). */
-    void*    ctx;  /**< pq_ctx (when owns_ctx), otherwise externally provided. */
+    pg_ops_t ops;      /**< Operation table (libpq real implementation or fake). */
+    void*    ctx;      /**< pq_ctx (when owns_ctx), otherwise externally provided. */
     int      owns_ctx; /**< Whether ctx is owned (freed on free). */
 };
 
 /** @brief libpq connection context: single connection + serialized mutex. */
 struct pq_ctx {
-    PGconn*         db;       /**< libpq connection. */
-    char            dsn[1024];/**< Connection string (for reconnect). */
-    pthread_mutex_t mtx;      /**< Connection serialization lock. */
+    PGconn*         db;        /**< libpq connection. */
+    char            dsn[1024]; /**< Connection string (for reconnect). */
+    pthread_mutex_t mtx;       /**< Connection serialization lock. */
 };
 
 /* ------------------------------------------------------------ helpers */
@@ -348,12 +348,13 @@ static int
 pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] = "SELECT key_id, key_hash, name, "
-                            "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
-                            "expires_at, revoked_at, COALESCE(group_id, 0), "
-                            "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
-                            "COALESCE(monthly_token_budget, 0) "
-                            "FROM api_keys ORDER BY key_id";
+    static const char q[] =
+        "SELECT key_id, key_hash, name, "
+        "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
+        "expires_at, revoked_at, COALESCE(group_id, 0), "
+        "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
+        "COALESCE(monthly_token_budget, 0) "
+        "FROM api_keys ORDER BY key_id";
     *n = 0;
 
     pq_lock(px);
@@ -382,16 +383,17 @@ static int
 pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] = "SELECT key_id, key_hash, name, "
-                            "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
-                            "expires_at, revoked_at, COALESCE(group_id, 0), "
-                            "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
-                            "COALESCE(monthly_token_budget, 0) "
-                            "FROM api_keys WHERE key_id = $1";
-    char              id[32];
-    const char*       val[1] = {0};
-    int               plen[1] = {0};
-    int               rc = -1;
+    static const char q[] =
+        "SELECT key_id, key_hash, name, "
+        "array_to_string(allowed_models, '|'), rate_qps, daily_token_quota, "
+        "expires_at, revoked_at, COALESCE(group_id, 0), "
+        "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
+        "COALESCE(monthly_token_budget, 0) "
+        "FROM api_keys WHERE key_id = $1";
+    char        id[32];
+    const char* val[1] = {0};
+    int         plen[1] = {0};
+    int         rc = -1;
 
     snprintf(id, sizeof id, "%ld", key_id);
     val[0] = id;
@@ -570,7 +572,8 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
-        "daily_token_quota, expires_at, group_id, guardrails_enabled, monthly_cost_budget, monthly_token_budget) "
+        "daily_token_quota, expires_at, group_id, guardrails_enabled, monthly_cost_budget, "
+        "monthly_token_budget) "
         "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
         "ELSE string_to_array($3, '|') END, $4, $5, "
         "CASE WHEN $6 = 'null' THEN NULL "
@@ -1426,11 +1429,12 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
             chunk_n = FLUSH_REQ_CHUNK;
         }
 
-        int sql_off = snprintf(sql,
-                               sizeof sql,
-                               "INSERT INTO usage_requests(key_id, model_name, provider, "
-                               "http_status, prompt_tokens, completion_tokens, "
-                               "cached_prompt_tokens, reasoning_tokens, latency_ns, ts, guardrail_action) VALUES ");
+        int sql_off = snprintf(
+            sql,
+            sizeof sql,
+            "INSERT INTO usage_requests(key_id, model_name, provider, "
+            "http_status, prompt_tokens, completion_tokens, "
+            "cached_prompt_tokens, reasoning_tokens, latency_ns, ts, guardrail_action) VALUES ");
         for (int i = 0; i < chunk_n; i++) {
             const usage_request_row_t* r = &rows[off + i];
             int                        pbase = i * 11;
@@ -1505,15 +1509,16 @@ static int
 pq_query_requests(void* vctx, long key_id, time_t since, usage_request_row_t* out, int cap, int* n)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] = "SELECT key_id, model_name, provider, http_status, prompt_tokens, "
-                            "completion_tokens, cached_prompt_tokens, reasoning_tokens, latency_ns, ts, "
-                            "COALESCE(guardrail_action, '') "
-                            "FROM usage_requests "
-                            "WHERE ($1::bigint = 0 OR key_id = $1) AND ts >= $2 "
-                            "ORDER BY ts DESC LIMIT $3";
-    char              key[32], since_b[32], cap_b[16];
-    const char*       vals[3];
-    int               plens[3] = {0};
+    static const char q[] =
+        "SELECT key_id, model_name, provider, http_status, prompt_tokens, "
+        "completion_tokens, cached_prompt_tokens, reasoning_tokens, latency_ns, ts, "
+        "COALESCE(guardrail_action, '') "
+        "FROM usage_requests "
+        "WHERE ($1::bigint = 0 OR key_id = $1) AND ts >= $2 "
+        "ORDER BY ts DESC LIMIT $3";
+    char        key[32], since_b[32], cap_b[16];
+    const char* vals[3];
+    int         plens[3] = {0};
 
     snprintf(key, sizeof key, "%ld", key_id);
     snprintf(since_b, sizeof since_b, "%ld", (long)since);
@@ -1548,7 +1553,8 @@ pq_query_requests(void* vctx, long key_id, time_t since, usage_request_row_t* ou
         out[i].latency_ns = PQnfields(res) > 8 ? strtoull(PQgetvalue(res, i, 8), NULL, 10) : 0;
         out[i].ts = PQnfields(res) > 9 ? (time_t)atol(PQgetvalue(res, i, 9)) : 0;
         if (PQnfields(res) > 10) {
-            copy_field(out[i].guardrail_action, sizeof out[i].guardrail_action, PQgetvalue(res, i, 10));
+            copy_field(
+                out[i].guardrail_action, sizeof out[i].guardrail_action, PQgetvalue(res, i, 10));
         } else {
             out[i].guardrail_action[0] = '\0';
         }
@@ -1624,8 +1630,9 @@ pq_list_groups(void* vctx, group_rec_t* out, int cap, int* n)
         copy_field(out[i].name, sizeof out[i].name, PQgetvalue(res, i, 1));
         out[i].created_at = (time_t)atol(PQgetvalue(res, i, 2));
         out[i].key_count = atol(PQgetvalue(res, i, 3));
-        out[i].monthly_budget_usd =
-            (PQnfields(res) > 4 && PQgetvalue(res, i, 4)[0] != '\0') ? atof(PQgetvalue(res, i, 4)) : 0.0;
+        out[i].monthly_budget_usd = (PQnfields(res) > 4 && PQgetvalue(res, i, 4)[0] != '\0')
+                                        ? atof(PQgetvalue(res, i, 4))
+                                        : 0.0;
     }
     *n = nt;
     PQclear(res);
@@ -1813,10 +1820,9 @@ static int
 pq_list_guardrails_rules(void* vctx, guardrail_rule_t* out, int cap, int* n)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] =
-        "SELECT id, rule_type, pattern, action, category, enabled, "
-        "EXTRACT(EPOCH FROM created_at)::bigint "
-        "FROM guardrails_rules ORDER BY id";
+    static const char q[] = "SELECT id, rule_type, pattern, action, category, enabled, "
+                            "EXTRACT(EPOCH FROM created_at)::bigint "
+                            "FROM guardrails_rules ORDER BY id";
     *n = 0;
 
     pq_lock(px);
@@ -1855,14 +1861,12 @@ pq_create_guardrails_rule(void* vctx, const guardrail_rule_t* rule, long* out_id
         "INSERT INTO guardrails_rules(rule_type, pattern, action, category, enabled) "
         "VALUES($1, $2, $3, $4, $5) RETURNING id";
     const char* enabled_str = rule->enabled ? "true" : "false";
-    const char* vals[5] = {
-        rule->rule_type[0] != '\0' ? rule->rule_type : "keyword",
-        rule->pattern,
-        rule->action[0] != '\0' ? rule->action : "block",
-        rule->category[0] != '\0' ? rule->category : "general",
-        enabled_str
-    };
-    int plens[5] = {0, 0, 0, 0, 0};
+    const char* vals[5] = {rule->rule_type[0] != '\0' ? rule->rule_type : "keyword",
+                           rule->pattern,
+                           rule->action[0] != '\0' ? rule->action : "block",
+                           rule->category[0] != '\0' ? rule->category : "general",
+                           enabled_str};
+    int         plens[5] = {0, 0, 0, 0, 0};
 
     pq_lock(px);
     PGresult* res = PQexecParams(px->db, q, 5, NULL, vals, plens, NULL, 0);
@@ -1896,13 +1900,7 @@ pq_update_guardrails_rule(void* vctx, const guardrail_rule_t* rule)
     snprintf(id_str, sizeof id_str, "%ld", rule->id);
     const char* enabled_str = rule->enabled ? "true" : "false";
     const char* vals[6] = {
-        rule->rule_type,
-        rule->pattern,
-        rule->action,
-        rule->category,
-        enabled_str,
-        id_str
-    };
+        rule->rule_type, rule->pattern, rule->action, rule->category, enabled_str, id_str};
     int plens[6] = {0, 0, 0, 0, 0, 0};
 
     pq_lock(px);

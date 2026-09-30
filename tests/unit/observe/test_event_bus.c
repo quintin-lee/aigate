@@ -45,28 +45,30 @@ TEST_CASE(test_event_bus_publish_pop)
     int sub2 = event_bus_subscribe(eb);
     TEST_ASSERT(sub1 > 0 && sub2 > 0, "subscribers creation failed");
 
-    event_bus_publish_request(eb, 123, "gpt-4o", "openai", 200, 150000000ULL, 50, 20, 0.0005, "masked");
+    event_bus_publish_request(
+        eb, 123, "gpt-4o", "openai", 200, 150000000ULL, 50, 20, 0.0005, "masked");
 
     event_item_t item1;
-    int rc1 = event_bus_pop(eb, sub1, &item1, 500);
+    int          rc1 = event_bus_pop(eb, sub1, &item1, 500);
     TEST_ASSERT(rc1 == 1, "pop item1 failed");
     TEST_ASSERT(item1.type == EVENT_REQUEST, "item1 type mismatch");
     TEST_ASSERT(strcmp(item1.event_name, "request") == 0, "item1 event_name mismatch");
     TEST_ASSERT(strstr(item1.payload, "\"model\":\"gpt-4o\"") != NULL, "item1 model missing");
     TEST_ASSERT(strstr(item1.payload, "\"provider\":\"openai\"") != NULL, "item1 provider missing");
     TEST_ASSERT(strstr(item1.payload, "\"status\":200") != NULL, "item1 status missing");
-    TEST_ASSERT(strstr(item1.payload, "\"guardrail\":\"masked\"") != NULL, "item1 guardrail missing");
+    TEST_ASSERT(strstr(item1.payload, "\"guardrail\":\"masked\"") != NULL,
+                "item1 guardrail missing");
     TEST_ASSERT(strstr(item1.payload, "\"cached\":false") != NULL, "item1 cached missing");
 
     event_item_t item2;
-    int rc2 = event_bus_pop(eb, sub2, &item2, 500);
+    int          rc2 = event_bus_pop(eb, sub2, &item2, 500);
     TEST_ASSERT(rc2 == 1, "pop item2 failed");
     TEST_ASSERT(item2.type == EVENT_REQUEST, "item2 type mismatch");
     TEST_ASSERT(strstr(item2.payload, "\"key_id\":123") != NULL, "item2 key_id missing");
 
     /* Pop again on empty queue with 20ms timeout */
     event_item_t item3;
-    int rc3 = event_bus_pop(eb, sub1, &item3, 20);
+    int          rc3 = event_bus_pop(eb, sub1, &item3, 20);
     TEST_ASSERT(rc3 == 0, "pop on empty queue should return 0");
 
     event_bus_free(eb);
@@ -89,9 +91,11 @@ TEST_CASE(test_event_bus_overflow_drop)
 
     /* Oldest 6 events (0..5) were dropped, first popped should be seq 6 */
     event_item_t item;
-    int rc = event_bus_pop(eb, sub, &item, 100);
+    int          rc = event_bus_pop(eb, sub, &item, 100);
     TEST_ASSERT(rc == 1, "pop after overflow failed");
-    TEST_ASSERT(strstr(item.payload, "\"seq\":6") != NULL, "expected seq 6 after drop, got %s", item.payload);
+    TEST_ASSERT(strstr(item.payload, "\"seq\":6") != NULL,
+                "expected seq 6 after drop, got %s",
+                item.payload);
 
     event_bus_free(eb);
 }
@@ -110,7 +114,7 @@ TEST_CASE(test_event_bus_helpers)
     event_bus_publish_ping(eb);
 
     event_item_t item;
-    int rc;
+    int          rc;
 
     rc = event_bus_pop(eb, sub, &item, 100);
     TEST_ASSERT(rc == 1, "pop cb failed");

@@ -14,28 +14,28 @@
 
 /** @brief Per-key monthly total: key id/spent cost/spent tokens/link. */
 typedef struct key_spend_node {
-    int64_t                key_id; /**< API key id */
-    double                 spent_cost; /**< Spent cost (USD). */
+    int64_t                key_id;       /**< API key id */
+    double                 spent_cost;   /**< Spent cost (USD). */
     int64_t                spent_tokens; /**< Spent token count. */
-    struct key_spend_node* next; /**< Intra-bucket link. */
+    struct key_spend_node* next;         /**< Intra-bucket link. */
 } key_spend_node_t;
 
 /** @brief Per-group monthly total: group id/spent cost/budget cap/link. */
 typedef struct group_spend_node {
-    int64_t                  group_id; /**< Group id. */
+    int64_t                  group_id;   /**< Group id. */
     double                   spent_cost; /**< Spent cost (USD). */
     double                   budget_usd; /**< Monthly budget cap (USD). */
-    struct group_spend_node* next; /**< Intra-bucket link. */
+    struct group_spend_node* next;       /**< Intra-bucket link. */
 } group_spend_node_t;
 
 /** @brief Budget enforcer instance: store/Redis/lock/current year-month/event bus/shard buckets. */
 struct budget_enforce_mgr {
-    pg_store_t*         store; /**< PG persistent store (bootstrapped at startup, nullable). */
-    redis_pool_t*       redis; /**< Redis pool (cluster sync, nullable). */
-    pthread_mutex_t     mtx; /**< Instance mutex. */
-    int                 current_ym; /**< Current year-month (YYYYMM, for bucket rollover comparison). */
-    event_bus_t*        eb; /**< Event bus (budget alert events, nullable). */
-    key_spend_node_t*   key_buckets[BUCKET_COUNT]; /**< Per-key monthly total shard buckets. */
+    pg_store_t*     store;      /**< PG persistent store (bootstrapped at startup, nullable). */
+    redis_pool_t*   redis;      /**< Redis pool (cluster sync, nullable). */
+    pthread_mutex_t mtx;        /**< Instance mutex. */
+    int             current_ym; /**< Current year-month (YYYYMM, for bucket rollover comparison). */
+    event_bus_t*    eb;         /**< Event bus (budget alert events, nullable). */
+    key_spend_node_t*   key_buckets[BUCKET_COUNT];   /**< Per-key monthly total shard buckets. */
     group_spend_node_t* group_buckets[BUCKET_COUNT]; /**< Per-group monthly total shard buckets. */
 };
 
@@ -43,7 +43,7 @@ struct budget_enforce_mgr {
 static int
 get_current_year_month(void)
 {
-    time_t now = time(NULL);
+    time_t    now = time(NULL);
     struct tm tm_buf;
     gmtime_r(&now, &tm_buf);
     return (tm_buf.tm_year + 1900) * 100 + (tm_buf.tm_mon + 1);
@@ -123,15 +123,14 @@ budget_enforce_reset(budget_enforce_mgr_t* mgr)
 }
 
 int
-budget_enforce_check(
-    budget_enforce_mgr_t* mgr,
-    int64_t               key_id,
-    int64_t               group_id,
-    double                key_cost_budget,
-    int64_t               key_token_budget,
-    double                group_cost_budget,
-    char*                 err_msg,
-    size_t                err_msg_sz)
+budget_enforce_check(budget_enforce_mgr_t* mgr,
+                     int64_t               key_id,
+                     int64_t               group_id,
+                     double                key_cost_budget,
+                     int64_t               key_token_budget,
+                     double                group_cost_budget,
+                     char*                 err_msg,
+                     size_t                err_msg_sz)
 {
     if (mgr == NULL) {
         return 0;
@@ -146,7 +145,7 @@ budget_enforce_check(
 
     /* 1. Check Key limits */
     if (key_id > 0 && (key_cost_budget > 0.0 || key_token_budget > 0)) {
-        size_t h = hash_id(key_id);
+        size_t            h = hash_id(key_id);
         key_spend_node_t* curr = mgr->key_buckets[h];
         while (curr != NULL && curr->key_id != key_id) {
             curr = curr->next;
@@ -154,24 +153,35 @@ budget_enforce_check(
         if (curr != NULL) {
             if (key_cost_budget > 0.0 && curr->spent_cost >= key_cost_budget) {
                 if (err_msg != NULL && err_msg_sz > 0) {
-                    snprintf(err_msg, err_msg_sz,
+                    snprintf(err_msg,
+                             err_msg_sz,
                              "Monthly cost budget of $%.2f exceeded for API key (spent: $%.2f)",
-                             key_cost_budget, curr->spent_cost);
+                             key_cost_budget,
+                             curr->spent_cost);
                 }
                 if (mgr->eb != NULL) {
-                    event_bus_publish_budget(mgr->eb, "key", key_id, "", 100.0, curr->spent_cost, key_cost_budget);
+                    event_bus_publish_budget(
+                        mgr->eb, "key", key_id, "", 100.0, curr->spent_cost, key_cost_budget);
                 }
                 pthread_mutex_unlock(&mgr->mtx);
                 return -1;
             }
             if (key_token_budget > 0 && curr->spent_tokens >= key_token_budget) {
                 if (err_msg != NULL && err_msg_sz > 0) {
-                    snprintf(err_msg, err_msg_sz,
+                    snprintf(err_msg,
+                             err_msg_sz,
                              "Monthly token budget of %ld tokens exceeded for API key (spent: %ld)",
-                             (long)key_token_budget, (long)curr->spent_tokens);
+                             (long)key_token_budget,
+                             (long)curr->spent_tokens);
                 }
                 if (mgr->eb != NULL) {
-                    event_bus_publish_budget(mgr->eb, "key", key_id, "", 100.0, (double)curr->spent_tokens, (double)key_token_budget);
+                    event_bus_publish_budget(mgr->eb,
+                                             "key",
+                                             key_id,
+                                             "",
+                                             100.0,
+                                             (double)curr->spent_tokens,
+                                             (double)key_token_budget);
                 }
                 pthread_mutex_unlock(&mgr->mtx);
                 return -1;
@@ -181,21 +191,26 @@ budget_enforce_check(
 
     /* 2. Check Group limit */
     if (group_id > 0) {
-        size_t h = hash_id(group_id);
+        size_t              h = hash_id(group_id);
         group_spend_node_t* curr = mgr->group_buckets[h];
         while (curr != NULL && curr->group_id != group_id) {
             curr = curr->next;
         }
         if (curr != NULL) {
-            double effective_budget = group_cost_budget > 0.0 ? group_cost_budget : curr->budget_usd;
+            double effective_budget =
+                group_cost_budget > 0.0 ? group_cost_budget : curr->budget_usd;
             if (effective_budget > 0.0 && curr->spent_cost >= effective_budget) {
                 if (err_msg != NULL && err_msg_sz > 0) {
-                    snprintf(err_msg, err_msg_sz,
+                    snprintf(err_msg,
+                             err_msg_sz,
                              "Monthly budget of $%.2f exceeded for group %ld (spent: $%.2f)",
-                             effective_budget, (long)group_id, curr->spent_cost);
+                             effective_budget,
+                             (long)group_id,
+                             curr->spent_cost);
                 }
                 if (mgr->eb != NULL) {
-                    event_bus_publish_budget(mgr->eb, "group", group_id, "", 100.0, curr->spent_cost, effective_budget);
+                    event_bus_publish_budget(
+                        mgr->eb, "group", group_id, "", 100.0, curr->spent_cost, effective_budget);
                 }
                 pthread_mutex_unlock(&mgr->mtx);
                 return -1;
@@ -209,11 +224,7 @@ budget_enforce_check(
 
 void
 budget_enforce_record(
-    budget_enforce_mgr_t* mgr,
-    int64_t               key_id,
-    int64_t               group_id,
-    double                cost_usd,
-    int64_t               tokens)
+    budget_enforce_mgr_t* mgr, int64_t key_id, int64_t group_id, double cost_usd, int64_t tokens)
 {
     if (mgr == NULL) {
         return;
@@ -227,7 +238,7 @@ budget_enforce_record(
     }
 
     if (key_id > 0) {
-        size_t h = hash_id(key_id);
+        size_t            h = hash_id(key_id);
         key_spend_node_t* curr = mgr->key_buckets[h];
         while (curr != NULL && curr->key_id != key_id) {
             curr = curr->next;
@@ -247,7 +258,7 @@ budget_enforce_record(
     }
 
     if (group_id > 0) {
-        size_t h = hash_id(group_id);
+        size_t              h = hash_id(group_id);
         group_spend_node_t* curr = mgr->group_buckets[h];
         while (curr != NULL && curr->group_id != group_id) {
             curr = curr->next;
@@ -269,67 +280,72 @@ budget_enforce_record(
 }
 
 int
-budget_enforce_get_key_usage(
-    budget_enforce_mgr_t* mgr,
-    int64_t               key_id,
-    double*               out_cost,
-    int64_t*              out_tokens)
+budget_enforce_get_key_usage(budget_enforce_mgr_t* mgr,
+                             int64_t               key_id,
+                             double*               out_cost,
+                             int64_t*              out_tokens)
 {
     if (mgr == NULL || key_id <= 0) {
         return -1;
     }
     pthread_mutex_lock(&mgr->mtx);
-    size_t h = hash_id(key_id);
+    size_t            h = hash_id(key_id);
     key_spend_node_t* curr = mgr->key_buckets[h];
     while (curr != NULL && curr->key_id != key_id) {
         curr = curr->next;
     }
     if (curr != NULL) {
-        if (out_cost != NULL) *out_cost = curr->spent_cost;
-        if (out_tokens != NULL) *out_tokens = curr->spent_tokens;
+        if (out_cost != NULL) {
+            *out_cost = curr->spent_cost;
+        }
+        if (out_tokens != NULL) {
+            *out_tokens = curr->spent_tokens;
+        }
     } else {
-        if (out_cost != NULL) *out_cost = 0.0;
-        if (out_tokens != NULL) *out_tokens = 0;
+        if (out_cost != NULL) {
+            *out_cost = 0.0;
+        }
+        if (out_tokens != NULL) {
+            *out_tokens = 0;
+        }
     }
     pthread_mutex_unlock(&mgr->mtx);
     return 0;
 }
 
 int
-budget_enforce_get_group_usage(
-    budget_enforce_mgr_t* mgr,
-    int64_t               group_id,
-    double*               out_cost)
+budget_enforce_get_group_usage(budget_enforce_mgr_t* mgr, int64_t group_id, double* out_cost)
 {
     if (mgr == NULL || group_id <= 0) {
         return -1;
     }
     pthread_mutex_lock(&mgr->mtx);
-    size_t h = hash_id(group_id);
+    size_t              h = hash_id(group_id);
     group_spend_node_t* curr = mgr->group_buckets[h];
     while (curr != NULL && curr->group_id != group_id) {
         curr = curr->next;
     }
     if (curr != NULL) {
-        if (out_cost != NULL) *out_cost = curr->spent_cost;
+        if (out_cost != NULL) {
+            *out_cost = curr->spent_cost;
+        }
     } else {
-        if (out_cost != NULL) *out_cost = 0.0;
+        if (out_cost != NULL) {
+            *out_cost = 0.0;
+        }
     }
     pthread_mutex_unlock(&mgr->mtx);
     return 0;
 }
 
 void
-budget_enforce_set_group_budget(
-    budget_enforce_mgr_t* mgr,
-    int64_t               group_id,
-    double                budget_usd)
+budget_enforce_set_group_budget(budget_enforce_mgr_t* mgr, int64_t group_id, double budget_usd)
 {
     if (mgr == NULL || group_id <= 0) {
         return;
     }
     pthread_mutex_lock(&mgr->mtx);
-    size_t h = hash_id(group_id);
+    size_t              h = hash_id(group_id);
     group_spend_node_t* curr = mgr->group_buckets[h];
     while (curr != NULL && curr->group_id != group_id) {
         curr = curr->next;
@@ -361,7 +377,7 @@ budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
 
     if (ops->list_groups != NULL) {
         group_rec_t glist[256];
-        int gn = 0;
+        int         gn = 0;
         if (ops->list_groups(ops->ctx, glist, 256, &gn) == 0) {
             for (int i = 0; i < gn; i++) {
                 budget_enforce_set_group_budget(mgr, glist[i].id, glist[i].monthly_budget_usd);
@@ -373,7 +389,7 @@ budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
         return 0;
     }
 
-    time_t now = time(NULL);
+    time_t    now = time(NULL);
     struct tm tm_buf;
     gmtime_r(&now, &tm_buf);
     tm_buf.tm_mday = 1;
@@ -383,10 +399,11 @@ budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
     time_t month_start = timegm(&tm_buf);
 
     cost_row_t rows[256];
-    int n = 0;
+    int        n = 0;
     if (ops->query_cost(ops->ctx, (long)month_start, (long)(now + 86400), rows, 256, &n) == 0) {
         for (int i = 0; i < n; i++) {
-            budget_enforce_record(mgr, 0, rows[i].group_id, 0.0, rows[i].prompt + rows[i].completion);
+            budget_enforce_record(
+                mgr, 0, rows[i].group_id, 0.0, rows[i].prompt + rows[i].completion);
         }
     }
     return 0;

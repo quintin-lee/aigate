@@ -18,15 +18,23 @@ shard_index(const char* key)
         return 0;
     }
     unsigned int v = 0;
-    char c0 = key[0];
-    char c1 = key[1];
-    if (c0 >= '0' && c0 <= '9') v = (c0 - '0') << 4;
-    else if (c0 >= 'a' && c0 <= 'f') v = (c0 - 'a' + 10) << 4;
-    else if (c0 >= 'A' && c0 <= 'F') v = (c0 - 'A' + 10) << 4;
+    char         c0 = key[0];
+    char         c1 = key[1];
+    if (c0 >= '0' && c0 <= '9') {
+        v = (c0 - '0') << 4;
+    } else if (c0 >= 'a' && c0 <= 'f') {
+        v = (c0 - 'a' + 10) << 4;
+    } else if (c0 >= 'A' && c0 <= 'F') {
+        v = (c0 - 'A' + 10) << 4;
+    }
 
-    if (c1 >= '0' && c1 <= '9') v |= (c1 - '0');
-    else if (c1 >= 'a' && c1 <= 'f') v |= (c1 - 'a' + 10);
-    else if (c1 >= 'A' && c1 <= 'F') v |= (c1 - 'A' + 10);
+    if (c1 >= '0' && c1 <= '9') {
+        v |= (c1 - '0');
+    } else if (c1 >= 'a' && c1 <= 'f') {
+        v |= (c1 - 'a' + 10);
+    } else if (c1 >= 'A' && c1 <= 'F') {
+        v |= (c1 - 'A' + 10);
+    }
 
     return (int)(v % CACHE_SHARDS_COUNT);
 }
@@ -35,7 +43,7 @@ shard_index(const char* key)
 static inline unsigned int
 bucket_index(const char* key)
 {
-    unsigned int hash = 5381;
+    unsigned int         hash = 5381;
     const unsigned char* p = (const unsigned char*)key;
     while (*p) {
         hash = ((hash << 5) + hash) + *p++;
@@ -105,7 +113,7 @@ evict_one_lru_locked(cache_shard_t* shard)
     }
 
     /* Unlink from hash bucket */
-    unsigned int b = bucket_index(victim->cache_key);
+    unsigned int    b = bucket_index(victim->cache_key);
     cache_entry_t** curr = &shard->buckets[b];
     while (*curr != NULL) {
         if (*curr == victim) {
@@ -145,8 +153,12 @@ response_cache_new(size_t max_bytes, size_t max_entries, long default_ttl_sec)
 
     size_t shard_max_bytes = rc->total_max_bytes / CACHE_SHARDS_COUNT;
     size_t shard_max_entries = rc->total_max_entries / CACHE_SHARDS_COUNT;
-    if (shard_max_bytes == 0) shard_max_bytes = 1024 * 1024;
-    if (shard_max_entries == 0) shard_max_entries = 100;
+    if (shard_max_bytes == 0) {
+        shard_max_bytes = 1024 * 1024;
+    }
+    if (shard_max_entries == 0) {
+        shard_max_entries = 100;
+    }
 
     for (int i = 0; i < CACHE_SHARDS_COUNT; i++) {
         pthread_mutex_init(&rc->shards[i].lock, NULL);
@@ -193,7 +205,10 @@ response_cache_free(response_cache_t* rc)
 }
 
 int
-response_cache_fingerprint(const char* model, const char* json_body, size_t body_len, char out_key[65])
+response_cache_fingerprint(const char* model,
+                           const char* json_body,
+                           size_t      body_len,
+                           char        out_key[65])
 {
     if (model == NULL || out_key == NULL) {
         return -1;
@@ -210,7 +225,7 @@ response_cache_fingerprint(const char* model, const char* json_body, size_t body
     }
 
     json_error_t err;
-    json_t* root = json_loadb(json_body, body_len, 0, &err);
+    json_t*      root = json_loadb(json_body, body_len, 0, &err);
     if (root == NULL || !json_is_object(root)) {
         if (root != NULL) {
             json_decref(root);
@@ -219,13 +234,15 @@ response_cache_fingerprint(const char* model, const char* json_body, size_t body
     }
 
     /* Build canonical normalized string */
-    char buf[16384];
+    char   buf[16384];
     size_t off = 0;
 
     /* 1. Model */
-    char model_lower[64];
+    char   model_lower[64];
     size_t ml = strlen(model);
-    if (ml >= sizeof(model_lower)) ml = sizeof(model_lower) - 1;
+    if (ml >= sizeof(model_lower)) {
+        ml = sizeof(model_lower) - 1;
+    }
     for (size_t i = 0; i < ml; i++) {
         model_lower[i] = (char)tolower((unsigned char)model[i]);
     }
@@ -254,12 +271,15 @@ response_cache_fingerprint(const char* model, const char* json_body, size_t body
         j_msgs = json_object_get(root, "contents"); /* Gemini format */
     }
     if (json_is_array(j_msgs)) {
-        size_t idx;
+        size_t  idx;
         json_t* m;
-        json_array_foreach(j_msgs, idx, m) {
-            if (!json_is_object(m)) continue;
+        json_array_foreach(j_msgs, idx, m)
+        {
+            if (!json_is_object(m)) {
+                continue;
+            }
             const char* role = json_string_value(json_object_get(m, "role"));
-            json_t* content = json_object_get(m, "content");
+            json_t*     content = json_object_get(m, "content");
             if (content == NULL) {
                 content = json_object_get(m, "parts");
             }
@@ -268,21 +288,25 @@ response_cache_fingerprint(const char* model, const char* json_body, size_t body
             }
             if (json_is_string(content) && off < sizeof(buf) - 128) {
                 const char* cstr = json_string_value(content);
-                size_t clen = strlen(cstr);
-                if (clen > 256) clen = 256; /* bounded representation */
+                size_t      clen = strlen(cstr);
+                if (clen > 256) {
+                    clen = 256; /* bounded representation */
+                }
                 if (off + clen < sizeof(buf) - 10) {
                     memcpy(buf + off, cstr, clen);
                     off += clen;
                     buf[off++] = '|';
                 }
             } else if (json_is_array(content)) {
-                size_t pidx;
+                size_t  pidx;
                 json_t* part;
-                json_array_foreach(content, pidx, part) {
+                json_array_foreach(content, pidx, part)
+                {
                     if (json_is_object(part)) {
                         const char* pt = json_string_value(json_object_get(part, "text"));
                         if (pt != NULL && off < sizeof(buf) - 128) {
-                            off += snprintf(buf + off, sizeof(buf) - off, "part[%zu]:%s|", pidx, pt);
+                            off +=
+                                snprintf(buf + off, sizeof(buf) - off, "part[%zu]:%s|", pidx, pt);
                         }
                     }
                 }
@@ -297,10 +321,11 @@ response_cache_fingerprint(const char* model, const char* json_body, size_t body
     json_t* j_tools = json_object_get(root, "tools");
     if (json_is_array(j_tools) && off < sizeof(buf) - 128) {
         off += snprintf(buf + off, sizeof(buf) - off, "tools:");
-        size_t tidx;
+        size_t  tidx;
         json_t* tool;
-        json_array_foreach(j_tools, tidx, tool) {
-            json_t* fn = json_object_get(tool, "function");
+        json_array_foreach(j_tools, tidx, tool)
+        {
+            json_t*     fn = json_object_get(tool, "function");
             const char* fname = json_string_value(json_object_get(fn ? fn : tool, "name"));
             if (fname != NULL && off < sizeof(buf) - 64) {
                 off += snprintf(buf + off, sizeof(buf) - off, "%s,", fname);
@@ -329,10 +354,10 @@ response_cache_get(response_cache_t* rc, const char* key)
         return NULL;
     }
 
-    int s = shard_index(key);
+    int            s = shard_index(key);
     cache_shard_t* shard = &rc->shards[s];
-    unsigned int b = bucket_index(key);
-    time_t now = time(NULL);
+    unsigned int   b = bucket_index(key);
+    time_t         now = time(NULL);
 
     pthread_mutex_lock(&shard->lock);
     cache_entry_t* entry = shard->buckets[b];
@@ -350,7 +375,9 @@ response_cache_get(response_cache_t* rc, const char* key)
                     curr = &(*curr)->hnext;
                 }
                 lru_remove(shard, entry);
-                if (shard->count > 0) shard->count--;
+                if (shard->count > 0) {
+                    shard->count--;
+                }
                 if (shard->bytes_used >= entry->response_len) {
                     shard->bytes_used -= entry->response_len;
                 } else {
@@ -368,9 +395,12 @@ response_cache_get(response_cache_t* rc, const char* key)
 
             shard->hits++;
             atomic_fetch_add(&rc->total_saved_prompt_tokens, (uint64_t)entry->prompt_tokens);
-            atomic_fetch_add(&rc->total_saved_completion_tokens, (uint64_t)entry->completion_tokens);
+            atomic_fetch_add(&rc->total_saved_completion_tokens,
+                             (uint64_t)entry->completion_tokens);
             double prev_cost = atomic_load(&rc->total_saved_cost_usd);
-            while (!atomic_compare_exchange_weak(&rc->total_saved_cost_usd, &prev_cost, prev_cost + entry->cost_usd)) {}
+            while (!atomic_compare_exchange_weak(
+                &rc->total_saved_cost_usd, &prev_cost, prev_cost + entry->cost_usd)) {
+            }
 
             atomic_fetch_add(&entry->ref_count, 1);
             pthread_mutex_unlock(&shard->lock);
@@ -420,11 +450,11 @@ response_cache_set(response_cache_t* rc,
         return -1;
     }
 
-    int s = shard_index(key);
+    int            s = shard_index(key);
     cache_shard_t* shard = &rc->shards[s];
-    unsigned int b = bucket_index(key);
-    time_t now = time(NULL);
-    long ttl = ttl_sec > 0 ? ttl_sec : rc->default_ttl_sec;
+    unsigned int   b = bucket_index(key);
+    time_t         now = time(NULL);
+    long           ttl = ttl_sec > 0 ? ttl_sec : rc->default_ttl_sec;
 
     pthread_mutex_lock(&shard->lock);
 
@@ -540,7 +570,9 @@ response_cache_purge(response_cache_t* rc,
                     *curr = e->hnext;
                     lru_remove(shard, e);
 
-                    if (shard->count > 0) shard->count--;
+                    if (shard->count > 0) {
+                        shard->count--;
+                    }
                     if (shard->bytes_used >= e->response_len) {
                         shard->bytes_used -= e->response_len;
                     }
@@ -557,8 +589,12 @@ response_cache_purge(response_cache_t* rc,
         pthread_mutex_unlock(&shard->lock);
     }
 
-    if (out_purged_entries != NULL) *out_purged_entries = total_purged;
-    if (out_freed_bytes != NULL) *out_freed_bytes = total_freed;
+    if (out_purged_entries != NULL) {
+        *out_purged_entries = total_purged;
+    }
+    if (out_freed_bytes != NULL) {
+        *out_freed_bytes = total_freed;
+    }
     return 0;
 }
 
@@ -569,8 +605,8 @@ response_cache_get_stats_json(response_cache_t* rc)
         return strdup("{\"enabled\":false}");
     }
 
-    size_t total_count = 0;
-    size_t total_bytes = 0;
+    size_t   total_count = 0;
+    size_t   total_bytes = 0;
     uint64_t total_hits = 0;
     uint64_t total_misses = 0;
 
@@ -593,7 +629,7 @@ response_cache_get_stats_json(response_cache_t* rc)
         pthread_mutex_unlock(&shard->lock);
     }
 
-    double hit_rate = 0.0;
+    double   hit_rate = 0.0;
     uint64_t total_reqs = total_hits + total_misses;
     if (total_reqs > 0) {
         hit_rate = ((double)total_hits / (double)total_reqs) * 100.0;
@@ -601,7 +637,7 @@ response_cache_get_stats_json(response_cache_t* rc)
 
     uint64_t saved_prompt = atomic_load(&rc->total_saved_prompt_tokens);
     uint64_t saved_comp = atomic_load(&rc->total_saved_completion_tokens);
-    double saved_cost = atomic_load(&rc->total_saved_cost_usd);
+    double   saved_cost = atomic_load(&rc->total_saved_cost_usd);
 
     json_t* root = json_object();
     json_object_set_new(root, "enabled", json_boolean(rc->enabled));
