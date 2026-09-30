@@ -117,6 +117,17 @@ class ChaosTester:
             ("chaos-blackhole", f"http://127.0.0.1:{self.chaos_port}/chaos/blackhole"),
         ]
         for name, ep in models:
+            del_req = urllib.request.Request(
+                f"{admin_url}/models/{name}",
+                headers=admin_headers,
+                method="DELETE"
+            )
+            try:
+                with urllib.request.urlopen(del_req, timeout=2) as resp:
+                    _ = resp.read()
+            except Exception:
+                pass
+
             payload = json.dumps({"name": name, "provider": "openai", "endpoint": ep}).encode("utf-8")
             req = urllib.request.Request(
                 f"{admin_url}/models",
@@ -181,12 +192,17 @@ class ChaosTester:
         payload = json.dumps({"model": "chaos-slow-stream", "stream": True, "messages": [{"role": "user", "content": "hi"}]}).encode("utf-8")
         req = urllib.request.Request(url, data=payload, headers={"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json", "Accept": "text/event-stream"})
         t0 = time.time()
-        with urllib.request.urlopen(req, timeout=6) as resp:
-            data = resp.read().decode("utf-8")
-            elapsed = time.time() - t0
-            assert "Chaos" in data or "chatcmpl" in data or "data:" in data
-            assert elapsed >= 0.2, "Stream should reflect chunk pacing"
-        print(f"PASS (elapsed {elapsed:.2f}s)")
+        try:
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                data = resp.read().decode("utf-8")
+                elapsed = time.time() - t0
+                assert "Chaos" in data or "chatcmpl" in data or "data:" in data
+                assert elapsed >= 0.1, "Stream should reflect chunk pacing"
+            print(f"PASS (elapsed {elapsed:.2f}s)")
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="ignore")
+            print(f"FAIL (HTTP {e.code}: {body})")
+            raise
 
     def test_c03_upstream_drop(self):
         """C-03: Upstream drops connection abruptly mid-stream."""

@@ -39,8 +39,24 @@ class ChaosTCPHandler(socketserver.BaseRequestHandler):
                     break
                 req_data += chunk
 
-            first_line = req_data.split(b"\r\n")[0].decode("utf-8", errors="ignore")
+            headers_part, _, body_part = req_data.partition(b"\r\n\r\n")
+            first_line = headers_part.split(b"\r\n")[0].decode("utf-8", errors="ignore")
             path = first_line.split(" ")[1] if len(first_line.split(" ")) > 1 else "/"
+
+            clen = 0
+            for line in headers_part.split(b"\r\n"):
+                if line.lower().startswith(b"content-length:"):
+                    try:
+                        clen = int(line.split(b":", 1)[1].strip())
+                    except Exception:
+                        pass
+
+            bytes_left = clen - len(body_part)
+            while bytes_left > 0 and "/blackhole" not in path:
+                c = sock.recv(min(4096, bytes_left))
+                if not c:
+                    break
+                bytes_left -= len(c)
 
             action = path
 
@@ -59,7 +75,7 @@ class ChaosTCPHandler(socketserver.BaseRequestHandler):
                 sock.sendall(b'{"status":"slow-ok"}')
 
             elif "/chaos/slow-stream" in action:
-                # C-02: Trickle SSE chunks with 0.3s delay
+                # C-02: Trickle SSE chunks with 0.1s delay
                 headers = (
                     b"HTTP/1.1 200 OK\r\n"
                     b"Content-Type: text/event-stream; charset=utf-8\r\n"
@@ -69,7 +85,7 @@ class ChaosTCPHandler(socketserver.BaseRequestHandler):
                 sock.sendall(headers)
                 for c in SSE_CHUNKS:
                     sock.sendall(c)
-                    time.sleep(0.3)
+                    time.sleep(0.1)
 
             elif "/chaos/drop-stream" in action:
                 # C-03: Sudden TCP drop / RST mid-stream
