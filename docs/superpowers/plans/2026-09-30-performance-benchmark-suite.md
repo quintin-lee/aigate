@@ -19,7 +19,7 @@
 - Create: `benchmarks/mock_upstream.py`
 - Test: `benchmarks/mock_upstream.py` (via self-test command)
 
-- [ ] **Step 1: Create benchmark payload fixtures**
+- [x] **Step 1: Create benchmark payload fixtures**
 
 Create standard test payload JSON files under `benchmarks/config/fixtures/`:
 
@@ -63,7 +63,7 @@ Create standard test payload JSON files under `benchmarks/config/fixtures/`:
 }
 ```
 
-- [ ] **Step 2: Create `benchmarks/mock_upstream.py`**
+- [x] **Step 2: Create `benchmarks/mock_upstream.py`**
 
 Create the Python HTTP server handling `/upstream/sync`, `/upstream/stream`, `/upstream/fail`, `/upstream/backup`, and `/health`:
 
@@ -186,7 +186,7 @@ if __name__ == "__main__":
     run(args.port)
 ```
 
-- [ ] **Step 3: Test Mock Upstream Server**
+- [x] **Step 3: Test Mock Upstream Server**
 
 Run a quick test in the background to verify endpoints `/health`, `/upstream/sync`, `/upstream/fail`:
 ```bash
@@ -200,7 +200,7 @@ kill $MOCK_PID
 Expected output:
 `{"status":"ok"}` followed by JSON containing `"chatcmpl-bench-sync"`.
 
-- [ ] **Step 4: Commit Task 1**
+- [x] **Step 4: Commit Task 1**
 
 ```bash
 git add benchmarks/config/fixtures/ benchmarks/mock_upstream.py
@@ -215,7 +215,7 @@ git commit -m "feat(benchmarks): 🎸 add mock upstream server and payload fixtu
 - Create: `benchmarks/k6/lib/sse_parser.js`
 - Create: `benchmarks/k6/scenarios.js`
 
-- [ ] **Step 1: Create `benchmarks/k6/lib/sse_parser.js`**
+- [x] **Step 1: Create `benchmarks/k6/lib/sse_parser.js`**
 
 Create `benchmarks/k6/lib/sse_parser.js` with SSE chunk and line parsing logic:
 
@@ -242,7 +242,7 @@ export function parseSSELines(rawText) {
 }
 ```
 
-- [ ] **Step 2: Create `benchmarks/k6/scenarios.js`**
+- [x] **Step 2: Create `benchmarks/k6/scenarios.js`**
 
 Create `benchmarks/k6/scenarios.js` with support for all 4 scenarios, TTFT measurement, and summary metric export:
 
@@ -348,7 +348,7 @@ export default function () {
 }
 ```
 
-- [ ] **Step 3: Syntax check k6 script**
+- [x] **Step 3: Syntax check k6 script**
 
 Run node or bun syntax check:
 ```bash
@@ -356,7 +356,7 @@ bun -e "import('./benchmarks/k6/scenarios.js')" 2>&1 || python3 -c "print('Synta
 ```
 Expected output: No syntax errors.
 
-- [ ] **Step 4: Commit Task 2**
+- [x] **Step 4: Commit Task 2**
 
 ```bash
 git add benchmarks/k6/
@@ -372,7 +372,7 @@ git commit -m "feat(benchmarks): 🎸 add k6 multi-scenario scripts and SSE pars
 - Create: `benchmarks/wrk/stream.lua`
 - Create: `benchmarks/wrk/cache.lua`
 
-- [ ] **Step 1: Create `benchmarks/wrk/sync.lua`**
+- [x] **Step 1: Create `benchmarks/wrk/sync.lua`**
 
 ```lua
 -- wrk script for non-streaming chat completions
@@ -395,7 +395,7 @@ response = function(status, headers, body)
 end
 ```
 
-- [ ] **Step 2: Create `benchmarks/wrk/stream.lua`**
+- [x] **Step 2: Create `benchmarks/wrk/stream.lua`**
 
 ```lua
 -- wrk script for streaming SSE chat completions
@@ -413,7 +413,7 @@ else
 end
 ```
 
-- [ ] **Step 3: Create `benchmarks/wrk/cache.lua`**
+- [x] **Step 3: Create `benchmarks/wrk/cache.lua`**
 
 ```lua
 -- wrk script for testing response cache HIT QPS
@@ -430,7 +430,7 @@ else
 end
 ```
 
-- [ ] **Step 4: Commit Task 3**
+- [x] **Step 4: Commit Task 3**
 
 ```bash
 git add benchmarks/wrk/
@@ -444,7 +444,7 @@ git commit -m "feat(benchmarks): 🎸 add wrk Lua scripts for sync, stream, and 
 **Files:**
 - Create: `benchmarks/bench.py`
 
-- [ ] **Step 1: Create `benchmarks/bench.py`**
+- [x] **Step 1: Create `benchmarks/bench.py`**
 
 Create `benchmarks/bench.py` containing complete lifecycle orchestration:
 1. Environment pre-check and binary build check.
@@ -799,7 +799,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: Test `benchmarks/bench.py` pre-flight checks**
+- [x] **Step 2: Test `benchmarks/bench.py` pre-flight checks**
 
 Run:
 ```bash
@@ -807,7 +807,7 @@ python3 benchmarks/bench.py --help
 ```
 Expected output: Help message showing `--tool`, `--scenario`, `--concurrency`, `--duration`.
 
-- [ ] **Step 3: Commit Task 4**
+- [x] **Step 3: Commit Task 4**
 
 ```bash
 git add benchmarks/bench.py
@@ -823,7 +823,7 @@ git commit -m "feat(benchmarks): 🎸 add unified benchmark runner bench.py"
 - Create: `benchmarks/README.md`
 - Create: `benchmarks/reports/.gitkeep`
 
-- [ ] **Step 1: Create `benchmarks/run.sh`**
+- [x] **Step 1: Create `benchmarks/run.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -840,7 +840,7 @@ Ensure it is executable:
 chmod +x benchmarks/run.sh benchmarks/bench.py
 ```
 
-- [ ] **Step 2: Create `benchmarks/README.md`**
+- [x] **Step 2: Create `benchmarks/README.md`**
 
 ```markdown
 # aigate Performance Benchmark Suite
@@ -892,21 +892,21 @@ Run specific scenario with custom duration and concurrency:
 Markdown benchmark reports are automatically generated under `benchmarks/reports/benchmark_<timestamp>.md`.
 ```
 
-- [ ] **Step 3: Create `benchmarks/reports/.gitkeep`**
+- [x] **Step 3: Create `benchmarks/reports/.gitkeep`**
 
 ```bash
 mkdir -p benchmarks/reports
 touch benchmarks/reports/.gitkeep
 ```
 
-- [ ] **Step 4: Verify launcher script syntax**
+- [x] **Step 4: Verify launcher script syntax**
 
 ```bash
 ./benchmarks/run.sh --help
 ```
 Expected output: Help menu of the benchmark runner.
 
-- [ ] **Step 5: Commit Task 5**
+- [x] **Step 5: Commit Task 5**
 
 ```bash
 git add benchmarks/run.sh benchmarks/README.md benchmarks/reports/.gitkeep
