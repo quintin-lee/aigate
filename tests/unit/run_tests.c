@@ -337,6 +337,13 @@ main(void)
     test_register("anthropic_tool_choice_required_mapping",
                   test_anthropic_tool_choice_required_mapping);
 
+    extern void test_anthropic_vision_single_image(void);
+    extern void test_anthropic_vision_text_only_string(void);
+    extern void test_anthropic_vision_multi_image(void);
+    test_register("anthropic_vision_single_image", test_anthropic_vision_single_image);
+    test_register("anthropic_vision_text_only_string", test_anthropic_vision_text_only_string);
+    test_register("anthropic_vision_multi_image", test_anthropic_vision_multi_image);
+
     extern void admin_ui_content(void);
     test_register("admin_ui_content", admin_ui_content);
 

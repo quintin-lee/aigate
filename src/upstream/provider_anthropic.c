@@ -64,6 +64,59 @@ ant_extract_text(json_t* jcontent)
     return buf ? buf : strdup("");
 }
 
+/** @brief Build Anthropic content: returns json_string (if plain string input) or json_array (if content parts).
+ *  Caller takes ownership of returned json_t*. */
+static json_t*
+ant_build_content_array(json_t* jcontent)
+{
+    if (jcontent == NULL) {
+        return json_string("");
+    }
+    if (json_is_string(jcontent)) {
+        return json_string(json_string_value(jcontent));
+    }
+    if (!json_is_array(jcontent)) {
+        return json_string("");
+    }
+    json_t* arr = json_array();
+    size_t  idx;
+    json_t* part;
+    json_array_foreach(jcontent, idx, part)
+    {
+        json_t* jtype = json_object_get(part, "type");
+        if (!jtype || !json_is_string(jtype)) {
+            continue;
+        }
+        const char* type_str = json_string_value(jtype);
+        if (strcmp(type_str, "text") == 0) {
+            json_t* jt = json_object_get(part, "text");
+            if (jt && json_is_string(jt)) {
+                json_t* tb = json_object();
+                json_object_set_new(tb, "type", json_string("text"));
+                json_object_set_new(tb, "text", json_string(json_string_value(jt)));
+                json_array_append_new(arr, tb);
+            }
+        } else if (strcmp(type_str, "image_url") == 0) {
+            json_t* jiu = json_object_get(part, "image_url");
+            json_t* ju = jiu ? json_object_get(jiu, "url") : NULL;
+            if (ju && json_is_string(ju)) {
+                json_t* img = json_object();
+                json_object_set_new(img, "type", json_string("image"));
+                json_t* src = json_object();
+                json_object_set_new(src, "type", json_string("url"));
+                json_object_set_new(src, "url", json_string(json_string_value(ju)));
+                json_object_set_new(img, "source", src);
+                json_array_append_new(arr, img);
+            } else {
+                AIGATE_LOG_WARN("image_url content part missing url");
+            }
+        } else {
+            AIGATE_LOG_WARN("unsupported content part type '%s'", type_str);
+        }
+    }
+    return arr;
+}
+
 int
 provider_anthropic_build(const model_rec_t* route,
                          const char*        in_body,
@@ -220,12 +273,11 @@ provider_anthropic_build(const model_rec_t* route,
                     json_object_set_new(m, "content", ant_content);
                     json_array_append_new(ant_msgs, m);
                 } else {
-                    /* plain text message */
-                    char*   txt = ant_extract_text(jcontent);
+                    /* plain text or multimodal user/assistant message */
+                    json_t* ant_content = ant_build_content_array(jcontent);
                     json_t* m = json_object();
                     json_object_set_new(m, "role", json_string(ant_role));
-                    json_object_set_new(m, "content", json_string(txt ? txt : ""));
-                    free(txt);
+                    json_object_set_new(m, "content", ant_content ? ant_content : json_string(""));
                     json_array_append_new(ant_msgs, m);
                 }
             }
