@@ -10,6 +10,7 @@
 #include "health_prober.h"
 #include "event_bus.h"
 #include "response_cache.h"
+#include "filter_chain.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -455,38 +456,11 @@ resolve_chat_target(chat_req_t* q)
         return -1;
     }
 
-    /* --- guardrails inspection --- */
-    char matched_rule[128] = {0};
+    /* Initialize effective body pointers (will be processed by filter_chain) */
     q->sanitized_body = NULL;
     q->sanitized_len = 0;
     q->eff_body = rq->body;
     q->eff_len = rq->body_len;
-
-    if (q->krec.guardrails_enabled && ac->gr != NULL && rq->body != NULL && rq->body_len > 0) {
-        guardrails_action_t gr_res = guardrails_inspect_inbound(ac->gr,
-                                                                (const char*)rq->body,
-                                                                rq->body_len,
-                                                                &q->sanitized_body,
-                                                                &q->sanitized_len,
-                                                                matched_rule,
-                                                                sizeof matched_rule);
-        if (gr_res == GUARDRAILS_BLOCKED) {
-            char block_msg[256];
-            snprintf(block_msg,
-                     sizeof block_msg,
-                     "Blocked by safety guardrail rule: %s",
-                     matched_rule[0] ? matched_rule : "blocked content");
-            aigate_write_error(rc, 400, "content_policy_violation", block_msg);
-            record_usage_and_event(
-                ac, q->krec.key_id, q->model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
-            return -1;
-        }
-        if (gr_res == GUARDRAILS_MASKED && q->sanitized_body != NULL) {
-            q->eff_body = q->sanitized_body;
-            snprintf(q->guardrail_act, sizeof q->guardrail_act, "masked");
-        }
-    }
-    q->eff_len = (q->sanitized_body != NULL) ? q->sanitized_len : rq->body_len;
     return 0;
 }
 
@@ -1023,6 +997,11 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     }
 
     if (resolve_chat_target(&chatq) != 0) {
+        chat_req_cleanup(&chatq);
+        return 0;
+    }
+
+    if (filter_chain_execute_inbound(&chatq) != FILTER_CONTINUE) {
         chat_req_cleanup(&chatq);
         return 0;
     }

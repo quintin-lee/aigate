@@ -467,6 +467,9 @@ main(void)
     extern void test_prompt_template_suite(void);
     test_register("prompt_template_suite", test_prompt_template_suite);
 
+    extern void test_filter_chain_suite(void);
+    test_register("filter_chain_suite", test_filter_chain_suite);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

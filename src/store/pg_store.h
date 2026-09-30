@@ -32,6 +32,8 @@ typedef struct key_rec {
     int    guardrails_enabled;   /**< 1 = enabled (default), 0 = disabled */
     double monthly_cost_budget;  /**< 0.0 = unlimited */
     long   monthly_token_budget; /**< 0 = unlimited */
+    char   system_prompt[4096];  /**< Optional prompt template */
+    int    prompt_mode;          /**< 0=prepend, 1=append, 2=override */
 } key_rec_t;
 
 /** @brief Per-model multi-target cap. */
@@ -60,8 +62,10 @@ typedef struct model_rec {
     /* Multi-target additions */
     int               n_targets;                      /**< Target count */
     upstream_target_t targets[MAX_TARGETS_PER_MODEL]; /**< Multi-target array */
-    char lb_policy[32];      /**< "priority", "round_robin", "weighted", "weighted_round_robin" */
-    char pricing_json[1024]; /**< jansson object with in_mtok, out_mtok, cached_mtok_discount */
+    char lb_policy[32];       /**< "priority", "round_robin", "weighted", "weighted_round_robin" */
+    char pricing_json[1024];  /**< jansson object with in_mtok, out_mtok, cached_mtok_discount */
+    char system_prompt[4096]; /**< Optional prompt template */
+    int  prompt_mode;         /**< 0=prepend, 1=append, 2=override */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
