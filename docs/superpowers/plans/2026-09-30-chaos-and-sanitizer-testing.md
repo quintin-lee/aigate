@@ -19,7 +19,7 @@
 - Create: `tests/chaos/chaos_server.py`
 - Test: `python3 tests/chaos/chaos_server.py --port 19098`
 
-- [ ] **Step 1: 创建测试用畸形样本文件**
+- [x] **Step 1: 创建测试用畸形样本文件**
 
 创建 `tests/chaos/fixtures/` 目录并写入畸形样本文件：
 
@@ -36,7 +36,7 @@
 `tests/chaos/fixtures/giant_body.txt` (生成超过 10MB 的请求体桩用于超大请求冲击):
 通过 Python 脚本写入生成。
 
-- [ ] **Step 2: 创建底层 Socket 混沌上游服务端 `tests/chaos/chaos_server.py`**
+- [x] **Step 2: 创建底层 Socket 混沌上游服务端 `tests/chaos/chaos_server.py`**
 
 实现原生 `socketserver.ThreadingTCPServer`，根据请求路径与 Header 注入故障：
 
@@ -195,7 +195,7 @@ if __name__ == "__main__":
     run_server(args.port)
 ```
 
-- [ ] **Step 3: 自测 `chaos_server.py` 各接口**
+- [x] **Step 3: 自测 `chaos_server.py` 各接口**
 
 编写临时自测命令测试 `/health`, `/chaos/slow-stream`, `/chaos/drop-stream`：
 ```bash
@@ -207,7 +207,7 @@ kill $SERVER_PID
 ```
 预期输出：`{"status":"ok"}`。
 
-- [ ] **Step 4: 提交 Task 1**
+- [x] **Step 4: 提交 Task 1**
 
 ```bash
 git add tests/chaos/fixtures/ tests/chaos/chaos_server.py
@@ -221,7 +221,7 @@ git commit -m "feat(chaos): 🎸 add chaos server and corrupted payload fixtures
 **Files:**
 - Create: `tests/chaos/test_chaos.py`
 
-- [ ] **Step 1: 编写 `tests/chaos/test_chaos.py`**
+- [x] **Step 1: 编写 `tests/chaos/test_chaos.py`**
 
 包含测试套件编排、网关进程自启/外部接入、API 密钥与模型动态注册、以及 7 组混沌场景断言：
 
@@ -512,7 +512,7 @@ if __name__ == "__main__":
     sys.exit(main())
 ```
 
-- [ ] **Step 2: 运行快速混沌测试验证**
+- [x] **Step 2: 运行快速混沌测试验证**
 
 在已有构建目录下执行：
 ```bash
@@ -520,7 +520,7 @@ python3 tests/chaos/test_chaos.py
 ```
 预期输出：所有 7 组测试场景打印 PASS，最终输出 `ALL CHAOS TESTS COMPLETED SUCCESSFULLY!`。
 
-- [ ] **Step 3: 提交 Task 2**
+- [x] **Step 3: 提交 Task 2**
 
 ```bash
 git add tests/chaos/test_chaos.py
@@ -535,11 +535,11 @@ git commit -m "feat(chaos): 🎸 add automated chaos testing orchestration suite
 - Modify: `src/core/pipeline_chat.c` 或 `src/upstream/upstream_client.c` (若断连/超时测试中发现任何待优化边界)
 - Test: `python3 tests/chaos/test_chaos.py`
 
-- [ ] **Step 1: 检验流式断开回调与 libcurl 传输中断逻辑**
+- [x] **Step 1: 检验流式断开回调与 libcurl 传输中断逻辑**
 
 检查 `src/upstream/upstream_client.c` 中的写回调与中止逻辑，确保当客户端连接断开返回非预期字节数时，返回 `CURL_WRITEFUNC_PAUSE` 或 0 字节触发 libcurl 优雅中止传输，防止悬挂传输句柄。
 
-- [ ] **Step 2: 运行回归测试**
+- [x] **Step 2: 运行回归测试**
 
 运行单元测试与混沌测试确保零破坏：
 ```bash
@@ -548,7 +548,7 @@ python3 tests/chaos/test_chaos.py
 ```
 预期输出：所有测试通过。
 
-- [ ] **Step 3: 提交 Task 3**
+- [x] **Step 3: 提交 Task 3**
 
 ```bash
 git add src/
@@ -564,7 +564,7 @@ git commit -m "fix(core): 🐛 harden stream abort and edge disconnection handli
 - Create: `tests/chaos/README.md`
 - Test: `./scripts/run_chaos_asan.sh`
 
-- [ ] **Step 1: 创建 `scripts/run_chaos_asan.sh`**
+- [x] **Step 1: 创建 `scripts/run_chaos_asan.sh`**
 
 ```bash
 #!/usr/bin/env bash
@@ -602,7 +602,7 @@ echo "=== [4/4] Sanitizer & Chaos Verification PASSED (0 Leaks, 0 Errors) ==="
 chmod +x scripts/run_chaos_asan.sh
 ```
 
-- [ ] **Step 2: 创建 `tests/chaos/README.md` 文档**
+- [x] **Step 2: 创建 `tests/chaos/README.md` 文档**
 
 编写混沌测试与 ASan 检测文档：
 ```markdown
@@ -633,7 +633,7 @@ python3 tests/chaos/test_chaos.py
 ```
 ```
 
-- [ ] **Step 3: 端到端完整验证 `./scripts/run_chaos_asan.sh`**
+- [x] **Step 3: 端到端完整验证 `./scripts/run_chaos_asan.sh`**
 
 执行自动化脚本：
 ```bash
@@ -641,7 +641,7 @@ python3 tests/chaos/test_chaos.py
 ```
 预期输出：编译完成，CTest 全部通过，全量混沌用例通过，最终输出 `Sanitizer & Chaos Verification PASSED (0 Leaks, 0 Errors)`。
 
-- [ ] **Step 4: 提交 Task 4**
+- [x] **Step 4: 提交 Task 4**
 
 ```bash
 git add scripts/run_chaos_asan.sh tests/chaos/README.md
