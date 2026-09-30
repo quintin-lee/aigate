@@ -148,6 +148,17 @@ ALTER TABLE usage_requests
   ADD COLUMN IF NOT EXISTS guardrail_action TEXT NOT NULL DEFAULT '';
 
 INSERT INTO schema_migrations(version) VALUES (9) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v10: prompt templates and modes for models and api_keys
+ALTER TABLE models
+  ADD COLUMN IF NOT EXISTS system_prompt TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS prompt_mode INT NOT NULL DEFAULT 0;
+
+ALTER TABLE api_keys
+  ADD COLUMN IF NOT EXISTS system_prompt TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS prompt_mode INT NOT NULL DEFAULT 0;
+
+INSERT INTO schema_migrations(version) VALUES (10) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

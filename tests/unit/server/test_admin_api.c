@@ -253,6 +253,12 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
             if (mask & KMASK_MONTHLY_TOKEN_BUDGET) {
                 fk->k.monthly_token_budget = k->monthly_token_budget;
             }
+            if (mask & KMASK_SYSTEM_PROMPT) {
+                snprintf(fk->k.system_prompt, sizeof fk->k.system_prompt, "%s", k->system_prompt);
+            }
+            if (mask & KMASK_PROMPT_MODE) {
+                fk->k.prompt_mode = k->prompt_mode;
+            }
             return 0;
         }
     }
@@ -360,6 +366,15 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
                          sizeof db->models[i].pricing_json,
                          "%s",
                          m->pricing_json);
+            }
+            if (mask & MMASK_SYSTEM_PROMPT) {
+                snprintf(db->models[i].system_prompt,
+                         sizeof db->models[i].system_prompt,
+                         "%s",
+                         m->system_prompt);
+            }
+            if (mask & MMASK_PROMPT_MODE) {
+                db->models[i].prompt_mode = m->prompt_mode;
             }
             return 0;
         }

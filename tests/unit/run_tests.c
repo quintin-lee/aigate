@@ -55,6 +55,7 @@ main(void)
     extern void test_pg_fake_guardrails_lifecycle(void);
     extern void test_pg_fake_key_budget_fields(void);
     extern void test_pg_fake_group_budget(void);
+    extern void test_pg_fake_prompt_template(void);
     extern void test_guardrails_ac_basic(void);
     extern void test_guardrails_ac_overlapping(void);
     extern void test_guardrails_ac_edge_cases(void);
@@ -132,6 +133,7 @@ main(void)
     test_register("pg_fake_guardrails_lifecycle", test_pg_fake_guardrails_lifecycle);
     test_register("pg_fake_key_budget_fields", test_pg_fake_key_budget_fields);
     test_register("pg_fake_group_budget", test_pg_fake_group_budget);
+    test_register("pg_fake_prompt_template", test_pg_fake_prompt_template);
     test_register("guardrails_ac_basic", test_guardrails_ac_basic);
     test_register("guardrails_ac_overlapping", test_guardrails_ac_overlapping);
     test_register("guardrails_ac_edge_cases", test_guardrails_ac_edge_cases);

@@ -143,6 +143,10 @@ typedef struct cost_row {
 #define KMASK_MONTHLY_COST_BUDGET (1 << 6)
 /** @brief Key update mask: monthly token budget. */
 #define KMASK_MONTHLY_TOKEN_BUDGET (1 << 7)
+/** @brief Key update mask: system prompt template. */
+#define KMASK_SYSTEM_PROMPT (1 << 8)
+/** @brief Key update mask: prompt template mode. */
+#define KMASK_PROMPT_MODE (1 << 9)
 
 /** @brief Model update mask: endpoint. */
 #define MMASK_ENDPOINT (1 << 0)
@@ -158,6 +162,10 @@ typedef struct cost_row {
 #define MMASK_LB_POLICY (1 << 5)
 /** @brief Model update mask: pricing. */
 #define MMASK_PRICING (1 << 6)
+/** @brief Model update mask: system prompt template. */
+#define MMASK_SYSTEM_PROMPT (1 << 7)
+/** @brief Model update mask: prompt template mode. */
+#define MMASK_PROMPT_MODE (1 << 8)
 
 /** @brief Provider update mask: provider type. */
 #define PMASK_TYPE (1 << 0)

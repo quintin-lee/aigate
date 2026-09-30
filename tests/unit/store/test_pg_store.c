@@ -275,6 +275,12 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
         if (mask & KMASK_MONTHLY_TOKEN_BUDGET) {
             fk->k.monthly_token_budget = k->monthly_token_budget;
         }
+        if (mask & KMASK_SYSTEM_PROMPT) {
+            snprintf(fk->k.system_prompt, sizeof fk->k.system_prompt, "%s", k->system_prompt);
+        }
+        if (mask & KMASK_PROMPT_MODE) {
+            fk->k.prompt_mode = k->prompt_mode;
+        }
         return 0;
     }
     return -1;
@@ -342,6 +348,15 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
         }
         if (mask & MMASK_LB_POLICY) {
             snprintf(db->models[i].lb_policy, sizeof db->models[i].lb_policy, "%s", m->lb_policy);
+        }
+        if (mask & MMASK_SYSTEM_PROMPT) {
+            snprintf(db->models[i].system_prompt,
+                     sizeof db->models[i].system_prompt,
+                     "%s",
+                     m->system_prompt);
+        }
+        if (mask & MMASK_PROMPT_MODE) {
+            db->models[i].prompt_mode = m->prompt_mode;
         }
         return 0;
     }
@@ -1509,6 +1524,79 @@ TEST_CASE(test_pg_real_groups_and_cost)
     TEST_ASSERT(n_rules >= 1, "at least 1 rule");
     TEST_ASSERT(ops->delete_guardrails_rule(ops->ctx, r_rule_id) == 0,
                 "real delete_guardrails_rule");
+
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_pg_fake_prompt_template)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    model_rec_t    m, m_out;
+    key_rec_t      k, k_out;
+
+    memset(&db, 0, sizeof db);
+    build_fake_ops(&db, &ops);
+    ps = pg_store_open("unused", &ops);
+    TEST_ASSERT(ps != NULL, "fake store open");
+
+    /* 1. Model prompt template creation */
+    memset(&m, 0, sizeof m);
+    strcpy(m.name, "tmpl-model");
+    strcpy(m.provider, "openai");
+    strcpy(m.endpoint, "http://127.0.0.1:9000");
+    strcpy(m.system_prompt, "System prompt for ${model}");
+    m.prompt_mode = 1; /* PROMPT_MODE_APPEND */
+    m.enabled = 1;
+    TEST_ASSERT(pg_store_ops(ps)->create_model(&db, &m) == 0, "create model with prompt template");
+
+    memset(&m_out, 0, sizeof m_out);
+    TEST_ASSERT(pg_store_ops(ps)->get_model(&db, "tmpl-model", &m_out) == 0, "get model");
+    TEST_ASSERT(strcmp(m_out.system_prompt, "System prompt for ${model}") == 0,
+                "model system_prompt matches");
+    TEST_ASSERT(m_out.prompt_mode == 1, "model prompt_mode matches");
+
+    /* 2. Model prompt template update */
+    strcpy(m.system_prompt, "Updated prompt");
+    m.prompt_mode = 2; /* PROMPT_MODE_OVERRIDE */
+    TEST_ASSERT(pg_store_ops(ps)->update_model(&db, &m, MMASK_SYSTEM_PROMPT | MMASK_PROMPT_MODE) ==
+                    0,
+                "update model prompt template");
+    memset(&m_out, 0, sizeof m_out);
+    TEST_ASSERT(pg_store_ops(ps)->get_model(&db, "tmpl-model", &m_out) == 0, "get updated model");
+    TEST_ASSERT(strcmp(m_out.system_prompt, "Updated prompt") == 0, "updated system_prompt");
+    TEST_ASSERT(m_out.prompt_mode == 2, "updated prompt_mode");
+
+    /* 3. Key prompt template creation */
+    long kid = 0;
+    memset(&k, 0, sizeof k);
+    strcpy(k.key_hash, "aabbcc112233");
+    strcpy(k.name, "tmpl-key");
+    strcpy(k.system_prompt, "Key prompt for ${key_name}");
+    k.prompt_mode = 0; /* PROMPT_MODE_PREPEND */
+    TEST_ASSERT(pg_store_ops(ps)->create_key(&db, &k, &kid) == 0,
+                "create key with prompt template");
+
+    memset(&k_out, 0, sizeof k_out);
+    TEST_ASSERT(pg_store_ops(ps)->get_key_by_id(&db, kid, &k_out) == 0, "get key by id");
+    TEST_ASSERT(strcmp(k_out.system_prompt, "Key prompt for ${key_name}") == 0,
+                "key system_prompt matches");
+    TEST_ASSERT(k_out.prompt_mode == 0, "key prompt_mode matches");
+    key_rec_free(&k_out);
+
+    /* 4. Key prompt template update */
+    k.key_id = kid;
+    strcpy(k.system_prompt, "Updated key prompt");
+    k.prompt_mode = 1;
+    TEST_ASSERT(pg_store_ops(ps)->update_key(&db, &k, KMASK_SYSTEM_PROMPT | KMASK_PROMPT_MODE) == 0,
+                "update key prompt template");
+    memset(&k_out, 0, sizeof k_out);
+    TEST_ASSERT(pg_store_ops(ps)->get_key_by_id(&db, kid, &k_out) == 0, "get updated key");
+    TEST_ASSERT(strcmp(k_out.system_prompt, "Updated key prompt") == 0,
+                "updated key system_prompt");
+    TEST_ASSERT(k_out.prompt_mode == 1, "updated key prompt_mode");
+    key_rec_free(&k_out);
 
     pg_store_close(ps);
 }
