@@ -535,6 +535,7 @@ handle_chat_stream(chat_req_t* q)
                                               total_lat,
                                               &ph_rv);
             if (ph < 0) {
+                chat_req_cleanup(q);
                 return ph_rv;
             }
             if (ph > 0) {
@@ -568,6 +569,7 @@ handle_chat_stream(chat_req_t* q)
             }
             free(acc.line_buf);
             acc.line_buf = NULL;
+            chat_req_cleanup(q);
             return 0;
         }
 
@@ -600,6 +602,7 @@ handle_chat_stream(chat_req_t* q)
         acc.line_buf = NULL;
         adapter->stream_bridge_free(bridge);
 
+        chat_req_cleanup(q);
         return 0;
     }
 
@@ -619,5 +622,6 @@ handle_chat_stream(chat_req_t* q)
                            last_provider,
                            q->guardrail_act,
                            0.0);
+    chat_req_cleanup(q);
     return 0;
 }
