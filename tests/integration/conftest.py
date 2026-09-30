@@ -44,11 +44,12 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
         s.bind(("", 0))
         port = s.getsockname()[1]
 
-    candidates_bin = [
+    custom_bin = os.environ.get("AIGATE_BIN")
+    candidates_bin = [custom_bin] if custom_bin else [
         os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.build/aigate")),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build/aigate")),
     ]
-    bin_path = next((b for b in candidates_bin if os.path.exists(b)), None)
+    bin_path = next((b for b in candidates_bin if b and os.path.exists(b)), None)
     if not bin_path:
         pytest.fail(f"aigate binary not found in {candidates_bin}. Run cmake --build first.")
 
