@@ -3,9 +3,10 @@
 
 import argparse
 import json
+import signal
 import sys
 import time
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 
 SYNC_RESPONSE = json.dumps({
     "id": "chatcmpl-bench-sync",
@@ -49,34 +50,10 @@ class MockHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
-        # Read request body if present
         clen = int(self.headers.get("Content-Length", 0))
-        if clen > 0:
-            _ = self.rfile.read(clen)
+        body_bytes = self.rfile.read(clen) if clen > 0 else b""
 
-        if self.path.endswith("/sync"):
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(SYNC_RESPONSE)))
-            self.send_header("X-Upstream-Provider", "mock-primary")
-            self.end_headers()
-            self.wfile.write(SYNC_RESPONSE)
-
-        elif self.path.endswith("/stream"):
-            self.send_response(200)
-            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-            self.send_header("Cache-Control", "no-cache")
-            self.send_header("Connection", "keep-alive")
-            self.send_header("X-Upstream-Provider", "mock-primary")
-            self.end_headers()
-
-            for chunk in STREAM_CHUNKS:
-                self.wfile.write(chunk)
-                self.wfile.flush()
-                time.sleep(0.005)  # 5ms token interval simulation
-
-        elif self.path.endswith("/fail"):
-            # Simulate 503 upstream service outage
+        if "/fail" in self.path:
             err = b'{"error":{"message":"Simulated upstream failure","type":"api_error","code":"service_unavailable"}}'
             self.send_response(503)
             self.send_header("Content-Type", "application/json")
@@ -84,26 +61,50 @@ class MockHandler(BaseHTTPRequestHandler):
             self.send_header("X-Upstream-Provider", "mock-primary")
             self.end_headers()
             self.wfile.write(err)
+            return
 
-        elif self.path.endswith("/backup"):
+        is_stream = b'"stream": true' in body_bytes or b'"stream":true' in body_bytes or "/stream" in self.path
+        if is_stream:
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(SYNC_RESPONSE)))
-            self.send_header("X-Upstream-Provider", "mock-secondary")
+            self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "close")
+            self.send_header("X-Upstream-Provider", "mock-primary")
             self.end_headers()
-            self.wfile.write(SYNC_RESPONSE)
 
-        else:
-            self.send_response(404)
-            self.end_headers()
+            for chunk in STREAM_CHUNKS:
+                self.wfile.write(chunk)
+                self.wfile.flush()
+                time.sleep(0.002)
+            return
+
+        # Non-streaming sync response
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(SYNC_RESPONSE)))
+        provider = "mock-secondary" if "/backup" in self.path else "mock-primary"
+        self.send_header("X-Upstream-Provider", provider)
+        self.end_headers()
+        self.wfile.write(SYNC_RESPONSE)
 
 
 def run(port=19090):
-    server = HTTPServer(("127.0.0.1", port), MockHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), MockHandler)
     print(f"Mock upstream server running on http://127.0.0.1:{port}", flush=True)
+
+    def handle_sig(sig, frame):
+        try:
+            server.server_close()
+        except Exception:
+            pass
+        sys.exit(0)
+
+    signal.signal(signal.SIGTERM, handle_sig)
+    signal.signal(signal.SIGINT, handle_sig)
+
     try:
         server.serve_forever()
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, SystemExit):
         pass
     finally:
         server.server_close()

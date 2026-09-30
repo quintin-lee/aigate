@@ -15,6 +15,9 @@ import time
 import urllib.request
 import urllib.error
 
+os.environ["no_proxy"] = "127.0.0.1,localhost," + os.environ.get("no_proxy", "")
+os.environ["NO_PROXY"] = "127.0.0.1,localhost," + os.environ.get("NO_PROXY", "")
+
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BENCH_DIR = os.path.join(ROOT_DIR, "benchmarks")
 BUILD_DIR = os.path.join(ROOT_DIR, ".build")
@@ -76,6 +79,9 @@ class BenchmarkHarness:
 
     def start_gateway(self):
         env = os.environ.copy()
+        for k in ["http_proxy", "https_proxy", "all_proxy", "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY"]:
+            env.pop(k, None)
+
         env["AIGATE_LISTEN"] = f":{GATEWAY_PORT}"
         env["AIGATE_PG_DSN"] = self.pg_dsn
         env["AIGATE_ADMIN_TOKEN"] = ADMIN_TOKEN
@@ -104,12 +110,28 @@ class BenchmarkHarness:
             "Content-Type": "application/json",
         }
 
-        # 1. Register benchmark models
+        # Clean up any existing benchmark models and keys first
+        for m in ["bench-sync", "bench-stream", "bench-cache", "bench-failover"]:
+            req = urllib.request.Request(f"{admin_url}/models/{m}", headers=admin_headers, method="DELETE")
+            try:
+                with urllib.request.urlopen(req, timeout=1) as resp:
+                    _ = resp.read()
+            except Exception:
+                pass
+
+        # 1. Register benchmark models (aigate appends /chat/completions to endpoint)
         models = [
-            {"name": "bench-sync", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}/upstream/sync"},
-            {"name": "bench-stream", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}/upstream/stream"},
-            {"name": "bench-cache", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}/upstream/sync"},
-            {"name": "bench-failover", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}/upstream/fail,http://127.0.0.1:{MOCK_PORT}/upstream/backup"},
+            {"name": "bench-sync", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}"},
+            {"name": "bench-stream", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}"},
+            {"name": "bench-cache", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}"},
+            {
+                "name": "bench-failover",
+                "lb_policy": "priority",
+                "targets": [
+                    {"provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}/fail", "priority": 0, "weight": 1},
+                    {"provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}/backup", "priority": 1, "weight": 1},
+                ],
+            },
         ]
 
         for m in models:
@@ -118,14 +140,13 @@ class BenchmarkHarness:
             try:
                 with urllib.request.urlopen(req, timeout=2) as resp:
                     _ = resp.read()
-            except urllib.error.HTTPError as e:
-                if e.code != 409:  # Ignore conflict if already exists
-                    pass
+            except Exception as e:
+                print(f"[bench] Model {m['name']} registration note: {e}")
 
-        # 2. Register benchmark API key
+        # 2. Register benchmark API key (empty allowed_models = all models allowed)
         key_payload = json.dumps({
-            "name": "bench-test-key",
-            "allowed_models": ["*"],
+            "name": f"bench-key-{int(time.time())}",
+            "allowed_models": [],
             "rate_qps": 100000,
             "daily_token_quota": 0,
         }).encode("utf-8")
@@ -136,8 +157,9 @@ class BenchmarkHarness:
                 resp_json = json.loads(resp.read().decode("utf-8"))
                 if "plaintext" in resp_json:
                     self.api_key = resp_json["plaintext"]
-        except Exception:
-            pass
+                    print(f"[bench] Generated active benchmark key: {self.api_key[:12]}...")
+        except Exception as e:
+            print(f"[bench] Key registration warning: {e}")
 
     def warmup_cache(self):
         url = f"http://127.0.0.1:{GATEWAY_PORT}/v1/chat/completions"
@@ -322,7 +344,14 @@ def run_python_scenario(scenario, duration, concurrency, api_key):
                         _ = resp.read()
                     latencies.append((time.time() - t0) * 1000.0)
                     successes += 1
-            except Exception:
+            except Exception as e:
+                if errors == 0:
+                    print(f"\n[bench] Request error in {scenario}: {e}")
+                    if hasattr(e, "read"):
+                        try:
+                            print(f"[bench] Response body: {e.read().decode()[:200]}")
+                        except Exception:
+                            pass
                 errors += 1
 
     threads = []

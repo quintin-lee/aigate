@@ -19,3 +19,7 @@ build-asan/
 # doxygen 生成输出（Doxyfile OUTPUT_DIRECTORY=.）
 /html/
 /latex/
+
+# benchmark runs
+benchmarks/reports/*.md
+
