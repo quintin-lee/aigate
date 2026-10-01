@@ -2751,10 +2751,26 @@ guardrails_rule_create(
 
     const char* rule_type = jstring(jbody, "rule_type", "keyword");
     if (strcmp(rule_type, "keyword") != 0 && strcmp(rule_type, "regex") != 0 &&
-        strcmp(rule_type, "pii") != 0) {
+        strcmp(rule_type, "pii") != 0 && strcmp(rule_type, "webhook") != 0) {
         json_decref(jbody);
-        return finish_error(
-            status, body, len, 400, "bad_request", "rule_type must be keyword, regex, or pii");
+        return finish_error(status,
+                            body,
+                            len,
+                            400,
+                            "bad_request",
+                            "rule_type must be keyword, regex, pii, or webhook");
+    }
+
+    if (strcmp(rule_type, "webhook") == 0) {
+        if (strncmp(pattern, "http://", 7) != 0 && strncmp(pattern, "https://", 8) != 0) {
+            json_decref(jbody);
+            return finish_error(status,
+                                body,
+                                len,
+                                400,
+                                "bad_request",
+                                "webhook pattern must be http:// or https:// URL");
+        }
     }
 
     const char* action = jstring(jbody, "action", "block");
@@ -2768,6 +2784,31 @@ guardrails_rule_create(
         json_decref(jbody);
         return finish_error(
             status, body, len, 400, "bad_request", "category too long (max 63 chars)");
+    }
+
+    const char* webhook_secret = jstring(jbody, "webhook_secret", "");
+    int         timeout_ms = 500;
+    json_t*     jt = json_object_get(jbody, "timeout_ms");
+    if (jt != NULL && json_is_integer(jt)) {
+        timeout_ms = (int)json_integer_value(jt);
+    }
+    if (timeout_ms <= 0) {
+        timeout_ms = 500;
+    }
+
+    const char* fail_mode = jstring(jbody, "fail_mode", "open");
+    if (strcmp(fail_mode, "open") != 0 && strcmp(fail_mode, "closed") != 0) {
+        json_decref(jbody);
+        return finish_error(
+            status, body, len, 400, "bad_request", "fail_mode must be open or closed");
+    }
+
+    const char* phase = jstring(jbody, "phase", "inbound");
+    if (strcmp(phase, "inbound") != 0 && strcmp(phase, "outbound") != 0 &&
+        strcmp(phase, "both") != 0) {
+        json_decref(jbody);
+        return finish_error(
+            status, body, len, 400, "bad_request", "phase must be inbound, outbound, or both");
     }
 
     int     enabled = 1;
@@ -2787,6 +2828,10 @@ guardrails_rule_create(
     snprintf(rule.action, sizeof rule.action, "%s", action);
     snprintf(rule.category, sizeof rule.category, "%s", category);
     rule.enabled = enabled;
+    snprintf(rule.webhook_secret, sizeof rule.webhook_secret, "%s", webhook_secret);
+    rule.timeout_ms = timeout_ms;
+    snprintf(rule.fail_mode, sizeof rule.fail_mode, "%s", fail_mode);
+    snprintf(rule.phase, sizeof rule.phase, "%s", phase);
 
     const pg_ops_t* ops = pg_store_ops(adm->ps);
     long            new_id = 0;
@@ -2808,6 +2853,10 @@ guardrails_rule_create(
     json_object_set_new(out, "action", json_string(rule.action));
     json_object_set_new(out, "category", json_string(rule.category));
     json_object_set_new(out, "enabled", json_boolean(rule.enabled));
+    json_object_set_new(out, "webhook_secret", json_string(rule.webhook_secret));
+    json_object_set_new(out, "timeout_ms", json_integer(rule.timeout_ms));
+    json_object_set_new(out, "fail_mode", json_string(rule.fail_mode));
+    json_object_set_new(out, "phase", json_string(rule.phase));
     return finish_json(status, body, len, 201, out);
 }
 
@@ -2847,6 +2896,10 @@ guardrails_rule_list(admin_ctx_t* adm, int* status, char** body, size_t* len, co
         json_object_set_new(o, "action", json_string(recs[i].action));
         json_object_set_new(o, "category", json_string(recs[i].category));
         json_object_set_new(o, "enabled", json_boolean(recs[i].enabled));
+        json_object_set_new(o, "webhook_secret", json_string(recs[i].webhook_secret));
+        json_object_set_new(o, "timeout_ms", json_integer(recs[i].timeout_ms));
+        json_object_set_new(o, "fail_mode", json_string(recs[i].fail_mode));
+        json_object_set_new(o, "phase", json_string(recs[i].phase));
         if (recs[i].created_at > 0) {
             char      ts_iso[32];
             struct tm tmv;
@@ -2907,10 +2960,15 @@ guardrails_rule_update(
 
     const char* rt = jstring(jbody, "rule_type", NULL);
     if (rt != NULL) {
-        if (strcmp(rt, "keyword") != 0 && strcmp(rt, "regex") != 0 && strcmp(rt, "pii") != 0) {
+        if (strcmp(rt, "keyword") != 0 && strcmp(rt, "regex") != 0 && strcmp(rt, "pii") != 0 &&
+            strcmp(rt, "webhook") != 0) {
             json_decref(jbody);
-            return finish_error(
-                status, body, len, 400, "bad_request", "rule_type must be keyword, regex, or pii");
+            return finish_error(status,
+                                body,
+                                len,
+                                400,
+                                "bad_request",
+                                "rule_type must be keyword, regex, pii, or webhook");
         }
         snprintf(existing.rule_type, sizeof existing.rule_type, "%s", rt);
     }
@@ -2921,6 +2979,17 @@ guardrails_rule_update(
             json_decref(jbody);
             return finish_error(
                 status, body, len, 400, "bad_request", "pattern invalid (1-511 chars)");
+        }
+        if (strcmp(existing.rule_type, "webhook") == 0) {
+            if (strncmp(pat, "http://", 7) != 0 && strncmp(pat, "https://", 8) != 0) {
+                json_decref(jbody);
+                return finish_error(status,
+                                    body,
+                                    len,
+                                    400,
+                                    "bad_request",
+                                    "webhook pattern must be http:// or https:// URL");
+            }
         }
         snprintf(existing.pattern, sizeof existing.pattern, "%s", pat);
     }
@@ -2943,6 +3012,37 @@ guardrails_rule_update(
                 status, body, len, 400, "bad_request", "category too long (max 63 chars)");
         }
         snprintf(existing.category, sizeof existing.category, "%s", cat);
+    }
+
+    const char* ws = jstring(jbody, "webhook_secret", NULL);
+    if (ws != NULL) {
+        snprintf(existing.webhook_secret, sizeof existing.webhook_secret, "%s", ws);
+    }
+
+    json_t* jt = json_object_get(jbody, "timeout_ms");
+    if (jt != NULL && json_is_integer(jt)) {
+        int to = (int)json_integer_value(jt);
+        existing.timeout_ms = to > 0 ? to : 500;
+    }
+
+    const char* fm = jstring(jbody, "fail_mode", NULL);
+    if (fm != NULL) {
+        if (strcmp(fm, "open") != 0 && strcmp(fm, "closed") != 0) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "fail_mode must be open or closed");
+        }
+        snprintf(existing.fail_mode, sizeof existing.fail_mode, "%s", fm);
+    }
+
+    const char* ph = jstring(jbody, "phase", NULL);
+    if (ph != NULL) {
+        if (strcmp(ph, "inbound") != 0 && strcmp(ph, "outbound") != 0 && strcmp(ph, "both") != 0) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "phase must be inbound, outbound, or both");
+        }
+        snprintf(existing.phase, sizeof existing.phase, "%s", ph);
     }
 
     json_t* jen = json_object_get(jbody, "enabled");
@@ -2974,6 +3074,10 @@ guardrails_rule_update(
     json_object_set_new(out, "action", json_string(existing.action));
     json_object_set_new(out, "category", json_string(existing.category));
     json_object_set_new(out, "enabled", json_boolean(existing.enabled));
+    json_object_set_new(out, "webhook_secret", json_string(existing.webhook_secret));
+    json_object_set_new(out, "timeout_ms", json_integer(existing.timeout_ms));
+    json_object_set_new(out, "fail_mode", json_string(existing.fail_mode));
+    json_object_set_new(out, "phase", json_string(existing.phase));
     json_object_set_new(out, "updated", json_true());
     return finish_json(status, body, len, 200, out);
 }
@@ -3014,6 +3118,60 @@ guardrails_reload(admin_ctx_t* adm, int* status, char** body, size_t* len)
     }
     json_t* out = json_object();
     json_object_set_new(out, "status", json_string("reloaded"));
+    return finish_json(status, body, len, 200, out);
+}
+
+/** @brief POST /admin/v1/guardrails/webhook/test: probe external webhook connectivity and latency.
+ *  @return 0 with status/body filled; -1 only on JSON serialization failure. */
+static int
+guardrails_webhook_test_handler(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    (void)adm;
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* url = jstring(jbody, "url", NULL);
+    if (url == NULL || url[0] == '\0') {
+        url = jstring(jbody, "pattern", NULL);
+    }
+    if (url == NULL || url[0] == '\0') {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "url is required");
+    }
+
+    const char* secret = jstring(jbody, "webhook_secret", "");
+    if (secret[0] == '\0') {
+        secret = jstring(jbody, "secret", "");
+    }
+
+    int     timeout_ms = 1000;
+    json_t* jt = json_object_get(jbody, "timeout_ms");
+    if (jt != NULL && json_is_integer(jt)) {
+        timeout_ms = (int)json_integer_value(jt);
+    }
+    if (timeout_ms <= 0) {
+        timeout_ms = 1000;
+    }
+
+    char   err_msg[256] = {0};
+    double latency_ms = 0.0;
+    int    prc =
+        guardrails_webhook_probe(url, secret, timeout_ms, err_msg, sizeof err_msg, &latency_ms);
+    json_decref(jbody);
+
+    json_t* out = json_object();
+    if (prc == 0) {
+        json_object_set_new(out, "status", json_string("ok"));
+        json_object_set_new(out, "latency_ms", json_real(latency_ms));
+        json_object_set_new(out, "reachable", json_true());
+    } else {
+        json_object_set_new(out, "status", json_string("error"));
+        json_object_set_new(out, "error", json_string(err_msg[0] ? err_msg : "probe failed"));
+        json_object_set_new(out, "reachable", json_false());
+    }
     return finish_json(status, body, len, 200, out);
 }
 
@@ -3227,6 +3385,11 @@ admin_dispatch(admin_ctx_t* adm,
         if (strcmp(rest, "guardrails/reload") == 0) {
             if (strcmp(method, "POST") == 0) {
                 return guardrails_reload(adm, out_status, out_body, out_len);
+            }
+        }
+        if (strcmp(rest, "guardrails/webhook/test") == 0) {
+            if (strcmp(method, "POST") == 0) {
+                return guardrails_webhook_test_handler(adm, out_status, out_body, out_len, body);
             }
         }
         if (rest[10] == '/') {

@@ -3178,6 +3178,81 @@ test_admin_guardrails_crud_and_reload(void)
     json_decref(jlist);
     free(body);
 
+    /* 11. Create Webhook rule */
+    const char* wh_body =
+        "{\"pattern\":\"https://audit.corp.internal/v1/moderation\","
+        "\"rule_type\":\"webhook\",\"action\":\"block\",\"category\":\"security\","
+        "\"webhook_secret\":\"wh-secret-xyz\",\"timeout_ms\":250,\"fail_mode\":"
+        "\"closed\",\"phase\":\"both\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   wh_body,
+                   strlen(wh_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "create webhook guardrail rule -> 201");
+    json_t* jwh = json_loads(body, 0, &jerr);
+    long    wh_id = (long)json_integer_value(json_object_get(jwh, "id"));
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jwh, "rule_type")), "webhook") == 0,
+                "created rule_type webhook");
+    TEST_ASSERT(
+        strcmp(json_string_value(json_object_get(jwh, "webhook_secret")), "wh-secret-xyz") == 0,
+        "created webhook_secret");
+    TEST_ASSERT(json_integer_value(json_object_get(jwh, "timeout_ms")) == 250,
+                "created timeout_ms");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jwh, "fail_mode")), "closed") == 0,
+                "created fail_mode");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jwh, "phase")), "both") == 0,
+                "created phase");
+    json_decref(jwh);
+    free(body);
+
+    /* 12. Update Webhook rule */
+    char wh_patch_uri[64];
+    snprintf(wh_patch_uri, sizeof wh_patch_uri, "/admin/v1/guardrails/%ld", wh_id);
+    const char* wh_patch_body = "{\"timeout_ms\":600,\"fail_mode\":\"open\"}";
+    admin_dispatch(&adm,
+                   wh_patch_uri,
+                   "PATCH",
+                   NULL,
+                   "admin-secret-token",
+                   wh_patch_body,
+                   strlen(wh_patch_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "update webhook rule -> 200");
+    json_t* jwh_up = json_loads(body, 0, &jerr);
+    TEST_ASSERT(json_integer_value(json_object_get(jwh_up, "timeout_ms")) == 600,
+                "updated timeout_ms 600");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(jwh_up, "fail_mode")), "open") == 0,
+                "updated fail_mode open");
+    json_decref(jwh_up);
+    free(body);
+
+    /* 13. Probe test endpoint */
+    const char* probe_body = "{\"url\":\"http://127.0.0.1:1/probe\",\"timeout_ms\":50}";
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails/webhook/test",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   probe_body,
+                   strlen(probe_body),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "probe endpoint returns 200");
+    json_t* jpr = json_loads(body, 0, &jerr);
+    TEST_ASSERT(json_is_false(json_object_get(jpr, "reachable")),
+                "probe reachable is false for dead port");
+    json_decref(jpr);
+    free(body);
+
     teardown_admin(ps, &core, &db);
 }
 
