@@ -497,6 +497,12 @@ main(void)
     extern void test_upstream_hedged_suite(void);
     test_register("upstream_hedged_suite", test_upstream_hedged_suite);
 
+    extern void test_w3c_traceparent_parsing(void);
+    test_register("w3c_traceparent_parsing", test_w3c_traceparent_parsing);
+
+    extern void test_span_lifecycle_and_timing(void);
+    test_register("span_lifecycle_and_timing", test_span_lifecycle_and_timing);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
