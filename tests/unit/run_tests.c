@@ -62,6 +62,10 @@ main(void)
     extern void test_guardrails_pii_masking(void);
     extern void test_guardrails_inbound_json_inspection(void);
     extern void test_guardrails_webhook_unit(void);
+    extern void test_pii_checksum_algorithms(void);
+    extern void test_pii_session_map_and_partial_masking(void);
+    extern void test_pii_inbound_transformation(void);
+    extern void test_pii_outbound_restoration(void);
     extern void test_budget_enforce_unlimited(void);
     extern void test_budget_enforce_key_cost_limit(void);
     extern void test_budget_enforce_key_token_limit(void);
@@ -142,6 +146,10 @@ main(void)
     test_register("guardrails_pii_masking", test_guardrails_pii_masking);
     test_register("guardrails_inbound_json_inspection", test_guardrails_inbound_json_inspection);
     test_register("guardrails_webhook_unit", test_guardrails_webhook_unit);
+    test_register("pii_checksum_algorithms", test_pii_checksum_algorithms);
+    test_register("pii_session_map_and_partial_masking", test_pii_session_map_and_partial_masking);
+    test_register("pii_inbound_transformation", test_pii_inbound_transformation);
+    test_register("pii_outbound_restoration", test_pii_outbound_restoration);
     test_register("budget_enforce_unlimited", test_budget_enforce_unlimited);
     test_register("budget_enforce_key_cost_limit", test_budget_enforce_key_cost_limit);
     test_register("budget_enforce_key_token_limit", test_budget_enforce_key_token_limit);
@@ -287,6 +295,7 @@ main(void)
     extern void test_admin_key_budgets_and_guardrails(void);
     extern void test_admin_group_budget(void);
     extern void test_admin_guardrails_crud_and_reload(void);
+    extern void test_admin_pii_endpoints(void);
     extern void test_admin_prompt_template_crud(void);
     test_register("admin_groups_crud", test_admin_groups_crud);
     test_register("admin_models_pricing", test_admin_models_pricing);
@@ -296,6 +305,7 @@ main(void)
     test_register("admin_key_budgets_and_guardrails", test_admin_key_budgets_and_guardrails);
     test_register("admin_group_budget", test_admin_group_budget);
     test_register("admin_guardrails_crud_and_reload", test_admin_guardrails_crud_and_reload);
+    test_register("admin_pii_endpoints", test_admin_pii_endpoints);
     test_register("admin_prompt_template_crud", test_admin_prompt_template_crud);
 
     extern void test_upstream_stream_normal(void);

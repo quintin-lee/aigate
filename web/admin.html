@@ -958,6 +958,124 @@
         </div>
       </div>
 
+      <!-- PII Rules Matrix Panel -->
+      <div class="glass-panel rounded-2xl overflow-hidden border border-slate-800">
+        <div class="p-4 border-b border-slate-800 bg-slate-900/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div class="text-sm font-bold text-white flex items-center gap-2">
+              <span>🛡️</span>
+              <span>敏感数据脱敏矩阵 (PII Protection Matrix)</span>
+              <span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">双向无感还原</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">结合数学校验和算法（Luhn 模 10、MOD 11-2）与多级动作策略，入站去标识化，出站流式/全量实时透明逆向还原。</p>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button onclick="savePiiConfig()" id="btnSavePiiConfig" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-sm transition flex items-center space-x-1.5">
+              <span>💾</span>
+              <span>保存脱敏策略设置</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll">
+          <table class="w-full text-left border-collapse text-xs data-tbl">
+            <thead>
+              <tr class="border-b border-slate-800 bg-slate-900/40 text-slate-400 uppercase tracking-wider font-semibold">
+                <th class="py-3 px-4 w-16 text-center">启用</th>
+                <th class="py-3 px-4">敏感实体类型</th>
+                <th class="py-3 px-4">高精度校验特征</th>
+                <th class="py-3 px-4 w-60">处置动作策略</th>
+                <th class="py-3 px-4">效果实时预览</th>
+              </tr>
+            </thead>
+            <tbody id="piiRulesTableBody" class="divide-y divide-slate-800/60 font-sans">
+              <!-- Dynamically populated by renderPiiRulesTable() -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Dual-comparison PII Simulation Sandbox -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-800/80 pb-3">
+          <div>
+            <div class="text-sm font-bold text-slate-200 flex items-center gap-2">
+              <span>🧪</span>
+              <span>实时双向脱敏与还原仿真沙箱 (PII Dual-View Simulator)</span>
+            </div>
+            <p class="text-xs text-slate-400 mt-0.5">调用底层真实脱敏与还原 C 引擎，验证算法校验和识别率与出入站双向变换。</p>
+          </div>
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <span class="text-[11px] text-slate-400 mr-1">快捷样例:</span>
+            <button onclick="loadPiiPreset('phone_bank')" class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">📱 手机+银行卡</button>
+            <button onclick="loadPiiPreset('id_api')" class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">🆔 身份证+API Key</button>
+            <button onclick="loadPiiPreset('mixed')" class="px-2.5 py-1 rounded-lg text-[11px] font-medium bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">🛡️ 混合隐私样例</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+          <!-- Left: Input prompt -->
+          <div class="lg:col-span-5 space-y-2.5">
+            <div class="flex items-center justify-between text-xs text-slate-400">
+              <label for="piiSandboxInput" class="font-medium text-slate-300">测试输入提示词 (Prompt):</label>
+              <button onclick="document.getElementById('piiSandboxInput').value = ''; document.getElementById('piiSandboxInput').focus();" class="text-[11px] text-slate-500 hover:text-slate-300 transition">清空输入</button>
+            </div>
+            <textarea id="piiSandboxInput" rows="6" placeholder="输入包含敏感信息的提示词，例如：客户手机 13812345678，银行卡 6222021234567890，请查询账户状态。" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-brand-500 font-mono resize-y"></textarea>
+            <div class="flex items-center gap-2">
+              <button id="btnPiiSimulate" onclick="testPiiSandbox()" class="flex-1 py-2 px-4 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-md shadow-brand-500/20 transition flex items-center justify-center gap-1.5">
+                <span>⚡</span>
+                <span>执行脱敏与还原演练</span>
+              </button>
+            </div>
+            <div class="p-2.5 rounded-xl bg-slate-900/60 border border-slate-800 text-[11px] text-slate-400 leading-relaxed">
+              <span class="text-amber-400 font-semibold">💡 提示:</span> 银行卡需通过 <span class="text-slate-200 font-mono">Luhn 模 10</span> 校验，身份证需通过 <span class="text-slate-200 font-mono">MOD 11-2</span> 校验。无效校验和（如普通订单号）会自动保留明文，不发生误脱敏。
+            </div>
+          </div>
+
+          <!-- Right: Dual-view Results -->
+          <div class="lg:col-span-7 space-y-3">
+            <!-- Detected entities bar -->
+            <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800 flex flex-col gap-1.5">
+              <div class="flex items-center justify-between">
+                <span class="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">识别命中敏感实体</span>
+                <span id="piiDetectedCount" class="text-[11px] text-slate-500">等待演练</span>
+              </div>
+              <div id="piiDetectedBadges" class="flex flex-wrap gap-1.5 min-h-[24px] items-center text-xs text-slate-500">
+                <span>点击左侧“执行演练”或预设样例查看检测结果</span>
+              </div>
+            </div>
+
+            <!-- Status Banner -->
+            <div id="piiSimStatusBanner" class="hidden p-2.5 rounded-xl text-xs font-medium border flex items-center gap-2"></div>
+
+            <!-- Dual view cards -->
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <!-- Card 1: Inbound (to LLM) -->
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-semibold text-sky-400 flex items-center gap-1">
+                    <span>📤</span> <span>发往大模型 (入站脱敏)</span>
+                  </span>
+                  <button onclick="copyPiiText('piiSimInbound')" class="text-[10px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 transition">复制</button>
+                </div>
+                <div id="piiSimInbound" class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-mono text-slate-200 select-all whitespace-pre-wrap min-h-[90px] max-h-[160px] overflow-y-auto">等待演练...</div>
+              </div>
+
+              <!-- Card 2: Outbound (to Client) -->
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs font-semibold text-emerald-400 flex items-center gap-1">
+                    <span>📥</span> <span>终端客户端接收 (出站还原)</span>
+                  </span>
+                  <button onclick="copyPiiText('piiSimOutbound')" class="text-[10px] text-slate-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 transition">复制</button>
+                </div>
+                <div id="piiSimOutbound" class="p-3 rounded-xl bg-slate-950/80 border border-slate-800 text-xs font-mono text-slate-200 select-all whitespace-pre-wrap min-h-[90px] max-h-[160px] overflow-y-auto">等待演练...</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- Live rule-testing sandbox -->
       <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
         <div class="flex items-center justify-between">
@@ -2749,6 +2867,7 @@
       keys: [],
       groups: [],
       guardrails: [],
+      piiConfig: [],
       costRows: [],
       usageRows: [],
       requestRows: [],
@@ -3094,6 +3213,7 @@
         fetchKeys();
       } else if (state.activeTab === "guardrails") {
         if (typeof fetchGuardrails === "function") fetchGuardrails();
+        if (typeof fetchPiiConfig === "function") fetchPiiConfig();
       } else if (state.activeTab === "groups") {
         fetchGroups();
       } else if (state.activeTab === "cost") {
@@ -4715,6 +4835,7 @@
       paginationState.guardrails.page = 1;
       updateGuardrailStats();
       filterGuardrailsTable(false);
+      if (typeof fetchPiiConfig === "function") fetchPiiConfig();
     }
 
 // Update guardrail stat cards.
@@ -4727,15 +4848,17 @@
       const rules = state.guardrails || [];
       const enabledRules = rules.filter(r => r.enabled);
       const kwBlock = enabledRules.filter(r => r.action === "block" || r.rule_type === "keyword").length;
-      const piiMask = enabledRules.filter(r => r.action === "mask" || r.rule_type === "pii").length;
+      const piiActive = (state.piiConfig || []).filter(p => p.enabled && p.action !== "off").length;
+      const piiMask = Math.max(enabledRules.filter(r => r.action === "mask" || r.rule_type === "pii").length, piiActive);
+      const totalCount = enabledRules.length + piiActive;
 
-      if (totalEl) totalEl.innerText = enabledRules.length.toLocaleString();
+      if (totalEl) totalEl.innerText = totalCount.toLocaleString();
       if (kwEl) kwEl.innerText = kwBlock.toLocaleString();
       if (piiEl) piiEl.innerText = piiMask.toLocaleString();
       if (statusEl) {
         statusEl.innerHTML = `
           <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span>已就绪 (${enabledRules.length} 条生效)</span>
+          <span>已就绪 (${totalCount} 条生效)</span>
         `;
       }
     }
@@ -5179,6 +5302,368 @@
           未命中任何阻断或脱敏规则，请求内容将原样安全转发至下游 LLM 模型。
         </div>
       `;
+    }
+
+    // --- PII Masking & Dual-View Simulator Logic ---
+    const PII_ENTITIES_METADATA = [
+      {
+        entity: "phone",
+        name: "手机号码",
+        tag: "PHONE",
+        icon: "📱",
+        algo: "11 位大陆号段 (1[3-9]\\d{9}) / E.164 国际号",
+        algoBadge: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+        example: "13812345678",
+        previews: {
+          anonymize_restore: "入站: [PHONE_1] ➔ 出站: 13812345678 (双向还原)",
+          mask_partial: "138****5678 (部分打码)",
+          redact_tag: "[PHONE] (单向标签)",
+          block: "🛑 阻断请求 (HTTP 400)",
+          off: "放行明文 (不处理)"
+        }
+      },
+      {
+        entity: "id_card",
+        name: "居民身份证",
+        tag: "ID_CARD",
+        icon: "🆔",
+        algo: "ISO 7064:1983.MOD 11-2 校验和 (防随机18位误判)",
+        algoBadge: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+        example: "110101199003072378",
+        previews: {
+          anonymize_restore: "入站: [ID_CARD_1] ➔ 出站: 110101...2378 (双向还原)",
+          mask_partial: "110101********2378 (部分打码)",
+          redact_tag: "[ID_CARD] (单向标签)",
+          block: "🛑 阻断请求 (HTTP 400)",
+          off: "放行明文 (不处理)"
+        }
+      },
+      {
+        entity: "bank_card",
+        name: "银行卡 / 信用卡",
+        tag: "BANK_CARD",
+        icon: "💳",
+        algo: "Luhn (Mod 10) 校验和算法 (防订单号误判)",
+        algoBadge: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+        example: "6222021234567890",
+        previews: {
+          anonymize_restore: "入站: [BANK_CARD_1] ➔ 出站: 622202...7890 (双向还原)",
+          mask_partial: "622202******7890 (部分打码)",
+          redact_tag: "[BANK_CARD] (单向标签)",
+          block: "🛑 阻断请求 (HTTP 400)",
+          off: "放行明文 (不处理)"
+        }
+      },
+      {
+        entity: "email",
+        name: "电子邮箱",
+        tag: "EMAIL",
+        icon: "📧",
+        algo: "RFC 5322 邮箱标准",
+        algoBadge: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+        example: "support@company.com",
+        previews: {
+          anonymize_restore: "入站: [EMAIL_1] ➔ 出站: support@company.com (双向还原)",
+          mask_partial: "s*****t@company.com (部分打码)",
+          redact_tag: "[EMAIL] (单向标签)",
+          block: "🛑 阻断请求 (HTTP 400)",
+          off: "放行明文 (不处理)"
+        }
+      },
+      {
+        entity: "api_key",
+        name: "API 密钥凭据",
+        tag: "API_KEY",
+        icon: "🔑",
+        algo: "OpenAI / Anthropic / AWS / JWT 凭证检测",
+        algoBadge: "bg-rose-500/10 text-rose-400 border-rose-500/20",
+        example: "sk-proj-abc123xyz456...",
+        previews: {
+          anonymize_restore: "入站: [API_KEY_1] ➔ 出站: sk-proj-abc... (双向还原)",
+          mask_partial: "sk-pro************xyz (部分打码)",
+          redact_tag: "[API_KEY] (单向标签)",
+          block: "🛑 阻断请求 (HTTP 400)",
+          off: "放行明文 (不处理)"
+        }
+      },
+      {
+        entity: "ip_address",
+        name: "网络 IP 地址",
+        tag: "IP_ADDRESS",
+        icon: "🌐",
+        algo: "IPv4 标准点分十进制地址",
+        algoBadge: "bg-teal-500/10 text-teal-400 border-teal-500/20",
+        example: "192.168.1.100",
+        previews: {
+          anonymize_restore: "入站: [IP_ADDRESS_1] ➔ 出站: 192.168.1.100 (双向还原)",
+          mask_partial: "192.168.*.* (部分打码)",
+          redact_tag: "[IP_ADDRESS] (单向标签)",
+          block: "🛑 阻断请求 (HTTP 400)",
+          off: "放行明文 (不处理)"
+        }
+      }
+    ];
+
+    async function fetchPiiConfig() {
+      const tbody = document.getElementById("piiRulesTableBody");
+      if (!tbody) return;
+      try {
+        const resp = await apiCall("/admin/v1/guardrails/pii");
+        if (!resp || !resp.ok) return;
+        const data = await resp.json();
+        state.piiConfig = data.rules || [];
+        renderPiiRulesTable();
+        updateGuardrailStats();
+      } catch (err) {
+        console.error("fetchPiiConfig error:", err);
+      }
+    }
+
+    function renderPiiRulesTable() {
+      const tbody = document.getElementById("piiRulesTableBody");
+      if (!tbody) return;
+      tbody.innerHTML = "";
+
+      const rulesMap = {};
+      (state.piiConfig || []).forEach(r => {
+        rulesMap[r.entity] = r;
+      });
+
+      PII_ENTITIES_METADATA.forEach(meta => {
+        const r = rulesMap[meta.entity] || {
+          entity: meta.entity,
+          enabled: true,
+          action: "anonymize_restore"
+        };
+
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-900/40 transition";
+        tr.innerHTML = `
+          <td class="py-3 px-4 text-center whitespace-nowrap">
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="pii_en_${meta.entity}" ${r.enabled ? "checked" : ""} onchange="onPiiRowChange('${meta.entity}')" class="sr-only peer">
+              <div class="w-8 h-4 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all peer-checked:bg-brand-600"></div>
+            </label>
+          </td>
+          <td class="py-3 px-4">
+            <div class="flex items-center space-x-2.5">
+              <span class="text-base">${meta.icon}</span>
+              <div>
+                <div class="font-bold text-slate-200 text-xs">${meta.name}</div>
+                <div class="text-[10px] text-slate-500 font-mono">${meta.entity} <span class="text-slate-600">·</span> [${meta.tag}]</div>
+              </div>
+            </div>
+          </td>
+          <td class="py-3 px-4">
+            <span class="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-semibold border ${meta.algoBadge}">${meta.algo}</span>
+          </td>
+          <td class="py-3 px-4 whitespace-nowrap">
+            <select id="pii_act_${meta.entity}" onchange="onPiiRowChange('${meta.entity}')" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="anonymize_restore" ${r.action === "anonymize_restore" ? "selected" : ""}>🔄 双向去标识化与还原</option>
+              <option value="mask_partial" ${r.action === "mask_partial" ? "selected" : ""}>🎭 部分掩码 (Mask Partial)</option>
+              <option value="redact_tag" ${r.action === "redact_tag" ? "selected" : ""}>🏷️ 实体标签擦除 (Tag)</option>
+              <option value="block" ${r.action === "block" ? "selected" : ""}>🛑 违规拦截阻断 (Block 400)</option>
+              <option value="off" ${r.action === "off" ? "selected" : ""}>⚪ 停用脱敏 (Off)</option>
+            </select>
+          </td>
+          <td class="py-3 px-4">
+            <div id="pii_prev_${meta.entity}" class="text-[11px] font-mono text-slate-300"></div>
+          </td>
+        `;
+        tbody.appendChild(tr);
+        onPiiRowChange(meta.entity);
+      });
+    }
+
+    function onPiiRowChange(entity) {
+      const meta = PII_ENTITIES_METADATA.find(m => m.entity === entity);
+      if (!meta) return;
+      const enEl = document.getElementById(`pii_en_${entity}`);
+      const actEl = document.getElementById(`pii_act_${entity}`);
+      const prevEl = document.getElementById(`pii_prev_${entity}`);
+      if (!prevEl) return;
+
+      const isEnabled = enEl ? enEl.checked : true;
+      const action = actEl ? actEl.value : "anonymize_restore";
+
+      if (actEl) {
+        actEl.disabled = !isEnabled;
+        actEl.classList.toggle("opacity-50", !isEnabled);
+      }
+
+      if (!isEnabled || action === "off") {
+        prevEl.innerHTML = `<span class="text-slate-500 italic">放行明文 (不进行脱敏)</span>`;
+        return;
+      }
+
+      if (action === "anonymize_restore") {
+        prevEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-sky-500/10 border border-sky-500/20 text-sky-400 font-bold">[${meta.tag}_1]</span> <span class="text-slate-400 text-[10px]">➔ 出站透明还原为真实数据</span>`;
+      } else if (action === "mask_partial") {
+        prevEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 font-bold font-mono">${meta.previews.mask_partial}</span>`;
+      } else if (action === "redact_tag") {
+        prevEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-purple-500/10 border border-purple-500/20 text-purple-400 font-bold font-mono">[${meta.tag}]</span> <span class="text-slate-400 text-[10px]">(单向擦除)</span>`;
+      } else if (action === "block") {
+        prevEl.innerHTML = `<span class="px-1.5 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-rose-400 font-bold">🛑 拦截请求 (HTTP 400)</span>`;
+      }
+    }
+
+    async function savePiiConfig() {
+      const btn = document.getElementById("btnSavePiiConfig");
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>⏳</span> <span>正在保存...</span>`;
+      }
+
+      const rules = PII_ENTITIES_METADATA.map(meta => {
+        const enEl = document.getElementById(`pii_en_${meta.entity}`);
+        const actEl = document.getElementById(`pii_act_${meta.entity}`);
+        return {
+          entity: meta.entity,
+          enabled: enEl ? enEl.checked : true,
+          action: actEl ? actEl.value : "anonymize_restore"
+        };
+      });
+
+      try {
+        const resp = await apiCall("/admin/v1/guardrails/pii", {
+          method: "PUT",
+          body: { rules }
+        });
+        if (resp && resp.ok) {
+          showToast("脱敏策略设置已全局同步并热生效", "success");
+          await fetchPiiConfig();
+          updateGuardrailStats();
+        } else {
+          const err = resp ? await resp.json().catch(() => ({})) : {};
+          showToast(`保存失败: ${err.error?.message || "网络错误"}`, "error");
+        }
+      } catch (err) {
+        showToast(`保存异常: ${err.message}`, "error");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<span>💾</span> <span>保存脱敏策略设置</span>`;
+        }
+      }
+    }
+
+    async function testPiiSandbox() {
+      const inputEl = document.getElementById("piiSandboxInput");
+      const inEl = document.getElementById("piiSimInbound");
+      const outEl = document.getElementById("piiSimOutbound");
+      const badgesEl = document.getElementById("piiDetectedBadges");
+      const countEl = document.getElementById("piiDetectedCount");
+      const bannerEl = document.getElementById("piiSimStatusBanner");
+      const btn = document.getElementById("btnPiiSimulate");
+
+      const text = (inputEl ? inputEl.value : "").trim();
+      if (!text) {
+        showToast("请输入测试提示词或点击上方快捷样例", "warning");
+        if (inputEl) inputEl.focus();
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>⏳</span> <span>正在演算...</span>`;
+      }
+      if (inEl) inEl.innerText = "⏳ 正在经由底层 C 引擎脱敏中...";
+      if (outEl) outEl.innerText = "⏳ 正在经由底层 C 引擎逆向还原中...";
+
+      try {
+        const resp = await apiCall("/admin/v1/guardrails/pii/test", {
+          method: "POST",
+          body: { text }
+        });
+        if (!resp || !resp.ok) {
+          const err = resp ? await resp.json().catch(() => ({})) : {};
+          showToast(`演练失败: ${err.error?.message || "服务器响应错误"}`, "error");
+          if (inEl) inEl.innerText = "脱敏演算失败";
+          if (outEl) outEl.innerText = "还原演算失败";
+          return;
+        }
+        const data = await resp.json();
+        if (inEl) inEl.innerText = data.anonymized || text;
+        if (outEl) outEl.innerText = data.restored_preview || text;
+
+        const detected = data.detected_entities || [];
+        if (countEl) countEl.innerText = `命中 ${detected.length} 处敏感实体`;
+        if (badgesEl) {
+          if (detected.length === 0) {
+            badgesEl.innerHTML = `<span class="text-xs text-slate-500">未检测到敏感实体（若输入包含银行卡或身份证，可能因校验和不匹配被安全放行）</span>`;
+          } else {
+            badgesEl.innerHTML = detected.map(d => `
+              <span class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[11px] font-mono bg-slate-800/80 border border-slate-700 text-slate-300">
+                <span class="text-amber-400 font-bold">${escapeHtml(d.placeholder || d.type)}</span>
+                <span class="text-slate-500">➔</span>
+                <span class="text-emerald-400 select-all">${escapeHtml(d.original)}</span>
+              </span>
+            `).join("");
+          }
+        }
+
+        if (bannerEl) {
+          bannerEl.classList.remove("hidden");
+          if (data.highest_action === "block") {
+            bannerEl.className = "p-2.5 rounded-xl text-xs font-medium border flex items-center gap-2 bg-rose-500/10 border-rose-500/30 text-rose-300";
+            bannerEl.innerHTML = `<span>🛑</span> <span><strong>请求将被阻断 (HTTP 400)</strong>：命中阻断级别规则，禁止发往上游大模型。</span>`;
+          } else if (data.highest_action === "anonymize_restore") {
+            bannerEl.className = "p-2.5 rounded-xl text-xs font-medium border flex items-center gap-2 bg-emerald-500/10 border-emerald-500/30 text-emerald-300";
+            bannerEl.innerHTML = `<span>✅</span> <span><strong>双向无感还原成功</strong>：上游公网大模型仅见占位符，终端客户端透明无感还原真实信息。</span>`;
+          } else if (data.highest_action === "mask_partial") {
+            bannerEl.className = "p-2.5 rounded-xl text-xs font-medium border flex items-center gap-2 bg-amber-500/10 border-amber-500/30 text-amber-300";
+            bannerEl.innerHTML = `<span>🎭</span> <span><strong>部分掩码脱敏完成</strong>：核心隐私字段已被单向打码加星，上游与客户端均不可逆。</span>`;
+          } else if (data.highest_action === "redact_tag") {
+            bannerEl.className = "p-2.5 rounded-xl text-xs font-medium border flex items-center gap-2 bg-purple-500/10 border-purple-500/30 text-purple-300";
+            bannerEl.innerHTML = `<span>🏷️</span> <span><strong>实体标签擦除完成</strong>：数据已替换为标准类型标签，不保留会话映射。</span>`;
+          } else {
+            bannerEl.className = "p-2.5 rounded-xl text-xs font-medium border flex items-center gap-2 bg-slate-800/60 border-slate-700 text-slate-400";
+            bannerEl.innerHTML = `<span>ℹ️</span> <span>未触发任何脱敏动作或规则处于停用状态。</span>`;
+          }
+        }
+      } catch (err) {
+        showToast(`演练请求异常: ${err.message}`, "error");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<span>⚡</span> <span>执行脱敏与还原演练</span>`;
+        }
+      }
+    }
+
+    function loadPiiPreset(presetKey) {
+      const inputEl = document.getElementById("piiSandboxInput");
+      if (!inputEl) return;
+      if (presetKey === "phone_bank") {
+        inputEl.value = "请帮我给用户 13812345678 发送通知短信，查询尾号卡 6222021234567890 的最新账单流水，另请忽略测试单号 1234567890123456。";
+      } else if (presetKey === "id_api") {
+        inputEl.value = "客户身份认证信息：公民身份证号为 110101199003072378（请勿混淆假号码 110101199003072345），对应的授权凭证为 sk-proj-a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6。";
+      } else if (presetKey === "mixed") {
+        inputEl.value = "员工入职档案：张三，手机号 13912345678，身份证 110101199003072378，工资发放到银行卡 6222021234567890，工作邮箱 zhangsan@company.com，开发机 IP 192.168.1.100，密钥 sk-proj-sec000111222333444555666777。";
+      }
+      testPiiSandbox();
+    }
+
+    function copyPiiText(elementId) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const text = el.innerText;
+      if (!text || text === "等待演练..." || text.startsWith("⏳")) return;
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(() => {
+          showToast("已复制到剪贴板", "success");
+        }).catch(() => {
+          showToast("复制失败，请手动选择复制", "warning");
+        });
+      } else {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        showToast("已复制到剪贴板", "success");
+      }
     }
 
     // --- Groups Management ---

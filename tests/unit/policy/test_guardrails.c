@@ -324,3 +324,206 @@ TEST_CASE(test_guardrails_webhook_unit)
 
     guardrails_destroy(ctx);
 }
+
+TEST_CASE(test_pii_checksum_algorithms)
+{
+    /* 1. Luhn Mod 10 for Bank / Credit Card */
+    /* Valid test cards */
+    TEST_ASSERT(guardrails_validate_luhn("4532015112830366") == true,
+                "valid luhn Visa (16 digits)");
+    TEST_ASSERT(guardrails_validate_luhn("6222021234567894") == true,
+                "valid luhn UnionPay (16 digits)");
+    TEST_ASSERT(guardrails_validate_luhn("378282246310005") == true, "valid luhn Amex (15 digits)");
+    /* Invalid cards / random numbers / wrong lengths */
+    TEST_ASSERT(guardrails_validate_luhn("4532015112830367") == false, "invalid luhn check digit");
+    TEST_ASSERT(guardrails_validate_luhn("1234567890123456") == false,
+                "sequential digits fail luhn");
+    TEST_ASSERT(guardrails_validate_luhn("12345") == false, "too short card fails luhn");
+    TEST_ASSERT(guardrails_validate_luhn("123456789012345678901") == false,
+                "too long card fails luhn");
+    TEST_ASSERT(guardrails_validate_luhn(NULL) == false, "null string fails luhn");
+
+    /* 2. ISO 7064:1983.MOD 11-2 for Chinese 18-digit ID Card */
+    /* Valid ID cards (Standard checksums) */
+    TEST_ASSERT(guardrails_validate_id_card_mod11("110101199003072375") == true,
+                "valid id card digit 1");
+    TEST_ASSERT(guardrails_validate_id_card_mod11("110101199003072383") == true,
+                "valid id card digit 2");
+    /* Valid ID with 'X' check digit */
+    TEST_ASSERT(guardrails_validate_id_card_mod11("11010119900307002X") == true,
+                "valid id card with X");
+    TEST_ASSERT(guardrails_validate_id_card_mod11("11010119900307002x") == true,
+                "valid id card with lowercase x");
+    /* Invalid ID cards */
+    TEST_ASSERT(guardrails_validate_id_card_mod11("110101199003072378") == false,
+                "wrong checksum digit fails");
+    TEST_ASSERT(guardrails_validate_id_card_mod11("123456789012345678") == false,
+                "random 18 digits fail MOD 11-2");
+    TEST_ASSERT(guardrails_validate_id_card_mod11("11010119900307") == false, "short length fails");
+    TEST_ASSERT(guardrails_validate_id_card_mod11(NULL) == false, "null fails");
+}
+
+TEST_CASE(test_pii_session_map_and_partial_masking)
+{
+    /* 1. Partial masking tests */
+    char masked[128];
+
+    guardrails_mask_partial_phone("13812345678", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "138****5678") == 0, "phone partial mask 138****5678");
+
+    guardrails_mask_partial_id_card("110101199003072375", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "110101********2375") == 0,
+                "id card partial mask 110101********2375");
+
+    guardrails_mask_partial_bank_card("6222021234567894", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "622202******7894") == 0, "bank card partial mask 622202******7894");
+
+    guardrails_mask_partial_email("alice.wonder@company.com", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "a***r@company.com") == 0, "email partial mask a***r@company.com");
+
+    guardrails_mask_partial_api_key("sk-proj-1234567890abcdef123456", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "sk-proj-******3456") == 0,
+                "api key partial mask sk-proj-******3456");
+
+    guardrails_mask_partial_ip("192.168.1.100", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "192.168.*.*") == 0, "ip partial mask 192.168.*.*");
+
+    /* 2. Session mapping table operations */
+    pii_session_map_t map;
+    memset(&map, 0, sizeof map);
+
+    const char* tok1 = pii_session_map_get_or_create(&map, PII_TYPE_PHONE, "13812345678");
+    TEST_ASSERT(tok1 != NULL, "tok1 created");
+    TEST_ASSERT(strcmp(tok1, "[PHONE_1]") == 0, "first phone token [PHONE_1]");
+    TEST_ASSERT(map.count == 1, "map count is 1");
+
+    /* Same value returns existing token (referential consistency) */
+    const char* tok1_dup = pii_session_map_get_or_create(&map, PII_TYPE_PHONE, "13812345678");
+    TEST_ASSERT(strcmp(tok1_dup, "[PHONE_1]") == 0, "duplicate returns same token");
+    TEST_ASSERT(map.count == 1, "map count unchanged on duplicate");
+
+    /* Second distinct value creates [PHONE_2] */
+    const char* tok2 = pii_session_map_get_or_create(&map, PII_TYPE_PHONE, "13900001111");
+    TEST_ASSERT(strcmp(tok2, "[PHONE_2]") == 0, "second phone token [PHONE_2]");
+    TEST_ASSERT(map.count == 2, "map count is 2");
+
+    /* Reverse lookup */
+    const char* orig1 = pii_session_map_lookup_token(&map, "[PHONE_1]");
+    TEST_ASSERT(orig1 != NULL && strcmp(orig1, "13812345678") == 0,
+                "lookup [PHONE_1] returns original");
+    const char* orig2 = pii_session_map_lookup_token(&map, "[PHONE_2]");
+    TEST_ASSERT(orig2 != NULL && strcmp(orig2, "13900001111") == 0,
+                "lookup [PHONE_2] returns original");
+    TEST_ASSERT(pii_session_map_lookup_token(&map, "[PHONE_3]") == NULL,
+                "lookup missing token returns NULL");
+}
+
+TEST_CASE(test_pii_inbound_transformation)
+{
+    guardrails_ctx_t* ctx = guardrails_create();
+    TEST_ASSERT(ctx != NULL, "guardrails_create");
+
+    /* 1. Anonymize & Restore action (creates token in map) */
+    pii_session_map_t map;
+    memset(&map, 0, sizeof map);
+    const char*  txt1 = "联系张三 13812345678 或者李四 13812345678";
+    int          changed = 0;
+    pii_action_t act = PII_ACTION_OFF;
+    char* trans1 = guardrails_transform_pii_text(ctx, txt1, strlen(txt1), &map, &act, &changed);
+
+    TEST_ASSERT(changed == 1, "text transformed");
+    TEST_ASSERT(act == PII_ACTION_ANONYMIZE_RESTORE, "action anonymize");
+    TEST_ASSERT(trans1 != NULL, "trans1 not null");
+    TEST_ASSERT(strstr(trans1, "[PHONE_1]") != NULL, "contains [PHONE_1]");
+    TEST_ASSERT(strstr(trans1, "13812345678") == NULL, "original phone replaced");
+    TEST_ASSERT(map.count == 1, "map has 1 entry");
+    free(trans1);
+
+    /* 2. Bank card with Luhn verification (valid vs invalid) */
+    /* Valid UnionPay card passes checksum -> masked */
+    const char* txt2 = "卡号 6222021234567894 请查收";
+    changed = 0;
+    char* trans2 = guardrails_transform_pii_text(ctx, txt2, strlen(txt2), &map, &act, &changed);
+    TEST_ASSERT(changed == 1, "valid bank card recognized");
+    TEST_ASSERT(trans2 != NULL, "trans2 not null");
+    free(trans2);
+
+    /* Invalid number of same length fails Luhn -> untouched */
+    const char* txt3 = "订单号 1234567890123456 请注意";
+    changed = 0;
+    char* trans3 = guardrails_transform_pii_text(ctx, txt3, strlen(txt3), &map, &act, &changed);
+    TEST_ASSERT(changed == 0, "invalid card number ignored by Luhn");
+    TEST_ASSERT(trans3 == NULL, "no change returns NULL");
+
+    /* 3. Chinese ID card with MOD 11-2 verification (valid vs invalid) */
+    const char* txt4 = "身份证 110101199003072375 归属地";
+    changed = 0;
+    char* trans4 = guardrails_transform_pii_text(ctx, txt4, strlen(txt4), &map, &act, &changed);
+    TEST_ASSERT(changed == 1, "valid ID card recognized");
+    TEST_ASSERT(trans4 != NULL, "trans4 not null");
+    free(trans4);
+
+    const char* txt5 = "编号 123456789012345678 请核对";
+    changed = 0;
+    char* trans5 = guardrails_transform_pii_text(ctx, txt5, strlen(txt5), &map, &act, &changed);
+    TEST_ASSERT(changed == 0, "invalid 18-digit number ignored by MOD 11-2");
+    TEST_ASSERT(trans5 == NULL, "no change returns NULL");
+
+    /* 4. API Key blocking action */
+    const char* txt6 = "我的密钥是 sk-1234567890abcdef1234567890";
+    changed = 0;
+    act = PII_ACTION_OFF;
+    char* trans6 = guardrails_transform_pii_text(ctx, txt6, strlen(txt6), &map, &act, &changed);
+    TEST_ASSERT(act == PII_ACTION_BLOCK, "api_key triggers BLOCK action");
+    free(trans6);
+
+    guardrails_destroy(ctx);
+}
+
+TEST_CASE(test_pii_outbound_restoration)
+{
+    pii_session_map_t map;
+    memset(&map, 0, sizeof map);
+    strcpy(map.entries[0].placeholder, "[PHONE_1]");
+    strcpy(map.entries[0].original, "13812345678");
+    strcpy(map.entries[1].placeholder, "[ID_CARD_1]");
+    strcpy(map.entries[1].original, "110101199003072378");
+    map.count = 2;
+
+    /* 1. Full text restoration */
+    const char* reply = "已经向用户 [PHONE_1]（身份证 [ID_CARD_1]）发送验证码。";
+    int         changed = 0;
+    char*       restored = guardrails_restore_pii_text(reply, strlen(reply), &map, &changed);
+
+    TEST_ASSERT(changed == 1, "restored text changed");
+    TEST_ASSERT(restored != NULL, "restored not null");
+    TEST_ASSERT(strstr(restored, "[PHONE_1]") == NULL, "token replaced");
+    TEST_ASSERT(strstr(restored, "13812345678") != NULL, "original phone present");
+    TEST_ASSERT(strstr(restored, "110101199003072378") != NULL, "original ID present");
+    free(restored);
+
+    /* 2. SSE streaming chunk boundary split restoration */
+    /* Simulate token [PHONE_1] split across two consecutive chunks */
+    pii_stream_filter_t sf;
+    guardrails_stream_filter_init(&sf, &map);
+
+    char   out1[128] = {0};
+    size_t out1_len = 0;
+    /* Chunk 1 ends in partial token "[PH" */
+    guardrails_stream_filter_feed(
+        &sf, "data: {\"content\":\"call [PH", 26, out1, sizeof out1, &out1_len);
+    TEST_ASSERT(strstr(out1, "[PH") == NULL, "partial token buffered, not emitted yet");
+
+    char   out2[128] = {0};
+    size_t out2_len = 0;
+    /* Chunk 2 supplies "ONE_1] now\"}\n\n" */
+    guardrails_stream_filter_feed(&sf, "ONE_1] now\"}\n\n", 14, out2, sizeof out2, &out2_len);
+    TEST_ASSERT(strstr(out2, "13812345678") != NULL, "split token restored to real phone");
+    TEST_ASSERT(strstr(out2, "[PHONE_1]") == NULL, "no placeholder in output");
+
+    /* Flush filter */
+    char   out_fin[64] = {0};
+    size_t fin_len = 0;
+    guardrails_stream_filter_flush(&sf, out_fin, sizeof out_fin, &fin_len);
+    TEST_ASSERT(fin_len == 0, "no residual bytes on clean termination");
+}

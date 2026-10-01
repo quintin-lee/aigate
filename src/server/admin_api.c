@@ -3222,6 +3222,252 @@ guardrails_webhook_test_handler(
     return finish_json(status, body, len, 200, out);
 }
 
+/* ------------------------------------------------------------ PII guardrails */
+
+static const char*
+pii_type_to_str(pii_type_t t)
+{
+    switch (t) {
+    case PII_TYPE_PHONE:
+        return "phone";
+    case PII_TYPE_ID_CARD:
+        return "id_card";
+    case PII_TYPE_BANK_CARD:
+        return "bank_card";
+    case PII_TYPE_EMAIL:
+        return "email";
+    case PII_TYPE_API_KEY:
+        return "api_key";
+    case PII_TYPE_IP_ADDRESS:
+        return "ip_address";
+    default:
+        return "unknown";
+    }
+}
+
+static pii_type_t
+pii_type_from_str(const char* s)
+{
+    if (s == NULL) {
+        return PII_TYPE_COUNT;
+    }
+    if (strcmp(s, "phone") == 0) {
+        return PII_TYPE_PHONE;
+    }
+    if (strcmp(s, "id_card") == 0) {
+        return PII_TYPE_ID_CARD;
+    }
+    if (strcmp(s, "bank_card") == 0) {
+        return PII_TYPE_BANK_CARD;
+    }
+    if (strcmp(s, "email") == 0) {
+        return PII_TYPE_EMAIL;
+    }
+    if (strcmp(s, "api_key") == 0) {
+        return PII_TYPE_API_KEY;
+    }
+    if (strcmp(s, "ip_address") == 0 || strcmp(s, "ip") == 0) {
+        return PII_TYPE_IP_ADDRESS;
+    }
+    return PII_TYPE_COUNT;
+}
+
+static const char*
+pii_action_to_str(pii_action_t act)
+{
+    switch (act) {
+    case PII_ACTION_OFF:
+        return "off";
+    case PII_ACTION_ANONYMIZE_RESTORE:
+        return "anonymize_restore";
+    case PII_ACTION_MASK_PARTIAL:
+        return "mask_partial";
+    case PII_ACTION_REDACT_TAG:
+        return "redact_tag";
+    case PII_ACTION_BLOCK:
+        return "block";
+    default:
+        return "off";
+    }
+}
+
+static pii_action_t
+pii_action_from_str(const char* s)
+{
+    if (s == NULL) {
+        return PII_ACTION_OFF;
+    }
+    if (strcmp(s, "anonymize_restore") == 0) {
+        return PII_ACTION_ANONYMIZE_RESTORE;
+    }
+    if (strcmp(s, "mask_partial") == 0) {
+        return PII_ACTION_MASK_PARTIAL;
+    }
+    if (strcmp(s, "redact_tag") == 0) {
+        return PII_ACTION_REDACT_TAG;
+    }
+    if (strcmp(s, "block") == 0) {
+        return PII_ACTION_BLOCK;
+    }
+    return PII_ACTION_OFF;
+}
+
+/** @brief GET /admin/v1/guardrails/pii: get active PII rules configuration. */
+static int
+guardrails_pii_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    guardrails_ctx_t* gr = (adm != NULL && adm->ac != NULL) ? adm->ac->gr : NULL;
+    pii_config_t      cfg;
+    if (gr != NULL) {
+        cfg = guardrails_get_pii_config(gr);
+    } else {
+        memset(&cfg, 0, sizeof(cfg));
+    }
+
+    json_t* arr = json_array();
+    for (int i = 0; i < PII_TYPE_COUNT; i++) {
+        json_t* item = json_object();
+        json_object_set_new(item, "entity", json_string(pii_type_to_str((pii_type_t)i)));
+        json_object_set_new(
+            item,
+            "name",
+            json_string(cfg.rules[i].name[0] ? cfg.rules[i].name : pii_type_to_str((pii_type_t)i)));
+        json_object_set_new(item, "tag", json_string(cfg.rules[i].tag));
+        json_object_set_new(item, "enabled", json_boolean(cfg.rules[i].enabled));
+        json_object_set_new(item, "action", json_string(pii_action_to_str(cfg.rules[i].action)));
+        json_array_append_new(arr, item);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "rules", arr);
+    return finish_json(status, body, len, 200, out);
+}
+
+/** @brief PUT /admin/v1/guardrails/pii: update PII rules configuration. */
+static int
+guardrails_pii_put(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    if (req_body == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "missing request body");
+    }
+    json_error_t jerr;
+    json_t*      root = json_loads((const char*)req_body, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, body, len, 400, "bad_request", "invalid json object");
+    }
+
+    guardrails_ctx_t* gr = (adm != NULL && adm->ac != NULL) ? adm->ac->gr : NULL;
+    if (gr == NULL) {
+        json_decref(root);
+        return finish_error(
+            status, body, len, 500, "internal_error", "guardrails engine not initialized");
+    }
+
+    pii_config_t cfg = guardrails_get_pii_config(gr);
+
+    json_t* arr = json_object_get(root, "rules");
+    if (arr != NULL && json_is_array(arr)) {
+        size_t  idx;
+        json_t* item;
+        json_array_foreach(arr, idx, item)
+        {
+            if (!json_is_object(item)) {
+                continue;
+            }
+            const char* ent_str = json_string_value(json_object_get(item, "entity"));
+            if (ent_str == NULL) {
+                ent_str = json_string_value(json_object_get(item, "name"));
+            }
+            pii_type_t t = pii_type_from_str(ent_str);
+            if (t >= PII_TYPE_COUNT) {
+                continue;
+            }
+            json_t* en = json_object_get(item, "enabled");
+            if (en != NULL && json_is_boolean(en)) {
+                cfg.rules[t].enabled = json_is_true(en);
+            }
+            const char* act_str = json_string_value(json_object_get(item, "action"));
+            if (act_str != NULL) {
+                cfg.rules[t].action = pii_action_from_str(act_str);
+            }
+        }
+    }
+
+    guardrails_set_pii_config(gr, &cfg);
+    json_decref(root);
+
+    json_t* out = json_object();
+    json_object_set_new(out, "status", json_string("ok"));
+    json_object_set_new(out, "updated", json_true());
+    return finish_json(status, body, len, 200, out);
+}
+
+/** @brief POST /admin/v1/guardrails/pii/test: simulate PII anonymization and restoration in real-time. */
+static int
+guardrails_pii_test(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    if (req_body == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "missing request body");
+    }
+    json_error_t jerr;
+    json_t*      root = json_loads((const char*)req_body, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, body, len, 400, "bad_request", "invalid json object");
+    }
+
+    const char* text = json_string_value(json_object_get(root, "text"));
+    if (text == NULL) {
+        json_decref(root);
+        return finish_error(status, body, len, 400, "bad_request", "missing 'text' field");
+    }
+
+    guardrails_ctx_t* gr = (adm != NULL && adm->ac != NULL) ? adm->ac->gr : NULL;
+    if (gr == NULL) {
+        json_decref(root);
+        return finish_error(
+            status, body, len, 500, "internal_error", "guardrails engine not initialized");
+    }
+
+    pii_session_map_t map;
+    memset(&map, 0, sizeof(map));
+    pii_action_t max_action = PII_ACTION_OFF;
+    int          changed = 0;
+
+    char* trans =
+        guardrails_transform_pii_text(gr, text, strlen(text), &map, &max_action, &changed);
+    const char* anon_text = (changed && trans != NULL) ? trans : text;
+
+    int   r_changed = 0;
+    char* restored = guardrails_restore_pii_text(anon_text, strlen(anon_text), &map, &r_changed);
+    const char* rest_text = (r_changed && restored != NULL) ? restored : anon_text;
+
+    json_t* det_arr = json_array();
+    for (int i = 0; i < map.count; i++) {
+        json_t* det = json_object();
+        json_object_set_new(det, "type", json_string(pii_type_to_str(map.entries[i].type)));
+        json_object_set_new(det, "placeholder", json_string(map.entries[i].placeholder));
+        json_object_set_new(det, "original", json_string(map.entries[i].original));
+        json_array_append_new(det_arr, det);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "anonymized", json_string(anon_text));
+    json_object_set_new(out, "restored_preview", json_string(rest_text));
+    json_object_set_new(out, "detected_entities", det_arr);
+    json_object_set_new(out, "highest_action", json_string(pii_action_to_str(max_action)));
+
+    free(trans);
+    free(restored);
+    json_decref(root);
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ response cache */
 
 static int
@@ -3429,6 +3675,19 @@ admin_dispatch(admin_ctx_t* adm,
                 return guardrails_rule_list(adm, out_status, out_body, out_len, query);
             }
         }
+        if (strcmp(rest, "guardrails/pii") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                return guardrails_pii_get(adm, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "PUT") == 0) {
+                return guardrails_pii_put(adm, out_status, out_body, out_len, body);
+            }
+        }
+        if (strcmp(rest, "guardrails/pii/test") == 0) {
+            if (strcmp(method, "POST") == 0) {
+                return guardrails_pii_test(adm, out_status, out_body, out_len, body);
+            }
+        }
         if (strcmp(rest, "guardrails/reload") == 0) {
             if (strcmp(method, "POST") == 0) {
                 return guardrails_reload(adm, out_status, out_body, out_len);
@@ -3439,7 +3698,7 @@ admin_dispatch(admin_ctx_t* adm,
                 return guardrails_webhook_test_handler(adm, out_status, out_body, out_len, body);
             }
         }
-        if (rest[10] == '/') {
+        if (rest[10] == '/' && strncmp(rest + 11, "pii", 3) != 0) {
             if (strcmp(method, "PATCH") == 0 || strcmp(method, "PUT") == 0) {
                 return guardrails_rule_update(adm, out_status, out_body, out_len, rest + 11, body);
             }

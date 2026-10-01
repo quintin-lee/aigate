@@ -3523,3 +3523,74 @@ TEST_CASE(test_admin_prompt_template_crud)
 
     teardown_admin(ps, &core, &db);
 }
+
+void
+test_admin_pii_endpoints(void)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. GET /admin/v1/guardrails/pii */
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails/pii",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET guardrails/pii returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"rules\"") != NULL, "body contains rules");
+    TEST_ASSERT(strstr(body, "phone") != NULL, "body contains phone entity");
+    free(body);
+    body = NULL;
+
+    /* 2. PUT /admin/v1/guardrails/pii */
+    const char* put_payload =
+        "{\"rules\":[{\"entity\":\"phone\",\"enabled\":true,\"action\":\"mask_partial\"},"
+        "{\"entity\":\"api_key\",\"enabled\":true,\"action\":\"block\"}]}";
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails/pii",
+                   "PUT",
+                   NULL,
+                   "admin-secret-token",
+                   put_payload,
+                   strlen(put_payload),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "PUT guardrails/pii returns 200");
+    free(body);
+    body = NULL;
+
+    /* 3. POST /admin/v1/guardrails/pii/test (Sandbox) */
+    const char* test_payload = "{\"text\":\"联系客户 13812345678 查银行卡 6222021234567890\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/guardrails/pii/test",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   test_payload,
+                   strlen(test_payload),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "POST guardrails/pii/test returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"anonymized\"") != NULL, "contains anonymized");
+    TEST_ASSERT(strstr(body, "\"restored_preview\"") != NULL, "contains restored_preview");
+    TEST_ASSERT(strstr(body, "\"detected_entities\"") != NULL, "contains detected_entities");
+    free(body);
+
+    teardown_admin(ps, &core, &db);
+}

@@ -1,6 +1,6 @@
 # 数据脱敏与安全风控升级 (PII Masking & Advanced Guardrails) 设计规范
 
-- **状态**: 草案 (Draft / Pending Approval)
+- **状态**: 已实现并全量验证通过 (Implemented & Verified)
 - **创建日期**: 2026-10-01
 - **责任模块**: `src/policy/guardrails.h`, `src/policy/guardrails.c`, `src/core/pipeline_chat.c`, `src/server/admin_api.c`, `web/admin.html`
 - **目标**: 构建支持双向无感去标识化、高精度校验和算法（Luhn/MOD 11-2）、多级策略（可逆还原/掩码/擦除/阻断）及在线演练沙箱的企业级数据脱敏与安全风控体系。
@@ -128,18 +128,18 @@ typedef struct {
 
 ## 4. 验证与验收标准 (Acceptance Criteria)
 
-- [ ] 正则与算法验证：
+- [x] 正则与算法验证：
   - 手机号检测国内与国际格式；
   - 18 位身份证需通过 MOD 11-2 校验和验证，普通 18 位随机数不触发；
   - 银行卡需通过 Luhn 校验和验证，普通长订单号不触发；
   - API Key、JWT、私钥报头能稳定识别。
-- [ ] 策略动作验证：
+- [x] 策略动作验证：
   - `anonymize_restore`：入站正确替换为 `[ENTITY_N]`，出站（含非流式与流式 SSE）100% 还原；
   - `mask_partial`：正确展示为带 `****` 的部分打码串；
   - `block`：请求被拦截并返回 400，审计日志记录拦截事件。
-- [ ] 控制台功能验证：
+- [x] 控制台功能验证：
   - 在 `web/admin.html`「安全风控」页中可自由配置策略并保存；
   - 实时脱敏沙箱演练可正确展示脱敏与还原效果。
-- [ ] 编译与构建标准：
+- [x] 编译与构建标准：
   - CMake 构建成功，全量单元测试与集成测试通过（100%）；
   - `Doxygen: 0 warnings`（严格保持零 Doxygen 告警）。
