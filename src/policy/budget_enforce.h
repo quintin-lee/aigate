@@ -54,9 +54,8 @@ int budget_enforce_get_key_usage(budget_enforce_mgr_t* mgr,
 int budget_enforce_get_group_usage(budget_enforce_mgr_t* mgr, int64_t group_id, double* out_cost);
 
 /** @brief Set/update monthly budget limit for a group. */
-void budget_enforce_set_group_budget(budget_enforce_mgr_t* mgr,
-                                     int64_t               group_id,
-                                     double                budget_usd);
+void
+budget_enforce_set_group_budget(budget_enforce_mgr_t* mgr, int64_t group_id, double budget_usd);
 
 struct event_bus;
 /** @brief Attach event bus for publishing budget warning events. */

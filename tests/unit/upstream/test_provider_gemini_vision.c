@@ -114,9 +114,8 @@ TEST_CASE(test_gemini_vision_unknown_mime_fallback)
 TEST_CASE(test_gemini_vision_text_only_string)
 {
     model_rec_t route = make_gemini_route();
-    const char* in_body =
-        "{\"model\":\"gemini-1.5-pro\","
-        "\"messages\":[{\"role\":\"user\",\"content\":\"Hello Gemini\"}]}";
+    const char* in_body = "{\"model\":\"gemini-1.5-pro\","
+                          "\"messages\":[{\"role\":\"user\",\"content\":\"Hello Gemini\"}]}";
 
     char        url[512];
     const char* hdrs[4][2];

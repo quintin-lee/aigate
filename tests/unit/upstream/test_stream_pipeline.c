@@ -209,9 +209,8 @@ TEST_CASE(test_stream_pipeline_normal)
     rq.path = "/v1/chat/completions";
     rq.bearer = "stream-key";
     rq.client_ip = "127.0.0.1";
-    const char* req_body =
-        "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
-        "\"content\":\"hi\"}]}";
+    const char* req_body = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"hi\"}]}";
     rq.body = req_body;
     rq.body_len = strlen(req_body);
 
@@ -284,9 +283,8 @@ TEST_CASE(test_stream_pipeline_early_error)
     rq.path = "/v1/chat/completions";
     rq.bearer = "stream-key";
     rq.client_ip = "127.0.0.1";
-    const char* req_body =
-        "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
-        "\"content\":\"hi\"}]}";
+    const char* req_body = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"hi\"}]}";
     rq.body = req_body;
     rq.body_len = strlen(req_body);
 
@@ -349,9 +347,8 @@ TEST_CASE(test_stream_pipeline_4xx_passthrough)
     rq.path = "/v1/chat/completions";
     rq.bearer = "stream-key";
     rq.client_ip = "127.0.0.1";
-    const char* req_body =
-        "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
-        "\"content\":\"hi\"}]}";
+    const char* req_body = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"hi\"}]}";
     rq.body = req_body;
     rq.body_len = strlen(req_body);
 
@@ -402,9 +399,8 @@ TEST_CASE(test_stream_pipeline_silence_timeout)
     rq.bearer = "stream-key";
     rq.client_ip = "127.0.0.1";
     /* stream-slow triggers 1.2s sleep between chunks in mock_upstream */
-    const char* req_body =
-        "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
-        "\"content\":\"stream-slow\"}]}";
+    const char* req_body = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"stream-slow\"}]}";
     rq.body = req_body;
     rq.body_len = strlen(req_body);
 
@@ -457,9 +453,8 @@ TEST_CASE(test_stream_pipeline_cache_dual_interop)
     /* 1. First streaming request: passes through upstream mock and accumulates into cache */
     struct cap c1;
     memset(&c1, 0, sizeof c1);
-    const char* req1 =
-        "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
-        "\"content\":\"cache-stream-test\"}]}";
+    const char* req1 = "{\"model\":\"gpt-4o\",\"stream\":true,\"messages\":[{\"role\":\"user\","
+                       "\"content\":\"cache-stream-test\"}]}";
     aigate_request_ctx rq1 = {
         .method = "POST",
         .path = "/v1/chat/completions",
@@ -493,9 +488,8 @@ TEST_CASE(test_stream_pipeline_cache_dual_interop)
     /* 3. Third request with NON-STREAMING (stream: false): should HIT cache and return JSON! */
     struct cap c3;
     memset(&c3, 0, sizeof c3);
-    const char* req3 =
-        "{\"model\":\"gpt-4o\",\"stream\":false,\"messages\":[{\"role\":\"user\","
-        "\"content\":\"cache-stream-test\"}]}";
+    const char* req3 = "{\"model\":\"gpt-4o\",\"stream\":false,\"messages\":[{\"role\":\"user\","
+                       "\"content\":\"cache-stream-test\"}]}";
     aigate_request_ctx rq3 = {
         .method = "POST",
         .path = "/v1/chat/completions",

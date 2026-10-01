@@ -356,9 +356,8 @@ int pg_store_list_guardrails_rules(const pg_store_t* ps, guardrail_rule_t* out, 
  *  @param rule Rule content (the id field is ignored).
  *  @param out_id Receives the new rule id.
  *  @return 0 on success; -1 on storage error. */
-int pg_store_create_guardrails_rule(const pg_store_t*       ps,
-                                    const guardrail_rule_t* rule,
-                                    long*                   out_id);
+int
+pg_store_create_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule, long* out_id);
 /** @brief Full-field update of a guardrails rule by id.
  *  @return 0 on success; -1 on storage error. */
 int pg_store_update_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t* rule);

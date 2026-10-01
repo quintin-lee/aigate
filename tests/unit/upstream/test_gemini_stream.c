@@ -55,12 +55,10 @@ TEST_CASE(test_gemini_streaming_bridge_chunks)
     TEST_ASSERT(b != NULL, "bridge new");
     TEST_ASSERT(!g_provider_gemini.stream_bridge_headers_sent(b), "headers not sent initially");
 
-    const char* chunk1 =
-        "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": "
-        "\"Hello\"}], \"role\": \"model\"}}]}\n\n";
-    const char* chunk2 =
-        "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \" "
-        "Gemini\"}], \"role\": \"model\"}}]}\n\n";
+    const char* chunk1 = "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": "
+                         "\"Hello\"}], \"role\": \"model\"}}]}\n\n";
+    const char* chunk2 = "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \" "
+                         "Gemini\"}], \"role\": \"model\"}}]}\n\n";
     const char* chunk3 =
         "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": \" streaming!\"}], "
         "\"role\": \"model\"}, \"finishReason\": \"STOP\"}], \"usageMetadata\": "
@@ -163,10 +161,9 @@ TEST_CASE(test_gemini_streaming_client_abort)
     TEST_ASSERT(b != NULL, "bridge new");
 
     /* A content delta triggers an output write; the write fails, so feed must abort. */
-    const char* chunk =
-        "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": "
-        "\"Hi\"}], \"role\": \"model\"}}]}\n\n";
-    int feed_rc = g_provider_gemini.stream_bridge_feed(b, chunk, strlen(chunk));
+    const char* chunk = "data: {\"candidates\": [{\"content\": {\"parts\": [{\"text\": "
+                        "\"Hi\"}], \"role\": \"model\"}}]}\n\n";
+    int         feed_rc = g_provider_gemini.stream_bridge_feed(b, chunk, strlen(chunk));
     TEST_ASSERT(feed_rc == -1, "feed returns -1 on client abort, got %d", feed_rc);
 
     g_provider_gemini.stream_bridge_free(b);

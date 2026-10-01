@@ -383,9 +383,9 @@ TEST_CASE(test_model_router_target_provider_override)
     int               count = 0;
 
     /* 1. When target_provider is NULL, standard routing applies */
-    TEST_ASSERT(
-        model_router_select_candidates_targeted(NULL, NULL, &m, NULL, cands, 8, &count) == 0,
-        "select null target");
+    TEST_ASSERT(model_router_select_candidates_targeted(NULL, NULL, &m, NULL, cands, 8, &count) ==
+                    0,
+                "select null target");
     TEST_ASSERT(count == 3, "returns all targets");
 
     /* 2. When target_provider is 'azure', azure target must be placed at index 0 */

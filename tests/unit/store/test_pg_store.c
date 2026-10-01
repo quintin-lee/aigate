@@ -1012,18 +1012,18 @@ TEST_CASE(test_pg_fake_usage_flush_and_query)
     r2.completion_tokens = 22;
     TEST_ASSERT(pg_store_ops(ps)->flush_usage(&db, &r2, 1) == 0, "flush r2");
 
-    TEST_ASSERT(
-        pg_store_ops(ps)->query_usage(&db, 7, NULL, 1699900000, 1700100000, buf, 4, &n) == 0,
-        "query all models");
+    TEST_ASSERT(pg_store_ops(ps)->query_usage(&db, 7, NULL, 1699900000, 1700100000, buf, 4, &n) ==
+                    0,
+                "query all models");
     TEST_ASSERT(n == 1, "one merged row");
-    TEST_ASSERT(
-        buf[0].requests == 5 && buf[0].prompt_tokens == 50 && buf[0].completion_tokens == 55,
-        "aggregated counts");
+    TEST_ASSERT(buf[0].requests == 5 && buf[0].prompt_tokens == 50 &&
+                    buf[0].completion_tokens == 55,
+                "aggregated counts");
 
     n = 0;
-    TEST_ASSERT(
-        pg_store_ops(ps)->query_usage(&db, 8, NULL, 1699900000, 1700100000, buf, 4, &n) == 0,
-        "query other key");
+    TEST_ASSERT(pg_store_ops(ps)->query_usage(&db, 8, NULL, 1699900000, 1700100000, buf, 4, &n) ==
+                    0,
+                "query other key");
     TEST_ASSERT(n == 0, "no rows for other key");
 
     pg_store_close(ps);
@@ -1188,10 +1188,10 @@ TEST_CASE(test_pg_fake_key_budget_fields)
     k.guardrails_enabled = 0;
     k.monthly_cost_budget = 250.75;
     k.monthly_token_budget = 1000000;
-    TEST_ASSERT(ops.update_key(
-                    ops.ctx,
-                    &k,
-                    KMASK_GUARDRAILS | KMASK_MONTHLY_COST_BUDGET | KMASK_MONTHLY_TOKEN_BUDGET) == 0,
+    TEST_ASSERT(ops.update_key(ops.ctx,
+                               &k,
+                               KMASK_GUARDRAILS | KMASK_MONTHLY_COST_BUDGET |
+                                   KMASK_MONTHLY_TOKEN_BUDGET) == 0,
                 "update budget fields");
 
     memset(&out, 0, sizeof out);
@@ -1482,10 +1482,10 @@ TEST_CASE(test_pg_real_groups_and_cost)
     cost_row_t crows[16];
     int        n_crows = 0;
     time_t     t_now = time(NULL);
-    TEST_ASSERT(
-        ops->query_cost(
-            ops->ctx, (long)(t_now - 86400), (long)(t_now + 86400), crows, 16, &n_crows) == 0,
-        "query_cost");
+    TEST_ASSERT(ops->query_cost(
+                    ops->ctx, (long)(t_now - 86400), (long)(t_now + 86400), crows, 16, &n_crows) ==
+                    0,
+                "query_cost");
 
     /* 8. Clear key group_id and cleanup group */
     k.key_id = kid;
@@ -1560,9 +1560,9 @@ TEST_CASE(test_pg_fake_prompt_template)
     /* 2. Model prompt template update */
     strcpy(m.system_prompt, "Updated prompt");
     m.prompt_mode = 2; /* PROMPT_MODE_OVERRIDE */
-    TEST_ASSERT(
-        pg_store_ops(ps)->update_model(&db, &m, MMASK_SYSTEM_PROMPT | MMASK_PROMPT_MODE) == 0,
-        "update model prompt template");
+    TEST_ASSERT(pg_store_ops(ps)->update_model(&db, &m, MMASK_SYSTEM_PROMPT | MMASK_PROMPT_MODE) ==
+                    0,
+                "update model prompt template");
     memset(&m_out, 0, sizeof m_out);
     TEST_ASSERT(pg_store_ops(ps)->get_model(&db, "tmpl-model", &m_out) == 0, "get updated model");
     TEST_ASSERT(strcmp(m_out.system_prompt, "Updated prompt") == 0, "updated system_prompt");

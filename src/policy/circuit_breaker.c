@@ -503,14 +503,13 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
             e->state = CB_OPEN;
             e->open_until = now + cb->cooloff_sec;
             e->half_open_probe_active = 0;
-            AIGATE_LOG_WARN(
-                "circuit breaker for %s:%s reached %d failures (status %d), tripped to "
-                "OPEN until %ld",
-                e->model,
-                e->endpoint,
-                e->consecutive_failures,
-                http_status,
-                (long)e->open_until);
+            AIGATE_LOG_WARN("circuit breaker for %s:%s reached %d failures (status %d), tripped to "
+                            "OPEN until %ld",
+                            e->model,
+                            e->endpoint,
+                            e->consecutive_failures,
+                            http_status,
+                            (long)e->open_until);
             if (cb->eb != NULL) {
                 event_bus_publish_cb(
                     cb->eb, e->endpoint, e->model, "CLOSED", "OPEN", "failures reached threshold");

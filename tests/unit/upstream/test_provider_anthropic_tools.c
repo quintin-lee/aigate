@@ -26,15 +26,14 @@ make_route(void)
 TEST_CASE(test_anthropic_tools_request_build)
 {
     model_rec_t route = make_route();
-    const char* in_body =
-        "{\"model\":\"claude-3-5-sonnet-20241022\","
-        "\"messages\":[{\"role\":\"user\",\"content\":\"What's the weather?\"}],"
-        "\"tools\":[{\"type\":\"function\",\"function\":{"
-        "\"name\":\"get_weather\","
-        "\"description\":\"Get weather for a location\","
-        "\"parameters\":{\"type\":\"object\",\"properties\":{"
-        "\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],"
-        "\"tool_choice\":\"auto\"}";
+    const char* in_body = "{\"model\":\"claude-3-5-sonnet-20241022\","
+                          "\"messages\":[{\"role\":\"user\",\"content\":\"What's the weather?\"}],"
+                          "\"tools\":[{\"type\":\"function\",\"function\":{"
+                          "\"name\":\"get_weather\","
+                          "\"description\":\"Get weather for a location\","
+                          "\"parameters\":{\"type\":\"object\",\"properties\":{"
+                          "\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],"
+                          "\"tool_choice\":\"auto\"}";
 
     char        url[512];
     const char* hdrs[4][2];
@@ -67,13 +66,12 @@ TEST_CASE(test_anthropic_tools_request_build)
 /* --------------------------------------------- Test 2: tool_use response */
 TEST_CASE(test_anthropic_tool_use_response_parse)
 {
-    const char* ant_resp =
-        "{\"id\":\"msg_01\",\"type\":\"message\","
-        "\"role\":\"assistant\",\"model\":\"claude-3-5-sonnet-20241022\","
-        "\"stop_reason\":\"tool_use\","
-        "\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_01\","
-        "\"name\":\"get_weather\",\"input\":{\"location\":\"Beijing\"}}],"
-        "\"usage\":{\"input_tokens\":30,\"output_tokens\":10}}";
+    const char* ant_resp = "{\"id\":\"msg_01\",\"type\":\"message\","
+                           "\"role\":\"assistant\",\"model\":\"claude-3-5-sonnet-20241022\","
+                           "\"stop_reason\":\"tool_use\","
+                           "\"content\":[{\"type\":\"tool_use\",\"id\":\"toolu_01\","
+                           "\"name\":\"get_weather\",\"input\":{\"location\":\"Beijing\"}}],"
+                           "\"usage\":{\"input_tokens\":30,\"output_tokens\":10}}";
 
     char*  oai = NULL;
     size_t olen = 0;
@@ -111,15 +109,14 @@ TEST_CASE(test_anthropic_tool_use_response_parse)
 /* ----------------------------------------- Test 3: mixed text + tool_use */
 TEST_CASE(test_anthropic_mixed_text_and_tool_use)
 {
-    const char* ant_resp =
-        "{\"id\":\"msg_02\",\"type\":\"message\","
-        "\"role\":\"assistant\",\"model\":\"claude-3-5-sonnet-20241022\","
-        "\"stop_reason\":\"tool_use\","
-        "\"content\":["
-        "{\"type\":\"text\",\"text\":\"Let me check the weather.\"},"
-        "{\"type\":\"tool_use\",\"id\":\"toolu_02\",\"name\":\"get_weather\","
-        "\"input\":{\"location\":\"Shanghai\"}}],"
-        "\"usage\":{\"input_tokens\":40,\"output_tokens\":15}}";
+    const char* ant_resp = "{\"id\":\"msg_02\",\"type\":\"message\","
+                           "\"role\":\"assistant\",\"model\":\"claude-3-5-sonnet-20241022\","
+                           "\"stop_reason\":\"tool_use\","
+                           "\"content\":["
+                           "{\"type\":\"text\",\"text\":\"Let me check the weather.\"},"
+                           "{\"type\":\"tool_use\",\"id\":\"toolu_02\",\"name\":\"get_weather\","
+                           "\"input\":{\"location\":\"Shanghai\"}}],"
+                           "\"usage\":{\"input_tokens\":40,\"output_tokens\":15}}";
 
     char*  oai = NULL;
     size_t olen = 0;
@@ -144,17 +141,16 @@ TEST_CASE(test_anthropic_tool_result_message_build)
 {
     model_rec_t route = make_route();
     /* Conversation: user → assistant(tool_calls) → tool(result) */
-    const char* in_body =
-        "{\"model\":\"claude-3-5-sonnet-20241022\","
-        "\"messages\":["
-        "{\"role\":\"user\",\"content\":\"What's the weather in Beijing?\"},"
-        "{\"role\":\"assistant\",\"content\":null,"
-        "\"tool_calls\":[{\"id\":\"toolu_01\",\"type\":\"function\","
-        "\"function\":{\"name\":\"get_weather\",\"arguments\":\"{"
-        "\\\"location\\\":\\\"Beijing\\\"}\"}}]},"
-        "{\"role\":\"tool\",\"tool_call_id\":\"toolu_01\","
-        "\"content\":\"Sunny, 25C\"}"
-        "]}";
+    const char* in_body = "{\"model\":\"claude-3-5-sonnet-20241022\","
+                          "\"messages\":["
+                          "{\"role\":\"user\",\"content\":\"What's the weather in Beijing?\"},"
+                          "{\"role\":\"assistant\",\"content\":null,"
+                          "\"tool_calls\":[{\"id\":\"toolu_01\",\"type\":\"function\","
+                          "\"function\":{\"name\":\"get_weather\",\"arguments\":\"{"
+                          "\\\"location\\\":\\\"Beijing\\\"}\"}}]},"
+                          "{\"role\":\"tool\",\"tool_call_id\":\"toolu_01\","
+                          "\"content\":\"Sunny, 25C\"}"
+                          "]}";
 
     char        url[512];
     const char* hdrs[4][2];
@@ -239,48 +235,42 @@ TEST_CASE(test_anthropic_sse_tool_call_stream)
     snprintf(b.msg_id, sizeof b.msg_id, "msg_01");
 
     /* message_start */
-    const char* s1 =
-        "event: message_start\n"
-        "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\","
-        "\"type\":\"message\",\"role\":\"assistant\","
-        "\"model\":\"claude-3-5-sonnet-20241022\","
-        "\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n";
+    const char* s1 = "event: message_start\n"
+                     "data: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\","
+                     "\"type\":\"message\",\"role\":\"assistant\","
+                     "\"model\":\"claude-3-5-sonnet-20241022\","
+                     "\"usage\":{\"input_tokens\":25,\"output_tokens\":1}}}\n\n";
     anthropic_bridge_feed(&b, s1, strlen(s1));
 
     /* content_block_start (tool_use) */
-    const char* s2 =
-        "event: content_block_start\n"
-        "data: {\"type\":\"content_block_start\",\"index\":0,"
-        "\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_01\","
-        "\"name\":\"get_weather\",\"input\":{}}}\n\n";
+    const char* s2 = "event: content_block_start\n"
+                     "data: {\"type\":\"content_block_start\",\"index\":0,"
+                     "\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_01\","
+                     "\"name\":\"get_weather\",\"input\":{}}}\n\n";
     anthropic_bridge_feed(&b, s2, strlen(s2));
 
     /* input_json_delta: two partial JSON chunks */
-    const char* s3 =
-        "event: content_block_delta\n"
-        "data: {\"type\":\"content_block_delta\",\"index\":0,"
-        "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"loc\"}}\n\n";
+    const char* s3 = "event: content_block_delta\n"
+                     "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                     "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"loc\"}}\n\n";
     anthropic_bridge_feed(&b, s3, strlen(s3));
 
-    const char* s4 =
-        "event: content_block_delta\n"
-        "data: {\"type\":\"content_block_delta\",\"index\":0,"
-        "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"ation\\\":"
-        "\\\"Beijing\\\"\"}}\n\n";
+    const char* s4 = "event: content_block_delta\n"
+                     "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                     "\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"ation\\\":"
+                     "\\\"Beijing\\\"\"}}\n\n";
     anthropic_bridge_feed(&b, s4, strlen(s4));
 
     /* content_block_stop — should emit tool_calls SSE chunk */
-    const char* s5 =
-        "event: content_block_stop\n"
-        "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
+    const char* s5 = "event: content_block_stop\n"
+                     "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
     anthropic_bridge_feed(&b, s5, strlen(s5));
 
     /* message_delta stop_reason=tool_use */
-    const char* s6 =
-        "event: message_delta\n"
-        "data: {\"type\":\"message_delta\","
-        "\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},"
-        "\"usage\":{\"output_tokens\":20}}\n\n";
+    const char* s6 = "event: message_delta\n"
+                     "data: {\"type\":\"message_delta\","
+                     "\"delta\":{\"stop_reason\":\"tool_use\",\"stop_sequence\":null},"
+                     "\"usage\":{\"output_tokens\":20}}\n\n";
     anthropic_bridge_feed(&b, s6, strlen(s6));
 
     /* message_stop */
@@ -299,13 +289,12 @@ TEST_CASE(test_anthropic_sse_tool_call_stream)
 TEST_CASE(test_anthropic_tool_choice_required_mapping)
 {
     model_rec_t route = make_route();
-    const char* in_body =
-        "{\"model\":\"claude-3-5-sonnet-20241022\","
-        "\"messages\":[{\"role\":\"user\",\"content\":\"Call a tool\"}],"
-        "\"tools\":[{\"type\":\"function\",\"function\":{"
-        "\"name\":\"fn\",\"description\":\"d\","
-        "\"parameters\":{\"type\":\"object\",\"properties\":{}}}}],"
-        "\"tool_choice\":\"required\"}";
+    const char* in_body = "{\"model\":\"claude-3-5-sonnet-20241022\","
+                          "\"messages\":[{\"role\":\"user\",\"content\":\"Call a tool\"}],"
+                          "\"tools\":[{\"type\":\"function\",\"function\":{"
+                          "\"name\":\"fn\",\"description\":\"d\","
+                          "\"parameters\":{\"type\":\"object\",\"properties\":{}}}}],"
+                          "\"tool_choice\":\"required\"}";
 
     char        url[512];
     const char* hdrs[4][2];

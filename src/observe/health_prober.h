@@ -64,10 +64,8 @@ typedef struct health_prober {
 } health_prober_t;
 
 /** @brief Create a new health prober instance. */
-health_prober_t* health_prober_new(pg_store_t*    ps,
-                                   const uint8_t* master_key,
-                                   event_bus_t*   eb,
-                                   int            interval_sec);
+health_prober_t*
+health_prober_new(pg_store_t* ps, const uint8_t* master_key, event_bus_t* eb, int interval_sec);
 
 /** @brief Free the health prober instance. */
 void health_prober_free(health_prober_t* hp);

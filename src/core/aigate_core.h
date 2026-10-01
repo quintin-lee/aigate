@@ -99,10 +99,8 @@ int aigate_write_json(aigate_response_ctx* rc, int status, const char* body, siz
 
 /** @brief Write an OpenAI-shaped error body:
  *  {"error":{"message":...,"type":...,"code":HTTP status}}. */
-int aigate_write_error(aigate_response_ctx* rc,
-                       int                  http_status,
-                       const char*          type,
-                       const char*          message);
+int
+aigate_write_error(aigate_response_ctx* rc, int http_status, const char* type, const char* message);
 
 /** @brief Write Anthropic error JSON ({"type": "error", "error": {"type": ..., "message": ...}}). */
 int aigate_write_anthropic_error(aigate_response_ctx* rc,

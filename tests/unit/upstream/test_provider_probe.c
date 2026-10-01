@@ -47,13 +47,13 @@ TEST_CASE(test_probe_plan_gemini)
     provider_probe_plan_t plan;
     for (int i = 0; i < 2; i++) {
         const char* type = i == 0 ? "gemini" : "google";
-        TEST_ASSERT(
-            provider_probe_plan(type, "https://generativelanguage.googleapis.com", &plan) == 0,
-            "%s maps",
-            type);
-        TEST_ASSERT(
-            strcmp(plan.url, "https://generativelanguage.googleapis.com/v1beta/models") == 0,
-            "url");
+        TEST_ASSERT(provider_probe_plan(type, "https://generativelanguage.googleapis.com", &plan) ==
+                        0,
+                    "%s maps",
+                    type);
+        TEST_ASSERT(strcmp(plan.url, "https://generativelanguage.googleapis.com/v1beta/models") ==
+                        0,
+                    "url");
         TEST_ASSERT(strcmp(plan.auth_header, "x-goog-api-key") == 0, "auth hdr");
         TEST_ASSERT(plan.bearer == 0, "no bearer");
     }

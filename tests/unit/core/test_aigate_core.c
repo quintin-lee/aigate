@@ -888,9 +888,8 @@ TEST_CASE(test_anthropic_native_pipeline_200)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* req_body =
-        "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\","
-        "\"content\":\"Hello\"}]}";
+    const char* req_body = "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\","
+                           "\"content\":\"Hello\"}]}";
     run_anthropic_messages(&ac, "test-key", req_body, &c);
     TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
     TEST_ASSERT(strstr(c.body, "msg_mock_123") != NULL, "contains msg_mock_123");
@@ -961,9 +960,8 @@ TEST_CASE(test_anthropic_native_stream_pipeline_200)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* req_body =
-        "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{"
-        "\"role\":\"user\",\"content\":\"Hello\"}]}";
+    const char* req_body = "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{"
+                           "\"role\":\"user\",\"content\":\"Hello\"}]}";
     run_anthropic_messages(&ac, "test-key", req_body, &c);
     TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
     TEST_ASSERT(strstr(c.hdrs, "text/event-stream") != NULL, "headers have text/event-stream");
@@ -1121,9 +1119,8 @@ TEST_CASE(test_core_guardrail_block)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* bad_body =
-        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
-        "\"hello badword here\"}]}";
+    const char* bad_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
+                           "\"hello badword here\"}]}";
     run_with_body(&ac, "test-key", bad_body, &c);
     TEST_ASSERT(c.status == 400, "status 400 on blocked keyword, got %d", c.status);
     TEST_ASSERT(strstr(c.body, "content_policy_violation") != NULL,
@@ -1162,9 +1159,8 @@ TEST_CASE(test_core_guardrail_pii_masking)
 
     struct cap c;
     memset(&c, 0, sizeof c);
-    const char* pii_body =
-        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
-        "\"reach me at 13800138000 or user@test.com\"}]}";
+    const char* pii_body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
+                           "\"reach me at 13800138000 or user@test.com\"}]}";
     run_with_body(&ac, "test-key", pii_body, &c);
     TEST_ASSERT(c.status == 200, "status 200, got %d", c.status);
 

@@ -68,18 +68,17 @@ static const char SCRIPT_DAILY_QUOTA_CONSUME[] =
  * ARGV[2]: window_s
  * Returns: {is_locked, current_fails}
  */
-static const char SCRIPT_ADMIN_LOCKOUT[] =
-    "local key = KEYS[1]\n"
-    "local max_fails = tonumber(ARGV[1])\n"
-    "local window_s = tonumber(ARGV[2])\n"
-    "local fails = redis.call('INCR', key)\n"
-    "if fails == 1 then\n"
-    "    redis.call('EXPIRE', key, window_s)\n"
-    "end\n"
-    "if fails >= max_fails then\n"
-    "    return {1, fails}\n"
-    "end\n"
-    "return {0, fails}\n";
+static const char SCRIPT_ADMIN_LOCKOUT[] = "local key = KEYS[1]\n"
+                                           "local max_fails = tonumber(ARGV[1])\n"
+                                           "local window_s = tonumber(ARGV[2])\n"
+                                           "local fails = redis.call('INCR', key)\n"
+                                           "if fails == 1 then\n"
+                                           "    redis.call('EXPIRE', key, window_s)\n"
+                                           "end\n"
+                                           "if fails >= max_fails then\n"
+                                           "    return {1, fails}\n"
+                                           "end\n"
+                                           "return {0, fails}\n";
 
 /* Circuit Breaker Sync:
  * KEYS[1]: aigate:cb:{endpoint_hash}

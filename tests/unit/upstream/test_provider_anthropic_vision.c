@@ -79,9 +79,8 @@ TEST_CASE(test_anthropic_vision_single_image)
 TEST_CASE(test_anthropic_vision_text_only_string)
 {
     model_rec_t route = make_anthropic_route();
-    const char* in_body =
-        "{\"model\":\"claude-3-5-sonnet-20241022\","
-        "\"messages\":[{\"role\":\"user\",\"content\":\"Just a text prompt\"}]}";
+    const char* in_body = "{\"model\":\"claude-3-5-sonnet-20241022\","
+                          "\"messages\":[{\"role\":\"user\",\"content\":\"Just a text prompt\"}]}";
 
     char        url[512];
     const char* hdrs[4][2];

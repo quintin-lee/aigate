@@ -87,10 +87,8 @@ int anthropic_bridge_feed(anthropic_bridge_t* b, const void* chunk, size_t len);
 int anthropic_bridge_finish(anthropic_bridge_t* b);
 
 /** @brief Parse token usage from non-streaming Anthropic response JSON. */
-int anthropic_sniff_usage_json(const char* json_str,
-                               long*       out_ptok,
-                               long*       out_ctok,
-                               long*       out_cached);
+int
+anthropic_sniff_usage_json(const char* json_str, long* out_ptok, long* out_ctok, long* out_cached);
 
 /** @brief Lightweight passive line-buffered sniffer for Anthropic SSE streams. */
 typedef struct anthropic_sniffer {
