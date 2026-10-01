@@ -236,6 +236,10 @@
         <span class="text-base">🤖</span>
         <span>模型</span>
       </button>
+      <button data-tab="prompts" onclick="switchTab('prompts')" class="side-link" id="nav-prompts-side">
+        <span class="text-base">📝</span>
+        <span>Prompt 模板</span>
+      </button>
       <button data-tab="keys" onclick="switchTab('keys')" class="side-link">
         <span class="text-base">🔑</span>
         <span>API 密钥</span>
@@ -259,6 +263,10 @@
       <button data-tab="usage" onclick="switchTab('usage')" class="side-link">
         <span class="text-base">📈</span>
         <span>用量统计</span>
+      </button>
+      <button data-tab="audit" onclick="switchTab('audit')" class="side-link" id="nav-audit-side">
+        <span class="text-base">📋</span>
+        <span>审计日志</span>
       </button>
 
       <div class="side-section-title pt-3">开发与监控</div>
@@ -325,11 +333,13 @@
           <button id="nav-overview" onclick="switchTab('overview')" class="nav-tab">📊 总览</button>
           <button id="nav-providers" onclick="switchTab('providers')" class="nav-tab">🏢 供应商</button>
           <button id="nav-models" onclick="switchTab('models')" class="nav-tab">🤖 模型</button>
+          <button id="nav-prompts" onclick="switchTab('prompts')" class="nav-tab">📝 Prompt 模板</button>
           <button id="nav-keys" onclick="switchTab('keys')" class="nav-tab">🔑 API 密钥</button>
           <button id="nav-guardrails" onclick="switchTab('guardrails')" class="nav-tab">🛡️ 安全风控</button>
           <button id="nav-groups" onclick="switchTab('groups')" class="nav-tab">👥 部门分组</button>
           <button id="nav-cost" onclick="switchTab('cost')" class="nav-tab">💰 成本归属</button>
           <button id="nav-usage" onclick="switchTab('usage')" class="nav-tab">📈 用量</button>
+          <button id="nav-audit" onclick="switchTab('audit')" class="nav-tab">📋 审计日志</button>
           <button id="nav-live" onclick="switchTab('live')" class="nav-tab">🛰️ 实时大屏</button>
           <button id="nav-cache" onclick="switchTab('cache')" class="nav-tab">💾 响应缓存</button>
           <button id="nav-playground" onclick="switchTab('playground')" class="nav-tab">⚡ 调试场</button>
@@ -362,11 +372,13 @@
       <button data-tab="cache" onclick="switchTab('cache')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">💾 响应缓存</button>
       <button data-tab="providers" onclick="switchTab('providers')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🏢 供应商</button>
       <button data-tab="models" onclick="switchTab('models')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🤖 模型</button>
+      <button data-tab="prompts" onclick="switchTab('prompts')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">📝 Prompt</button>
       <button data-tab="keys" onclick="switchTab('keys')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🔑 密钥</button>
       <button data-tab="guardrails" onclick="switchTab('guardrails')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🛡️ 风控</button>
       <button data-tab="groups" onclick="switchTab('groups')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">👥 分组</button>
       <button data-tab="cost" onclick="switchTab('cost')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">💰 成本</button>
       <button data-tab="usage" onclick="switchTab('usage')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">📈 用量</button>
+      <button data-tab="audit" onclick="switchTab('audit')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">📋 审计</button>
       <button data-tab="playground" onclick="switchTab('playground')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">⚡ 调试场</button>
       <button data-tab="metrics" onclick="switchTab('metrics')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🛠️ 指标</button>
     </div>
@@ -2061,6 +2073,13 @@
       usageRows: [],
       requestRows: [],
       metricsText: "",
+      promptPresets: [],
+      activePromptId: null,
+      promptVariables: {},
+      auditAutoRefresh: 5000,
+      auditTimerId: null,
+      auditRecords: [],
+      selectedAuditRecord: null,
       editingModelName: null,
       editingKeyId: null,
       editingProviderId: null,
@@ -2088,6 +2107,7 @@
       cost: { page: 1, limit: 10, total: 0 },
       usage: { page: 1, limit: 10, total: 0 },
       requests: { page: 1, limit: 10, total: 0 },
+      audit: { page: 1, limit: 20, total: 0 },
     };
 
 // Slice the current page of a table.
@@ -2141,6 +2161,8 @@
         renderUsageTable();
       } else if (key === "requests") {
         if (typeof filterUsageRequestsTable === "function") filterUsageRequestsTable(false);
+      } else if (key === "audit") {
+        if (typeof filterAuditRequests === "function") filterAuditRequests(false);
       }
     }
 
@@ -2314,6 +2336,9 @@
 
     // --- Tabs Switching ---
     function switchTab(tabId) {
+      if (state.activeTab === "audit" && tabId !== "audit") {
+        if (typeof stopAuditPolling === "function") stopAuditPolling();
+      }
       state.activeTab = tabId;
       document.querySelectorAll(".tab-content").forEach(el => el.classList.add("hidden"));
       const target = document.getElementById(`tab-${tabId}`);
@@ -2350,11 +2375,13 @@
         cache: "响应缓存",
         providers: "模型供应商",
         models: "上游模型",
+        prompts: "Prompt 模板管理",
         keys: "API 密钥",
         guardrails: "安全风控",
         groups: "部门分组",
         cost: "成本归属",
         usage: "用量统计",
+        audit: "请求审计日志流",
         playground: "调试场",
         metrics: "监控指标"
       };
@@ -2381,6 +2408,8 @@
         fetchProviders();
       } else if (state.activeTab === "models") {
         fetchModels();
+      } else if (state.activeTab === "prompts") {
+        if (typeof initPromptWorkspace === "function") initPromptWorkspace();
       } else if (state.activeTab === "keys") {
         fetchKeys();
       } else if (state.activeTab === "guardrails") {
@@ -2391,6 +2420,8 @@
         fetchGroups().then(() => fetchCostData());
       } else if (state.activeTab === "usage") {
         fetchUsageData();
+      } else if (state.activeTab === "audit") {
+        if (typeof startAuditPolling === "function") startAuditPolling();
       } else if (state.activeTab === "playground") {
         fetchModelsForPlayground();
       } else if (state.activeTab === "metrics") {
