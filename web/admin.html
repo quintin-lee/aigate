@@ -1121,6 +1121,35 @@
         </div>
       </div>
 
+      <!-- Cost Visualization Dashboard Charts -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <!-- Donut: Cost Attribution by Model/Group (5 cols) -->
+        <div class="lg:col-span-5 glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span>🍩</span><span id="costDonutTitle">消费占比分布 (按模型)</span>
+            </h3>
+            <span class="text-[10px] text-slate-500 font-mono">Chart.js Donut</span>
+          </div>
+          <div class="flex-1 flex items-center justify-center relative min-h-[220px]">
+            <canvas id="costDonutChartCanvas"></canvas>
+          </div>
+        </div>
+
+        <!-- Trend: Daily Cost & Token Trend (7 cols) -->
+        <div class="lg:col-span-7 glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span>📈</span><span>花费走势与 Token 复合走势</span>
+            </h3>
+            <span class="text-[10px] text-slate-500 font-mono">USD & Tokens</span>
+          </div>
+          <div class="flex-1 relative min-h-[220px]">
+            <canvas id="costTrendChartCanvas"></canvas>
+          </div>
+        </div>
+      </div>
+
       <!-- Filter form -->
       <div class="glass-panel p-4 rounded-2xl border border-slate-800 flex flex-wrap items-end gap-3">
         <div>
@@ -5376,6 +5405,141 @@
       document.getElementById("costStatTotalPrompt").innerText = sumPrompt.toLocaleString();
       document.getElementById("costStatCachedBadge").innerText = `含 ${sumCached.toLocaleString()} 缓存命中`;
       document.getElementById("costStatTotalCompletion").innerText = sumCompletion.toLocaleString();
+
+      renderCostCharts(rows, by);
+    }
+
+    function renderCostCharts(rows, by) {
+      if (typeof Chart === "undefined") return;
+
+      const donutCanvas = document.getElementById("costDonutChartCanvas");
+      const trendCanvas = document.getElementById("costTrendChartCanvas");
+      if (!donutCanvas || !trendCanvas) return;
+
+      const safeRows = Array.isArray(rows) ? rows : [];
+
+      // 1. Donut chart: Aggregate cost by model (or group)
+      const costMap = {};
+      safeRows.forEach(r => {
+        const key = r.model || r.group || "默认模型";
+        const val = r.cost_cents != null ? r.cost_cents / 100.0 : 0;
+        costMap[key] = (costMap[key] || 0) + val;
+      });
+
+      const donutLabels = Object.keys(costMap);
+      const donutValues = Object.values(costMap).map(v => parseFloat(v.toFixed(4)));
+
+      if (state.costDonutChart) {
+        state.costDonutChart.destroy();
+      }
+
+      state.costDonutChart = new Chart(donutCanvas.getContext("2d"), {
+        type: "doughnut",
+        data: {
+          labels: donutLabels.length ? donutLabels : ["暂无数据"],
+          datasets: [{
+            data: donutValues.length ? donutValues : [1],
+            backgroundColor: donutValues.length
+              ? ["#6366f1", "#38bdf8", "#34d399", "#f59e0b", "#f43f5e", "#a855f7", "#ec4899", "#14b8a6"]
+              : ["#334155"],
+            borderColor: "#0f172a",
+            borderWidth: 2
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: "right", labels: { color: "#94a3b8", font: { size: 10 }, boxWidth: 12 } },
+            tooltip: {
+              callbacks: {
+                label: ctx => ` ${ctx.label}: $${typeof ctx.parsed === "number" ? ctx.parsed.toFixed(4) : ctx.parsed}`
+              }
+            }
+          },
+          cutout: "68%"
+        }
+      });
+
+      // 2. Trend chart: aggregate by day
+      const dayCostMap = {};
+      const dayTokenMap = {};
+
+      safeRows.forEach(r => {
+        const dayStr = r.day ? new Date(r.day * 1000).toISOString().slice(5, 10) : "汇总";
+        const val = r.cost_cents != null ? r.cost_cents / 100.0 : 0;
+        const tokens = (r.prompt_tokens || 0) + (r.completion_tokens || 0);
+        dayCostMap[dayStr] = (dayCostMap[dayStr] || 0) + val;
+        dayTokenMap[dayStr] = (dayTokenMap[dayStr] || 0) + tokens;
+      });
+
+      let trendLabels = Object.keys(dayCostMap).sort();
+      if (trendLabels.length === 0) {
+        trendLabels = ["今日"];
+        dayCostMap["今日"] = 0;
+        dayTokenMap["今日"] = 0;
+      }
+
+      const costTrendData = trendLabels.map(d => parseFloat((dayCostMap[d] || 0).toFixed(4)));
+      const tokenTrendData = trendLabels.map(d => dayTokenMap[d] || 0);
+
+      if (state.costTrendChart) {
+        state.costTrendChart.destroy();
+      }
+
+      state.costTrendChart = new Chart(trendCanvas.getContext("2d"), {
+        data: {
+          labels: trendLabels,
+          datasets: [
+            {
+              type: "bar",
+              label: "花费 ($ USD)",
+              data: costTrendData,
+              backgroundColor: "rgba(99, 102, 241, 0.75)",
+              borderColor: "#6366f1",
+              borderWidth: 1,
+              borderRadius: 6,
+              yAxisID: "y"
+            },
+            {
+              type: "line",
+              label: "消耗 Token",
+              data: tokenTrendData,
+              borderColor: "#38bdf8",
+              backgroundColor: "rgba(56, 189, 248, 0.15)",
+              borderWidth: 2,
+              tension: 0.3,
+              pointRadius: 3,
+              fill: false,
+              yAxisID: "y1"
+            }
+          ]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { ticks: { color: "#64748b", font: { size: 10 } }, grid: { color: "rgba(255,255,255,0.05)" } },
+            y: {
+              position: "left",
+              ticks: { color: "#64748b", font: { size: 10 }, callback: v => `$${v}` },
+              grid: { color: "rgba(255,255,255,0.05)" }
+            },
+            y1: {
+              position: "right",
+              grid: { drawOnChartArea: false },
+              ticks: {
+                color: "#38bdf8",
+                font: { size: 9 },
+                callback: v => `${v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v}`
+              }
+            }
+          },
+          plugins: {
+            legend: { position: "top", labels: { color: "#94a3b8", font: { size: 10 }, boxWidth: 12 } }
+          }
+        }
+      });
     }
 
     // --- Usage Logic ---
