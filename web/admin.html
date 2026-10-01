@@ -5310,6 +5310,413 @@
       });
     }
 
+    // --- Live Request Audit Stream Management ---
+    let auditFilteredRecords = [];
+    let auditCurrentPageSlice = [];
+
+    function startAuditPolling() {
+      stopAuditPolling();
+      populateAuditFilters();
+      fetchAuditRequests(true);
+      if (state.auditAutoRefresh > 0) {
+        state.auditTimerId = setInterval(() => {
+          if (state.activeTab === "audit") {
+            fetchAuditRequests(true);
+          }
+        }, state.auditAutoRefresh);
+      }
+      updateAuditStreamIndicator(true);
+    }
+
+    function stopAuditPolling() {
+      if (state.auditTimerId) {
+        clearInterval(state.auditTimerId);
+        state.auditTimerId = null;
+      }
+      updateAuditStreamIndicator(false);
+    }
+
+    function setAuditRefreshInterval(val) {
+      state.auditAutoRefresh = parseInt(val, 10) || 0;
+      if (state.auditAutoRefresh > 0) {
+        startAuditPolling();
+      } else {
+        stopAuditPolling();
+      }
+    }
+
+    function updateAuditStreamIndicator(active) {
+      const el = document.getElementById("auditStreamIndicator");
+      if (!el) return;
+      if (active && state.auditAutoRefresh > 0) {
+        el.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+      } else {
+        el.className = "w-2 h-2 rounded-full bg-amber-400";
+      }
+    }
+
+    async function populateAuditFilters() {
+      const keySelect = document.getElementById("auditKeyFilter");
+      const modelSelect = document.getElementById("auditModelFilter");
+      if (!keySelect || !modelSelect) return;
+
+      const currentKey = keySelect.value;
+      const currentModel = modelSelect.value;
+
+      if (!state.keys || state.keys.length === 0) {
+        const resp = await apiCall("/admin/v1/keys");
+        if (resp && resp.ok) {
+          const data = await resp.json();
+          state.keys = data.keys || data.data || [];
+        }
+      }
+
+      if (!state.models || state.models.length === 0) {
+        const resp = await apiCall("/admin/v1/models");
+        if (resp && resp.ok) {
+          const data = await resp.json();
+          state.models = data.models || data.data || [];
+        }
+      }
+
+      keySelect.innerHTML = `<option value="">全部密钥</option>`;
+      (state.keys || []).forEach(k => {
+        const opt = document.createElement("option");
+        opt.value = k.id;
+        opt.textContent = `Key #${k.id} (${k.name || (k.key ? k.key.substring(0, 8) : '未命名')})`;
+        keySelect.appendChild(opt);
+      });
+      keySelect.value = currentKey;
+
+      modelSelect.innerHTML = `<option value="">全部模型</option>`;
+      (state.models || []).forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m.name;
+        opt.textContent = m.name;
+        modelSelect.appendChild(opt);
+      });
+      modelSelect.value = currentModel;
+    }
+
+    async function fetchAuditRequests(silent = false) {
+      const kid = document.getElementById("auditKeyFilter")?.value || "";
+      const query = kid ? `?limit=100&key_id=${encodeURIComponent(kid)}` : "?limit=100";
+
+      const resp = await apiCall(`/admin/v1/usage/requests${query}`);
+      if (!resp || !resp.ok) {
+        const tbody = document.getElementById("auditTableBody");
+        if (tbody) {
+          tbody.innerHTML = `<tr><td colspan="9" class="py-8 px-4 text-center text-rose-400 text-xs">无法获取审计日志，请检查网络或后端状态</td></tr>`;
+        }
+        return;
+      }
+
+      const data = await resp.json();
+      state.auditRecords = data.requests || [];
+      calculateAuditKPIs(state.auditRecords);
+      filterAuditRequests(false);
+
+      if (!silent) {
+        showToast("已刷新审计日志", "info");
+      }
+    }
+
+    function calculateAuditKPIs(records = []) {
+      const totalEl = document.getElementById("auditStatTotalRequests");
+      const latencyEl = document.getElementById("auditStatAvgLatency");
+      const errEl = document.getElementById("auditStatErrorRate");
+      const grEl = document.getElementById("auditStatGuardrails");
+
+      const count = records.length;
+      if (totalEl) totalEl.textContent = count.toLocaleString();
+
+      if (count === 0) {
+        if (latencyEl) latencyEl.textContent = "0 ms";
+        if (errEl) errEl.textContent = "0.0%";
+        if (grEl) grEl.textContent = "0";
+        return;
+      }
+
+      let totalLatency = 0;
+      let errorCount = 0;
+      let guardrailCount = 0;
+
+      records.forEach(r => {
+        totalLatency += (r.latency_ms || 0);
+        if (r.http_status >= 400) errorCount++;
+        const ga = (r.guardrail_action || "").toLowerCase();
+        if (ga && ga !== "none" && ga !== "pass") guardrailCount++;
+      });
+
+      const avgLatency = totalLatency / count;
+      const errorRate = (errorCount / count) * 100;
+
+      if (latencyEl) latencyEl.textContent = `${avgLatency.toFixed(1)} ms`;
+      if (errEl) errEl.textContent = `${errorRate.toFixed(1)}%`;
+      if (grEl) grEl.textContent = guardrailCount.toLocaleString();
+    }
+
+    function filterAuditRequests(resetPage = false) {
+      if (resetPage) paginationState.audit.page = 1;
+
+      const kid = document.getElementById("auditKeyFilter")?.value || "";
+      const model = (document.getElementById("auditModelFilter")?.value || "").toLowerCase();
+      const statusFilter = document.getElementById("auditStatusFilter")?.value || "all";
+      const grFilter = document.getElementById("auditGuardrailFilter")?.value || "all";
+      const q = (document.getElementById("auditSearchInput")?.value || "").toLowerCase().trim();
+
+      auditFilteredRecords = (state.auditRecords || []).filter(r => {
+        if (kid && String(r.key_id) !== String(kid)) return false;
+        if (model && (r.model || "").toLowerCase() !== model) return false;
+
+        if (statusFilter === "2xx" && (r.http_status < 200 || r.http_status >= 300)) return false;
+        if (statusFilter === "4xx" && (r.http_status < 400 || r.http_status >= 500)) return false;
+        if (statusFilter === "5xx" && r.http_status < 500) return false;
+
+        const ga = (r.guardrail_action || "").toLowerCase();
+        if (grFilter === "none" && ga && ga !== "none" && ga !== "pass") return false;
+        if (grFilter === "masked" && ga !== "masked") return false;
+        if (grFilter === "blocked" && ga !== "blocked") return false;
+
+        if (q) {
+          const modStr = (r.model || "").toLowerCase();
+          const provStr = (r.provider || "").toLowerCase();
+          const keyStr = String(r.key_id);
+          const statStr = String(r.http_status);
+          if (!modStr.includes(q) && !provStr.includes(q) && !keyStr.includes(q) && !statStr.includes(q)) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      renderAuditTable();
+    }
+
+    function renderAuditTable() {
+      const tbody = document.getElementById("auditTableBody");
+      const empty = document.getElementById("auditEmptyState");
+      if (!tbody) return;
+
+      tbody.innerHTML = "";
+      if (!auditFilteredRecords || auditFilteredRecords.length === 0) {
+        if (empty) empty.classList.remove("hidden");
+        getPageSlice("audit", []);
+        return;
+      }
+      if (empty) empty.classList.add("hidden");
+
+      auditCurrentPageSlice = getPageSlice("audit", auditFilteredRecords);
+
+      auditCurrentPageSlice.forEach((r, idx) => {
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-900/60 transition cursor-pointer";
+
+        // Date format
+        const dateStr = r.ts ? new Date(r.ts).toLocaleString() : "—";
+
+        // Status badge
+        let statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">${r.http_status}</span>`;
+        if (r.http_status >= 200 && r.http_status < 300) {
+          statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">${r.http_status} OK</span>`;
+        } else if (r.http_status >= 400 && r.http_status < 500) {
+          statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">${r.http_status}</span>`;
+        } else if (r.http_status >= 500) {
+          statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">${r.http_status} ERR</span>`;
+        }
+
+        // Latency color
+        const lat = r.latency_ms || 0;
+        let latClass = "text-emerald-400";
+        if (lat >= 2000) latClass = "text-rose-400";
+        else if (lat >= 500) latClass = "text-amber-400";
+
+        // Guardrail badge
+        const ga = (r.guardrail_action || "none").toLowerCase();
+        let grBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">none</span>`;
+        if (ga === "blocked") {
+          grBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold">🚫 blocked</span>`;
+        } else if (ga === "masked") {
+          grBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">🛡️ masked</span>`;
+        }
+
+        const totalTokens = (r.prompt_tokens || 0) + (r.completion_tokens || 0);
+
+        tr.innerHTML = `
+          <td class="py-3 px-4 text-slate-300 whitespace-nowrap">${dateStr}</td>
+          <td class="py-3 px-4 whitespace-nowrap"><span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[11px]">#${r.key_id}</span></td>
+          <td class="py-3 px-4 font-bold text-white whitespace-nowrap">${escapeHtml(r.model)}</td>
+          <td class="py-3 px-4 text-slate-400 whitespace-nowrap">${escapeHtml(r.provider || "-")}</td>
+          <td class="py-3 px-4 whitespace-nowrap">${statusBadge}</td>
+          <td class="py-3 px-4 text-right whitespace-nowrap text-slate-300">
+            <span class="text-indigo-400">${(r.prompt_tokens || 0).toLocaleString()}</span> /
+            <span class="text-cyan-400">${(r.completion_tokens || 0).toLocaleString()}</span>
+            <span class="text-slate-500 font-sans text-[10px]">(Σ ${totalTokens.toLocaleString()})</span>
+          </td>
+          <td class="py-3 px-4 text-right font-mono font-bold whitespace-nowrap ${latClass}">${lat.toFixed(1)} ms</td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">${grBadge}</td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">
+            <button onclick="openAuditDetail(${idx})" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] transition shadow-sm">
+              详情
+            </button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function openAuditDetail(index) {
+      const r = auditCurrentPageSlice[index];
+      if (!r) return;
+      state.selectedAuditRecord = r;
+
+      const drawer = document.getElementById("auditDetailDrawer");
+      const backdrop = document.getElementById("auditDetailBackdrop");
+      if (!drawer || !backdrop) return;
+
+      // Status
+      const statusEl = document.getElementById("auditDrawerStatus");
+      if (statusEl) {
+        if (r.http_status >= 200 && r.http_status < 300) {
+          statusEl.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">${r.http_status} OK</span>`;
+        } else if (r.http_status >= 400 && r.http_status < 500) {
+          statusEl.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">${r.http_status} Client Error</span>`;
+        } else {
+          statusEl.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">${r.http_status} Server Error</span>`;
+        }
+      }
+
+      // Metadata
+      const timeEl = document.getElementById("auditDrawerTime");
+      if (timeEl) timeEl.textContent = r.ts ? new Date(r.ts).toLocaleString() : "—";
+
+      const keyEl = document.getElementById("auditDrawerKey");
+      if (keyEl) keyEl.textContent = `#${r.key_id}`;
+
+      const modelEl = document.getElementById("auditDrawerModel");
+      if (modelEl) modelEl.textContent = `${r.model} (${r.provider || 'unknown'})`;
+
+      const latencyEl = document.getElementById("auditDrawerLatency");
+      if (latencyEl) latencyEl.textContent = `${(r.latency_ms || 0).toFixed(1)} ms`;
+
+      const grEl = document.getElementById("auditDrawerGuardrail");
+      if (grEl) {
+        const ga = (r.guardrail_action || "none").toLowerCase();
+        if (ga === "blocked") {
+          grEl.innerHTML = `<span class="px-2 py-0.5 rounded text-xs font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30">🚫 敏感拦截 (Blocked)</span>`;
+        } else if (ga === "masked") {
+          grEl.innerHTML = `<span class="px-2 py-0.5 rounded text-xs font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30">🛡️ 敏感脱敏 (Masked)</span>`;
+        } else {
+          grEl.innerHTML = `<span class="px-2 py-0.5 rounded text-xs bg-slate-800 text-slate-400">无干预 (Pass)</span>`;
+        }
+      }
+
+      // Tokens breakdown
+      const pTokens = r.prompt_tokens || 0;
+      const cTokens = r.completion_tokens || 0;
+      const cachedTokens = r.cached_prompt_tokens || 0;
+      const rTokens = r.reasoning_tokens || 0;
+      const total = pTokens + cTokens;
+
+      document.getElementById("auditDrawerPromptTokens").textContent = pTokens.toLocaleString();
+      document.getElementById("auditDrawerCompTokens").textContent = cTokens.toLocaleString();
+      document.getElementById("auditDrawerCachedTokens").textContent = cachedTokens.toLocaleString();
+      document.getElementById("auditDrawerReasonTokens").textContent = rTokens.toLocaleString();
+      document.getElementById("auditDrawerTotalTokens").textContent = `总计: ${total.toLocaleString()}`;
+
+      // Stacked bar
+      const maxVal = Math.max(1, total);
+      document.getElementById("auditDrawerPromptBar").style.width = `${Math.min(100, (pTokens / maxVal) * 100)}%`;
+      document.getElementById("auditDrawerCompBar").style.width = `${Math.min(100, (cTokens / maxVal) * 100)}%`;
+      document.getElementById("auditDrawerCachedBar").style.width = `${Math.min(100, (cachedTokens / maxVal) * 100)}%`;
+      document.getElementById("auditDrawerReasonBar").style.width = `${Math.min(100, (rTokens / maxVal) * 100)}%`;
+
+      // JSON pre
+      document.getElementById("auditDrawerJsonPre").textContent = JSON.stringify(r, null, 2);
+
+      // Slide-over animation
+      backdrop.classList.remove("hidden");
+      drawer.classList.remove("hidden");
+      drawer.classList.add("flex");
+      setTimeout(() => {
+        drawer.classList.remove("translate-x-full");
+      }, 10);
+    }
+
+    function closeAuditDetail() {
+      const drawer = document.getElementById("auditDetailDrawer");
+      const backdrop = document.getElementById("auditDetailBackdrop");
+      if (!drawer || !backdrop) return;
+
+      drawer.classList.add("translate-x-full");
+      setTimeout(() => {
+        drawer.classList.remove("flex");
+        drawer.classList.add("hidden");
+        backdrop.classList.add("hidden");
+      }, 300);
+    }
+
+    function copyAuditDetailJson() {
+      const text = document.getElementById("auditDrawerJsonPre")?.textContent || "";
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast("请求遥测 JSON 已复制到剪贴板", "success");
+      }).catch(err => {
+        showToast("复制失败: " + err.message, "error");
+      });
+    }
+
+    function exportAuditAsCsv() {
+      if (!auditFilteredRecords || auditFilteredRecords.length === 0) {
+        showToast("当前无审计记录可导出", "error");
+        return;
+      }
+      const headers = [
+        "Timestamp", "Key_ID", "Model", "Provider", "HTTP_Status",
+        "Prompt_Tokens", "Completion_Tokens", "Cached_Prompt_Tokens", "Reasoning_Tokens",
+        "Total_Tokens", "Latency_MS", "Guardrail_Action"
+      ];
+      const rows = auditFilteredRecords.map(r => [
+        `"${r.ts || ''}"`,
+        r.key_id || 0,
+        `"${(r.model || '').replace(/"/g, '""')}"`,
+        `"${(r.provider || '').replace(/"/g, '""')}"`,
+        r.http_status || 0,
+        r.prompt_tokens || 0,
+        r.completion_tokens || 0,
+        r.cached_prompt_tokens || 0,
+        r.reasoning_tokens || 0,
+        (r.prompt_tokens || 0) + (r.completion_tokens || 0),
+        (r.latency_ms || 0).toFixed(2),
+        `"${r.guardrail_action || 'none'}"`
+      ]);
+
+      const csvContent = "\uFEFF" + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `aigate_audit_stream_${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(`已导出 ${auditFilteredRecords.length} 条审计记录为 CSV`, "success");
+    }
+
+    function exportAuditAsJson() {
+      if (!auditFilteredRecords || auditFilteredRecords.length === 0) {
+        showToast("当前无审计记录可导出", "error");
+        return;
+      }
+      const blob = new Blob([JSON.stringify(auditFilteredRecords, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `aigate_audit_stream_${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(`已导出 ${auditFilteredRecords.length} 条审计记录为 JSON`, "success");
+    }
+
     // --- Playground Logic ---
     async function fetchModelsForPlayground() {
       await fetchModels();
