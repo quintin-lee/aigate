@@ -988,6 +988,7 @@
               <option value="keyword">敏感词 (keyword)</option>
               <option value="pii">隐私脱敏 (pii)</option>
               <option value="regex">正则表达式 (regex)</option>
+              <option value="webhook">外部审查插件 (webhook)</option>
             </select>
             <input type="text" id="grSearchInput" oninput="filterGuardrailsTable(true)" placeholder="搜索规则或模式..." class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-44">
           </div>
@@ -2370,12 +2371,48 @@
             <option value="keyword">keyword (敏感词匹配 - Aho-Corasick)</option>
             <option value="pii">pii (隐私脱敏预置类型)</option>
             <option value="regex">regex (正则表达式规则)</option>
+            <option value="webhook">webhook (外部 Webhook 深度审查插件)</option>
           </select>
         </div>
         <div>
-          <label class="block font-semibold text-slate-300 mb-1">匹配模式 / 标识 (Pattern) *</label>
+          <label class="block font-semibold text-slate-300 mb-1">匹配模式 / Webhook URL (Pattern) *</label>
           <input type="text" id="grFormPattern" required placeholder="例如：DROP TABLE 或 PHONE / EMAIL" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
           <p id="grFormPatternHint" class="text-[10px] text-slate-500 mt-1">敏感词模式支持多词高效匹配；PII 可使用 PHONE, ID_CARD, EMAIL, API_KEY。</p>
+        </div>
+        <!-- Dynamic Webhook Plugin Section -->
+        <div id="grWebhookConfigSection" class="hidden space-y-3 p-3.5 rounded-xl bg-slate-900/60 border border-purple-500/20">
+          <div class="flex items-center justify-between text-[11px] font-semibold text-purple-400">
+            <span>🌐 外部审核 Webhook 扩展配置</span>
+            <button type="button" onclick="testGuardrailWebhookConnectivity()" id="btnTestWebhook" class="px-2.5 py-1 rounded bg-purple-600/30 hover:bg-purple-600/50 text-purple-200 border border-purple-500/40 text-[10px] font-semibold transition flex items-center space-x-1">
+              <span>⚡ 探测连通性</span>
+            </button>
+          </div>
+          <div id="grWebhookProbeResult" class="hidden text-[10px] px-2.5 py-1.5 rounded-lg font-mono"></div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">Webhook Secret / Bearer 认证令牌 (可选)</label>
+            <input type="password" id="grWebhookSecret" placeholder="例如：whsec_..." class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:border-purple-500 font-mono text-xs">
+          </div>
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block font-semibold text-slate-300 mb-1">超时时间 (毫秒)</label>
+              <input type="number" id="grTimeoutMs" value="500" min="50" max="10000" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:border-purple-500 font-mono text-xs">
+            </div>
+            <div>
+              <label class="block font-semibold text-slate-300 mb-1">降级策略 (Fail Mode)</label>
+              <select id="grFailMode" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:border-purple-500 text-xs">
+                <option value="open">放行 (Fail-Open)</option>
+                <option value="closed">阻断 (Fail-Closed)</option>
+              </select>
+            </div>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">审查阶段 (Phase)</label>
+            <select id="grPhase" class="w-full px-3 py-1.5 rounded-lg bg-slate-950 border border-slate-700 text-white focus:outline-none focus:border-purple-500 text-xs">
+              <option value="inbound">入站 Prompt 拦截 (Inbound)</option>
+              <option value="outbound">出站模型响应审查 (Outbound)</option>
+              <option value="both">双向全量审查 (Both)</option>
+            </select>
+          </div>
         </div>
         <div>
           <label class="block font-semibold text-slate-300 mb-1">处置动作 *</label>
@@ -4515,6 +4552,8 @@
           typeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20">关键词 (keyword)</span>`;
         } else if (r.rule_type === "pii") {
           typeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">隐私脱敏 (pii)</span>`;
+        } else if (r.rule_type === "webhook") {
+          typeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">🌐 Webhook (${escapeHtml(r.phase || 'inbound')})</span>`;
         } else {
           typeBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-teal-500/10 text-teal-400 border border-teal-500/20">正则 (regex)</span>`;
         }
@@ -4527,6 +4566,11 @@
           ? `<button onclick="toggleGuardrailRule(${r.id}, false)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20 transition">● 已启用</button>`
           : `<button onclick="toggleGuardrailRule(${r.id}, true)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition">○ 已停用</button>`;
 
+        let catContent = r.category ? escapeHtml(r.category) : "<span class='text-slate-500'>—</span>";
+        if (r.rule_type === "webhook") {
+          catContent += ` <span class="text-[10px] text-slate-400 font-mono block sm:inline">(${r.timeout_ms || 500}ms · ${r.fail_mode === 'closed' ? 'Fail-Closed' : 'Fail-Open'})</span>`;
+        }
+
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
         tr.innerHTML = `
@@ -4536,7 +4580,7 @@
             <code class="px-1.5 py-0.5 rounded bg-slate-900 border border-slate-800 text-amber-300 font-mono text-[11px] break-all select-all">${escapeHtml(r.pattern)}</code>
           </td>
           <td class="py-3 px-4 whitespace-nowrap">${actionBadge}</td>
-          <td class="py-3 px-4 font-sans text-slate-300">${r.category ? escapeHtml(r.category) : "<span class='text-slate-500'>—</span>"}</td>
+          <td class="py-3 px-4 font-sans text-slate-300">${catContent}</td>
           <td class="py-3 px-4 text-center whitespace-nowrap">${statusBadge}</td>
           <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
             <button onclick="editGuardrailRule(${r.id})" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
@@ -4575,6 +4619,16 @@
       document.getElementById("grFormCategory").value = rule ? (rule.category || "") : "";
       document.getElementById("grFormEnabled").checked = rule ? !!rule.enabled : true;
 
+      document.getElementById("grWebhookSecret").value = rule && rule.webhook_secret ? rule.webhook_secret : "";
+      document.getElementById("grTimeoutMs").value = rule && rule.timeout_ms ? rule.timeout_ms : 500;
+      document.getElementById("grFailMode").value = rule && rule.fail_mode ? rule.fail_mode : "open";
+      document.getElementById("grPhase").value = rule && rule.phase ? rule.phase : "inbound";
+      const prRes = document.getElementById("grWebhookProbeResult");
+      if (prRes) {
+        prRes.classList.add("hidden");
+        prRes.innerText = "";
+      }
+
       onGuardrailTypeChange();
       document.getElementById("guardrailModal").classList.remove("hidden");
       setTimeout(() => document.getElementById("grFormPattern").focus(), 50);
@@ -4592,24 +4646,82 @@
       const actionSelect = document.getElementById("grFormAction");
       const hint = document.getElementById("grFormPatternHint");
       const patternInput = document.getElementById("grFormPattern");
+      const webhookSection = document.getElementById("grWebhookConfigSection");
 
       if (!state.editingGuardrailId) {
         if (type === "pii") {
           actionSelect.value = "mask";
-        } else if (type === "keyword") {
+        } else if (type === "keyword" || type === "webhook") {
           actionSelect.value = "block";
         }
       }
 
       if (type === "keyword") {
+        if (webhookSection) webhookSection.classList.add("hidden");
         if (hint) hint.innerText = "Aho-Corasick 高效敏感词，例如：DROP TABLE, 暴力, 政治敏感词...";
         if (patternInput && !patternInput.value) patternInput.placeholder = "例如：DROP TABLE";
       } else if (type === "pii") {
+        if (webhookSection) webhookSection.classList.add("hidden");
         if (hint) hint.innerText = "内置 PII 标识：PHONE (手机号), ID_CARD (身份证), EMAIL (电子邮箱), API_KEY (API密钥)";
         if (patternInput && !patternInput.value) patternInput.placeholder = "PHONE 或 ID_CARD 或 EMAIL 或 API_KEY";
       } else if (type === "regex") {
+        if (webhookSection) webhookSection.classList.add("hidden");
         if (hint) hint.innerText = "POSIX 扩展正则表达式，例如：1[3-9][0-9]{9}";
         if (patternInput && !patternInput.value) patternInput.placeholder = "例如：[0-9]{11}";
+      } else if (type === "webhook") {
+        if (webhookSection) webhookSection.classList.remove("hidden");
+        if (hint) hint.innerText = "外部 Webhook HTTP/HTTPS 服务端点，网关将在推理前后发送标准化审查请求。";
+        if (patternInput && !patternInput.value) patternInput.placeholder = "https://audit.corp.internal/v1/moderation";
+      }
+    }
+
+// Test webhook connectivity probe
+    async function testGuardrailWebhookConnectivity() {
+      const url = document.getElementById("grFormPattern")?.value.trim();
+      const secret = document.getElementById("grWebhookSecret")?.value.trim() || "";
+      const timeoutMs = parseInt(document.getElementById("grTimeoutMs")?.value, 10) || 1000;
+      const resultEl = document.getElementById("grWebhookProbeResult");
+      const btn = document.getElementById("btnTestWebhook");
+
+      if (!url) {
+        showToast("请先在匹配模式中输入 Webhook URL", "warning");
+        document.getElementById("grFormPattern")?.focus();
+        return;
+      }
+
+      if (resultEl) {
+        resultEl.classList.remove("hidden");
+        resultEl.className = "text-[10px] px-2.5 py-1.5 rounded-lg font-mono bg-slate-900 border border-slate-700 text-slate-400";
+        resultEl.innerText = "⏳ 正在探测连通性...";
+      }
+      if (btn) btn.disabled = true;
+
+      try {
+        const resp = await apiCall("/admin/v1/guardrails/webhook/test", {
+          method: "POST",
+          body: { url, webhook_secret: secret, timeout_ms: timeoutMs }
+        });
+        const data = resp ? await resp.json() : {};
+        if (data.reachable) {
+          if (resultEl) {
+            resultEl.className = "text-[10px] px-2.5 py-1.5 rounded-lg font-mono bg-emerald-500/10 border border-emerald-500/30 text-emerald-400";
+            resultEl.innerText = `✅ 连通性探测成功: HTTP 200 (延迟 ${data.latency_ms !== undefined ? data.latency_ms.toFixed(1) : 0}ms)`;
+          }
+          showToast("Webhook 服务连通正常", "success");
+        } else {
+          if (resultEl) {
+            resultEl.className = "text-[10px] px-2.5 py-1.5 rounded-lg font-mono bg-rose-500/10 border border-rose-500/30 text-rose-400";
+            resultEl.innerText = `❌ 探测失败: ${data.error || "服务不可达"}`;
+          }
+          showToast(`探测失败: ${data.error || "服务不可达"}`, "error");
+        }
+      } catch (e) {
+        if (resultEl) {
+          resultEl.className = "text-[10px] px-2.5 py-1.5 rounded-lg font-mono bg-rose-500/10 border border-rose-500/30 text-rose-400";
+          resultEl.innerText = `❌ 请求异常: ${e.message}`;
+        }
+      } finally {
+        if (btn) btn.disabled = false;
       }
     }
 
@@ -4643,6 +4755,13 @@
         category: category,
         enabled: enabled
       };
+
+      if (ruleType === "webhook") {
+        payload.webhook_secret = document.getElementById("grWebhookSecret")?.value.trim() || "";
+        payload.timeout_ms = parseInt(document.getElementById("grTimeoutMs")?.value, 10) || 500;
+        payload.fail_mode = document.getElementById("grFailMode")?.value || "open";
+        payload.phase = document.getElementById("grPhase")?.value || "inbound";
+      }
 
       const isEdit = !!id;
       const url = isEdit ? `/admin/v1/guardrails/${id}` : "/admin/v1/guardrails";
