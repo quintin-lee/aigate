@@ -202,7 +202,7 @@ TEST_CASE(test_model_router_priority_selection)
 
     upstream_target_t cands[8];
     int               count = 0;
-    TEST_ASSERT(model_router_select_candidates(NULL, &m, cands, 8, &count) == 0, "select");
+    TEST_ASSERT(model_router_select_candidates(NULL, NULL, &m, cands, 8, &count) == 0, "select");
     TEST_ASSERT(count == 3, "3 candidates");
     TEST_ASSERT(strcmp(cands[0].endpoint, "http://p0-a") == 0, "first is p0-a");
     TEST_ASSERT(strcmp(cands[1].endpoint, "http://p0-b") == 0, "second is p0-b");
@@ -227,8 +227,8 @@ TEST_CASE(test_model_router_round_robin)
 
     upstream_target_t cands1[4], cands2[4];
     int               count1 = 0, count2 = 0;
-    TEST_ASSERT(model_router_select_candidates(NULL, &m, cands1, 4, &count1) == 0, "sel 1");
-    TEST_ASSERT(model_router_select_candidates(NULL, &m, cands2, 4, &count2) == 0, "sel 2");
+    TEST_ASSERT(model_router_select_candidates(NULL, NULL, &m, cands1, 4, &count1) == 0, "sel 1");
+    TEST_ASSERT(model_router_select_candidates(NULL, NULL, &m, cands2, 4, &count2) == 0, "sel 2");
     TEST_ASSERT(count1 == 2 && count2 == 2, "counts match");
     /* The first candidate in cands1 and cands2 should alternate */
     TEST_ASSERT(strcmp(cands1[0].endpoint, cands2[0].endpoint) != 0, "rr rotated first candidate");
@@ -254,7 +254,7 @@ TEST_CASE(test_model_router_weighted)
     for (int i = 0; i < 11; i++) {
         upstream_target_t cands[4];
         int               count = 0;
-        model_router_select_candidates(NULL, &m, cands, 4, &count);
+        model_router_select_candidates(NULL, NULL, &m, cands, 4, &count);
         if (strcmp(cands[0].endpoint, "http://heavy") == 0) {
             heavy_first++;
         }
@@ -290,7 +290,8 @@ TEST_CASE(test_model_router_cb_exclusion_and_fallback)
 
     upstream_target_t cands[8];
     int               count = 0;
-    TEST_ASSERT(model_router_select_candidates(cb, &m, cands, 8, &count) == 0, "select with cb");
+    TEST_ASSERT(model_router_select_candidates(cb, NULL, &m, cands, 8, &count) == 0,
+                "select with cb");
     TEST_ASSERT(count == 2, "2 healthy candidates");
     TEST_ASSERT(strcmp(cands[0].endpoint, "http://p0-good") == 0, "p0-good chosen first");
     TEST_ASSERT(strcmp(cands[1].endpoint, "http://p1-backup") == 0, "p1-backup fallback");
@@ -305,7 +306,7 @@ TEST_CASE(test_model_router_cb_exclusion_and_fallback)
     cb_record_failure(cb, "cb-model", "http://p1-backup", 500);
 
     /* When all are tripped, fallback to earliest expiry (or lowest priority) */
-    TEST_ASSERT(model_router_select_candidates(cb, &m, cands, 8, &count) == 0,
+    TEST_ASSERT(model_router_select_candidates(cb, NULL, &m, cands, 8, &count) == 0,
                 "select all tripped");
     TEST_ASSERT(count == 3, "returns all tripped targets in recovery order");
 
@@ -341,7 +342,7 @@ TEST_CASE(test_model_router_half_open_probe_in_candidates)
 
     upstream_target_t cands[8];
     int               count = 0;
-    TEST_ASSERT(model_router_select_candidates(cb, &m, cands, 8, &count) == 0, "select");
+    TEST_ASSERT(model_router_select_candidates(cb, NULL, &m, cands, 8, &count) == 0, "select");
     /* Before the fix, the probe entry's first call flipped probe_active and
      * the second call (in the tier pass) rejected it, so only probe-b
      * survived. Both candidates must be present after the fix. */

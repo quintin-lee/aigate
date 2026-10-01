@@ -13,6 +13,7 @@
 #ifndef AIGATE_PG_STORE_H
 #define AIGATE_PG_STORE_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
 
@@ -66,6 +67,9 @@ typedef struct model_rec {
     char pricing_json[1024];  /**< jansson object with in_mtok, out_mtok, cached_mtok_discount */
     char system_prompt[4096]; /**< Optional prompt template */
     int  prompt_mode;         /**< 0=prepend, 1=append, 2=override */
+    int  hedged_delay_ms;     /**< 0 for auto-P95, >0 for static ms delay */
+    int  hedge_budget_pct;    /**< Max % of requests that can trigger hedge (default: 15) */
+    bool hedged_enabled;      /**< True if hedged speculative execution is active */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
@@ -170,6 +174,12 @@ typedef struct cost_row {
 #define MMASK_SYSTEM_PROMPT (1 << 7)
 /** @brief Model update mask: prompt template mode. */
 #define MMASK_PROMPT_MODE (1 << 8)
+/** @brief Model update mask: hedged delay in ms. */
+#define MMASK_HEDGED_DELAY (1 << 9)
+/** @brief Model update mask: hedge budget percentage. */
+#define MMASK_HEDGE_BUDGET (1 << 10)
+/** @brief Model update mask: hedged enabled boolean. */
+#define MMASK_HEDGED_ENABLED (1 << 11)
 
 /** @brief Provider update mask: provider type. */
 #define PMASK_TYPE (1 << 0)

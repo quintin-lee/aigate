@@ -476,6 +476,15 @@ main(void)
     extern void test_filter_chain_suite(void);
     test_register("filter_chain_suite", test_filter_chain_suite);
 
+    extern void test_latency_tracker_suite(void);
+    test_register("latency_tracker_suite", test_latency_tracker_suite);
+
+    extern void test_model_router_adaptive_suite(void);
+    test_register("model_router_adaptive_suite", test_model_router_adaptive_suite);
+
+    extern void test_upstream_hedged_suite(void);
+    test_register("upstream_hedged_suite", test_upstream_hedged_suite);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

@@ -508,6 +508,20 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
         const char* pm = PQgetvalue(res, row, 10);
         out->prompt_mode = (pm != NULL && pm[0] != '\0') ? atoi(pm) : 0;
     }
+    if (nfields > 11) {
+        const char* hd = PQgetvalue(res, row, 11);
+        out->hedged_delay_ms = (hd != NULL && hd[0] != '\0') ? atoi(hd) : 0;
+    }
+    if (nfields > 12) {
+        const char* hb = PQgetvalue(res, row, 12);
+        out->hedge_budget_pct = (hb != NULL && hb[0] != '\0') ? atoi(hb) : 15;
+    } else {
+        out->hedge_budget_pct = 15;
+    }
+    if (nfields > 13) {
+        const char* he = PQgetvalue(res, row, 13);
+        out->hedged_enabled = (he != NULL && (strcmp(he, "t") == 0 || strcmp(he, "true") == 0));
+    }
 
     /* Fallback: if no targets configured, synthesize targets[0] from primary fields */
     if (out->n_targets == 0) {
@@ -534,7 +548,9 @@ pq_get_model(void* vctx, const char* name, model_rec_t* out)
         "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
         "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, "
         "'priority'), COALESCE(pricing::text, '{}'), "
-        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0) "
+        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
+        "COALESCE(hedged_delay_ms, 0), COALESCE(hedge_budget_pct, 15), COALESCE(hedged_enabled, "
+        "false) "
         "FROM models WHERE model_name = $1 AND enabled = true";
     const char* val[1] = {name};
     int         plen[1] = {0};
@@ -567,7 +583,9 @@ pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
         "SELECT model_name, provider, endpoint, COALESCE(upstream_key_ref, ''), "
         "default_params::text, enabled, COALESCE(targets::text, '[]'), COALESCE(lb_policy, "
         "'priority'), COALESCE(pricing::text, '{}'), "
-        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0) "
+        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
+        "COALESCE(hedged_delay_ms, 0), COALESCE(hedge_budget_pct, 15), COALESCE(hedged_enabled, "
+        "false) "
         "FROM models ORDER BY model_name";
     *n = 0;
 
@@ -893,12 +911,14 @@ pq_create_model(void* vctx, const model_rec_t* m)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "INSERT INTO models(model_name, provider, endpoint, upstream_key_ref, "
-        "default_params, targets, lb_policy, pricing, system_prompt, prompt_mode) "
+        "default_params, targets, lb_policy, pricing, system_prompt, prompt_mode, "
+        "hedged_delay_ms, hedge_budget_pct, hedged_enabled) "
         "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb, $6::jsonb, $7, "
-        "$8::jsonb, CASE WHEN $9 = '' THEN NULL ELSE $9 END, $10)";
-    const char* vals[10];
-    int         plens[10] = {0};
-    char        pm_str[16];
+        "$8::jsonb, CASE WHEN $9 = '' THEN NULL ELSE $9 END, $10, $11, $12, $13)";
+    const char* vals[13];
+    int         plens[13] = {0};
+    char        pm_str[16], hd_str[16], hb_str[16];
+    const char* he_str = m->hedged_enabled ? "true" : "false";
 
     char*       targets_json = serialize_targets_json(m);
     const char* t_str = targets_json ? targets_json : "[]";
@@ -913,6 +933,8 @@ pq_create_model(void* vctx, const model_rec_t* m)
                          : (m->n_targets > 0 ? m->targets[0].upstream_key_ref : "");
     const char* pricing = (m->pricing_json[0] != '\0') ? m->pricing_json : "{}";
     snprintf(pm_str, sizeof pm_str, "%d", m->prompt_mode);
+    snprintf(hd_str, sizeof hd_str, "%d", m->hedged_delay_ms);
+    snprintf(hb_str, sizeof hb_str, "%d", m->hedge_budget_pct > 0 ? m->hedge_budget_pct : 15);
 
     vals[0] = m->name;
     vals[1] = prov;
@@ -924,9 +946,12 @@ pq_create_model(void* vctx, const model_rec_t* m)
     vals[7] = pricing;
     vals[8] = m->system_prompt;
     vals[9] = pm_str;
+    vals[10] = hd_str;
+    vals[11] = hb_str;
+    vals[12] = he_str;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 10, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 13, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (targets_json != NULL) {
         free(targets_json);
@@ -947,11 +972,11 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
 {
     struct pq_ctx* px = vctx;
     char           sql[2048];
-    const char*    vals[16];
-    int            plens[16] = {0};
+    const char*    vals[20];
+    int            plens[20] = {0};
     int            nv = 0, off;
     char*          targets_json = NULL;
-    char           pm_str[16];
+    char           pm_str[16], hd_str[16], hb_str[16];
     snprintf(pm_str, sizeof pm_str, "%d", m->prompt_mode);
 
     if (mask == 0) {
@@ -1024,6 +1049,29 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
         off += snprintf(
             sql + off, sizeof sql - (size_t)off, "%sprompt_mode = $%d", nv > 1 ? ", " : "", nv);
         vals[nv - 1] = pm_str;
+    }
+    if (mask & MMASK_HEDGED_DELAY) {
+        nv++;
+        off += snprintf(
+            sql + off, sizeof sql - (size_t)off, "%shedged_delay_ms = $%d", nv > 1 ? ", " : "", nv);
+        snprintf(hd_str, sizeof hd_str, "%d", m->hedged_delay_ms);
+        vals[nv - 1] = hd_str;
+    }
+    if (mask & MMASK_HEDGE_BUDGET) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%shedge_budget_pct = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        snprintf(hb_str, sizeof hb_str, "%d", m->hedge_budget_pct);
+        vals[nv - 1] = hb_str;
+    }
+    if (mask & MMASK_HEDGED_ENABLED) {
+        nv++;
+        off += snprintf(
+            sql + off, sizeof sql - (size_t)off, "%shedged_enabled = $%d", nv > 1 ? ", " : "", nv);
+        vals[nv - 1] = m->hedged_enabled ? "true" : "false";
     }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE model_name = $%d", nv);

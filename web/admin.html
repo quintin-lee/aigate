@@ -2174,6 +2174,8 @@
             <select id="mFormLbPolicy" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-medium">
               <option value="priority">主备故障切换 (Priority Failover)</option>
               <option value="weighted_round_robin">加权轮询 (Weighted Round-Robin)</option>
+              <option value="latency_p95">⚡ 自适应 P95 优先 (Fastest First)</option>
+              <option value="dynamic_weighted">⚖️ 动态延迟加权轮询 (Dynamic Weighted)</option>
             </select>
           </div>
         </div>
@@ -2198,6 +2200,31 @@
         <div>
           <label class="block font-semibold text-slate-300 mb-1">默认参数 (JSON)</label>
           <textarea id="mFormParams" rows="2" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono" placeholder="{&quot;temperature&quot;: 0.7}">{}</textarea>
+        </div>
+
+        <!-- Hedged Requests config -->
+        <div class="border-t border-slate-800/80 pt-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="font-semibold text-slate-200">对冲投机请求 (Hedged Requests)</span>
+              <span class="text-[11px] text-slate-500 ml-1.5">（并发竞速降低长尾延迟，首个响应胜出）</span>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="mFormHedgedEnabled" class="sr-only peer">
+              <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-brand-600"></div>
+            </label>
+          </div>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">对冲触发延迟 (毫秒, 0 为自动 P95)</label>
+              <input type="number" min="0" max="60000" id="mFormHedgedDelay" placeholder="0" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
+            </div>
+            <div>
+              <label class="block text-[11px] text-slate-400 mb-1">对冲预算上限 (%, 默认 15%)</label>
+              <input type="number" min="1" max="100" id="mFormHedgeBudget" placeholder="15" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
+            </div>
+          </div>
+          <p class="text-[10px] text-slate-500">当首选端点在设定窗口内未返回时，自动并发请求候选端点，首个成功响应即返回并优雅终止败者。</p>
         </div>
 
         <!-- Pricing config -->
@@ -3344,10 +3371,20 @@
       pageItems.forEach(m => {
         const name = m.name || m.model_name || "unknown";
         const lbPolicy = m.lb_policy || "priority";
-        const isWrr = lbPolicy === "weighted_round_robin" || lbPolicy === "weighted";
-        const policyBadge = isWrr
-          ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">加权轮询</span>`
-          : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">主备优先级</span>`;
+        let policyBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">主备优先级</span>`;
+        if (lbPolicy === "weighted_round_robin" || lbPolicy === "weighted") {
+          policyBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">加权轮询</span>`;
+        } else if (lbPolicy === "latency_p95") {
+          policyBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20">⚡ P95 优先</span>`;
+        } else if (lbPolicy === "dynamic_weighted") {
+          policyBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20">⚖️ 动态加权</span>`;
+        }
+
+        let hedgedBadge = "";
+        if (m.hedged_enabled) {
+          const delayText = (m.hedged_delay_ms && m.hedged_delay_ms > 0) ? `${m.hedged_delay_ms}ms` : "P95";
+          hedgedBadge = `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20" title="对冲延迟: ${delayText}, 预算上限: ${m.hedge_budget_pct || 15}%">🚀 对冲 (${delayText})</span>`;
+        }
 
         let tgts = (m.targets && m.targets.length > 0) ? m.targets : [];
         if (tgts.length === 0 && m.endpoint) {
@@ -3404,6 +3441,7 @@
           </td>
           <td class="py-3 px-4 whitespace-nowrap">
             ${policyBadge}
+            ${hedgedBadge}
             ${targetCountBadge}
           </td>
           <td class="py-3 px-4">
@@ -3580,6 +3618,19 @@
           fPDisc.value = "";
         }
 
+        const fHedged = document.getElementById("mFormHedgedEnabled");
+        const fHedgedDelay = document.getElementById("mFormHedgedDelay");
+        const fHedgeBudget = document.getElementById("mFormHedgeBudget");
+        if (m) {
+          fHedged.checked = !!m.hedged_enabled;
+          fHedgedDelay.value = (m.hedged_delay_ms != null && m.hedged_delay_ms > 0) ? m.hedged_delay_ms : "";
+          fHedgeBudget.value = (m.hedge_budget_pct != null) ? m.hedge_budget_pct : 15;
+        } else {
+          fHedged.checked = false;
+          fHedgedDelay.value = "";
+          fHedgeBudget.value = 15;
+        }
+
         let tgts = (m && m.targets && m.targets.length > 0) ? m.targets : [];
         if (tgts.length === 0 && m && m.endpoint) {
           tgts = [{
@@ -3605,6 +3656,9 @@
         document.getElementById("mFormPricingIn").value = "";
         document.getElementById("mFormPricingOut").value = "";
         document.getElementById("mFormPricingDiscount").value = "";
+        document.getElementById("mFormHedgedEnabled").checked = false;
+        document.getElementById("mFormHedgedDelay").value = "";
+        document.getElementById("mFormHedgeBudget").value = 15;
         addTargetRow({
           provider: "openai",
           endpoint: "https://api.openai.com",
@@ -3629,6 +3683,11 @@
       const lbPolicy = document.getElementById("mFormLbPolicy").value;
       const rawParams = document.getElementById("mFormParams").value.trim();
       const enabled = document.getElementById("mFormEnabled").checked;
+      const hedgedEnabled = document.getElementById("mFormHedgedEnabled").checked;
+      const rawDelay = parseInt(document.getElementById("mFormHedgedDelay").value, 10);
+      const hedgedDelay = (!isNaN(rawDelay) && rawDelay >= 0) ? rawDelay : 0;
+      const rawBudget = parseInt(document.getElementById("mFormHedgeBudget").value, 10);
+      const hedgeBudget = (!isNaN(rawBudget) && rawBudget >= 1 && rawBudget <= 100) ? rawBudget : 15;
 
       let defaultParams = {};
       try {
@@ -3668,6 +3727,9 @@
         endpoint: primary.endpoint,
         upstream_key_ref: primary.upstream_key_ref,
         lb_policy: lbPolicy,
+        hedged_enabled: hedgedEnabled,
+        hedged_delay_ms: hedgedDelay,
+        hedge_budget_pct: hedgeBudget,
         targets: targets,
         default_params: defaultParams,
         enabled: enabled

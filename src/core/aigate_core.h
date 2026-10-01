@@ -55,21 +55,23 @@ typedef struct aigate_response_ctx {
 struct health_prober;
 struct event_bus;
 struct response_cache;
+struct latency_tracker;
 
 /** @brief Gateway pipeline state: policy handles plus config (THE SEAM owner). */
 typedef struct aigate_core {
-    auth_key_cache         keys;               /**< API key cache (includes negative cache) */
-    ratelimit_t*           rl;                 /**< Rate limiter, may be NULL (disabled) */
-    model_router_t*        router;             /**< Model routing table */
-    usage_meter_t*         um;                 /**< Usage meter, may be NULL (disabled) */
-    circuit_breaker_t*     cb;                 /**< Circuit breaker, may be NULL (disabled) */
-    pg_store_t*            ps;                 /**< Backing store (borrowed, not owned) */
-    int                    default_timeout_ms; /**< Upstream default timeout, ms */
-    guardrails_ctx_t*      gr;                 /**< Guardrails context, may be NULL (disabled) */
-    budget_enforce_mgr_t*  be;                 /**< Budget enforcement, may be NULL (disabled) */
-    struct health_prober*  hp;                 /**< Health prober, may be NULL */
-    struct event_bus*      eb;                 /**< Event bus, may be NULL */
-    struct response_cache* rc;                 /**< Response cache, may be NULL (disabled) */
+    auth_key_cache          keys;               /**< API key cache (includes negative cache) */
+    ratelimit_t*            rl;                 /**< Rate limiter, may be NULL (disabled) */
+    model_router_t*         router;             /**< Model routing table */
+    usage_meter_t*          um;                 /**< Usage meter, may be NULL (disabled) */
+    circuit_breaker_t*      cb;                 /**< Circuit breaker, may be NULL (disabled) */
+    pg_store_t*             ps;                 /**< Backing store (borrowed, not owned) */
+    int                     default_timeout_ms; /**< Upstream default timeout, ms */
+    guardrails_ctx_t*       gr;                 /**< Guardrails context, may be NULL (disabled) */
+    budget_enforce_mgr_t*   be;                 /**< Budget enforcement, may be NULL (disabled) */
+    struct health_prober*   hp;                 /**< Health prober, may be NULL */
+    struct event_bus*       eb;                 /**< Event bus, may be NULL */
+    struct response_cache*  rc;                 /**< Response cache, may be NULL (disabled) */
+    struct latency_tracker* lt;                 /**< Latency tracker & hedge budget, may be NULL */
 } aigate_core;
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */

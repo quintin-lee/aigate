@@ -168,6 +168,14 @@ ALTER TABLE guardrails_rules
   ADD COLUMN IF NOT EXISTS phase VARCHAR(16) NOT NULL DEFAULT 'inbound';
 
 INSERT INTO schema_migrations(version) VALUES (11) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v12: adaptive latency routing & hedged requests support
+ALTER TABLE models
+  ADD COLUMN IF NOT EXISTS hedged_delay_ms INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS hedge_budget_pct INT NOT NULL DEFAULT 15,
+  ADD COLUMN IF NOT EXISTS hedged_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+INSERT INTO schema_migrations(version) VALUES (12) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

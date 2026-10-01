@@ -1085,6 +1085,26 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     if (jpm != NULL) {
         m.prompt_mode = parse_prompt_mode(jpm, 0);
     }
+    json_t* jhedged = json_object_get(jbody, "hedged_enabled");
+    if (jhedged != NULL && json_is_boolean(jhedged)) {
+        m.hedged_enabled = json_is_true(jhedged);
+    }
+    json_t* jhdelay = json_object_get(jbody, "hedged_delay_ms");
+    if (jhdelay != NULL && json_is_integer(jhdelay)) {
+        int delay = (int)json_integer_value(jhdelay);
+        if (delay >= 0) {
+            m.hedged_delay_ms = delay;
+        }
+    }
+    json_t* jhbudget = json_object_get(jbody, "hedge_budget_pct");
+    if (jhbudget != NULL && json_is_integer(jhbudget)) {
+        int budget = (int)json_integer_value(jhbudget);
+        if (budget >= 0 && budget <= 100) {
+            m.hedge_budget_pct = budget;
+        }
+    } else {
+        m.hedge_budget_pct = 15;
+    }
     m.enabled = 1;
 
     int rc = pg_store_ops(adm->ps)->create_key != NULL
@@ -1099,6 +1119,9 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     json_t* out = json_object();
     json_object_set_new(out, "name", json_string(m.name));
     json_object_set_new(out, "created", json_true());
+    json_object_set_new(out, "hedged_enabled", json_boolean(m.hedged_enabled));
+    json_object_set_new(out, "hedged_delay_ms", json_integer(m.hedged_delay_ms));
+    json_object_set_new(out, "hedge_budget_pct", json_integer(m.hedge_budget_pct));
     json_object_set_new(out,
                         "system_prompt",
                         m.system_prompt[0] != '\0' ? json_string(m.system_prompt) : json_null());
@@ -1146,6 +1169,9 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
             o,
             "lb_policy",
             json_string(recs[i].lb_policy[0] != '\0' ? recs[i].lb_policy : "priority"));
+        json_object_set_new(o, "hedged_enabled", json_boolean(recs[i].hedged_enabled));
+        json_object_set_new(o, "hedged_delay_ms", json_integer(recs[i].hedged_delay_ms));
+        json_object_set_new(o, "hedge_budget_pct", json_integer(recs[i].hedge_budget_pct));
 
         json_error_t jerr;
         json_t*      jp =
@@ -1313,6 +1339,27 @@ model_patch(
     if (v != NULL) {
         m.prompt_mode = parse_prompt_mode(v, 0);
         mask |= MMASK_PROMPT_MODE;
+    }
+    v = json_object_get(jbody, "hedged_enabled");
+    if (v != NULL && json_is_boolean(v)) {
+        m.hedged_enabled = json_is_true(v);
+        mask |= MMASK_HEDGED_ENABLED;
+    }
+    v = json_object_get(jbody, "hedged_delay_ms");
+    if (v != NULL && json_is_integer(v)) {
+        int delay = (int)json_integer_value(v);
+        if (delay >= 0) {
+            m.hedged_delay_ms = delay;
+            mask |= MMASK_HEDGED_DELAY;
+        }
+    }
+    v = json_object_get(jbody, "hedge_budget_pct");
+    if (v != NULL && json_is_integer(v)) {
+        int budget = (int)json_integer_value(v);
+        if (budget >= 0 && budget <= 100) {
+            m.hedge_budget_pct = budget;
+            mask |= MMASK_HEDGE_BUDGET;
+        }
     }
     json_decref(jbody);
 

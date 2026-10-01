@@ -37,6 +37,18 @@ long metrics_total_failovers(void);
 /** @brief Reset failover metrics (for tests). */
 void metrics_reset_failovers(void);
 
+/** @brief Increment hedged request counter. */
+void metrics_inc_hedged_requests(void);
+
+/** @brief Increment hedged won counter. */
+void metrics_inc_hedged_won(void);
+
+/** @brief Lifetime total of all hedged requests. */
+long metrics_total_hedged_requests(void);
+
+/** @brief Lifetime total of all hedged won requests. */
+long metrics_total_hedged_won(void);
+
 /** @brief 1 when @p ip (dotted-quad string) is contained in the comma-
  *  separated CIDR/IPv4 list @p acl ("127.0.0.1,10.0.0.0/8").
  *  @note ACL is IPv4-only by design (spec §5); empty @p acl → allow all. */

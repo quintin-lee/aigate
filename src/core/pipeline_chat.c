@@ -7,6 +7,8 @@
 #include "provider_adapter.h"
 #include "response_cache.h"
 #include "upstream_client.h"
+#include "upstream_hedged.h"
+#include "latency_tracker.h"
 #include "filter_chain.h"
 
 #include <jansson.h>
@@ -177,8 +179,238 @@ handle_chat_sync(chat_req_t* q)
     /* --- upstream non-streaming call with failover loop --- */
     uint64_t    total_lat = 0;
     const char* last_provider = q->route.provider;
+    int         start_ci = 0;
 
-    for (int ci = 0; ci < q->n_candidates; ci++) {
+    /* --- hedged speculative request if enabled and >= 2 candidates --- */
+    if (q->route.hedged_enabled && q->n_candidates >= 2) {
+        upstream_target_t*        target0 = &q->candidates[0];
+        upstream_target_t*        target1 = &q->candidates[1];
+        const provider_adapter_t* adapter0 = provider_find(target0->provider);
+        const provider_adapter_t* adapter1 = provider_find(target1->provider);
+
+        if (adapter0 != NULL && adapter0->build_chat != NULL && adapter1 != NULL &&
+            adapter1->build_chat != NULL) {
+
+            model_rec_t cur_route0 = q->route;
+            fill_cur_route(&q->route, target0, &cur_route0);
+            char        url0[1024];
+            char*       merged0 = NULL;
+            size_t      mlen0 = 0;
+            const char* extra_hdrs0[4][2] = {{0}};
+            int         n_extra_hdrs0 = 0;
+
+            model_rec_t cur_route1 = q->route;
+            fill_cur_route(&q->route, target1, &cur_route1);
+            char        url1[1024];
+            char*       merged1 = NULL;
+            size_t      mlen1 = 0;
+            const char* extra_hdrs1[4][2] = {{0}};
+            int         n_extra_hdrs1 = 0;
+
+            int brc0 = adapter0->build_chat(&cur_route0,
+                                            q->eff_body != NULL ? (const char*)q->eff_body : NULL,
+                                            url0,
+                                            sizeof url0,
+                                            extra_hdrs0,
+                                            &n_extra_hdrs0,
+                                            &merged0,
+                                            &mlen0);
+            int brc1 = adapter1->build_chat(&cur_route1,
+                                            q->eff_body != NULL ? (const char*)q->eff_body : NULL,
+                                            url1,
+                                            sizeof url1,
+                                            extra_hdrs1,
+                                            &n_extra_hdrs1,
+                                            &merged1,
+                                            &mlen1);
+
+            if (brc0 == 0 && brc1 == 0) {
+                hedged_call_params_t hparams;
+                memset(&hparams, 0, sizeof(hparams));
+                hparams.model = q->model;
+                hparams.lt = q->ac->lt;
+                hparams.delay_ms = q->route.hedged_delay_ms;
+                hparams.budget_pct = q->route.hedge_budget_pct;
+                hparams.timeout_ms = q->ac->default_timeout_ms;
+                hparams.has_secondary = true;
+
+                snprintf(hparams.primary.url, sizeof(hparams.primary.url), "%s", url0);
+                snprintf(hparams.primary.key,
+                         sizeof(hparams.primary.key),
+                         "%s",
+                         cur_route0.upstream_key);
+                snprintf(hparams.primary.endpoint,
+                         sizeof(hparams.primary.endpoint),
+                         "%s",
+                         target0->endpoint);
+                hparams.primary.payload = merged0;
+                hparams.primary.payload_len = mlen0;
+                for (int i = 0; i < n_extra_hdrs0 && i < HEDGED_MAX_EXTRA_HEADERS; i++) {
+                    hparams.primary.extra_headers[i][0] = extra_hdrs0[i][0];
+                    hparams.primary.extra_headers[i][1] = extra_hdrs0[i][1];
+                }
+                hparams.primary.n_extra_headers = n_extra_hdrs0;
+
+                snprintf(hparams.secondary.url, sizeof(hparams.secondary.url), "%s", url1);
+                snprintf(hparams.secondary.key,
+                         sizeof(hparams.secondary.key),
+                         "%s",
+                         cur_route1.upstream_key);
+                snprintf(hparams.secondary.endpoint,
+                         sizeof(hparams.secondary.endpoint),
+                         "%s",
+                         target1->endpoint);
+                hparams.secondary.payload = merged1;
+                hparams.secondary.payload_len = mlen1;
+                for (int i = 0; i < n_extra_hdrs1 && i < HEDGED_MAX_EXTRA_HEADERS; i++) {
+                    hparams.secondary.extra_headers[i][0] = extra_hdrs1[i][0];
+                    hparams.secondary.extra_headers[i][1] = extra_hdrs1[i][1];
+                }
+                hparams.secondary.n_extra_headers = n_extra_hdrs1;
+
+                hedged_call_result_t hres;
+                int                  hrc = upstream_call_hedged(&hparams, &hres);
+                free(merged0);
+                free(merged1);
+
+                if (hres.was_hedged) {
+                    metrics_inc_hedged_requests();
+                    if (hres.winning_target_idx == 1 && hres.status == 200) {
+                        metrics_inc_hedged_won();
+                    }
+                }
+
+                upstream_target_t* win_target = (hres.winning_target_idx == 1) ? target1 : target0;
+                const provider_adapter_t* win_adapter =
+                    (hres.winning_target_idx == 1) ? adapter1 : adapter0;
+                total_lat = hres.latency_ns;
+                last_provider = win_target->provider;
+
+                if (q->ac->lt != NULL && total_lat > 0) {
+                    latency_tracker_record(q->ac->lt, q->model, win_target->endpoint, total_lat);
+                }
+
+                int    status = hres.status;
+                char*  ubody = hres.body;
+                size_t ulen = hres.body_len;
+                int    urc = (hrc == 0 && ubody != NULL) ? 0 : -502;
+                bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
+
+                if (!is_failover && status < 400) {
+                    cb_record_success(q->ac->cb, q->model, win_target->endpoint);
+                    char*  parsed_body = NULL;
+                    size_t parsed_len = 0;
+                    long   ptok = 0, ctok = 0, cached_tok = 0;
+                    int    parsed_status = status;
+                    if (win_adapter->parse_chat_response(ubody ? ubody : "",
+                                                         ulen,
+                                                         q->model,
+                                                         &parsed_status,
+                                                         &parsed_body,
+                                                         &parsed_len,
+                                                         &ptok,
+                                                         &ctok,
+                                                         &cached_tok) != 0) {
+                        free(ubody);
+                        aigate_write_error(
+                            q->rc, 502, "upstream_error", "failed to parse upstream response");
+                        chat_req_cleanup(q);
+                        return 0;
+                    }
+                    free(ubody);
+
+                    if (parsed_status == 200) {
+                        char*  filtered_resp = NULL;
+                        size_t filtered_len = 0;
+                        if (filter_chain_execute_outbound(
+                                q, parsed_body, parsed_len, &filtered_resp, &filtered_len) ==
+                            FILTER_STOP) {
+                            free(parsed_body);
+                            chat_req_cleanup(q);
+                            return 0;
+                        }
+                        if (filtered_resp != NULL) {
+                            free(parsed_body);
+                            parsed_body = filtered_resp;
+                            parsed_len = filtered_len;
+                        }
+                    }
+
+                    double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
+                    record_usage_and_event(q->ac,
+                                           q->krec.key_id,
+                                           q->model,
+                                           parsed_status,
+                                           ptok,
+                                           ctok,
+                                           cached_tok,
+                                           0,
+                                           total_lat,
+                                           win_target->provider,
+                                           q->guardrail_act,
+                                           req_cost);
+                    if (q->ac->be != NULL) {
+                        budget_enforce_record(
+                            q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
+                    }
+                    rl_reserve_tokens(
+                        q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
+
+                    if (q->ac->rc != NULL && q->cache_key[0] != '\0' && parsed_status == 200 &&
+                        parsed_body != NULL && !q->no_store && parsed_len <= 1048576) {
+                        response_cache_set(q->ac->rc,
+                                           q->cache_key,
+                                           q->model,
+                                           parsed_body,
+                                           parsed_len,
+                                           ptok,
+                                           ctok,
+                                           req_cost,
+                                           0);
+                    }
+
+                    int rv = aigate_write_json(
+                        q->rc, parsed_status, parsed_body ? parsed_body : "", parsed_len);
+                    free(parsed_body);
+                    chat_req_cleanup(q);
+                    return rv;
+                }
+
+                cb_record_failure(q->ac->cb, q->model, win_target->endpoint, status);
+                if (!is_failover && status >= 400) {
+                    if (ubody != NULL && urc == 0) {
+                        record_usage_and_event(q->ac,
+                                               q->krec.key_id,
+                                               q->model,
+                                               status,
+                                               0,
+                                               0,
+                                               0,
+                                               0,
+                                               total_lat,
+                                               win_target->provider,
+                                               q->guardrail_act,
+                                               0.0);
+                        int rv = aigate_write_json(q->rc, status, ubody, ulen);
+                        free(ubody);
+                        chat_req_cleanup(q);
+                        return rv;
+                    }
+                    free(ubody);
+                } else {
+                    free(ubody);
+                }
+
+                /* Both candidates 0 and 1 failed in the hedged run, fallback to candidate 2 if any */
+                start_ci = 2;
+            } else {
+                free(merged0);
+                free(merged1);
+            }
+        }
+    }
+
+    for (int ci = start_ci; ci < q->n_candidates; ci++) {
         upstream_target_t*        target = &q->candidates[ci];
         const provider_adapter_t* adapter = provider_find(target->provider);
         if (adapter == NULL || adapter->build_chat == NULL ||
@@ -241,6 +473,9 @@ handle_chat_sync(chat_req_t* q)
         }
         uint64_t lat = mono_ns() - t0;
         total_lat += lat;
+        if (q->ac->lt != NULL && lat > 0) {
+            latency_tracker_record(q->ac->lt, q->model, target->endpoint, lat);
+        }
         free(merged);
 
         bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
@@ -441,6 +676,30 @@ handle_stream_preheaders(chat_req_t*               q,
     return 0;
 }
 
+typedef struct stream_feed_wrapper {
+    int (*real_feed)(void* bridge, const void* chunk, size_t len);
+    void*              real_bridge;
+    latency_tracker_t* lt;
+    const char*        model;
+    const char*        endpoint;
+    uint64_t           t0;
+    bool               first_chunk_recorded;
+} stream_feed_wrapper_t;
+
+static int
+stream_feed_wrapper_fn(void* ctx, const void* chunk, size_t len)
+{
+    stream_feed_wrapper_t* w = (stream_feed_wrapper_t*)ctx;
+    if (!w->first_chunk_recorded && len > 0) {
+        w->first_chunk_recorded = true;
+        uint64_t ttft_ns = mono_ns() - w->t0;
+        if (w->lt != NULL && ttft_ns > 0) {
+            latency_tracker_record(w->lt, w->model, w->endpoint, ttft_ns);
+        }
+    }
+    return w->real_feed(w->real_bridge, chunk, len);
+}
+
 int
 handle_chat_stream(chat_req_t* q)
 {
@@ -497,6 +756,17 @@ handle_chat_stream(chat_req_t* q)
         uint64_t t0 = mono_ns();
         long     silence_timeout_ms =
             q->ac->default_timeout_ms > 0 ? (long)q->ac->default_timeout_ms : 30000L;
+
+        stream_feed_wrapper_t feed_wrapper = {
+            .real_feed = adapter->stream_bridge_feed,
+            .real_bridge = bridge,
+            .lt = q->ac->lt,
+            .model = q->model,
+            .endpoint = target->endpoint,
+            .t0 = t0,
+            .first_chunk_recorded = false,
+        };
+
         int  urc = upstream_stream_call(url,
                                         cur_route.upstream_key,
                                         extra_hdrs,
@@ -504,8 +774,8 @@ handle_chat_stream(chat_req_t* q)
                                         merged,
                                         mlen,
                                         silence_timeout_ms,
-                                        (upstream_chunk_fn)adapter->stream_bridge_feed,
-                                        bridge,
+                                        (upstream_chunk_fn)stream_feed_wrapper_fn,
+                                        &feed_wrapper,
                                         &status,
                                         &sbody,
                                         &slen);
@@ -516,6 +786,8 @@ handle_chat_stream(chat_req_t* q)
             nanosleep(&sl, NULL);
             free(sbody); /* the retry re-captures into the same pointers */
             sbody = NULL;
+            feed_wrapper.t0 = mono_ns();
+            feed_wrapper.first_chunk_recorded = false;
             urc = upstream_stream_call(url,
                                        cur_route.upstream_key,
                                        extra_hdrs,
@@ -523,8 +795,8 @@ handle_chat_stream(chat_req_t* q)
                                        merged,
                                        mlen,
                                        silence_timeout_ms,
-                                       (upstream_chunk_fn)adapter->stream_bridge_feed,
-                                       bridge,
+                                       (upstream_chunk_fn)stream_feed_wrapper_fn,
+                                       &feed_wrapper,
                                        &status,
                                        &sbody,
                                        &slen);
@@ -532,6 +804,9 @@ handle_chat_stream(chat_req_t* q)
         }
         uint64_t lat = mono_ns() - t0;
         total_lat += lat;
+        if (q->ac->lt != NULL && lat > 0) {
+            latency_tracker_record(q->ac->lt, q->model, target->endpoint, lat);
+        }
         free(merged);
 
         bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));

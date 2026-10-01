@@ -11,6 +11,7 @@
 #include "event_bus.h"
 #include "response_cache.h"
 #include "filter_chain.h"
+#include "latency_tracker.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -168,10 +169,14 @@ aigate_core_init(aigate_core*   ac,
     } else {
         AIGATE_LOG_WARN("failed to initialize response cache");
     }
+    ac->lt = latency_tracker_create();
 
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
         /* Roll back any partially built sub-objects; the router teardown
          * also cleanses its master-key copy. */
+        if (ac->lt != NULL) {
+            latency_tracker_destroy(ac->lt);
+        }
         if (ac->rc != NULL) {
             response_cache_free(ac->rc);
         }
@@ -209,6 +214,10 @@ aigate_core_init(aigate_core*   ac,
 void
 aigate_core_shutdown(aigate_core* ac)
 {
+    if (ac->lt != NULL) {
+        latency_tracker_destroy(ac->lt);
+        ac->lt = NULL;
+    }
     if (ac->rc != NULL) {
         response_cache_free(ac->rc);
         ac->rc = NULL;
@@ -449,7 +458,8 @@ resolve_chat_target(chat_req_t* q)
     /* --- candidate targets selection --- */
     q->n_candidates = 0;
     if (model_router_select_candidates(
-            ac->cb, &q->route, q->candidates, MAX_TARGETS_PER_MODEL, &q->n_candidates) != 0 ||
+            ac->cb, ac->lt, &q->route, q->candidates, MAX_TARGETS_PER_MODEL, &q->n_candidates) !=
+            0 ||
         q->n_candidates == 0) {
         aigate_write_error(
             rc, PIPE_MODEL, "no_healthy_upstream", "no upstream targets available for model");
