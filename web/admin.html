@@ -4142,9 +4142,10 @@
           return;
         }
         state.keys.forEach(k => {
+          const kid = k.key_id != null ? k.key_id : k.id;
           const opt = document.createElement("option");
-          opt.value = k.id;
-          opt.textContent = `Key #${k.id} - ${k.name || (k.key ? k.key.substring(0, 10) + '...' : '未命名')}`;
+          opt.value = kid;
+          opt.textContent = `Key #${kid} - ${k.name || (k.key ? k.key.substring(0, 10) + '...' : '未命名')}`;
           select.appendChild(opt);
         });
       }
@@ -4212,7 +4213,7 @@
         if (resp && resp.ok) {
           const data = await resp.json();
           state.keys = data.keys || data.data || [];
-          const k = state.keys.find(x => String(x.id) === String(targetId));
+          const k = state.keys.find(x => String(x.key_id != null ? x.key_id : x.id) === String(targetId));
           if (k) {
             sysPrompt = k.system_prompt || "";
             mode = k.prompt_mode || "prepend";
@@ -5381,9 +5382,10 @@
 
       keySelect.innerHTML = `<option value="">全部密钥</option>`;
       (state.keys || []).forEach(k => {
+        const kid = k.key_id != null ? k.key_id : k.id;
         const opt = document.createElement("option");
-        opt.value = k.id;
-        opt.textContent = `Key #${k.id} (${k.name || (k.key ? k.key.substring(0, 8) : '未命名')})`;
+        opt.value = kid;
+        opt.textContent = `Key #${kid} (${k.name || (k.key ? k.key.substring(0, 8) : '未命名')})`;
         keySelect.appendChild(opt);
       });
       keySelect.value = currentKey;

@@ -432,6 +432,141 @@ def test_admin_ui_guardrails_and_budgets_features(gateway):
     requests.delete(f"{base_url}/admin/v1/groups/{grp_id}", headers=admin_headers)
 
 
+def test_admin_ui_prompt_and_audit_features(gateway):
+    base_url = gateway["base_url"]
+    admin_token = gateway["admin_token"]
+    admin_headers = {
+        "Authorization": f"Bearer {admin_token}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Verify GET /admin delivers the updated UI bundle with Prompt Templates and Audit Stream
+    resp = requests.get(f"{base_url}/admin")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # Navigation buttons
+    assert 'id="nav-prompts"' in html
+    assert 'id="nav-audit"' in html
+    assert 'id="nav-prompts-side"' in html
+    assert 'id="nav-audit-side"' in html
+
+    # Main tab containers
+    assert 'id="tab-prompts"' in html
+    assert 'id="tab-audit"' in html
+
+    # Prompt Template UI components
+    assert 'id="promptEditTextarea"' in html
+    assert 'id="promptEditMode"' in html
+    assert 'id="promptEditName"' in html
+    assert 'id="promptVariableInputsContainer"' in html
+    assert 'id="promptRenderedPreview"' in html
+    assert 'id="promptCharCount"' in html
+    assert 'id="promptTokenCount"' in html
+    assert 'id="promptTargetSelect"' in html
+    assert 'id="promptPresetsList"' in html
+
+    # Audit Stream UI components
+    assert 'id="auditRefreshInterval"' in html
+    assert 'id="auditStatTotalRequests"' in html
+    assert 'id="auditStatAvgLatency"' in html
+    assert 'id="auditStatErrorRate"' in html
+    assert 'id="auditStatGuardrails"' in html
+    assert 'id="auditKeyFilter"' in html
+    assert 'id="auditModelFilter"' in html
+    assert 'id="auditStatusFilter"' in html
+    assert 'id="auditGuardrailFilter"' in html
+    assert 'id="auditTableBody"' in html
+    assert 'id="auditDetailDrawer"' in html
+    assert 'id="auditDetailBackdrop"' in html
+    assert 'id="auditDrawerTokenBar"' in html
+    assert 'id="auditDrawerJsonPre"' in html
+    assert 'id="auditExportCsvBtn"' in html
+    assert 'id="auditExportJsonBtn"' in html
+
+    # 2. Test Model API integration wired into Prompt Template management
+    test_model = "ui-test-prompt-model"
+    requests.delete(f"{base_url}/admin/v1/models/{test_model}", headers=admin_headers)
+    resp = requests.post(
+        f"{base_url}/admin/v1/models",
+        headers=admin_headers,
+        json={
+            "name": test_model,
+            "provider": "mock",
+            "targets": [{"url": "http://127.0.0.1:8000"}],
+            "system_prompt": "You are a helpful {{role}}.",
+            "prompt_mode": "override",
+        },
+    )
+    assert resp.status_code == 201
+    model_data = resp.json()
+    assert model_data.get("system_prompt") == "You are a helpful {{role}}."
+    assert model_data.get("prompt_mode") == "override"
+
+    # Update Model via PUT /admin/v1/models/{name}
+    resp = requests.put(
+        f"{base_url}/admin/v1/models/{test_model}",
+        headers=admin_headers,
+        json={
+            "system_prompt": "You are a secure {{role}} working at {{company}}.",
+            "prompt_mode": "prepend",
+        },
+    )
+    assert resp.status_code == 200
+    resp = requests.get(f"{base_url}/admin/v1/models", headers=admin_headers)
+    assert resp.status_code == 200
+    models = resp.json()["models"]
+    m = next((x for x in models if x["name"] == test_model), None)
+    assert m is not None
+    assert m.get("system_prompt") == "You are a secure {{role}} working at {{company}}."
+    assert m.get("prompt_mode") == "prepend"
+
+    # 3. Test Key API integration wired into Prompt Template management
+    resp = requests.post(
+        f"{base_url}/admin/v1/keys",
+        headers=admin_headers,
+        json={
+            "name": "ui-prompt-key",
+            "rate_qps": 10,
+            "system_prompt": "Key-level instructions: {{custom_rule}}",
+            "prompt_mode": "append",
+        },
+    )
+    assert resp.status_code == 201
+    key_id = resp.json()["key_id"]
+
+    # Update Key via PUT /admin/v1/keys/{id}
+    resp = requests.put(
+        f"{base_url}/admin/v1/keys/{key_id}",
+        headers=admin_headers,
+        json={
+            "system_prompt": "Updated key instructions for {{user_id}}",
+            "prompt_mode": "override",
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = requests.get(f"{base_url}/admin/v1/keys", headers=admin_headers)
+    assert resp.status_code == 200
+    keys = resp.json()["keys"]
+    k = next((x for x in keys if x.get("key_id", x.get("id")) == key_id), None)
+    assert k is not None
+    assert k.get("system_prompt") == "Updated key instructions for {{user_id}}"
+    assert k.get("prompt_mode") == "override"
+
+    # 4. Verify Audit Requests API endpoint wired into the UI
+    resp = requests.get(f"{base_url}/admin/v1/usage/requests?limit=10", headers=admin_headers)
+    assert resp.status_code == 200
+    req_data = resp.json()
+    assert "requests" in req_data
+    assert "total" in req_data
+    assert isinstance(req_data["requests"], list)
+
+    # 5. Clean up
+    requests.delete(f"{base_url}/admin/v1/models/{test_model}", headers=admin_headers)
+    requests.delete(f"{base_url}/admin/v1/keys/{key_id}", headers=admin_headers)
+
+
 def test_gemini_chat_and_streaming(gateway):
     base_url = gateway["base_url"]
     admin_token = gateway["admin_token"]
