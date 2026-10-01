@@ -142,4 +142,86 @@ bool guardrails_validate_luhn(const char* digits);
  */
 bool guardrails_validate_id_card_mod11(const char* id_str);
 
+/* --- Advanced PII Masking & De-anonymization --- */
+
+/** @brief Supported PII sensitive entity categories. */
+typedef enum {
+    PII_TYPE_PHONE = 0,
+    PII_TYPE_ID_CARD = 1,
+    PII_TYPE_BANK_CARD = 2,
+    PII_TYPE_EMAIL = 3,
+    PII_TYPE_API_KEY = 4,
+    PII_TYPE_IP_ADDRESS = 5,
+    PII_TYPE_COUNT = 6
+} pii_type_t;
+
+/** @brief Processing actions for detected PII entities. */
+typedef enum {
+    PII_ACTION_OFF = 0,
+    PII_ACTION_ANONYMIZE_RESTORE = 1, /**< Replace with [TAG_N] and restore on response */
+    PII_ACTION_MASK_PARTIAL = 2,      /**< Keep prefixes/suffixes and mask middle with '*' */
+    PII_ACTION_REDACT_TAG = 3,        /**< One-way replacement with [TAG] */
+    PII_ACTION_BLOCK = 4              /**< Block the entire request with HTTP 400 */
+} pii_action_t;
+
+/** @brief Configuration rule for a single PII entity. */
+typedef struct {
+    pii_type_t   type;
+    char         name[32]; /**< e.g. "phone", "id_card", "bank_card" */
+    char         tag[32];  /**< e.g. "PHONE", "ID_CARD", "BANK_CARD" */
+    bool         enabled;
+    pii_action_t action;
+} pii_rule_t;
+
+/** @brief Global PII configuration table. */
+typedef struct {
+    pii_rule_t rules[PII_TYPE_COUNT];
+} pii_config_t;
+
+#define PII_MAX_SESSION_ENTRIES 64
+
+/** @brief One mapping entry between placeholder token and original sensitive text. */
+typedef struct {
+    char       placeholder[32]; /**< e.g. "[PHONE_1]" */
+    char       original[128];   /**< e.g. "13812345678" */
+    pii_type_t type;            /**< Entity type */
+} pii_entry_t;
+
+/** @brief Request-bound session mapping table. */
+typedef struct {
+    pii_entry_t entries[PII_MAX_SESSION_ENTRIES];
+    int         count;
+} pii_session_map_t;
+
+/** @brief Partial mask phone number (e.g. 138****5678). */
+void guardrails_mask_partial_phone(const char* src, char* out, size_t out_sz);
+/** @brief Partial mask Chinese ID card (e.g. 110101********2375). */
+void guardrails_mask_partial_id_card(const char* src, char* out, size_t out_sz);
+/** @brief Partial mask bank/credit card (e.g. 622202******7894). */
+void guardrails_mask_partial_bank_card(const char* src, char* out, size_t out_sz);
+/** @brief Partial mask email (e.g. a***r@company.com). */
+void guardrails_mask_partial_email(const char* src, char* out, size_t out_sz);
+/** @brief Partial mask API key (e.g. sk-proj-******3456). */
+void guardrails_mask_partial_api_key(const char* src, char* out, size_t out_sz);
+/** @brief Partial mask IPv4 address (e.g. 192.168.*.*). */
+void guardrails_mask_partial_ip(const char* src, char* out, size_t out_sz);
+
+/**
+ * @brief Get existing or create new session placeholder for sensitive text.
+ * @param map Session map.
+ * @param type Entity type.
+ * @param original Sensitive plain text.
+ * @return Placeholder string (e.g. "[PHONE_1]"), or NULL on map full.
+ */
+const char*
+pii_session_map_get_or_create(pii_session_map_t* map, pii_type_t type, const char* original);
+
+/**
+ * @brief Reverse lookup sensitive plain text by placeholder token.
+ * @param map Session map.
+ * @param placeholder Token to look up (e.g. "[PHONE_1]").
+ * @return Original string, or NULL if not found.
+ */
+const char* pii_session_map_lookup_token(const pii_session_map_t* map, const char* placeholder);
+
 #endif /* AIGATE_GUARDRAILS_H */

@@ -362,3 +362,58 @@ TEST_CASE(test_pii_checksum_algorithms)
     TEST_ASSERT(guardrails_validate_id_card_mod11("11010119900307") == false, "short length fails");
     TEST_ASSERT(guardrails_validate_id_card_mod11(NULL) == false, "null fails");
 }
+
+TEST_CASE(test_pii_session_map_and_partial_masking)
+{
+    /* 1. Partial masking tests */
+    char masked[128];
+
+    guardrails_mask_partial_phone("13812345678", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "138****5678") == 0, "phone partial mask 138****5678");
+
+    guardrails_mask_partial_id_card("110101199003072375", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "110101********2375") == 0,
+                "id card partial mask 110101********2375");
+
+    guardrails_mask_partial_bank_card("6222021234567894", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "622202******7894") == 0, "bank card partial mask 622202******7894");
+
+    guardrails_mask_partial_email("alice.wonder@company.com", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "a***r@company.com") == 0, "email partial mask a***r@company.com");
+
+    guardrails_mask_partial_api_key("sk-proj-1234567890abcdef123456", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "sk-proj-******3456") == 0,
+                "api key partial mask sk-proj-******3456");
+
+    guardrails_mask_partial_ip("192.168.1.100", masked, sizeof masked);
+    TEST_ASSERT(strcmp(masked, "192.168.*.*") == 0, "ip partial mask 192.168.*.*");
+
+    /* 2. Session mapping table operations */
+    pii_session_map_t map;
+    memset(&map, 0, sizeof map);
+
+    const char* tok1 = pii_session_map_get_or_create(&map, PII_TYPE_PHONE, "13812345678");
+    TEST_ASSERT(tok1 != NULL, "tok1 created");
+    TEST_ASSERT(strcmp(tok1, "[PHONE_1]") == 0, "first phone token [PHONE_1]");
+    TEST_ASSERT(map.count == 1, "map count is 1");
+
+    /* Same value returns existing token (referential consistency) */
+    const char* tok1_dup = pii_session_map_get_or_create(&map, PII_TYPE_PHONE, "13812345678");
+    TEST_ASSERT(strcmp(tok1_dup, "[PHONE_1]") == 0, "duplicate returns same token");
+    TEST_ASSERT(map.count == 1, "map count unchanged on duplicate");
+
+    /* Second distinct value creates [PHONE_2] */
+    const char* tok2 = pii_session_map_get_or_create(&map, PII_TYPE_PHONE, "13900001111");
+    TEST_ASSERT(strcmp(tok2, "[PHONE_2]") == 0, "second phone token [PHONE_2]");
+    TEST_ASSERT(map.count == 2, "map count is 2");
+
+    /* Reverse lookup */
+    const char* orig1 = pii_session_map_lookup_token(&map, "[PHONE_1]");
+    TEST_ASSERT(orig1 != NULL && strcmp(orig1, "13812345678") == 0,
+                "lookup [PHONE_1] returns original");
+    const char* orig2 = pii_session_map_lookup_token(&map, "[PHONE_2]");
+    TEST_ASSERT(orig2 != NULL && strcmp(orig2, "13900001111") == 0,
+                "lookup [PHONE_2] returns original");
+    TEST_ASSERT(pii_session_map_lookup_token(&map, "[PHONE_3]") == NULL,
+                "lookup missing token returns NULL");
+}

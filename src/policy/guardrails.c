@@ -1382,3 +1382,167 @@ guardrails_validate_id_card_mod11(const char* id_str)
     }
     return actual == expected;
 }
+
+void
+guardrails_mask_partial_phone(const char* src, char* out, size_t out_sz)
+{
+    if (src == NULL || out == NULL || out_sz == 0) {
+        return;
+    }
+    size_t len = strlen(src);
+    if (len == 11) {
+        snprintf(out, out_sz, "%.3s****%s", src, src + 7);
+    } else if (len > 7) {
+        snprintf(out, out_sz, "%.3s****%s", src, src + len - 4);
+    } else {
+        snprintf(out, out_sz, "[PHONE]");
+    }
+}
+
+void
+guardrails_mask_partial_id_card(const char* src, char* out, size_t out_sz)
+{
+    if (src == NULL || out == NULL || out_sz == 0) {
+        return;
+    }
+    size_t len = strlen(src);
+    if (len == 18) {
+        snprintf(out, out_sz, "%.6s********%s", src, src + 14);
+    } else {
+        snprintf(out, out_sz, "[ID_CARD]");
+    }
+}
+
+void
+guardrails_mask_partial_bank_card(const char* src, char* out, size_t out_sz)
+{
+    if (src == NULL || out == NULL || out_sz == 0) {
+        return;
+    }
+    size_t len = strlen(src);
+    if (len >= 10) {
+        snprintf(out, out_sz, "%.6s******%s", src, src + len - 4);
+    } else {
+        snprintf(out, out_sz, "[BANK_CARD]");
+    }
+}
+
+void
+guardrails_mask_partial_email(const char* src, char* out, size_t out_sz)
+{
+    if (src == NULL || out == NULL || out_sz == 0) {
+        return;
+    }
+    const char* at = strchr(src, '@');
+    if (at != NULL && at > src) {
+        size_t ulen = (size_t)(at - src);
+        if (ulen >= 2) {
+            snprintf(out, out_sz, "%c***%c%s", src[0], src[ulen - 1], at);
+        } else {
+            snprintf(out, out_sz, "%c***%s", src[0], at);
+        }
+    } else {
+        snprintf(out, out_sz, "[EMAIL]");
+    }
+}
+
+void
+guardrails_mask_partial_api_key(const char* src, char* out, size_t out_sz)
+{
+    if (src == NULL || out == NULL || out_sz == 0) {
+        return;
+    }
+    size_t len = strlen(src);
+    if (strncmp(src, "sk-proj-", 8) == 0 && len > 12) {
+        snprintf(out, out_sz, "sk-proj-******%s", src + len - 4);
+    } else if (strncmp(src, "sk-", 3) == 0 && len > 7) {
+        snprintf(out, out_sz, "sk-******%s", src + len - 4);
+    } else if (strncmp(src, "ghp_", 4) == 0 && len > 8) {
+        snprintf(out, out_sz, "ghp_******%s", src + len - 4);
+    } else if (len > 8) {
+        snprintf(out, out_sz, "%.4s******%s", src, src + len - 4);
+    } else {
+        snprintf(out, out_sz, "[API_KEY]");
+    }
+}
+
+void
+guardrails_mask_partial_ip(const char* src, char* out, size_t out_sz)
+{
+    if (src == NULL || out == NULL || out_sz == 0) {
+        return;
+    }
+    const char* d1 = strchr(src, '.');
+    const char* d2 = (d1 != NULL) ? strchr(d1 + 1, '.') : NULL;
+    if (d2 != NULL) {
+        snprintf(out, out_sz, "%.*s.*.*", (int)(d2 - src), src);
+    } else {
+        snprintf(out, out_sz, "[IP]");
+    }
+}
+
+const char*
+pii_session_map_get_or_create(pii_session_map_t* map, pii_type_t type, const char* original)
+{
+    if (map == NULL || original == NULL || original[0] == '\0') {
+        return NULL;
+    }
+    for (int i = 0; i < map->count; i++) {
+        if (strcmp(map->entries[i].original, original) == 0) {
+            return map->entries[i].placeholder;
+        }
+    }
+    if (map->count >= PII_MAX_SESSION_ENTRIES) {
+        return NULL;
+    }
+    const char* tag = "PII";
+    switch (type) {
+    case PII_TYPE_PHONE:
+        tag = "PHONE";
+        break;
+    case PII_TYPE_ID_CARD:
+        tag = "ID_CARD";
+        break;
+    case PII_TYPE_BANK_CARD:
+        tag = "BANK_CARD";
+        break;
+    case PII_TYPE_EMAIL:
+        tag = "EMAIL";
+        break;
+    case PII_TYPE_API_KEY:
+        tag = "API_KEY";
+        break;
+    case PII_TYPE_IP_ADDRESS:
+        tag = "IP";
+        break;
+    default:
+        break;
+    }
+    int type_idx = 1;
+    for (int i = 0; i < map->count; i++) {
+        if (map->entries[i].type == type) {
+            type_idx++;
+        }
+    }
+    pii_entry_t* entry = &map->entries[map->count];
+    entry->type = type;
+    snprintf(entry->placeholder, sizeof(entry->placeholder), "[%s_%d]", tag, type_idx);
+    strncpy(entry->original, original, sizeof(entry->original) - 1);
+    entry->original[sizeof(entry->original) - 1] = '\0';
+    map->count++;
+    return entry->placeholder;
+}
+
+const char*
+pii_session_map_lookup_token(const pii_session_map_t* map, const char* placeholder)
+{
+    if (map == NULL || placeholder == NULL || placeholder[0] == '\0') {
+        return NULL;
+    }
+    for (int i = 0; i < map->count; i++) {
+        if (strcmp(map->entries[i].placeholder, placeholder) == 0) {
+            return map->entries[i].original;
+        }
+    }
+    return NULL;
+}
