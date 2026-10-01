@@ -1342,6 +1342,182 @@
       </div>
     </div>
 
+    <!-- ==================== Tab: Request Audit Stream ==================== -->
+    <div id="tab-audit" class="tab-content hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+            <span>📋</span> 实时请求审计流 (Live Request Audit Stream)
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">全量实时捕获请求流水、Token 消耗细分、毫秒级响应延迟与安全风控审计</p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <!-- Auto-refresh controller -->
+          <div class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
+            <span id="auditStreamIndicator" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="text-slate-400">自动刷新:</span>
+            <select id="auditRefreshInterval" onchange="setAuditRefreshInterval(this.value)" class="bg-transparent text-slate-200 font-semibold focus:outline-none cursor-pointer">
+              <option value="2000">2 秒</option>
+              <option value="5000" selected>5 秒</option>
+              <option value="10000">10 秒</option>
+              <option value="0">暂停</option>
+            </select>
+          </div>
+
+          <button id="auditRefreshBtn" onclick="fetchAuditRequests()" title="立刻手动刷新" class="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          </button>
+
+          <button id="auditExportCsvBtn" onclick="exportAuditAsCsv()" title="导出当前视图为 CSV" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition flex items-center space-x-1">
+            <span>📥</span>
+            <span>CSV</span>
+          </button>
+
+          <button id="auditExportJsonBtn" onclick="exportAuditAsJson()" title="导出当前视图为 JSON" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition flex items-center space-x-1">
+            <span>📥</span>
+            <span>JSON</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4 Summary KPI Cards -->
+      <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <div class="card p-4">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-slate-400 font-medium">窗口请求总量</span>
+            <span class="text-xs">📊</span>
+          </div>
+          <div id="auditStatTotalRequests" class="text-2xl font-bold text-white mt-1">0</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">最近拉取的请求样本</div>
+        </div>
+
+        <div class="card p-4">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-slate-400 font-medium">平均响应耗时</span>
+            <span class="text-xs">⚡</span>
+          </div>
+          <div id="auditStatAvgLatency" class="text-2xl font-bold text-emerald-400 mt-1">0 ms</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">端到端网关+上游延迟</div>
+        </div>
+
+        <div class="card p-4">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-slate-400 font-medium">异常错误率</span>
+            <span class="text-xs">⚠️</span>
+          </div>
+          <div id="auditStatErrorRate" class="text-2xl font-bold text-sky-400 mt-1">0.0%</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">4xx / 5xx 状态码占比</div>
+        </div>
+
+        <div class="card p-4">
+          <div class="flex items-center justify-between">
+            <span class="text-[11px] text-slate-400 font-medium">风控干预拦截</span>
+            <span class="text-xs">🛡️</span>
+          </div>
+          <div id="auditStatGuardrails" class="text-2xl font-bold text-purple-400 mt-1">0</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">敏感脱敏与阻断次数</div>
+        </div>
+      </div>
+
+      <!-- Filter Controls Toolbar -->
+      <div class="card p-4 space-y-3">
+        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
+          <!-- Key filter -->
+          <div>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">API 密钥</label>
+            <select id="auditKeyFilter" onchange="filterAuditRequests(true)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+              <option value="">全部密钥</option>
+            </select>
+          </div>
+
+          <!-- Model filter -->
+          <div>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">上游模型</label>
+            <select id="auditModelFilter" onchange="filterAuditRequests(true)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+              <option value="">全部模型</option>
+            </select>
+          </div>
+
+          <!-- Status filter -->
+          <div>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">HTTP 状态</label>
+            <select id="auditStatusFilter" onchange="filterAuditRequests(true)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-mono">
+              <option value="all">全部状态</option>
+              <option value="2xx">2xx 成功响应</option>
+              <option value="4xx">4xx 客户端异常</option>
+              <option value="5xx">5xx 服务端错误</option>
+            </select>
+          </div>
+
+          <!-- Guardrail filter -->
+          <div>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">风控动作</label>
+            <select id="auditGuardrailFilter" onchange="filterAuditRequests(true)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-mono">
+              <option value="all">全部动作</option>
+              <option value="none">无干预 (none)</option>
+              <option value="masked">脱敏 (masked)</option>
+              <option value="blocked">阻断 (blocked)</option>
+            </select>
+          </div>
+
+          <!-- Keyword search -->
+          <div>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">快速模糊搜索</label>
+            <div class="relative">
+              <input type="text" id="auditSearchInput" oninput="filterAuditRequests(true)" placeholder="搜索模型、供应商、Key ID..." class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Audit Stream Table Card -->
+      <div class="card overflow-hidden">
+        <div class="overflow-x-auto custom-scroll">
+          <table class="w-full text-left border-collapse text-xs" id="auditTable">
+            <thead>
+              <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 font-medium whitespace-nowrap">
+                <th class="py-3 px-4">请求时间</th>
+                <th class="py-3 px-4">API 密钥</th>
+                <th class="py-3 px-4">上游模型</th>
+                <th class="py-3 px-4">供应商</th>
+                <th class="py-3 px-4">状态码</th>
+                <th class="py-3 px-4 text-right">Tokens 明细 (P / C / Σ)</th>
+                <th class="py-3 px-4 text-right">耗时</th>
+                <th class="py-3 px-4 text-center">风控动作</th>
+                <th class="py-3 px-4 text-center">操作</th>
+              </tr>
+            </thead>
+            <tbody id="auditTableBody" class="divide-y divide-slate-800/60 font-mono">
+              <tr><td colspan="9" class="py-8 px-4 text-center text-slate-500 text-xs">正在连接并拉取审计日志…</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div id="auditEmptyState" class="hidden py-10 text-center text-slate-500 text-xs">
+          没有符合当前过滤条件的审计日志记录。
+        </div>
+
+        <!-- Pagination Controls -->
+        <div id="auditPagination" class="flex items-center justify-between px-4 py-3 border-t border-slate-800 bg-slate-900/40 text-xs text-slate-400">
+          <div class="flex items-center space-x-2">
+            <span>共 <strong class="text-slate-200" id="auditTotalCount">0</strong> 条</span>
+            <span>每页</span>
+            <select id="auditPageSize" onchange="changePageSize('audit', this.value)" class="bg-slate-950 border border-slate-800 rounded px-2 py-1 text-slate-200 text-xs focus:ring-1 focus:ring-brand-500">
+              <option value="10">10</option>
+              <option value="20" selected>20</option>
+              <option value="50">50</option>
+              <option value="100">100</option>
+            </select>
+          </div>
+          <div class="flex items-center space-x-2">
+            <button id="auditPrevBtn" onclick="prevPage('audit')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">上一页</button>
+            <span class="text-slate-300 font-mono">第 <span id="auditCurrentPage">1</span> / <span id="auditTotalPages">1</span> 页</span>
+            <button id="auditNextBtn" onclick="nextPage('audit')" class="px-2.5 py-1 rounded border border-slate-800 hover:bg-slate-800 text-slate-300 disabled:opacity-40 disabled:cursor-not-allowed">下一页</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ==================== Tab 5: Playground ==================== -->
     <div id="tab-playground" class="tab-content hidden space-y-6">
       <div class="flex items-center justify-between">
@@ -2252,6 +2428,103 @@
       <div class="flex justify-end">
         <button onclick="closeLiveReqDetailModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white transition">关闭</button>
       </div>
+    </div>
+  </div>
+
+  <!-- 9. Request Audit Slide-over Detail Drawer -->
+  <div id="auditDetailBackdrop" class="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm hidden transition-opacity" onclick="closeAuditDetail()"></div>
+
+  <div id="auditDetailDrawer" class="fixed top-0 right-0 z-50 h-full w-full max-w-xl bg-slate-900 border-l border-slate-800 shadow-2xl p-6 overflow-y-auto custom-scroll translate-x-full transition-transform duration-300 ease-in-out hidden flex flex-col space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+      <div class="flex items-center space-x-2">
+        <span class="text-lg">📋</span>
+        <h3 class="text-base font-bold text-white">请求遥测审计详情</h3>
+      </div>
+      <button onclick="closeAuditDetail()" class="text-slate-400 hover:text-white p-1 text-lg rounded-lg hover:bg-slate-800 transition">&times;</button>
+    </div>
+
+    <!-- Overview Card -->
+    <div class="card p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <div id="auditDrawerStatus"></div>
+        <span id="auditDrawerTime" class="text-xs text-slate-400 font-mono"></span>
+      </div>
+      <div class="grid grid-cols-2 gap-3 text-xs pt-1">
+        <div>
+          <span class="text-slate-500 block">调用密钥</span>
+          <span id="auditDrawerKey" class="text-slate-200 font-mono font-semibold"></span>
+        </div>
+        <div>
+          <span class="text-slate-500 block">模型 & 供应商</span>
+          <span id="auditDrawerModel" class="text-slate-200 font-mono font-semibold"></span>
+        </div>
+        <div>
+          <span class="text-slate-500 block">端到端耗时</span>
+          <span id="auditDrawerLatency" class="text-emerald-400 font-mono font-bold"></span>
+        </div>
+        <div>
+          <span class="text-slate-500 block">安全风控动作</span>
+          <div id="auditDrawerGuardrail"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Token Breakdown Visualizer -->
+    <div class="card p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+          <span>🪙</span> Token 消耗分布
+        </span>
+        <span class="text-xs font-mono font-bold text-white" id="auditDrawerTotalTokens">总计: 0</span>
+      </div>
+
+      <!-- Visual stacked bar -->
+      <div class="w-full bg-slate-950 rounded-full h-2.5 overflow-hidden flex" id="auditDrawerTokenBar">
+        <div id="auditDrawerPromptBar" class="bg-indigo-500 h-full" style="width: 0%" title="Prompt Tokens"></div>
+        <div id="auditDrawerCompBar" class="bg-cyan-400 h-full" style="width: 0%" title="Completion Tokens"></div>
+        <div id="auditDrawerCachedBar" class="bg-amber-400 h-full" style="width: 0%" title="Cached Tokens"></div>
+        <div id="auditDrawerReasonBar" class="bg-purple-500 h-full" style="width: 0%" title="Reasoning Tokens"></div>
+      </div>
+
+      <!-- Metric stats 4-grid -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center pt-1">
+        <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+          <span class="text-[10px] text-indigo-400 block font-medium">Prompt</span>
+          <span id="auditDrawerPromptTokens" class="text-sm font-mono font-bold text-white">0</span>
+        </div>
+        <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+          <span class="text-[10px] text-cyan-400 block font-medium">Completion</span>
+          <span id="auditDrawerCompTokens" class="text-sm font-mono font-bold text-white">0</span>
+        </div>
+        <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+          <span class="text-[10px] text-amber-400 block font-medium">Cached</span>
+          <span id="auditDrawerCachedTokens" class="text-sm font-mono font-bold text-white">0</span>
+        </div>
+        <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+          <span class="text-[10px] text-purple-400 block font-medium">Reasoning</span>
+          <span id="auditDrawerReasonTokens" class="text-sm font-mono font-bold text-white">0</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Raw JSON Inspector -->
+    <div class="card p-4 space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-400">原始遥测 JSON 元数据</span>
+        <button onclick="copyAuditDetailJson()" id="auditDrawerCopyJsonBtn" class="px-2.5 py-1 rounded-lg text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1 shadow-sm">
+          <span>📋</span>
+          <span>复制 JSON</span>
+        </button>
+      </div>
+      <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 overflow-x-auto custom-scroll max-h-56">
+        <pre id="auditDrawerJsonPre" class="font-mono text-xs text-cyan-300/90 whitespace-pre-wrap leading-relaxed select-all"></pre>
+      </div>
+    </div>
+
+    <!-- Footer actions -->
+    <div class="flex items-center justify-end space-x-2 pt-2">
+      <button onclick="closeAuditDetail()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white transition">关闭</button>
     </div>
   </div>
 
