@@ -173,7 +173,9 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
     bool should_hedge = params->has_secondary && params->secondary.url[0] != '\0';
     if (should_hedge && params->lt != NULL) {
         /* Check hedge budget */
-        if (!latency_tracker_hedge_admitted(params->lt, params->model, 15)) {
+        int budget =
+            (params->budget_pct > 0 && params->budget_pct <= 100) ? params->budget_pct : 15;
+        if (!latency_tracker_hedge_admitted(params->lt, params->model, budget)) {
             should_hedge = false;
         }
     }
@@ -181,7 +183,9 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
     /* Determine delay window */
     int delay_ms = params->delay_ms;
     if (delay_ms <= 0 && params->lt != NULL) {
-        delay_ms = (int)latency_tracker_get_p95_ms(params->lt, params->model, params->primary.url);
+        const char* ep =
+            params->primary.endpoint[0] ? params->primary.endpoint : params->primary.url;
+        delay_ms = (int)latency_tracker_get_p95_ms(params->lt, params->model, ep);
         if (delay_ms < 50) {
             delay_ms = 50;
         }
@@ -203,8 +207,10 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
     worker_ctx_t primary_ctx;
     memset(&primary_ctx, 0, sizeof(primary_ctx));
     primary_ctx.spec = &params->primary;
-    primary_ctx.payload = params->payload;
-    primary_ctx.payload_len = params->payload_len;
+    primary_ctx.payload =
+        (params->primary.payload != NULL) ? params->primary.payload : params->payload;
+    primary_ctx.payload_len =
+        (params->primary.payload != NULL) ? params->primary.payload_len : params->payload_len;
     primary_ctx.timeout_ms = params->timeout_ms;
     primary_ctx.shared_mutex = &mutex;
     primary_ctx.shared_cond = &cond;
@@ -214,8 +220,10 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
     worker_ctx_t secondary_ctx;
     memset(&secondary_ctx, 0, sizeof(secondary_ctx));
     secondary_ctx.spec = &params->secondary;
-    secondary_ctx.payload = params->payload;
-    secondary_ctx.payload_len = params->payload_len;
+    secondary_ctx.payload =
+        (params->secondary.payload != NULL) ? params->secondary.payload : params->payload;
+    secondary_ctx.payload_len =
+        (params->secondary.payload != NULL) ? params->secondary.payload_len : params->payload_len;
     secondary_ctx.timeout_ms = params->timeout_ms;
     secondary_ctx.shared_mutex = &mutex;
     secondary_ctx.shared_cond = &cond;

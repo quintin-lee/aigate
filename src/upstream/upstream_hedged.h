@@ -13,8 +13,11 @@
 #define HEDGED_MAX_EXTRA_HEADERS 16
 
 typedef struct hedged_endpoint_spec {
-    char        url[512];
+    char        url[1024];
     char        key[1024];
+    char        endpoint[512];
+    const char* payload;
+    size_t      payload_len;
     const char* extra_headers[HEDGED_MAX_EXTRA_HEADERS][2];
     int         n_extra_headers;
 } hedged_endpoint_spec_t;
@@ -27,7 +30,8 @@ typedef struct hedged_call_params {
     const char*            payload;
     size_t                 payload_len;
     int                    timeout_ms;
-    int                    delay_ms; /**< Waiting window before hedging */
+    int                    delay_ms;   /**< Waiting window before hedging */
+    int                    budget_pct; /**< Hedge budget percentage (default 15) */
     latency_tracker_t*     lt;
 } hedged_call_params_t;
 

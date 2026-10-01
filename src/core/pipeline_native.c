@@ -198,7 +198,7 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
     upstream_target_t candidates[MAX_TARGETS_PER_MODEL];
     int               n_candidates = 0;
     if (model_router_select_candidates(
-            ac->cb, NULL, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
+            ac->cb, ac->lt, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
         n_candidates == 0) {
         aigate_write_anthropic_error(
             rc, 503, "api_error", "no upstream targets available for model");
@@ -778,7 +778,7 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
     upstream_target_t candidates[MAX_TARGETS_PER_MODEL];
     int               n_candidates = 0;
     if (model_router_select_candidates(
-            ac->cb, NULL, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
+            ac->cb, ac->lt, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
         n_candidates == 0) {
         aigate_write_gemini_error(
             rc, 503, "UNAVAILABLE", "no upstream targets available for model");

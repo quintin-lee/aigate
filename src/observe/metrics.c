@@ -28,6 +28,32 @@ static failover_metric_entry_t g_failovers[METRICS_MAX_FAILOVERS];
 static pthread_mutex_t g_failover_mtx = PTHREAD_MUTEX_INITIALIZER;
 /** Whether the table-full drop warning was already logged (warn once, avoids log flooding). */
 static _Atomic int g_failover_warned = 0;
+static atomic_long g_hedged_requests_total = 0;
+static atomic_long g_hedged_won_total = 0;
+
+void
+metrics_inc_hedged_requests(void)
+{
+    atomic_fetch_add_explicit(&g_hedged_requests_total, 1, memory_order_relaxed);
+}
+
+void
+metrics_inc_hedged_won(void)
+{
+    atomic_fetch_add_explicit(&g_hedged_won_total, 1, memory_order_relaxed);
+}
+
+long
+metrics_total_hedged_requests(void)
+{
+    return atomic_load_explicit(&g_hedged_requests_total, memory_order_relaxed);
+}
+
+long
+metrics_total_hedged_won(void)
+{
+    return atomic_load_explicit(&g_hedged_won_total, memory_order_relaxed);
+}
 
 /** @brief Latency histogram bucket count (matches BUCKET_LE length). */
 #define NUM_BUCKETS 6
@@ -60,11 +86,19 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
                  "aigate_tokens_total %ld\n"
                  "# HELP aigate_tokens_cached_total Total cached prompt tokens.\n"
                  "# TYPE aigate_tokens_cached_total counter\n"
-                 "aigate_tokens_cached_total %ld\n",
+                 "aigate_tokens_cached_total %ld\n"
+                 "# HELP aigate_hedged_requests_total Total hedged backup requests issued.\n"
+                 "# TYPE aigate_hedged_requests_total counter\n"
+                 "aigate_hedged_requests_total %ld\n"
+                 "# HELP aigate_hedged_won_total Total hedged requests that won the race.\n"
+                 "# TYPE aigate_hedged_won_total counter\n"
+                 "aigate_hedged_won_total %ld\n",
                  total_reqs,
                  total_errs,
                  total_toks,
-                 total_cached);
+                 total_cached,
+                 metrics_total_hedged_requests(),
+                 metrics_total_hedged_won());
     if (n < 0 || (size_t)n >= rem) {
         return -1;
     }

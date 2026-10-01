@@ -142,7 +142,7 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
     upstream_target_t candidates[MAX_TARGETS_PER_MODEL];
     int               n_candidates = 0;
     if (model_router_select_candidates(
-            ac->cb, NULL, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
+            ac->cb, ac->lt, &route, candidates, MAX_TARGETS_PER_MODEL, &n_candidates) != 0 ||
         n_candidates == 0) {
         aigate_write_error(
             rc, PIPE_MODEL, "no_healthy_upstream", "no upstream targets available for model");
