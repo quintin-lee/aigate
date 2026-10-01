@@ -696,13 +696,17 @@ static int
 stream_feed_wrapper_fn(void* ctx, const void* chunk, size_t len)
 {
     stream_feed_wrapper_t* w = (stream_feed_wrapper_t*)ctx;
+    /* Step 1: Detect the first non-empty token chunk in the response stream */
     if (!w->first_chunk_recorded && len > 0) {
         w->first_chunk_recorded = true;
+        /* Step 2: Calculate elapsed Time To First Token (TTFT) via monotonic clock */
         uint64_t ttft_ns = mono_ns() - w->t0;
+        /* Step 3: Record TTFT sample in latency tracker for adaptive routing and P95 scoring */
         if (w->lt != NULL && ttft_ns > 0) {
             latency_tracker_record(w->lt, w->model, w->endpoint, ttft_ns);
         }
     }
+    /* Step 4: Transparently forward chunk to underlying stream bridge without delay */
     return w->real_feed(w->real_bridge, chunk, len);
 }
 

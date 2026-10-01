@@ -622,15 +622,18 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
     acc->orig_rc->status = 200;
     acc->orig_rc->headers_sent = true;
     int rv = 0;
+    /* Step 1: Forward raw chunk directly to downstream client for zero-latency response */
     if (acc->orig_rc->write != NULL) {
         rv = acc->orig_rc->write(acc->orig_rc->impl, buf, len, fin);
     }
+    /* If stream overflowed or empty, bypass accumulation and continue passthrough only */
     if (len == 0 || buf == NULL || acc->overflow) {
         return rv;
     }
 
     const char* p = (const char*)buf;
     const char* end = p + len;
+    /* Step 2: Split incoming chunks across newline delimiters (\n), handling cross-frame splits */
     while (p < end) {
         const char* nl = memchr(p, '\n', (size_t)(end - p));
         if (nl != NULL) {
@@ -640,11 +643,13 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
                 acc->line_len += seg;
                 acc->line_buf[acc->line_len] = '\0';
 
+                /* Step 3: Parse SSE data line and append delta content to full response accumulator */
                 accumulate_sse_line(acc, acc->line_buf);
             }
             acc->line_len = 0;
             p = nl + 1;
         } else {
+            /* Partial line trailing at the end of this TCP chunk; stash in line_buf until next chunk */
             size_t seg = (size_t)(end - p);
             if (acc_line_reserve(acc, acc->line_len + seg + 1)) {
                 memcpy(acc->line_buf + acc->line_len, p, seg);

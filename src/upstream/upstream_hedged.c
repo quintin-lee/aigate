@@ -181,6 +181,7 @@ hedged_worker_run(void* arg)
     int                 idx = ctx->my_idx;
     uint64_t            t0 = get_mono_ns();
 
+    /* Step 1: Initialize libcurl easy session */
     CURL* c = curl_easy_init();
     if (c == NULL) {
         pthread_mutex_lock(&ctrl->mutex);
@@ -193,6 +194,7 @@ hedged_worker_run(void* arg)
         return NULL;
     }
 
+    /* Step 2: Configure HTTP request headers and authorization */
     struct curl_slist* hdrs = NULL;
     int                has_auth = 0;
     for (int i = 0; i < ctx->n_extra_headers; i++) {
@@ -217,6 +219,7 @@ hedged_worker_run(void* arg)
     hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
     hdrs = curl_slist_append(hdrs, "Accept: application/json");
 
+    /* Step 3: Bind curl options and callbacks for cooperative cancellation polling */
     curl_easy_setopt(c, CURLOPT_URL, ctx->url);
     curl_easy_setopt(c, CURLOPT_POST, 1L);
     curl_easy_setopt(c, CURLOPT_POSTFIELDS, ctx->payload);
@@ -230,6 +233,7 @@ hedged_worker_run(void* arg)
     curl_easy_setopt(c, CURLOPT_XFERINFODATA, ctx);
     curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
 
+    /* Execute synchronous curl transfer on this worker thread */
     CURLcode code = curl_easy_perform(c);
     long     status = 0;
     curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &status);
@@ -239,6 +243,7 @@ hedged_worker_run(void* arg)
 
     uint64_t lat = get_mono_ns() - t0;
 
+    /* Step 4: Critical section: Record outcome, arbitrate winner, and signal coordinator */
     pthread_mutex_lock(&ctrl->mutex);
     ctrl->http_status[idx] = (int)status;
     ctrl->lat_ns[idx] = lat;
@@ -251,7 +256,8 @@ hedged_worker_run(void* arg)
     }
     ctrl->done[idx] = 1;
 
-    /* If this worker returned 200 and no winner has been decided yet, claim win */
+    /* Winner arbitration invariant: The first worker with HTTP 200 claims winning_idx
+     * and sets cooperative cancellation on the competitor. */
     if (ctrl->rc[idx] == 0 && ctrl->http_status[idx] == 200 && ctrl->winning_idx == -1) {
         ctrl->winning_idx = idx;
         ctrl->cancel_flags[1 - idx] = 1;
@@ -259,6 +265,7 @@ hedged_worker_run(void* arg)
     pthread_cond_broadcast(&ctrl->cond);
     pthread_mutex_unlock(&ctrl->mutex);
 
+    /* Step 5: Clean up thread context and release ref_count to race controller */
     worker_ctx_free(ctx);
     ctrl_release(ctrl);
     return NULL;
@@ -272,10 +279,10 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
     }
     memset(out_result, 0, sizeof(*out_result));
 
-    /* Check if hedging is eligible */
+    /* Phase 1: Evaluate hedging eligibility against secondary config and hedge budget */
     bool should_hedge = params->has_secondary && params->secondary.url[0] != '\0';
     if (should_hedge && params->lt != NULL) {
-        /* Check hedge budget */
+        /* Check hedge budget: default to 15% if unspecified */
         int budget =
             (params->budget_pct > 0 && params->budget_pct <= 100) ? params->budget_pct : 15;
         if (!latency_tracker_hedge_admitted(params->lt, params->model, budget)) {
@@ -283,7 +290,7 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
         }
     }
 
-    /* Determine delay window */
+    /* Phase 2: Compute hedging delay window (P95 latency or configured delay_ms) */
     int delay_ms = params->delay_ms;
     if (delay_ms <= 0 && params->lt != NULL) {
         const char* ep =
@@ -300,13 +307,14 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
         delay_ms = 1000;
     }
 
+    /* Phase 3: Initialize synchronization controller and dispatch Primary worker */
     hedged_race_ctrl_t* ctrl = calloc(1, sizeof(*ctrl));
     if (ctrl == NULL) {
         return -502;
     }
     pthread_mutex_init(&ctrl->mutex, NULL);
     pthread_cond_init(&ctrl->cond, NULL);
-    ctrl->ref_count = 1; /* for this function */
+    ctrl->ref_count = 1; /* Retained by this coordination thread */
     ctrl->winning_idx = -1;
 
     worker_ctx_t* primary_ctx = worker_ctx_create(ctrl, 0, &params->primary, params);
@@ -333,7 +341,7 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
 
     pthread_mutex_lock(&ctrl->mutex);
 
-    /* Wait up to delay_ms for Primary to finish or win */
+    /* Phase 4: Wait up to delay_ms for Primary worker to complete or claim victory */
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += delay_ms / 1000;
@@ -350,7 +358,7 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
         }
     }
 
-    /* If primary hasn't finished with 200 within delay_ms (or failed), spawn secondary if enabled */
+    /* Phase 5: If Primary did not finish within delay_ms, dispatch Secondary hedge worker */
     if (ctrl->winning_idx == -1 && should_hedge) {
         worker_ctx_t* sec_ctx = worker_ctx_create(ctrl, 1, &params->secondary, params);
         if (sec_ctx != NULL) {
@@ -368,54 +376,55 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
         }
     }
 
-    /* Wait for a winner or for both workers to finish */
+    /* Wait for a winning target or for all active workers to terminate */
     while (ctrl->winning_idx == -1) {
         if (ctrl->done[0] && (!secondary_started || ctrl->done[1])) {
-            /* Both are done and neither was 200 */
+            /* Terminal condition: all active workers finished without HTTP 200 */
             break;
         }
         pthread_cond_wait(&ctrl->cond, &ctrl->mutex);
     }
 
-    /* If a winner was chosen, cancel the loser */
+    /* Signal cooperative cancellation to losing branch */
     if (ctrl->winning_idx == 0 && secondary_started) {
         ctrl->cancel_flags[1] = 1;
     } else if (ctrl->winning_idx == 1) {
         ctrl->cancel_flags[0] = 1;
     }
 
-    /* Determine final result */
+    /* Phase 6: Harvest winning response, transfer buffer ownership, and clean up */
     int final_rc = -502;
     int win = ctrl->winning_idx;
 
     if (win == 1) {
-        /* Secondary won */
+        /* Secondary backup won the race */
         out_result->winning_target_idx = 1;
         out_result->status = ctrl->http_status[1];
         out_result->body = ctrl->resp_body[1];
         out_result->body_len = ctrl->resp_len[1];
         out_result->latency_ns = ctrl->lat_ns[1];
         final_rc = ctrl->rc[1];
-        ctrl->resp_body[1] = NULL; /* transfer ownership */
+        ctrl->resp_body[1] = NULL; /* transfer heap ownership to caller */
         ctrl->resp_len[1] = 0;
     } else if (win == 0 || ctrl->done[0]) {
-        /* Primary won or both failed, return primary's result */
+        /* Primary won, or both failed: return Primary's status/error payload */
         out_result->winning_target_idx = 0;
         out_result->status = ctrl->http_status[0];
         out_result->body = ctrl->resp_body[0];
         out_result->body_len = ctrl->resp_len[0];
         out_result->latency_ns = ctrl->lat_ns[0];
         final_rc = ctrl->rc[0];
-        ctrl->resp_body[0] = NULL; /* transfer ownership */
+        ctrl->resp_body[0] = NULL; /* transfer heap ownership to caller */
         ctrl->resp_len[0] = 0;
     } else if (secondary_started && ctrl->done[1]) {
+        /* Fallback: secondary finished with terminal status */
         out_result->winning_target_idx = 1;
         out_result->status = ctrl->http_status[1];
         out_result->body = ctrl->resp_body[1];
         out_result->body_len = ctrl->resp_len[1];
         out_result->latency_ns = ctrl->lat_ns[1];
         final_rc = ctrl->rc[1];
-        ctrl->resp_body[1] = NULL; /* transfer ownership */
+        ctrl->resp_body[1] = NULL; /* transfer heap ownership to caller */
         ctrl->resp_len[1] = 0;
     }
 
@@ -423,7 +432,7 @@ upstream_call_hedged(const hedged_call_params_t* params, hedged_call_result_t* o
     pthread_attr_destroy(&attr);
 
     /* Release caller's reference to ctrl.
-     * Loser thread will release its own reference and free ctrl when done. */
+     * Remaining detached worker threads release their own reference upon completion. */
     ctrl_release(ctrl);
 
     return final_rc;

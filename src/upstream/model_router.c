@@ -259,7 +259,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
         }
     }
 
-    /* Collect distinct priorities sorted ascending */
+    /* Step 1: Collect and deduplicate distinct priority levels sorted ascending (0 = highest priority tier) */
     int prios[MAX_TARGETS_PER_MODEL];
     int n_prios = 0;
     for (int i = 0; i < n_tgts; i++) {
@@ -275,7 +275,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
             prios[n_prios++] = p;
         }
     }
-    /* Insertion sort priorities */
+    /* Insertion sort priorities ascending */
     for (int i = 0; i < n_prios - 1; i++) {
         for (int j = i + 1; j < n_prios; j++) {
             if (prios[j] < prios[i]) {
@@ -289,10 +289,10 @@ model_router_select_candidates(circuit_breaker_t* cb,
     int total_added = 0;
     int healthy_count = 0;
 
-    /* One cb_allow_request per target: the first call on a HALF_OPEN
-     * entry flips probe_active and later calls for the same entry
-     * reject, so the result is captured here and reused by the tier
-     * pass instead of being re-queried. */
+    /* Step 2: Circuit Breaker snapshot.
+     * Invariant: A single cb_allow_request call per target captures health status.
+     * In HALF_OPEN state, the first call transitions probe_active to true and subsequent
+     * calls return false; snapshotting guarantees atomic, consistent evaluation per batch. */
     bool allowed[MAX_TARGETS_PER_MODEL];
     for (int i = 0; i < n_tgts; i++) {
         allowed[i] = (cb == NULL) || cb_allow_request(cb, model->name, src_targets[i].endpoint);
@@ -302,7 +302,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
     }
 
     if (healthy_count > 0) {
-        /* Iterate through priority tiers ascending */
+        /* Step 3: Iterate through priority tiers ascending, populating healthy candidates */
         for (int pi = 0; pi < n_prios && total_added < cap; pi++) {
             int p = prios[pi];
             int tier_healthy_idx[MAX_TARGETS_PER_MODEL];
@@ -315,11 +315,12 @@ model_router_select_candidates(circuit_breaker_t* cb,
                 }
             }
             if (n_th == 0) {
-                continue; /* Skip empty / fully tripped tier */
+                continue; /* Skip empty or fully tripped tier */
             }
 
-            /* Apply LB policy within this tier */
+            /* Apply Load Balancing policy within the current priority tier */
             if (strcmp(model->lb_policy, "round_robin") == 0 && n_th > 1) {
+                /* Policy A: Atomic Round-Robin. Relaxed atomic increment avoids cross-core mutex locks. */
                 unsigned long start =
                     atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) %
                     (unsigned long)n_th;
@@ -331,6 +332,8 @@ model_router_select_candidates(circuit_breaker_t* cb,
             } else if ((strcmp(model->lb_policy, "weighted") == 0 ||
                         strcmp(model->lb_policy, "weighted_round_robin") == 0) &&
                        n_th > 1) {
+                /* Policy B: Configured Static Weights Roulette Wheel Selection.
+                 * Pick first candidate by cumulative weight probability, sort remainder by weight descending. */
                 int total_w = 0;
                 for (int k = 0; k < n_th; k++) {
                     total_w += src_targets[tier_healthy_idx[k]].weight;
@@ -350,9 +353,9 @@ model_router_select_candidates(circuit_breaker_t* cb,
                         break;
                     }
                 }
-                /* Add chosen target first */
+                /* Place winning target first */
                 out_candidates[total_added++] = src_targets[tier_healthy_idx[chosen_k]];
-                /* Add remaining targets sorted by weight descending */
+                /* Sort remaining targets in this tier by weight descending for fallback ordering */
                 int rem_k[MAX_TARGETS_PER_MODEL];
                 int n_rem = 0;
                 for (int k = 0; k < n_th; k++) {
@@ -373,6 +376,8 @@ model_router_select_candidates(circuit_breaker_t* cb,
                     out_candidates[total_added++] = src_targets[rem_k[k]];
                 }
             } else if (strcmp(model->lb_policy, "latency_p95") == 0 && n_th > 1) {
+                /* Policy C: Latency P95 Optimal Selection.
+                 * Query sliding window P95 latency (ms) for each endpoint; sort ascending (fastest first). */
                 struct {
                     int      src_idx;
                     uint32_t p95;
@@ -383,7 +388,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
                     lat_cands[k].p95 =
                         latency_tracker_get_p95_ms(lt, model->name, src_targets[src_idx].endpoint);
                 }
-                /* Sort ascending by p95 */
+                /* Sort ascending by P95 latency */
                 for (int a = 0; a < n_th - 1; a++) {
                     for (int b = a + 1; b < n_th; b++) {
                         if (lat_cands[b].p95 < lat_cands[a].p95) {
@@ -400,6 +405,9 @@ model_router_select_candidates(circuit_breaker_t* cb,
                     out_candidates[total_added++] = src_targets[lat_cands[k].src_idx];
                 }
             } else if (strcmp(model->lb_policy, "dynamic_weighted") == 0 && n_th > 1) {
+                /* Policy D: Dynamic Latency-Weighted (EWMA Inverse).
+                 * Dynamic weight formula: W_i = max(1, 1000 / (EWMA_ms + 10)).
+                 * The constant +10 dampens jitter and avoids division-by-zero on microsecond latencies. */
                 int dyn_weights[MAX_TARGETS_PER_MODEL];
                 int total_w = 0;
                 for (int k = 0; k < n_th; k++) {
@@ -416,6 +424,7 @@ model_router_select_candidates(circuit_breaker_t* cb,
                 if (total_w <= 0) {
                     total_w = n_th;
                 }
+                /* Roulette wheel selection using dynamic inverse latency weights */
                 unsigned long pick =
                     atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) %
                     (unsigned long)total_w;
@@ -428,8 +437,9 @@ model_router_select_candidates(circuit_breaker_t* cb,
                         break;
                     }
                 }
+                /* Selected dynamic winner placed first */
                 out_candidates[total_added++] = src_targets[tier_healthy_idx[chosen_k]];
-                /* Add remaining targets sorted by dynamic weight descending */
+                /* Add remaining targets sorted by dynamic weight descending for optimal failover */
                 int rem_k[MAX_TARGETS_PER_MODEL];
                 int n_rem = 0;
                 for (int k = 0; k < n_th; k++) {
@@ -450,14 +460,15 @@ model_router_select_candidates(circuit_breaker_t* cb,
                     out_candidates[total_added++] = src_targets[tier_healthy_idx[rem_k[k]]];
                 }
             } else {
-                /* Default "priority": retain original definition order */
+                /* Policy E: Default Priority order (maintain original declaration order) */
                 for (int k = 0; k < n_th && total_added < cap; k++) {
                     out_candidates[total_added++] = src_targets[tier_healthy_idx[k]];
                 }
             }
         }
     } else {
-        /* ALL targets are tripped: fallback to target with earliest open_until */
+        /* Step 4: Emergency Fallback when ALL targets in all tiers are tripped by Circuit Breaker.
+         * Select the target whose open_until cooldown expires earliest to allow immediate recovery probing. */
         struct tripped_tgt {
             int    src_idx;
             time_t open_until;

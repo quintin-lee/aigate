@@ -66,9 +66,11 @@ ac_trie_insert(ac_trie_t* trie, const char* keyword)
         return -1;
     }
     int curr = 0;
+    /* Step 1: Traverse or branch node for each byte in the UTF-8 keyword */
     for (size_t i = 0; keyword[i] != '\0'; i++) {
         unsigned char c = (unsigned char)keyword[i];
         if (trie->nodes[curr].next[c] == -1) {
+            /* Step 2: Dynamic capacity doubling when node table fills */
             if (trie->node_count >= trie->node_cap) {
                 size_t     new_cap = trie->node_cap * 2;
                 ac_node_t* new_nodes = realloc(trie->nodes, sizeof(ac_node_t) * new_cap);
@@ -88,6 +90,7 @@ ac_trie_insert(ac_trie_t* trie, const char* keyword)
         }
         curr = trie->nodes[curr].next[c];
     }
+    /* Step 3: Attach duplicated keyword string to the terminal leaf state */
     if (trie->nodes[curr].matched_keyword == NULL) {
         trie->nodes[curr].matched_keyword = strdup(keyword);
         if (trie->nodes[curr].matched_keyword == NULL) {
@@ -110,7 +113,9 @@ ac_trie_build_failure_links(ac_trie_t* trie)
     }
     size_t q_head = 0, q_tail = 0;
 
-    /* Setup level 1 transitions and root failure links */
+    /* Step 1: Root self-loops & Level-1 seeding.
+     * Missing characters on root state (0) loop back to 0. Level-1 children set fail=0
+     * and are pushed into the BFS queue. */
     for (int c = 0; c < 256; c++) {
         int next_node = trie->nodes[0].next[c];
         if (next_node != -1) {
@@ -121,16 +126,19 @@ ac_trie_build_failure_links(ac_trie_t* trie)
         }
     }
 
-    /* BFS */
+    /* Step 2: Breadth-First Search (BFS) failure link derivation */
     while (q_head < q_tail) {
         int r = queue[q_head++];
         for (int c = 0; c < 256; c++) {
             int u = trie->nodes[r].next[c];
             if (u != -1) {
+                /* Child u exists: compute fail(u) = next[fail(r)][c] */
                 int fail_state = trie->nodes[r].fail;
                 trie->nodes[u].fail = trie->nodes[fail_state].next[c];
 
-                /* Propagate matched keyword if failure state matches and current node doesn't have one */
+                /* Step 3: Output Link Compression (Keyword Inheritance).
+                 * If the failure state is a match, propagate it to node u so matching
+                 * requires no runtime traversal of failure ancestors. */
                 if (trie->nodes[u].matched_keyword == NULL &&
                     trie->nodes[trie->nodes[u].fail].matched_keyword != NULL) {
                     trie->nodes[u].matched_keyword =
@@ -139,7 +147,10 @@ ac_trie_build_failure_links(ac_trie_t* trie)
 
                 queue[q_tail++] = u;
             } else {
-                /* DFA optimization: transition to failure state's transition */
+                /* Step 4: DFA State Compression Invariant.
+                 * Redirect missing transition directly to failure state's transition:
+                 * next[r][c] = next[fail(r)][c]. Converts the AC tree into a full DFA,
+                 * ensuring O(1) single-lookup state transitions per character during search. */
                 int fail_state = trie->nodes[r].fail;
                 trie->nodes[r].next[c] = trie->nodes[fail_state].next[c];
             }
@@ -157,9 +168,11 @@ ac_trie_search(const ac_trie_t* trie, const char* text, size_t len)
         return NULL;
     }
     int state = 0;
+    /* Step 1: O(|text|) single-pass deterministic DFA search without backtracking loops */
     for (size_t i = 0; i < len; i++) {
         unsigned char c = (unsigned char)text[i];
         state = trie->nodes[state].next[c];
+        /* Step 2: Immediate keyword match check on current DFA state */
         if (trie->nodes[state].matched_keyword != NULL) {
             return trie->nodes[state].matched_keyword;
         }
