@@ -476,6 +476,9 @@ main(void)
     extern void test_filter_chain_suite(void);
     test_register("filter_chain_suite", test_filter_chain_suite);
 
+    extern void test_latency_tracker_suite(void);
+    test_register("latency_tracker_suite", test_latency_tracker_suite);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
