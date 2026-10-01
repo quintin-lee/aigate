@@ -206,5 +206,26 @@ filter_chain_execute_outbound(
         }
     }
 
+    /* De-anonymize session PII tokens back to original values */
+    if (q->pii_map.count > 0) {
+        const char* cur_body = (out_body != NULL && *out_body != NULL) ? *out_body : resp_body;
+        size_t      cur_len = (out_len != NULL && *out_len > 0) ? *out_len : resp_len;
+        int         p_changed = 0;
+        char* restored = guardrails_restore_pii_text(cur_body, cur_len, &q->pii_map, &p_changed);
+        if (p_changed && restored != NULL) {
+            if (out_body != NULL && *out_body != NULL) {
+                free(*out_body);
+            }
+            if (out_body != NULL) {
+                *out_body = restored;
+            } else {
+                free(restored);
+            }
+            if (out_len != NULL) {
+                *out_len = strlen(restored);
+            }
+        }
+    }
+
     return FILTER_CONTINUE;
 }

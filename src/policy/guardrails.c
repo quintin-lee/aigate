@@ -2064,3 +2064,233 @@ pii_session_map_lookup_token(const pii_session_map_t* map, const char* placehold
     }
     return NULL;
 }
+
+char*
+guardrails_restore_pii_text(const char*              resp_text,
+                            size_t                   resp_len,
+                            const pii_session_map_t* map,
+                            int*                     changed)
+{
+    if (changed != NULL) {
+        *changed = 0;
+    }
+    if (resp_text == NULL || resp_len == 0 || map == NULL || map->count == 0) {
+        return NULL;
+    }
+
+    size_t cap = resp_len + 256;
+    char*  buf = malloc(cap);
+    if (buf == NULL) {
+        return NULL;
+    }
+
+    size_t olen = 0;
+    int    local_changed = 0;
+    size_t i = 0;
+
+    while (i < resp_len) {
+        if (resp_text[i] == '[') {
+            ssize_t close_idx = -1;
+            for (size_t k = 1; k < 32 && (i + k) < resp_len; k++) {
+                char ch = resp_text[i + k];
+                if (ch == ']') {
+                    close_idx = (ssize_t)(i + k);
+                    break;
+                }
+                if (!isalnum((unsigned char)ch) && ch != '_') {
+                    break;
+                }
+            }
+
+            if (close_idx >= 0) {
+                size_t tok_len = (size_t)(close_idx - i + 1);
+                char   tok[36];
+                memcpy(tok, resp_text + i, tok_len);
+                tok[tok_len] = '\0';
+
+                const char* orig = pii_session_map_lookup_token(map, tok);
+                if (orig != NULL) {
+                    size_t orig_len = strlen(orig);
+                    if (olen + orig_len + 1 > cap) {
+                        cap = olen + orig_len + 128;
+                        char* nb = realloc(buf, cap);
+                        if (nb == NULL) {
+                            free(buf);
+                            return NULL;
+                        }
+                        buf = nb;
+                    }
+                    memcpy(buf + olen, orig, orig_len);
+                    olen += orig_len;
+                    local_changed = 1;
+                    i = (size_t)close_idx + 1;
+                    continue;
+                }
+            }
+        }
+
+        if (olen + 2 > cap) {
+            cap = olen + 128;
+            char* nb = realloc(buf, cap);
+            if (nb == NULL) {
+                free(buf);
+                return NULL;
+            }
+            buf = nb;
+        }
+        buf[olen++] = resp_text[i++];
+    }
+
+    buf[olen] = '\0';
+
+    if (local_changed) {
+        if (changed != NULL) {
+            *changed = 1;
+        }
+        return buf;
+    }
+
+    free(buf);
+    return NULL;
+}
+
+void
+guardrails_stream_filter_init(pii_stream_filter_t* sf, const pii_session_map_t* map)
+{
+    if (sf == NULL) {
+        return;
+    }
+    sf->map = map;
+    sf->win_len = 0;
+    sf->win[0] = '\0';
+}
+
+void
+guardrails_stream_filter_feed(pii_stream_filter_t* sf,
+                              const char*          chunk,
+                              size_t               len,
+                              char*                out,
+                              size_t               out_cap,
+                              size_t*              out_len)
+{
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    if (sf == NULL || out == NULL || out_cap == 0) {
+        return;
+    }
+    if (chunk == NULL || len == 0) {
+        return;
+    }
+    if (sf->map == NULL || sf->map->count == 0) {
+        size_t copy_len = len < out_cap ? len : out_cap;
+        memcpy(out, chunk, copy_len);
+        if (out_len != NULL) {
+            *out_len = copy_len;
+        }
+        return;
+    }
+
+    char   old_win[sizeof(sf->win)];
+    size_t old_win_len = sf->win_len;
+    if (old_win_len > 0) {
+        memcpy(old_win, sf->win, old_win_len);
+        sf->win_len = 0;
+        sf->win[0] = '\0';
+    }
+
+    size_t total_in = old_win_len + len;
+    size_t olen = 0;
+    size_t i = 0;
+
+    while (i < total_in) {
+        char c = (i < old_win_len) ? old_win[i] : chunk[i - old_win_len];
+        if (c == '[') {
+            ssize_t close_idx = -1;
+            bool    valid_prefix = true;
+            for (size_t k = 1; k < 32 && (i + k) < total_in; k++) {
+                char ch = ((i + k) < old_win_len) ? old_win[i + k] : chunk[(i + k) - old_win_len];
+                if (ch == ']') {
+                    close_idx = (ssize_t)(i + k);
+                    break;
+                }
+                if (!isalnum((unsigned char)ch) && ch != '_') {
+                    valid_prefix = false;
+                    break;
+                }
+            }
+
+            if (close_idx >= 0) {
+                size_t tok_len = (size_t)(close_idx - i + 1);
+                char   tok[36];
+                for (size_t t = 0; t < tok_len && t < sizeof(tok) - 1; t++) {
+                    tok[t] =
+                        ((i + t) < old_win_len) ? old_win[i + t] : chunk[(i + t) - old_win_len];
+                }
+                tok[tok_len] = '\0';
+
+                const char* orig = pii_session_map_lookup_token(sf->map, tok);
+                if (orig != NULL) {
+                    size_t orig_len = strlen(orig);
+                    for (size_t o = 0; o < orig_len && olen < out_cap; o++) {
+                        out[olen++] = orig[o];
+                    }
+                    i = (size_t)close_idx + 1;
+                    continue;
+                } else {
+                    if (olen < out_cap) {
+                        out[olen++] = c;
+                    }
+                    i++;
+                    continue;
+                }
+            } else {
+                size_t rem = total_in - i;
+                if (valid_prefix && rem < 32) {
+                    for (size_t t = 0; t < rem && t < sizeof(sf->win) - 1; t++) {
+                        sf->win[t] =
+                            ((i + t) < old_win_len) ? old_win[i + t] : chunk[(i + t) - old_win_len];
+                    }
+                    sf->win_len = rem;
+                    sf->win[rem] = '\0';
+                    break;
+                } else {
+                    if (olen < out_cap) {
+                        out[olen++] = c;
+                    }
+                    i++;
+                    continue;
+                }
+            }
+        } else {
+            if (olen < out_cap) {
+                out[olen++] = c;
+            }
+            i++;
+        }
+    }
+
+    if (out_len != NULL) {
+        *out_len = olen;
+    }
+}
+
+void
+guardrails_stream_filter_flush(pii_stream_filter_t* sf, char* out, size_t out_cap, size_t* out_len)
+{
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    if (sf == NULL || out == NULL || out_cap == 0) {
+        return;
+    }
+    if (sf->win_len > 0) {
+        size_t copy_len = sf->win_len < out_cap ? sf->win_len : out_cap;
+        memcpy(out, sf->win, copy_len);
+        if (out_len != NULL) {
+            *out_len = copy_len;
+        }
+        sf->win_len = 0;
+        sf->win[0] = '\0';
+    }
+}

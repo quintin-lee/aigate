@@ -263,4 +263,57 @@ guardrails_action_t guardrails_inspect_inbound_with_pii(guardrails_ctx_t*  ctx,
                                                         char*              blocked_keyword,
                                                         size_t             blocked_keyword_sz);
 
+/** @brief Outbound streaming sliding-window filter context for de-anonymization. */
+typedef struct {
+    const pii_session_map_t* map;     /**< Pointer to session map. */
+    char                     win[32]; /**< Sliding window holding partial token starting with '[' */
+    size_t                   win_len; /**< Bytes stored in sliding window buffer. */
+} pii_stream_filter_t;
+
+/**
+ * @brief Reverse-replace session tokens in response text back to original values.
+ * @param resp_text Response payload text.
+ * @param resp_len Length of response text.
+ * @param map Pointer to request-bound session map.
+ * @param[out] changed Receives 1 if modified, 0 otherwise.
+ * @return Newly allocated restored string (caller frees), or NULL if unchanged.
+ */
+char* guardrails_restore_pii_text(const char*              resp_text,
+                                  size_t                   resp_len,
+                                  const pii_session_map_t* map,
+                                  int*                     changed);
+
+/**
+ * @brief Initialize streaming sliding-window filter for PII de-anonymization.
+ * @param sf Pointer to filter context.
+ * @param map Session mapping table.
+ */
+void guardrails_stream_filter_init(pii_stream_filter_t* sf, const pii_session_map_t* map);
+
+/**
+ * @brief Feed a streaming chunk into sliding-window filter and produce de-anonymized output.
+ * @param sf Pointer to filter context.
+ * @param chunk Incoming chunk buffer.
+ * @param len Length of chunk buffer.
+ * @param out Output buffer for filtered chunk.
+ * @param out_cap Capacity of output buffer.
+ * @param[out] out_len Number of bytes written to out buffer.
+ */
+void guardrails_stream_filter_feed(pii_stream_filter_t* sf,
+                                   const char*          chunk,
+                                   size_t               len,
+                                   char*                out,
+                                   size_t               out_cap,
+                                   size_t*              out_len);
+
+/**
+ * @brief Flush any remaining partial bytes buffered in sliding window filter.
+ * @param sf Pointer to filter context.
+ * @param out Output buffer for residual bytes.
+ * @param out_cap Capacity of output buffer.
+ * @param[out] out_len Number of bytes written to out buffer.
+ */
+void
+guardrails_stream_filter_flush(pii_stream_filter_t* sf, char* out, size_t out_cap, size_t* out_len);
+
 #endif /* AIGATE_GUARDRAILS_H */

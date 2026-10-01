@@ -479,3 +479,51 @@ TEST_CASE(test_pii_inbound_transformation)
 
     guardrails_destroy(ctx);
 }
+
+TEST_CASE(test_pii_outbound_restoration)
+{
+    pii_session_map_t map;
+    memset(&map, 0, sizeof map);
+    strcpy(map.entries[0].placeholder, "[PHONE_1]");
+    strcpy(map.entries[0].original, "13812345678");
+    strcpy(map.entries[1].placeholder, "[ID_CARD_1]");
+    strcpy(map.entries[1].original, "110101199003072378");
+    map.count = 2;
+
+    /* 1. Full text restoration */
+    const char* reply = "已经向用户 [PHONE_1]（身份证 [ID_CARD_1]）发送验证码。";
+    int         changed = 0;
+    char*       restored = guardrails_restore_pii_text(reply, strlen(reply), &map, &changed);
+
+    TEST_ASSERT(changed == 1, "restored text changed");
+    TEST_ASSERT(restored != NULL, "restored not null");
+    TEST_ASSERT(strstr(restored, "[PHONE_1]") == NULL, "token replaced");
+    TEST_ASSERT(strstr(restored, "13812345678") != NULL, "original phone present");
+    TEST_ASSERT(strstr(restored, "110101199003072378") != NULL, "original ID present");
+    free(restored);
+
+    /* 2. SSE streaming chunk boundary split restoration */
+    /* Simulate token [PHONE_1] split across two consecutive chunks */
+    pii_stream_filter_t sf;
+    guardrails_stream_filter_init(&sf, &map);
+
+    char   out1[128] = {0};
+    size_t out1_len = 0;
+    /* Chunk 1 ends in partial token "[PH" */
+    guardrails_stream_filter_feed(
+        &sf, "data: {\"content\":\"call [PH", 26, out1, sizeof out1, &out1_len);
+    TEST_ASSERT(strstr(out1, "[PH") == NULL, "partial token buffered, not emitted yet");
+
+    char   out2[128] = {0};
+    size_t out2_len = 0;
+    /* Chunk 2 supplies "ONE_1] now\"}\n\n" */
+    guardrails_stream_filter_feed(&sf, "ONE_1] now\"}\n\n", 14, out2, sizeof out2, &out2_len);
+    TEST_ASSERT(strstr(out2, "13812345678") != NULL, "split token restored to real phone");
+    TEST_ASSERT(strstr(out2, "[PHONE_1]") == NULL, "no placeholder in output");
+
+    /* Flush filter */
+    char   out_fin[64] = {0};
+    size_t fin_len = 0;
+    guardrails_stream_filter_flush(&sf, out_fin, sizeof out_fin, &fin_len);
+    TEST_ASSERT(fin_len == 0, "no residual bytes on clean termination");
+}

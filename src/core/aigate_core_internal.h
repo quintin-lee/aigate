@@ -37,6 +37,7 @@ typedef struct stream_cache_acc {
     char                 id[64];        /**< Response id (from first data line). */
     long                 created;       /**< Response created timestamp. */
     bool                 overflow;      /**< Over-limit/alloc failure: passthrough only. */
+    pii_stream_filter_t  pii_sf; /**< Streaming PII de-anonymization sliding window filter. */
 } stream_cache_acc_t;
 
 /**

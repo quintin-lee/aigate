@@ -752,6 +752,7 @@ handle_chat_stream(chat_req_t* q)
         stream_cache_acc_t acc;
         memset(&acc, 0, sizeof(acc));
         acc.orig_rc = q->rc;
+        guardrails_stream_filter_init(&acc.pii_sf, &q->pii_map);
 
         aigate_response_ctx proxy_rc = *q->rc;
         proxy_rc.impl = &acc;
