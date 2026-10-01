@@ -7,6 +7,7 @@
 #include "provider_adapter.h"
 #include "response_cache.h"
 #include "upstream_client.h"
+#include "filter_chain.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -265,6 +266,22 @@ handle_chat_sync(chat_req_t* q)
                 return 0;
             }
             free(ubody);
+
+            if (parsed_status == 200) {
+                char*  filtered_resp = NULL;
+                size_t filtered_len = 0;
+                if (filter_chain_execute_outbound(
+                        q, parsed_body, parsed_len, &filtered_resp, &filtered_len) == FILTER_STOP) {
+                    free(parsed_body);
+                    chat_req_cleanup(q);
+                    return 0;
+                }
+                if (filtered_resp != NULL) {
+                    free(parsed_body);
+                    parsed_body = filtered_resp;
+                    parsed_len = filtered_len;
+                }
+            }
 
             double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
             record_usage_and_event(q->ac,

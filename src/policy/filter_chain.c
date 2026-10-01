@@ -19,6 +19,7 @@ filter_guardrails(chat_req_t* q)
 
     if (q->krec.guardrails_enabled && q->ac->gr != NULL && q->rq->body != NULL &&
         q->rq->body_len > 0) {
+        /* L1: Local Aho-Corasick & PII Regex */
         guardrails_action_t gr_res = guardrails_inspect_inbound(q->ac->gr,
                                                                 (const char*)q->rq->body,
                                                                 q->rq->body_len,
@@ -39,6 +40,44 @@ filter_guardrails(chat_req_t* q)
         }
         if (gr_res == GUARDRAILS_MASKED && q->sanitized_body != NULL) {
             q->eff_body = q->sanitized_body;
+            snprintf(q->guardrail_act, sizeof q->guardrail_act, "masked");
+        }
+
+        /* L2: External Webhook Moderation (Inbound) */
+        char*       wh_sanitized = NULL;
+        size_t      wh_san_len = 0;
+        char        wh_reason[128] = {0};
+        const char* current_body =
+            (q->sanitized_body != NULL) ? q->sanitized_body : (const char*)q->rq->body;
+        size_t current_len = (q->sanitized_body != NULL) ? q->sanitized_len : q->rq->body_len;
+
+        guardrails_action_t wh_res = guardrails_inspect_webhook_inbound(q->ac->gr,
+                                                                        q->model,
+                                                                        q->krec.key_id,
+                                                                        current_body,
+                                                                        current_len,
+                                                                        &wh_sanitized,
+                                                                        &wh_san_len,
+                                                                        wh_reason,
+                                                                        sizeof wh_reason);
+        if (wh_res == GUARDRAILS_BLOCKED) {
+            char block_msg[256];
+            snprintf(block_msg,
+                     sizeof block_msg,
+                     "Blocked by external moderation webhook: %s",
+                     wh_reason[0] ? wh_reason : "content_policy_violation");
+            aigate_write_error(q->rc, 400, "content_policy_violation", block_msg);
+            record_usage_and_event(
+                q->ac, q->krec.key_id, q->model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
+            return FILTER_STOP;
+        }
+        if (wh_res == GUARDRAILS_MASKED && wh_sanitized != NULL) {
+            if (q->sanitized_body != NULL) {
+                free(q->sanitized_body);
+            }
+            q->sanitized_body = wh_sanitized;
+            q->sanitized_len = wh_san_len;
+            q->eff_body = wh_sanitized;
             snprintf(q->guardrail_act, sizeof q->guardrail_act, "masked");
         }
     }
@@ -109,6 +148,61 @@ filter_chain_execute_inbound(chat_req_t* q)
 
     if (filter_prompt_template(q) == FILTER_STOP) {
         return FILTER_STOP;
+    }
+
+    return FILTER_CONTINUE;
+}
+
+filter_action_t
+filter_chain_execute_outbound(
+    chat_req_t* q, const char* resp_body, size_t resp_len, char** out_body, size_t* out_len)
+{
+    if (out_body != NULL) {
+        *out_body = NULL;
+    }
+    if (out_len != NULL) {
+        *out_len = 0;
+    }
+    if (q == NULL || resp_body == NULL || resp_len == 0) {
+        return FILTER_CONTINUE;
+    }
+
+    if (q->krec.guardrails_enabled && q->ac->gr != NULL) {
+        char                wh_reason[128] = {0};
+        char*               wh_sanitized = NULL;
+        size_t              wh_san_len = 0;
+        guardrails_action_t act = guardrails_inspect_webhook_outbound(q->ac->gr,
+                                                                      q->model,
+                                                                      q->krec.key_id,
+                                                                      resp_body,
+                                                                      resp_len,
+                                                                      &wh_sanitized,
+                                                                      &wh_san_len,
+                                                                      wh_reason,
+                                                                      sizeof wh_reason);
+        if (act == GUARDRAILS_BLOCKED) {
+            char block_msg[256];
+            snprintf(block_msg,
+                     sizeof block_msg,
+                     "Response blocked by external moderation webhook: %s",
+                     wh_reason[0] ? wh_reason : "prohibited_content");
+            aigate_write_error(q->rc, 400, "content_policy_violation", block_msg);
+            record_usage_and_event(
+                q->ac, q->krec.key_id, q->model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
+            return FILTER_STOP;
+        }
+        if (act == GUARDRAILS_MASKED && wh_sanitized != NULL) {
+            if (out_body != NULL) {
+                *out_body = wh_sanitized;
+            } else {
+                free(wh_sanitized);
+            }
+            if (out_len != NULL) {
+                *out_len = wh_san_len;
+            }
+            snprintf(q->guardrail_act, sizeof q->guardrail_act, "masked");
+            return FILTER_CONTINUE;
+        }
     }
 
     return FILTER_CONTINUE;

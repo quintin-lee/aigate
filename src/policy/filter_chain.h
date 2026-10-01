@@ -24,6 +24,18 @@ typedef filter_action_t (*req_filter_fn)(chat_req_t* q);
  */
 filter_action_t filter_chain_execute_inbound(chat_req_t* q);
 
+/**
+ * @brief Execute outbound middleware filter chain (e.g. L2 Webhook moderation on model response).
+ * @param q Request context.
+ * @param resp_body Upstream parsed response body.
+ * @param resp_len Upstream parsed response length.
+ * @param out_body Written with new sanitized body if masked; NULL if unchanged.
+ * @param out_len Written with new sanitized length if masked; 0 if unchanged.
+ * @return FILTER_CONTINUE to proceed with writing response to client; FILTER_STOP if interrupted.
+ */
+filter_action_t filter_chain_execute_outbound(
+    chat_req_t* q, const char* resp_body, size_t resp_len, char** out_body, size_t* out_len);
+
 #ifdef __cplusplus
 }
 #endif
