@@ -190,8 +190,9 @@ handle_v1(struct mg_connection* conn, void* cbdata)
                         (long long)ri->content_length,
                         cw->max_body_bytes,
                         ri->remote_addr);
-        const char* err413 = "{\"error\":{\"message\":\"request body too "
-                             "large\",\"type\":\"payload_too_large\",\"code\":413}}";
+        const char* err413 =
+            "{\"error\":{\"message\":\"request body too "
+            "large\",\"type\":\"payload_too_large\",\"code\":413}}";
         send_http_error_json(conn, 413, err413, (size_t)strlen(err413));
         return 1;
     }
@@ -225,6 +226,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
         cc = mg_get_header(conn, "x-skip-cache");
     }
     rq.cache_control = cc;
+    rq.target_provider = mg_get_header(conn, "X-Aigate-Target-Provider");
 
     aigate_handle_request(cw->ac, &rq, &rc);
 
@@ -320,8 +322,9 @@ handle_admin(struct mg_connection* conn, void* cbdata)
                         (long long)ri->content_length,
                         cw->max_body_bytes,
                         ri->remote_addr);
-        const char* err413 = "{\"error\":{\"message\":\"request body too "
-                             "large\",\"type\":\"payload_too_large\",\"code\":413}}";
+        const char* err413 =
+            "{\"error\":{\"message\":\"request body too "
+            "large\",\"type\":\"payload_too_large\",\"code\":413}}";
         send_http_error_json(conn, 413, err413, (size_t)strlen(err413));
         return 1;
     }

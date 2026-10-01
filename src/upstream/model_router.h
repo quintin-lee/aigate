@@ -65,4 +65,22 @@ int model_router_select_candidates(circuit_breaker_t* cb,
                                    int                cap,
                                    int*               out_count);
 
+/** @brief Select ordered candidate targets, optionally pinning a target provider to first position.
+ *  @param cb              Optional circuit breaker to check target health (can be NULL).
+ *  @param lt              Optional latency tracker for adaptive routing (can be NULL).
+ *  @param model           Model record containing targets and lb_policy.
+ *  @param target_provider If non-NULL and matches a configured target, pins it as first candidate.
+ *  @param out_candidates  Array of size @p cap to receive ordered candidates.
+ *  @param cap             Maximum number of candidates (e.g. MAX_TARGETS_PER_MODEL).
+ *  @param out_count       Receives number of candidates placed in @p out_candidates.
+ *  @return 0 on success, -1 on error.
+ */
+int model_router_select_candidates_targeted(circuit_breaker_t* cb,
+                                            latency_tracker_t* lt,
+                                            const model_rec_t* model,
+                                            const char*        target_provider,
+                                            upstream_target_t* out_candidates,
+                                            int                cap,
+                                            int*               out_count);
+
 #endif /* AIGATE_MODEL_ROUTER_H */

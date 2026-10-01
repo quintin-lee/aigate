@@ -94,6 +94,7 @@ main(void)
     extern void test_model_router_weighted(void);
     extern void test_model_router_cb_exclusion_and_fallback(void);
     extern void test_model_router_half_open_probe_in_candidates(void);
+    extern void test_model_router_target_provider_override(void);
     extern void test_upstream_200_roundtrip(void);
     extern void test_upstream_500_passthrough(void);
     extern void test_upstream_timeout(void);
@@ -173,6 +174,7 @@ main(void)
     test_register("model_router_weighted", test_model_router_weighted);
     test_register("model_router_cb_exclusion", test_model_router_cb_exclusion_and_fallback);
     test_register("model_router_half_open_probe", test_model_router_half_open_probe_in_candidates);
+    test_register("model_router_target_provider", test_model_router_target_provider_override);
     test_register("upstream_200", test_upstream_200_roundtrip);
     test_register("upstream_500", test_upstream_500_passthrough);
     test_register("upstream_timeout", test_upstream_timeout);

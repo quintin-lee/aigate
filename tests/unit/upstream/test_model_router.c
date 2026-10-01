@@ -355,3 +355,49 @@ TEST_CASE(test_model_router_half_open_probe_in_candidates)
 
     cb_destroy(cb);
 }
+
+TEST_CASE(test_model_router_target_provider_override)
+{
+    model_rec_t m;
+    memset(&m, 0, sizeof m);
+    strcpy(m.name, "target-model");
+    strcpy(m.lb_policy, "weighted");
+    m.n_targets = 3;
+
+    strcpy(m.targets[0].provider, "openai");
+    strcpy(m.targets[0].endpoint, "http://p0-openai");
+    m.targets[0].weight = 10;
+    m.targets[0].priority = 0;
+
+    strcpy(m.targets[1].provider, "azure");
+    strcpy(m.targets[1].endpoint, "http://p1-azure");
+    m.targets[1].weight = 90;
+    m.targets[1].priority = 0;
+
+    strcpy(m.targets[2].provider, "backup");
+    strcpy(m.targets[2].endpoint, "http://p2-backup");
+    m.targets[2].weight = 50;
+    m.targets[2].priority = 1;
+
+    upstream_target_t cands[8];
+    int               count = 0;
+
+    /* 1. When target_provider is NULL, standard routing applies */
+    TEST_ASSERT(
+        model_router_select_candidates_targeted(NULL, NULL, &m, NULL, cands, 8, &count) == 0,
+        "select null target");
+    TEST_ASSERT(count == 3, "returns all targets");
+
+    /* 2. When target_provider is 'azure', azure target must be placed at index 0 */
+    TEST_ASSERT(
+        model_router_select_candidates_targeted(NULL, NULL, &m, "azure", cands, 8, &count) == 0,
+        "select azure target");
+    TEST_ASSERT(count >= 1, "has candidates");
+    TEST_ASSERT(strcmp(cands[0].provider, "azure") == 0, "azure target pinned to candidate 0");
+
+    /* 3. When target_provider is non-existent, fallback to normal candidates */
+    TEST_ASSERT(model_router_select_candidates_targeted(
+                    NULL, NULL, &m, "non-existent", cands, 8, &count) == 0,
+                "select non-existent target");
+    TEST_ASSERT(count == 3, "fallback returns all targets");
+}

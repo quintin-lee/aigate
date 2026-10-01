@@ -35,6 +35,8 @@ typedef struct aigate_request_ctx {
     const void* body;          /**< Request body (borrowed, not owned) */
     size_t      body_len;      /**< Request body length in bytes */
     const char* cache_control; /**< Client Cache-Control header, may be NULL */
+    const char*
+        target_provider; /**< Client X-Aigate-Target-Provider header for channel debugging, may be NULL */
 } aigate_request_ctx;
 
 /** @brief Outbound response sink (transport implements callbacks). */
@@ -97,8 +99,10 @@ int aigate_write_json(aigate_response_ctx* rc, int status, const char* body, siz
 
 /** @brief Write an OpenAI-shaped error body:
  *  {"error":{"message":...,"type":...,"code":HTTP status}}. */
-int
-aigate_write_error(aigate_response_ctx* rc, int http_status, const char* type, const char* message);
+int aigate_write_error(aigate_response_ctx* rc,
+                       int                  http_status,
+                       const char*          type,
+                       const char*          message);
 
 /** @brief Write Anthropic error JSON ({"type": "error", "error": {"type": ..., "message": ...}}). */
 int aigate_write_anthropic_error(aigate_response_ctx* rc,

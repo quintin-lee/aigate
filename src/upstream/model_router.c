@@ -200,12 +200,13 @@ model_router_invalidate(model_router_t* mr, const char* model)
 }
 
 int
-model_router_select_candidates(circuit_breaker_t* cb,
-                               latency_tracker_t* lt,
-                               const model_rec_t* model,
-                               upstream_target_t* out_candidates,
-                               int                cap,
-                               int*               out_count)
+model_router_select_candidates_targeted(circuit_breaker_t* cb,
+                                        latency_tracker_t* lt,
+                                        const model_rec_t* model,
+                                        const char*        target_provider,
+                                        upstream_target_t* out_candidates,
+                                        int                cap,
+                                        int*               out_count)
 {
     if (model == NULL || out_candidates == NULL || cap <= 0 || out_count == NULL) {
         return -1;
@@ -256,6 +257,28 @@ model_router_select_candidates(circuit_breaker_t* cb,
                          "%s",
                          model->upstream_key);
             }
+        }
+    }
+
+    /* Targeted Provider Override: if requested and exists in targets, place it first */
+    if (target_provider != NULL && target_provider[0] != '\0') {
+        int targeted_idx = -1;
+        for (int i = 0; i < n_tgts; i++) {
+            if (strcmp(src_targets[i].provider, target_provider) == 0) {
+                targeted_idx = i;
+                break;
+            }
+        }
+        if (targeted_idx >= 0) {
+            int added = 0;
+            out_candidates[added++] = src_targets[targeted_idx];
+            for (int i = 0; i < n_tgts && added < cap; i++) {
+                if (i != targeted_idx) {
+                    out_candidates[added++] = src_targets[i];
+                }
+            }
+            *out_count = added;
+            return 0;
         }
     }
 
@@ -498,4 +521,16 @@ model_router_select_candidates(circuit_breaker_t* cb,
 
     *out_count = total_added;
     return 0;
+}
+
+int
+model_router_select_candidates(circuit_breaker_t* cb,
+                               latency_tracker_t* lt,
+                               const model_rec_t* model,
+                               upstream_target_t* out_candidates,
+                               int                cap,
+                               int*               out_count)
+{
+    return model_router_select_candidates_targeted(
+        cb, lt, model, NULL, out_candidates, cap, out_count);
 }
