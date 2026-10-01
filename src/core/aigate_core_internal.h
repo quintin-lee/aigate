@@ -7,6 +7,7 @@
 
 #include "aigate_core.h"
 #include "aigate_log.h"
+#include "guardrails.h"
 #include "response_cache.h"
 #include <jansson.h>
 #include <stdbool.h>
@@ -63,6 +64,7 @@ typedef struct {
     char        cache_key[65]; /**< Hex-encoded SHA-256 fingerprint for response cache lookup. */
     bool        bypass_cache;  /**< True if cache lookup should be bypassed by policy or header. */
     bool        no_store;      /**< True if response should not be cached. */
+    pii_session_map_t pii_map; /**< Request-bound PII de-anonymization session map. */
 } chat_req_t;
 
 /**

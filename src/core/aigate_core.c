@@ -356,6 +356,7 @@ chat_req_cleanup(chat_req_t* q)
     key_rec_free(&q->krec);
     free(q->sanitized_body);
     q->sanitized_body = NULL;
+    memset(&q->pii_map, 0, sizeof(q->pii_map));
 }
 
 /** @brief Auth → QPS → daily quota → monthly budget gates.

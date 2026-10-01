@@ -64,6 +64,7 @@ main(void)
     extern void test_guardrails_webhook_unit(void);
     extern void test_pii_checksum_algorithms(void);
     extern void test_pii_session_map_and_partial_masking(void);
+    extern void test_pii_inbound_transformation(void);
     extern void test_budget_enforce_unlimited(void);
     extern void test_budget_enforce_key_cost_limit(void);
     extern void test_budget_enforce_key_token_limit(void);
@@ -146,6 +147,7 @@ main(void)
     test_register("guardrails_webhook_unit", test_guardrails_webhook_unit);
     test_register("pii_checksum_algorithms", test_pii_checksum_algorithms);
     test_register("pii_session_map_and_partial_masking", test_pii_session_map_and_partial_masking);
+    test_register("pii_inbound_transformation", test_pii_inbound_transformation);
     test_register("budget_enforce_unlimited", test_budget_enforce_unlimited);
     test_register("budget_enforce_key_cost_limit", test_budget_enforce_key_cost_limit);
     test_register("budget_enforce_key_token_limit", test_budget_enforce_key_token_limit);

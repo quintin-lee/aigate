@@ -417,3 +417,65 @@ TEST_CASE(test_pii_session_map_and_partial_masking)
     TEST_ASSERT(pii_session_map_lookup_token(&map, "[PHONE_3]") == NULL,
                 "lookup missing token returns NULL");
 }
+
+TEST_CASE(test_pii_inbound_transformation)
+{
+    guardrails_ctx_t* ctx = guardrails_create();
+    TEST_ASSERT(ctx != NULL, "guardrails_create");
+
+    /* 1. Anonymize & Restore action (creates token in map) */
+    pii_session_map_t map;
+    memset(&map, 0, sizeof map);
+    const char*  txt1 = "联系张三 13812345678 或者李四 13812345678";
+    int          changed = 0;
+    pii_action_t act = PII_ACTION_OFF;
+    char* trans1 = guardrails_transform_pii_text(ctx, txt1, strlen(txt1), &map, &act, &changed);
+
+    TEST_ASSERT(changed == 1, "text transformed");
+    TEST_ASSERT(act == PII_ACTION_ANONYMIZE_RESTORE, "action anonymize");
+    TEST_ASSERT(trans1 != NULL, "trans1 not null");
+    TEST_ASSERT(strstr(trans1, "[PHONE_1]") != NULL, "contains [PHONE_1]");
+    TEST_ASSERT(strstr(trans1, "13812345678") == NULL, "original phone replaced");
+    TEST_ASSERT(map.count == 1, "map has 1 entry");
+    free(trans1);
+
+    /* 2. Bank card with Luhn verification (valid vs invalid) */
+    /* Valid UnionPay card passes checksum -> masked */
+    const char* txt2 = "卡号 6222021234567894 请查收";
+    changed = 0;
+    char* trans2 = guardrails_transform_pii_text(ctx, txt2, strlen(txt2), &map, &act, &changed);
+    TEST_ASSERT(changed == 1, "valid bank card recognized");
+    TEST_ASSERT(trans2 != NULL, "trans2 not null");
+    free(trans2);
+
+    /* Invalid number of same length fails Luhn -> untouched */
+    const char* txt3 = "订单号 1234567890123456 请注意";
+    changed = 0;
+    char* trans3 = guardrails_transform_pii_text(ctx, txt3, strlen(txt3), &map, &act, &changed);
+    TEST_ASSERT(changed == 0, "invalid card number ignored by Luhn");
+    TEST_ASSERT(trans3 == NULL, "no change returns NULL");
+
+    /* 3. Chinese ID card with MOD 11-2 verification (valid vs invalid) */
+    const char* txt4 = "身份证 110101199003072375 归属地";
+    changed = 0;
+    char* trans4 = guardrails_transform_pii_text(ctx, txt4, strlen(txt4), &map, &act, &changed);
+    TEST_ASSERT(changed == 1, "valid ID card recognized");
+    TEST_ASSERT(trans4 != NULL, "trans4 not null");
+    free(trans4);
+
+    const char* txt5 = "编号 123456789012345678 请核对";
+    changed = 0;
+    char* trans5 = guardrails_transform_pii_text(ctx, txt5, strlen(txt5), &map, &act, &changed);
+    TEST_ASSERT(changed == 0, "invalid 18-digit number ignored by MOD 11-2");
+    TEST_ASSERT(trans5 == NULL, "no change returns NULL");
+
+    /* 4. API Key blocking action */
+    const char* txt6 = "我的密钥是 sk-1234567890abcdef1234567890";
+    changed = 0;
+    act = PII_ACTION_OFF;
+    char* trans6 = guardrails_transform_pii_text(ctx, txt6, strlen(txt6), &map, &act, &changed);
+    TEST_ASSERT(act == PII_ACTION_BLOCK, "api_key triggers BLOCK action");
+    free(trans6);
+
+    guardrails_destroy(ctx);
+}

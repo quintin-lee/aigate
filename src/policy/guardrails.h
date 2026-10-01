@@ -166,18 +166,19 @@ typedef enum {
 
 /** @brief Configuration rule for a single PII entity. */
 typedef struct {
-    pii_type_t   type;
+    pii_type_t   type;     /**< Sensitive entity category identifier. */
     char         name[32]; /**< e.g. "phone", "id_card", "bank_card" */
     char         tag[32];  /**< e.g. "PHONE", "ID_CARD", "BANK_CARD" */
-    bool         enabled;
-    pii_action_t action;
+    bool         enabled;  /**< Whether detection for this entity type is active. */
+    pii_action_t action;   /**< Handling policy action for this entity type. */
 } pii_rule_t;
 
 /** @brief Global PII configuration table. */
 typedef struct {
-    pii_rule_t rules[PII_TYPE_COUNT];
+    pii_rule_t rules[PII_TYPE_COUNT]; /**< Per-entity PII rules array. */
 } pii_config_t;
 
+/** @brief Maximum number of distinct sensitive entities tracked per request session. */
 #define PII_MAX_SESSION_ENTRIES 64
 
 /** @brief One mapping entry between placeholder token and original sensitive text. */
@@ -189,8 +190,8 @@ typedef struct {
 
 /** @brief Request-bound session mapping table. */
 typedef struct {
-    pii_entry_t entries[PII_MAX_SESSION_ENTRIES];
-    int         count;
+    pii_entry_t entries[PII_MAX_SESSION_ENTRIES]; /**< Session token mapping array. */
+    int         count;                            /**< Number of active mapping entries. */
 } pii_session_map_t;
 
 /** @brief Partial mask phone number (e.g. 138****5678). */
@@ -199,7 +200,7 @@ void guardrails_mask_partial_phone(const char* src, char* out, size_t out_sz);
 void guardrails_mask_partial_id_card(const char* src, char* out, size_t out_sz);
 /** @brief Partial mask bank/credit card (e.g. 622202******7894). */
 void guardrails_mask_partial_bank_card(const char* src, char* out, size_t out_sz);
-/** @brief Partial mask email (e.g. a***r@company.com). */
+/** @brief Partial mask email (e.g. a***r\@company.com). */
 void guardrails_mask_partial_email(const char* src, char* out, size_t out_sz);
 /** @brief Partial mask API key (e.g. sk-proj-******3456). */
 void guardrails_mask_partial_api_key(const char* src, char* out, size_t out_sz);
@@ -223,5 +224,43 @@ pii_session_map_get_or_create(pii_session_map_t* map, pii_type_t type, const cha
  * @return Original string, or NULL if not found.
  */
 const char* pii_session_map_lookup_token(const pii_session_map_t* map, const char* placeholder);
+
+/**
+ * @brief Transform inbound text based on active PII rules and session map.
+ * @param ctx Guardrails context.
+ * @param text Raw text.
+ * @param len Length of text.
+ * @param map Pointer to request-bound session map (for anonymize_restore).
+ * @param out_action Receives highest-severity action taken (BLOCK > MASK > PASS).
+ * @param changed Receives 1 if modified, 0 otherwise.
+ * @return Newly allocated string (caller frees), or NULL if unchanged.
+ */
+char* guardrails_transform_pii_text(guardrails_ctx_t*  ctx,
+                                    const char*        text,
+                                    size_t             len,
+                                    pii_session_map_t* map,
+                                    pii_action_t*      out_action,
+                                    int*               changed);
+
+/**
+ * @brief Inbound inspection with session map for reversible PII anonymization.
+ * @param ctx Guardrails context.
+ * @param raw_body Request body JSON.
+ * @param raw_len Length of raw_body.
+ * @param pii_map Pointer to session map (can be NULL).
+ * @param sanitized_body Receives allocated sanitized body if modified.
+ * @param sanitized_len Receives length of sanitized body.
+ * @param blocked_keyword Receives blocked keyword if blocked.
+ * @param blocked_keyword_sz Size of blocked_keyword buffer.
+ * @return One of GUARDRAILS_PASS/MASKED/BLOCKED.
+ */
+guardrails_action_t guardrails_inspect_inbound_with_pii(guardrails_ctx_t*  ctx,
+                                                        const char*        raw_body,
+                                                        size_t             raw_len,
+                                                        pii_session_map_t* pii_map,
+                                                        char**             sanitized_body,
+                                                        size_t*            sanitized_len,
+                                                        char*              blocked_keyword,
+                                                        size_t             blocked_keyword_sz);
 
 #endif /* AIGATE_GUARDRAILS_H */

@@ -20,13 +20,14 @@ filter_guardrails(chat_req_t* q)
     if (q->krec.guardrails_enabled && q->ac->gr != NULL && q->rq->body != NULL &&
         q->rq->body_len > 0) {
         /* L1: Local Aho-Corasick & PII Regex */
-        guardrails_action_t gr_res = guardrails_inspect_inbound(q->ac->gr,
-                                                                (const char*)q->rq->body,
-                                                                q->rq->body_len,
-                                                                &q->sanitized_body,
-                                                                &q->sanitized_len,
-                                                                matched_rule,
-                                                                sizeof matched_rule);
+        guardrails_action_t gr_res = guardrails_inspect_inbound_with_pii(q->ac->gr,
+                                                                         (const char*)q->rq->body,
+                                                                         q->rq->body_len,
+                                                                         &q->pii_map,
+                                                                         &q->sanitized_body,
+                                                                         &q->sanitized_len,
+                                                                         matched_rule,
+                                                                         sizeof matched_rule);
         if (gr_res == GUARDRAILS_BLOCKED) {
             char block_msg[256];
             snprintf(block_msg,

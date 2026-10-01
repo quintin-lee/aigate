@@ -1166,8 +1166,10 @@ TEST_CASE(test_core_guardrail_pii_masking)
 
     const char* up_body = mock_upstream_last_body(mu);
     TEST_ASSERT(up_body != NULL, "upstream got request body");
-    TEST_ASSERT(strstr(up_body, "[PHONE]") != NULL, "upstream body has [PHONE]");
-    TEST_ASSERT(strstr(up_body, "[EMAIL]") != NULL, "upstream body has [EMAIL]");
+    TEST_ASSERT(strstr(up_body, "[PHONE_1]") != NULL || strstr(up_body, "[PHONE]") != NULL,
+                "upstream body has phone token");
+    TEST_ASSERT(strstr(up_body, "[EMAIL_1]") != NULL || strstr(up_body, "[EMAIL]") != NULL,
+                "upstream body has email token");
     TEST_ASSERT(strstr(up_body, "13800138000") == NULL, "upstream did not get raw phone");
     TEST_ASSERT(strstr(up_body, "user@test.com") == NULL, "upstream did not get raw email");
 

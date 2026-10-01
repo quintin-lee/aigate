@@ -191,6 +191,9 @@ struct guardrails_ctx {
     regex_t          re_email;          /**< Email regex. */
     regex_t          re_id_card;        /**< ID card number regex. */
     regex_t          re_phone;          /**< Phone number regex. */
+    regex_t          re_bank_card;      /**< Bank card number regex. */
+    regex_t          re_ip;             /**< IPv4 address regex. */
+    pii_config_t     pii_cfg;           /**< PII configuration rules. */
     int              regex_ready;       /**< Regex compilation ready flag. */
     guardrail_webhook_rule_t
            webhooks[MAX_WEBHOOK_RULES]; /**< Registered webhook inspection rules. */
@@ -217,6 +220,29 @@ guardrails_create(void)
             "[1-9][0-9]{5}(18|19|20)[0-9]{2}(0[1-9]|1[0-2])(0[1-9]|[12][0-9]|3[01])[0-9]{3}[0-9Xx]",
             REG_EXTENDED);
     regcomp(&ctx->re_phone, "1[3-9][0-9]{9}", REG_EXTENDED);
+    regcomp(&ctx->re_bank_card, "[0-9]{13,19}", REG_EXTENDED);
+    regcomp(&ctx->re_ip, "([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3})\\.([0-9]{1,3})", REG_EXTENDED);
+
+    /* Default PII configuration:
+     * - phone: anonymize_restore
+     * - id_card: anonymize_restore
+     * - bank_card: mask_partial
+     * - email: anonymize_restore
+     * - api_key: block
+     * - ip_address: redact_tag */
+    ctx->pii_cfg.rules[PII_TYPE_PHONE] =
+        (pii_rule_t){PII_TYPE_PHONE, "phone", "PHONE", true, PII_ACTION_ANONYMIZE_RESTORE};
+    ctx->pii_cfg.rules[PII_TYPE_ID_CARD] =
+        (pii_rule_t){PII_TYPE_ID_CARD, "id_card", "ID_CARD", true, PII_ACTION_ANONYMIZE_RESTORE};
+    ctx->pii_cfg.rules[PII_TYPE_BANK_CARD] =
+        (pii_rule_t){PII_TYPE_BANK_CARD, "bank_card", "BANK_CARD", true, PII_ACTION_MASK_PARTIAL};
+    ctx->pii_cfg.rules[PII_TYPE_EMAIL] =
+        (pii_rule_t){PII_TYPE_EMAIL, "email", "EMAIL", true, PII_ACTION_ANONYMIZE_RESTORE};
+    ctx->pii_cfg.rules[PII_TYPE_API_KEY] =
+        (pii_rule_t){PII_TYPE_API_KEY, "api_key", "API_KEY", true, PII_ACTION_BLOCK};
+    ctx->pii_cfg.rules[PII_TYPE_IP_ADDRESS] =
+        (pii_rule_t){PII_TYPE_IP_ADDRESS, "ip_address", "IP", false, PII_ACTION_REDACT_TAG};
+
     ctx->regex_ready = 1;
 
     return ctx;
@@ -236,6 +262,8 @@ guardrails_destroy(guardrails_ctx_t* ctx)
         regfree(&ctx->re_email);
         regfree(&ctx->re_id_card);
         regfree(&ctx->re_phone);
+        regfree(&ctx->re_bank_card);
+        regfree(&ctx->re_ip);
     }
     pthread_rwlock_unlock(&ctx->rwlock);
     pthread_rwlock_destroy(&ctx->rwlock);
@@ -302,25 +330,29 @@ guardrails_load_rules(guardrails_ctx_t* ctx, const guardrail_rule_t* rules, size
     return 0;
 }
 
-/** @brief Regex global replace: with digit-boundary check on, skip hits directly adjacent to digits on both sides (e.g. ID card/phone).
- *  @param out_changed Optional, always written with whether a replacement happened.
- *  @return New string (caller frees); NULL when src is NULL, src copy as OOM fallback. */
+/** @brief Regex global replace with digit-boundary and algorithmic checksum checks. */
 static char*
-replace_regex(const regex_t* re,
-              const char*    src,
-              const char*    repl,
-              int            check_digit_boundary,
-              int*           out_changed)
+replace_entity_regex(const regex_t*     re,
+                     const char*        src,
+                     pii_type_t         type,
+                     pii_action_t       action,
+                     pii_session_map_t* map,
+                     int                check_digit_boundary,
+                     int                check_checksum,
+                     pii_action_t*      out_action,
+                     int*               out_changed)
 {
     if (src == NULL) {
         return NULL;
     }
+    if (action == PII_ACTION_OFF) {
+        return strdup(src);
+    }
     regmatch_t  pmatch[1];
     const char* cursor = src;
     size_t      src_len = strlen(src);
-    size_t      repl_len = strlen(repl);
 
-    size_t cap = src_len + 64;
+    size_t cap = src_len + 128;
     char*  buf = malloc(cap);
     if (buf == NULL) {
         return strdup(src);
@@ -352,7 +384,10 @@ replace_regex(const regex_t* re,
             int before_digit = (so > 0 && isdigit((unsigned char)cursor[so - 1]));
             int after_digit = (cursor[eo] != '\0' && isdigit((unsigned char)cursor[eo]));
             if (before_digit || after_digit) {
-                size_t step = (size_t)so + 1;
+                size_t step = (size_t)eo;
+                while (cursor[step] != '\0' && isdigit((unsigned char)cursor[step])) {
+                    step++;
+                }
                 if (len + step + 1 > cap) {
                     cap = len + step + 64;
                     char* nb = realloc(buf, cap);
@@ -369,6 +404,194 @@ replace_regex(const regex_t* re,
             }
         }
 
+        /* Extract matched string for algorithm verification */
+        size_t mlen = (size_t)(eo - so);
+        if (mlen >= 128) {
+            size_t step = (size_t)so + 1;
+            if (len + step + 1 > cap) {
+                cap = len + step + 64;
+                char* nb = realloc(buf, cap);
+                if (nb == NULL) {
+                    free(buf);
+                    return strdup(src);
+                }
+                buf = nb;
+            }
+            memcpy(buf + len, cursor, step);
+            len += step;
+            cursor += step;
+            continue;
+        }
+        char mstr[128];
+        memcpy(mstr, cursor + so, mlen);
+        mstr[mlen] = '\0';
+
+        /* Specific algorithm validations */
+        if (check_checksum && type == PII_TYPE_ID_CARD &&
+            !guardrails_validate_id_card_mod11(mstr)) {
+            size_t step = (size_t)eo;
+            while (cursor[step] != '\0' && (isdigit((unsigned char)cursor[step]) ||
+                                            cursor[step] == 'X' || cursor[step] == 'x')) {
+                step++;
+            }
+            if (len + step + 1 > cap) {
+                cap = len + step + 64;
+                char* nb = realloc(buf, cap);
+                if (nb == NULL) {
+                    free(buf);
+                    return strdup(src);
+                }
+                buf = nb;
+            }
+            memcpy(buf + len, cursor, step);
+            len += step;
+            cursor += step;
+            continue;
+        }
+        if (check_checksum && type == PII_TYPE_BANK_CARD && !guardrails_validate_luhn(mstr)) {
+            size_t step = (size_t)eo;
+            while (cursor[step] != '\0' && isdigit((unsigned char)cursor[step])) {
+                step++;
+            }
+            if (len + step + 1 > cap) {
+                cap = len + step + 64;
+                char* nb = realloc(buf, cap);
+                if (nb == NULL) {
+                    free(buf);
+                    return strdup(src);
+                }
+                buf = nb;
+            }
+            memcpy(buf + len, cursor, step);
+            len += step;
+            cursor += step;
+            continue;
+        }
+        if (check_checksum && type == PII_TYPE_IP_ADDRESS) {
+            int a, b, c, d;
+            if (sscanf(mstr, "%d.%d.%d.%d", &a, &b, &c, &d) != 4 || a > 255 || b > 255 || c > 255 ||
+                d > 255) {
+                size_t step = (size_t)eo;
+                if (len + step + 1 > cap) {
+                    cap = len + step + 64;
+                    char* nb = realloc(buf, cap);
+                    if (nb == NULL) {
+                        free(buf);
+                        return strdup(src);
+                    }
+                    buf = nb;
+                }
+                memcpy(buf + len, cursor, step);
+                len += step;
+                cursor += step;
+                continue;
+            }
+        }
+
+        /* Valid sensitive match! Update action severity */
+        if (out_action != NULL && action > *out_action) {
+            *out_action = action;
+        }
+
+        /* Determine replacement text */
+        char repl[128];
+        repl[0] = '\0';
+        switch (action) {
+        case PII_ACTION_ANONYMIZE_RESTORE: {
+            const char* tok = (map != NULL) ? pii_session_map_get_or_create(map, type, mstr) : NULL;
+            if (tok != NULL) {
+                snprintf(repl, sizeof repl, "%s", tok);
+            } else {
+                const char* tag = "PII";
+                switch (type) {
+                case PII_TYPE_PHONE:
+                    tag = "PHONE";
+                    break;
+                case PII_TYPE_ID_CARD:
+                    tag = "ID_CARD";
+                    break;
+                case PII_TYPE_BANK_CARD:
+                    tag = "BANK_CARD";
+                    break;
+                case PII_TYPE_EMAIL:
+                    tag = "EMAIL";
+                    break;
+                case PII_TYPE_API_KEY:
+                    tag = "API_KEY";
+                    break;
+                case PII_TYPE_IP_ADDRESS:
+                    tag = "IP";
+                    break;
+                default:
+                    break;
+                }
+                snprintf(repl, sizeof repl, "[%s]", tag);
+            }
+            break;
+        }
+        case PII_ACTION_MASK_PARTIAL: {
+            switch (type) {
+            case PII_TYPE_PHONE:
+                guardrails_mask_partial_phone(mstr, repl, sizeof repl);
+                break;
+            case PII_TYPE_ID_CARD:
+                guardrails_mask_partial_id_card(mstr, repl, sizeof repl);
+                break;
+            case PII_TYPE_BANK_CARD:
+                guardrails_mask_partial_bank_card(mstr, repl, sizeof repl);
+                break;
+            case PII_TYPE_EMAIL:
+                guardrails_mask_partial_email(mstr, repl, sizeof repl);
+                break;
+            case PII_TYPE_API_KEY:
+                guardrails_mask_partial_api_key(mstr, repl, sizeof repl);
+                break;
+            case PII_TYPE_IP_ADDRESS:
+                guardrails_mask_partial_ip(mstr, repl, sizeof repl);
+                break;
+            default:
+                snprintf(repl, sizeof repl, "[PII]");
+                break;
+            }
+            break;
+        }
+        case PII_ACTION_REDACT_TAG: {
+            const char* tag = "PII";
+            switch (type) {
+            case PII_TYPE_PHONE:
+                tag = "PHONE";
+                break;
+            case PII_TYPE_ID_CARD:
+                tag = "ID_CARD";
+                break;
+            case PII_TYPE_BANK_CARD:
+                tag = "BANK_CARD";
+                break;
+            case PII_TYPE_EMAIL:
+                tag = "EMAIL";
+                break;
+            case PII_TYPE_API_KEY:
+                tag = "API_KEY";
+                break;
+            case PII_TYPE_IP_ADDRESS:
+                tag = "IP";
+                break;
+            default:
+                break;
+            }
+            snprintf(repl, sizeof repl, "[%s]", tag);
+            break;
+        }
+        case PII_ACTION_BLOCK: {
+            snprintf(repl, sizeof repl, "%s", mstr);
+            break;
+        }
+        default:
+            snprintf(repl, sizeof repl, "%s", mstr);
+            break;
+        }
+
+        size_t repl_len = strlen(repl);
         if (len + (size_t)so + repl_len + 1 > cap) {
             cap = len + (size_t)so + repl_len + 64;
             char* nb = realloc(buf, cap);
@@ -400,6 +623,128 @@ replace_regex(const regex_t* re,
 }
 
 char*
+guardrails_transform_pii_text(guardrails_ctx_t*  ctx,
+                              const char*        text,
+                              size_t             len,
+                              pii_session_map_t* map,
+                              pii_action_t*      out_action,
+                              int*               changed)
+{
+    (void)len;
+    if (ctx == NULL || text == NULL || text[0] == '\0') {
+        if (changed != NULL) {
+            *changed = 0;
+        }
+        if (out_action != NULL) {
+            *out_action = PII_ACTION_OFF;
+        }
+        return NULL;
+    }
+
+    pthread_rwlock_rdlock(&ctx->rwlock);
+    pii_config_t cfg = ctx->pii_cfg;
+    pthread_rwlock_unlock(&ctx->rwlock);
+
+    int          local_changed = 0;
+    pii_action_t max_action = PII_ACTION_OFF;
+
+    /* 1. API key */
+    char* s1 = replace_entity_regex(
+        &ctx->re_api_key,
+        text,
+        PII_TYPE_API_KEY,
+        cfg.rules[PII_TYPE_API_KEY].enabled ? cfg.rules[PII_TYPE_API_KEY].action : PII_ACTION_OFF,
+        map,
+        0,
+        1,
+        &max_action,
+        &local_changed);
+
+    /* 2. Email */
+    char* s2 = replace_entity_regex(
+        &ctx->re_email,
+        s1,
+        PII_TYPE_EMAIL,
+        cfg.rules[PII_TYPE_EMAIL].enabled ? cfg.rules[PII_TYPE_EMAIL].action : PII_ACTION_OFF,
+        map,
+        0,
+        1,
+        &max_action,
+        &local_changed);
+    free(s1);
+
+    /* 3. ID Card */
+    char* s3 = replace_entity_regex(
+        &ctx->re_id_card,
+        s2,
+        PII_TYPE_ID_CARD,
+        cfg.rules[PII_TYPE_ID_CARD].enabled ? cfg.rules[PII_TYPE_ID_CARD].action : PII_ACTION_OFF,
+        map,
+        1,
+        1,
+        &max_action,
+        &local_changed);
+    free(s2);
+
+    /* 4. Bank Card */
+    char* s4 = replace_entity_regex(&ctx->re_bank_card,
+                                    s3,
+                                    PII_TYPE_BANK_CARD,
+                                    cfg.rules[PII_TYPE_BANK_CARD].enabled
+                                        ? cfg.rules[PII_TYPE_BANK_CARD].action
+                                        : PII_ACTION_OFF,
+                                    map,
+                                    1,
+                                    1,
+                                    &max_action,
+                                    &local_changed);
+    free(s3);
+
+    /* 5. Phone */
+    char* s5 = replace_entity_regex(
+        &ctx->re_phone,
+        s4,
+        PII_TYPE_PHONE,
+        cfg.rules[PII_TYPE_PHONE].enabled ? cfg.rules[PII_TYPE_PHONE].action : PII_ACTION_OFF,
+        map,
+        1,
+        1,
+        &max_action,
+        &local_changed);
+    free(s4);
+
+    /* 6. IP Address */
+    char* s6 = replace_entity_regex(&ctx->re_ip,
+                                    s5,
+                                    PII_TYPE_IP_ADDRESS,
+                                    cfg.rules[PII_TYPE_IP_ADDRESS].enabled
+                                        ? cfg.rules[PII_TYPE_IP_ADDRESS].action
+                                        : PII_ACTION_OFF,
+                                    map,
+                                    1,
+                                    1,
+                                    &max_action,
+                                    &local_changed);
+    free(s5);
+
+    if (out_action != NULL) {
+        *out_action = max_action;
+    }
+
+    if (local_changed) {
+        if (changed != NULL) {
+            *changed = 1;
+        }
+        return s6;
+    }
+    free(s6);
+    if (changed != NULL) {
+        *changed = 0;
+    }
+    return NULL;
+}
+
+char*
 guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t len, int* changed)
 {
     (void)len;
@@ -410,22 +755,66 @@ guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t len, in
         return NULL;
     }
 
-    int   local_changed = 0;
-    char* s1 = replace_regex(&ctx->re_api_key, text, "[API_KEY]", 0, &local_changed);
-    char* s2 = replace_regex(&ctx->re_email, s1, "[EMAIL]", 0, &local_changed);
+    int          local_changed = 0;
+    pii_action_t max_action = PII_ACTION_OFF;
+
+    char* s1 = replace_entity_regex(&ctx->re_api_key,
+                                    text,
+                                    PII_TYPE_API_KEY,
+                                    PII_ACTION_REDACT_TAG,
+                                    NULL,
+                                    0,
+                                    0,
+                                    &max_action,
+                                    &local_changed);
+    char* s2 = replace_entity_regex(&ctx->re_email,
+                                    s1,
+                                    PII_TYPE_EMAIL,
+                                    PII_ACTION_REDACT_TAG,
+                                    NULL,
+                                    0,
+                                    0,
+                                    &max_action,
+                                    &local_changed);
     free(s1);
-    char* s3 = replace_regex(&ctx->re_id_card, s2, "[ID_CARD]", 1, &local_changed);
+    char* s3 = replace_entity_regex(&ctx->re_id_card,
+                                    s2,
+                                    PII_TYPE_ID_CARD,
+                                    PII_ACTION_REDACT_TAG,
+                                    NULL,
+                                    1,
+                                    0,
+                                    &max_action,
+                                    &local_changed);
     free(s2);
-    char* s4 = replace_regex(&ctx->re_phone, s3, "[PHONE]", 1, &local_changed);
+    char* s4 = replace_entity_regex(&ctx->re_phone,
+                                    s3,
+                                    PII_TYPE_PHONE,
+                                    PII_ACTION_REDACT_TAG,
+                                    NULL,
+                                    1,
+                                    0,
+                                    &max_action,
+                                    &local_changed);
     free(s3);
+    char* s5 = replace_entity_regex(&ctx->re_bank_card,
+                                    s4,
+                                    PII_TYPE_BANK_CARD,
+                                    PII_ACTION_REDACT_TAG,
+                                    NULL,
+                                    1,
+                                    0,
+                                    &max_action,
+                                    &local_changed);
+    free(s4);
 
     if (local_changed) {
         if (changed != NULL) {
             *changed = 1;
         }
-        return s4;
+        return s5;
     }
-    free(s4);
+    free(s5);
     if (changed != NULL) {
         *changed = 0;
     }
@@ -433,13 +822,14 @@ guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t len, in
 }
 
 guardrails_action_t
-guardrails_inspect_inbound(guardrails_ctx_t* ctx,
-                           const char*       raw_body,
-                           size_t            raw_len,
-                           char**            sanitized_body,
-                           size_t*           sanitized_len,
-                           char*             blocked_keyword,
-                           size_t            blocked_keyword_sz)
+guardrails_inspect_inbound_with_pii(guardrails_ctx_t*  ctx,
+                                    const char*        raw_body,
+                                    size_t             raw_len,
+                                    pii_session_map_t* pii_map,
+                                    char**             sanitized_body,
+                                    size_t*            sanitized_len,
+                                    char*              blocked_keyword,
+                                    size_t             blocked_keyword_sz)
 {
     if (ctx == NULL || raw_body == NULL || raw_len == 0) {
         if (sanitized_body != NULL) {
@@ -494,11 +884,29 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
                 }
                 json_t* j_content = json_object_get(msg, "content");
                 if (j_content != NULL && json_is_string(j_content)) {
-                    int   c_changed = 0;
-                    char* masked = guardrails_mask_pii_text(ctx,
-                                                            json_string_value(j_content),
-                                                            strlen(json_string_value(j_content)),
-                                                            &c_changed);
+                    int          c_changed = 0;
+                    pii_action_t item_act = PII_ACTION_OFF;
+                    char*        masked =
+                        guardrails_transform_pii_text(ctx,
+                                                      json_string_value(j_content),
+                                                      strlen(json_string_value(j_content)),
+                                                      pii_map,
+                                                      &item_act,
+                                                      &c_changed);
+                    if (item_act == PII_ACTION_BLOCK) {
+                        free(masked);
+                        json_decref(root);
+                        if (blocked_keyword != NULL && blocked_keyword_sz > 0) {
+                            snprintf(blocked_keyword, blocked_keyword_sz, "sensitive_data_blocked");
+                        }
+                        if (sanitized_body != NULL) {
+                            *sanitized_body = NULL;
+                        }
+                        if (sanitized_len != NULL) {
+                            *sanitized_len = 0;
+                        }
+                        return GUARDRAILS_BLOCKED;
+                    }
                     if (c_changed && masked != NULL) {
                         json_object_set_new(msg, "content", json_string(masked));
                         free(masked);
@@ -514,12 +922,31 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
                         }
                         json_t* j_text = json_object_get(part, "text");
                         if (j_text != NULL && json_is_string(j_text)) {
-                            int   c_changed = 0;
-                            char* masked =
-                                guardrails_mask_pii_text(ctx,
-                                                         json_string_value(j_text),
-                                                         strlen(json_string_value(j_text)),
-                                                         &c_changed);
+                            int          c_changed = 0;
+                            pii_action_t item_act = PII_ACTION_OFF;
+                            char*        masked =
+                                guardrails_transform_pii_text(ctx,
+                                                              json_string_value(j_text),
+                                                              strlen(json_string_value(j_text)),
+                                                              pii_map,
+                                                              &item_act,
+                                                              &c_changed);
+                            if (item_act == PII_ACTION_BLOCK) {
+                                free(masked);
+                                json_decref(root);
+                                if (blocked_keyword != NULL && blocked_keyword_sz > 0) {
+                                    snprintf(blocked_keyword,
+                                             blocked_keyword_sz,
+                                             "sensitive_data_blocked");
+                                }
+                                if (sanitized_body != NULL) {
+                                    *sanitized_body = NULL;
+                                }
+                                if (sanitized_len != NULL) {
+                                    *sanitized_len = 0;
+                                }
+                                return GUARDRAILS_BLOCKED;
+                            }
                             if (c_changed && masked != NULL) {
                                 json_object_set_new(part, "text", json_string(masked));
                                 free(masked);
@@ -534,9 +961,28 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
         /* 2b. Inspect "prompt" */
         json_t* j_prompt = json_object_get(root, "prompt");
         if (j_prompt != NULL && json_is_string(j_prompt)) {
-            int   c_changed = 0;
-            char* masked = guardrails_mask_pii_text(
-                ctx, json_string_value(j_prompt), strlen(json_string_value(j_prompt)), &c_changed);
+            int          c_changed = 0;
+            pii_action_t item_act = PII_ACTION_OFF;
+            char*        masked = guardrails_transform_pii_text(ctx,
+                                                                json_string_value(j_prompt),
+                                                                strlen(json_string_value(j_prompt)),
+                                                                pii_map,
+                                                                &item_act,
+                                                                &c_changed);
+            if (item_act == PII_ACTION_BLOCK) {
+                free(masked);
+                json_decref(root);
+                if (blocked_keyword != NULL && blocked_keyword_sz > 0) {
+                    snprintf(blocked_keyword, blocked_keyword_sz, "sensitive_data_blocked");
+                }
+                if (sanitized_body != NULL) {
+                    *sanitized_body = NULL;
+                }
+                if (sanitized_len != NULL) {
+                    *sanitized_len = 0;
+                }
+                return GUARDRAILS_BLOCKED;
+            }
             if (c_changed && masked != NULL) {
                 json_object_set_new(root, "prompt", json_string(masked));
                 free(masked);
@@ -547,9 +993,28 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
         /* 2c. Inspect "system" */
         json_t* j_sys = json_object_get(root, "system");
         if (j_sys != NULL && json_is_string(j_sys)) {
-            int   c_changed = 0;
-            char* masked = guardrails_mask_pii_text(
-                ctx, json_string_value(j_sys), strlen(json_string_value(j_sys)), &c_changed);
+            int          c_changed = 0;
+            pii_action_t item_act = PII_ACTION_OFF;
+            char*        masked = guardrails_transform_pii_text(ctx,
+                                                                json_string_value(j_sys),
+                                                                strlen(json_string_value(j_sys)),
+                                                                pii_map,
+                                                                &item_act,
+                                                                &c_changed);
+            if (item_act == PII_ACTION_BLOCK) {
+                free(masked);
+                json_decref(root);
+                if (blocked_keyword != NULL && blocked_keyword_sz > 0) {
+                    snprintf(blocked_keyword, blocked_keyword_sz, "sensitive_data_blocked");
+                }
+                if (sanitized_body != NULL) {
+                    *sanitized_body = NULL;
+                }
+                if (sanitized_len != NULL) {
+                    *sanitized_len = 0;
+                }
+                return GUARDRAILS_BLOCKED;
+            }
             if (c_changed && masked != NULL) {
                 json_object_set_new(root, "system", json_string(masked));
                 free(masked);
@@ -578,12 +1043,31 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
                         }
                         json_t* j_text = json_object_get(part, "text");
                         if (j_text != NULL && json_is_string(j_text)) {
-                            int   c_changed = 0;
-                            char* masked =
-                                guardrails_mask_pii_text(ctx,
-                                                         json_string_value(j_text),
-                                                         strlen(json_string_value(j_text)),
-                                                         &c_changed);
+                            int          c_changed = 0;
+                            pii_action_t item_act = PII_ACTION_OFF;
+                            char*        masked =
+                                guardrails_transform_pii_text(ctx,
+                                                              json_string_value(j_text),
+                                                              strlen(json_string_value(j_text)),
+                                                              pii_map,
+                                                              &item_act,
+                                                              &c_changed);
+                            if (item_act == PII_ACTION_BLOCK) {
+                                free(masked);
+                                json_decref(root);
+                                if (blocked_keyword != NULL && blocked_keyword_sz > 0) {
+                                    snprintf(blocked_keyword,
+                                             blocked_keyword_sz,
+                                             "sensitive_data_blocked");
+                                }
+                                if (sanitized_body != NULL) {
+                                    *sanitized_body = NULL;
+                                }
+                                if (sanitized_len != NULL) {
+                                    *sanitized_len = 0;
+                                }
+                                return GUARDRAILS_BLOCKED;
+                            }
                             if (c_changed && masked != NULL) {
                                 json_object_set_new(part, "text", json_string(masked));
                                 free(masked);
@@ -615,8 +1099,23 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
             json_decref(root);
         }
         /* Fallback for non-JSON text payloads */
-        int   c_changed = 0;
-        char* masked = guardrails_mask_pii_text(ctx, raw_body, raw_len, &c_changed);
+        int          c_changed = 0;
+        pii_action_t item_act = PII_ACTION_OFF;
+        char*        masked =
+            guardrails_transform_pii_text(ctx, raw_body, raw_len, pii_map, &item_act, &c_changed);
+        if (item_act == PII_ACTION_BLOCK) {
+            free(masked);
+            if (blocked_keyword != NULL && blocked_keyword_sz > 0) {
+                snprintf(blocked_keyword, blocked_keyword_sz, "sensitive_data_blocked");
+            }
+            if (sanitized_body != NULL) {
+                *sanitized_body = NULL;
+            }
+            if (sanitized_len != NULL) {
+                *sanitized_len = 0;
+            }
+            return GUARDRAILS_BLOCKED;
+        }
         if (c_changed && masked != NULL) {
             if (sanitized_body != NULL) {
                 *sanitized_body = masked;
@@ -635,6 +1134,25 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
         *sanitized_len = 0;
     }
     return GUARDRAILS_PASS;
+}
+
+guardrails_action_t
+guardrails_inspect_inbound(guardrails_ctx_t* ctx,
+                           const char*       raw_body,
+                           size_t            raw_len,
+                           char**            sanitized_body,
+                           size_t*           sanitized_len,
+                           char*             blocked_keyword,
+                           size_t            blocked_keyword_sz)
+{
+    return guardrails_inspect_inbound_with_pii(ctx,
+                                               raw_body,
+                                               raw_len,
+                                               NULL,
+                                               sanitized_body,
+                                               sanitized_len,
+                                               blocked_keyword,
+                                               blocked_keyword_sz);
 }
 
 /* --- External Webhook Moderation Engine Implementation --- */
