@@ -324,3 +324,41 @@ TEST_CASE(test_guardrails_webhook_unit)
 
     guardrails_destroy(ctx);
 }
+
+TEST_CASE(test_pii_checksum_algorithms)
+{
+    /* 1. Luhn Mod 10 for Bank / Credit Card */
+    /* Valid test cards */
+    TEST_ASSERT(guardrails_validate_luhn("4532015112830366") == true,
+                "valid luhn Visa (16 digits)");
+    TEST_ASSERT(guardrails_validate_luhn("6222021234567894") == true,
+                "valid luhn UnionPay (16 digits)");
+    TEST_ASSERT(guardrails_validate_luhn("378282246310005") == true, "valid luhn Amex (15 digits)");
+    /* Invalid cards / random numbers / wrong lengths */
+    TEST_ASSERT(guardrails_validate_luhn("4532015112830367") == false, "invalid luhn check digit");
+    TEST_ASSERT(guardrails_validate_luhn("1234567890123456") == false,
+                "sequential digits fail luhn");
+    TEST_ASSERT(guardrails_validate_luhn("12345") == false, "too short card fails luhn");
+    TEST_ASSERT(guardrails_validate_luhn("123456789012345678901") == false,
+                "too long card fails luhn");
+    TEST_ASSERT(guardrails_validate_luhn(NULL) == false, "null string fails luhn");
+
+    /* 2. ISO 7064:1983.MOD 11-2 for Chinese 18-digit ID Card */
+    /* Valid ID cards (Standard checksums) */
+    TEST_ASSERT(guardrails_validate_id_card_mod11("110101199003072375") == true,
+                "valid id card digit 1");
+    TEST_ASSERT(guardrails_validate_id_card_mod11("110101199003072383") == true,
+                "valid id card digit 2");
+    /* Valid ID with 'X' check digit */
+    TEST_ASSERT(guardrails_validate_id_card_mod11("11010119900307002X") == true,
+                "valid id card with X");
+    TEST_ASSERT(guardrails_validate_id_card_mod11("11010119900307002x") == true,
+                "valid id card with lowercase x");
+    /* Invalid ID cards */
+    TEST_ASSERT(guardrails_validate_id_card_mod11("110101199003072378") == false,
+                "wrong checksum digit fails");
+    TEST_ASSERT(guardrails_validate_id_card_mod11("123456789012345678") == false,
+                "random 18 digits fail MOD 11-2");
+    TEST_ASSERT(guardrails_validate_id_card_mod11("11010119900307") == false, "short length fails");
+    TEST_ASSERT(guardrails_validate_id_card_mod11(NULL) == false, "null fails");
+}

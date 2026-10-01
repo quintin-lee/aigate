@@ -128,4 +128,18 @@ int guardrails_webhook_probe(const char* url,
                              size_t      err_sz,
                              double*     out_latency_ms);
 
+/**
+ * @brief Validate bank/credit card number using Luhn algorithm (Mod 10).
+ * @param digits Numeric string containing only digits '0'-'9'.
+ * @return True if length is 13..19 digits and Luhn checksum is valid; false otherwise.
+ */
+bool guardrails_validate_luhn(const char* digits);
+
+/**
+ * @brief Validate Chinese 18-digit resident ID card using ISO 7064:1983.MOD 11-2.
+ * @param id_str 18-character string (17 digits + 1 digit/X).
+ * @return True if format matches and check character matches MOD 11-2 remainder; false otherwise.
+ */
+bool guardrails_validate_id_card_mod11(const char* id_str);
+
 #endif /* AIGATE_GUARDRAILS_H */

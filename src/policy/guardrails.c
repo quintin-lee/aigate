@@ -1323,3 +1323,62 @@ guardrails_webhook_probe(const char* url,
 
     return 0;
 }
+
+bool
+guardrails_validate_luhn(const char* digits)
+{
+    if (digits == NULL) {
+        return false;
+    }
+    size_t len = strlen(digits);
+    if (len < 13 || len > 19) {
+        return false;
+    }
+    for (size_t i = 0; i < len; i++) {
+        if (!isdigit((unsigned char)digits[i])) {
+            return false;
+        }
+    }
+    int  sum = 0;
+    bool alternate = false;
+    for (ssize_t i = (ssize_t)len - 1; i >= 0; i--) {
+        int n = digits[i] - '0';
+        if (alternate) {
+            n *= 2;
+            if (n > 9) {
+                n = (n % 10) + 1;
+            }
+        }
+        sum += n;
+        alternate = !alternate;
+    }
+    return (sum % 10 == 0);
+}
+
+bool
+guardrails_validate_id_card_mod11(const char* id_str)
+{
+    if (id_str == NULL) {
+        return false;
+    }
+    if (strlen(id_str) != 18) {
+        return false;
+    }
+    static const int  weights[17] = {7, 9, 10, 5, 8, 4, 2, 1, 6, 3, 7, 9, 10, 5, 8, 4, 2};
+    static const char check_chars[11] = {'1', '0', 'X', '9', '8', '7', '6', '5', '4', '3', '2'};
+
+    int sum = 0;
+    for (int i = 0; i < 17; i++) {
+        if (!isdigit((unsigned char)id_str[i])) {
+            return false;
+        }
+        sum += (id_str[i] - '0') * weights[i];
+    }
+    int  mod = sum % 11;
+    char expected = check_chars[mod];
+    char actual = id_str[17];
+    if (actual == 'x') {
+        actual = 'X';
+    }
+    return actual == expected;
+}
