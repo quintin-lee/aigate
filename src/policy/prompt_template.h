@@ -1,3 +1,8 @@
+/**
+ * @file prompt_template.h
+ * @ingroup group_policy
+ * @brief Prompt template interpolation and system prompt injection policy engine.
+ */
 #ifndef AIGATE_PROMPT_TEMPLATE_H
 #define AIGATE_PROMPT_TEMPLATE_H
 
@@ -8,17 +13,23 @@
 extern "C" {
 #endif
 
+/**
+ * @brief Injection mode specifying how system prompt templates merge with user requests.
+ */
 typedef enum {
-    PROMPT_MODE_PREPEND = 0,
-    PROMPT_MODE_APPEND = 1,
-    PROMPT_MODE_OVERRIDE = 2
+    PROMPT_MODE_PREPEND = 0, /**< Prepend template before existing system prompt or messages. */
+    PROMPT_MODE_APPEND = 1,  /**< Append template after existing system prompt or messages. */
+    PROMPT_MODE_OVERRIDE = 2 /**< Override and replace any existing system prompt. */
 } prompt_inject_mode_t;
 
+/**
+ * @brief Prompt template configuration and injection rules.
+ */
 typedef struct {
-    const char*          system_template;
-    prompt_inject_mode_t mode;
-    const char*          prefix_user_prompt;
-    const char*          suffix_user_prompt;
+    const char* system_template; /**< System prompt template string with variable placeholders. */
+    prompt_inject_mode_t mode;   /**< Injection merge mode. */
+    const char*          prefix_user_prompt; /**< Prefix prepended to the final user prompt. */
+    const char*          suffix_user_prompt; /**< Suffix appended to the final user prompt. */
 } prompt_template_t;
 
 /**

@@ -9,9 +9,13 @@
 #include <stdint.h>
 #include <stddef.h>
 
+/** @brief Number of latency samples in sliding window per model/endpoint. */
 #define LATENCY_TRACKER_WINDOW_SZ 64
+
+/** @brief Maximum number of distinct model/endpoint entries tracked. */
 #define LATENCY_TRACKER_MAX_ENTRIES 512
 
+/** @brief Opaque latency tracker handle managing rolling latencies and hedge budgets. */
 typedef struct latency_tracker latency_tracker_t;
 
 /** @brief Create a new latency tracker instance. */

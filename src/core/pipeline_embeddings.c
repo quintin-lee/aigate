@@ -11,6 +11,11 @@
 #include <string.h>
 #include <time.h>
 
+/**
+ * @brief Handle /v1/embeddings endpoint execution.
+ * @param[in,out] q Request processing context.
+ * @return 0 if handled or path bypassed, non-zero on error.
+ */
 int
 handle_embeddings(chat_req_t* q)
 {

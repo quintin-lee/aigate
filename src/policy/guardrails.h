@@ -90,10 +90,10 @@ char* guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t l
 
 /** @brief Webhook rule runtime definition. */
 typedef struct guardrail_webhook_rule {
-    long id;
-    char url[512];
-    char secret[256];
-    int  timeout_ms;
+    long id;            /**< Unique rule identifier. */
+    char url[512];      /**< External webhook inspection HTTP/HTTPS URL. */
+    char secret[256];   /**< HMAC shared secret or bearer token. */
+    int  timeout_ms;    /**< HTTP client timeout in milliseconds. */
     char fail_mode[16]; /**< "open" | "closed" */
     char phase[16];     /**< "inbound" | "outbound" | "both" */
 } guardrail_webhook_rule_t;

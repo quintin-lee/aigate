@@ -12,32 +12,40 @@
 #include <string.h>
 #include <time.h>
 
+/** @brief Maximum upstream response body buffer capacity (32 MiB). */
 #define RESP_MAX_LEN (32 * 1024 * 1024)
 
+/**
+ * @brief Thread synchronization and race outcome control block for hedged requests.
+ */
 typedef struct hedged_race_ctrl {
-    pthread_mutex_t mutex;
-    pthread_cond_t  cond;
-    int             ref_count;
-    int             winning_idx;
-    volatile int    cancel_flags[2];
-    int             done[2];
-    int             http_status[2];
-    int             rc[2];
-    char*           resp_body[2];
-    size_t          resp_len[2];
-    uint64_t        lat_ns[2];
+    pthread_mutex_t mutex; /**< Mutex protecting race completion state and conditions. */
+    pthread_cond_t  cond;  /**< Condition variable signaled when any request completes or wins. */
+    int ref_count;         /**< Reference counter for safe resource deallocation across threads. */
+    int winning_idx;       /**< Index of first winning target (-1 if none yet). */
+    volatile int
+             cancel_flags[2]; /**< Cooperative cancellation flags set when competitor finishes. */
+    int      done[2];         /**< Completion flags for primary (0) and secondary (1). */
+    int      http_status[2];  /**< HTTP status codes returned by upstreams. */
+    int      rc[2]; /**< Transport return codes (0 on HTTP success, non-zero on network error). */
+    char*    resp_body[2]; /**< Dynamically allocated response buffers for each worker. */
+    size_t   resp_len[2];  /**< Length of each response body. */
+    uint64_t lat_ns[2];    /**< Measured latency in nanoseconds for each worker. */
 } hedged_race_ctrl_t;
 
+/**
+ * @brief Thread worker context for executing one branch of a hedged request.
+ */
 typedef struct worker_ctx {
-    hedged_race_ctrl_t* ctrl;
-    int                 my_idx;
-    char                url[1024];
-    char                key[1024];
-    char*               payload;
-    size_t              payload_len;
-    char*               extra_headers[HEDGED_MAX_EXTRA_HEADERS][2];
-    int                 n_extra_headers;
-    long                timeout_ms;
+    hedged_race_ctrl_t* ctrl;      /**< Pointer to shared race control block. */
+    int                 my_idx;    /**< Target index for this worker (0: primary, 1: secondary). */
+    char                url[1024]; /**< Upstream URL. */
+    char                key[1024]; /**< API bearer key. */
+    char*               payload;   /**< Copied request payload. */
+    size_t              payload_len;                  /**< Payload length. */
+    char* extra_headers[HEDGED_MAX_EXTRA_HEADERS][2]; /**< Extra header key-value copies. */
+    int   n_extra_headers;                            /**< Count of extra headers. */
+    long  timeout_ms; /**< Timeout limit for curl in milliseconds. */
 } worker_ctx_t;
 
 static uint64_t

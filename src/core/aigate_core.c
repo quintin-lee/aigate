@@ -95,8 +95,21 @@ calc_req_cost(const model_rec_t* route, long prompt, long completion, long cache
            1000000.0;
 }
 
-/** @brief Record one request: usage meter (um_record_full) + request event (event_bus_publish_request).
- *  @param ac  core instance; returns immediately if NULL. Remaining params: key/model/status/token counts/latency/cost. */
+/**
+ * @brief Record one request: usage meter (um_record_full) + request event (event_bus_publish_request).
+ * @param[in] ac            Core instance (returns immediately if NULL).
+ * @param[in] key_id        Authenticated key ID.
+ * @param[in] model         Model identifier string.
+ * @param[in] status        HTTP status code.
+ * @param[in] ptok          Prompt tokens count.
+ * @param[in] ctok          Completion tokens count.
+ * @param[in] cached_tok    Cached prompt tokens count.
+ * @param[in] reasoning_tok Reasoning tokens count.
+ * @param[in] lat_ns        Latency in nanoseconds.
+ * @param[in] provider      Target provider name.
+ * @param[in] guardrail_act Guardrail action string.
+ * @param[in] req_cost      Estimated cost in USD.
+ */
 void
 record_usage_and_event(aigate_core* ac,
                        long         key_id,

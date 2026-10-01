@@ -8,23 +8,31 @@
 #include <stdlib.h>
 #include <string.h>
 
+/**
+ * @brief Latency tracking statistics entry for a single model and endpoint combination.
+ */
 typedef struct latency_entry {
-    char             model[64];
-    char             endpoint[256];
-    uint32_t         samples_ms[LATENCY_TRACKER_WINDOW_SZ];
-    uint32_t         head;
-    uint32_t         count;
-    uint32_t         cached_p95_ms;
-    double           ewma_ms;
-    uint64_t         total_requests;
-    uint64_t         hedged_requests;
-    pthread_rwlock_t rwlock;
+    char     model[64];              /**< Model identifier. */
+    char     endpoint[256];          /**< Upstream target endpoint URL/host. */
+    uint32_t samples_ms
+        [LATENCY_TRACKER_WINDOW_SZ]; /**< Ring buffer of recent latency samples in milliseconds. */
+    uint32_t         head;           /**< Ring buffer insert cursor index. */
+    uint32_t         count;          /**< Valid sample count in ring buffer (up to window size). */
+    uint32_t         cached_p95_ms;  /**< Memoized P95 latency in milliseconds. */
+    double           ewma_ms; /**< Exponentially weighted moving average latency in milliseconds. */
+    uint64_t         total_requests;  /**< Total requests initiated for this entry. */
+    uint64_t         hedged_requests; /**< Number of hedged backup requests dispatched. */
+    pthread_rwlock_t rwlock;          /**< Read-write lock protecting metrics and ring buffer. */
 } latency_entry_t;
 
+/**
+ * @brief Global latency tracker managing a fixed table of model/endpoint entries.
+ */
 struct latency_tracker {
-    latency_entry_t  entries[LATENCY_TRACKER_MAX_ENTRIES];
-    size_t           count;
-    pthread_rwlock_t table_lock;
+    latency_entry_t entries
+        [LATENCY_TRACKER_MAX_ENTRIES]; /**< Table of tracked model/endpoint latency entries. */
+    size_t           count;            /**< Number of allocated entries in table. */
+    pthread_rwlock_t table_lock; /**< Read-write lock protecting entry insertion and lookups. */
 };
 
 static uint32_t

@@ -79,7 +79,8 @@ handle_models_list(chat_req_t* q)
 }
 
 /** @brief Chat capability check + cache-control parse + cache lookup.
- *  @param[out] is_streaming set from body "stream" flag.
+ *  @param[in,out] q            Request processing context.
+ *  @param[out]    is_streaming set from body "stream" flag.
  *  @return 1 when the response was already written (HIT or unsupported);
  *          0 to continue to upstream; <0 never (reserved). */
 int
@@ -676,14 +677,19 @@ handle_stream_preheaders(chat_req_t*               q,
     return 0;
 }
 
+/**
+ * @brief Context wrapper around stream bridge feed callback for measuring time-to-first-token (TTFT).
+ */
 typedef struct stream_feed_wrapper {
-    int (*real_feed)(void* bridge, const void* chunk, size_t len);
-    void*              real_bridge;
-    latency_tracker_t* lt;
-    const char*        model;
-    const char*        endpoint;
-    uint64_t           t0;
-    bool               first_chunk_recorded;
+    int (*real_feed)(void*       bridge,
+                     const void* chunk,
+                     size_t      len); /**< Underlying stream bridge feed callback. */
+    void*              real_bridge;    /**< Underlying bridge instance. */
+    latency_tracker_t* lt;             /**< Latency tracker instance (optional). */
+    const char*        model;          /**< Target model name for metrics. */
+    const char*        endpoint;       /**< Target upstream endpoint address. */
+    uint64_t           t0;             /**< Timestamp when request was dispatched. */
+    bool first_chunk_recorded;         /**< True if first non-empty chunk has been observed. */
 } stream_feed_wrapper_t;
 
 static int
@@ -700,6 +706,11 @@ stream_feed_wrapper_fn(void* ctx, const void* chunk, size_t len)
     return w->real_feed(w->real_bridge, chunk, len);
 }
 
+/**
+ * @brief Handle streaming (SSE) /v1/chat/completions request execution.
+ * @param[in,out] q Request processing context.
+ * @return 0 on success, non-zero on error.
+ */
 int
 handle_chat_stream(chat_req_t* q)
 {

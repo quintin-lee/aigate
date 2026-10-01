@@ -1,5 +1,5 @@
 PROJECT_NAME           = aigate
-INPUT                  = src README.md docs/README.md docs/DEVELOPMENT.md .env.example
+INPUT                  = src README.md docs/README.md docs/DEVELOPMENT.md docs/ONBOARDING.md docs/CONFIGURATION.md .env.example
 RECURSIVE              = YES
 GENERATE_HTML          = YES
 OUTPUT_DIRECTORY       = build/docs

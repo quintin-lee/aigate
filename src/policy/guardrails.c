@@ -171,16 +171,17 @@ ac_trie_search(const ac_trie_t* trie, const char* text, size_t len)
 
 /** @brief Guardrails engine instance: rwlock/block+exempt tries/PII regex group/ready flag. */
 struct guardrails_ctx {
-    pthread_rwlock_t         rwlock;      /**< Rule hot-reload rwlock. */
-    ac_trie_t*               ac_block;    /**< Blocklist keyword trie. */
-    ac_trie_t*               ac_exempt;   /**< Exempt keyword trie. */
-    regex_t                  re_api_key;  /**< API key regex. */
-    regex_t                  re_email;    /**< Email regex. */
-    regex_t                  re_id_card;  /**< ID card number regex. */
-    regex_t                  re_phone;    /**< Phone number regex. */
-    int                      regex_ready; /**< Regex compilation ready flag. */
-    guardrail_webhook_rule_t webhooks[MAX_WEBHOOK_RULES];
-    size_t                   webhook_count;
+    pthread_rwlock_t rwlock;            /**< Rule hot-reload rwlock. */
+    ac_trie_t*       ac_block;          /**< Blocklist keyword trie. */
+    ac_trie_t*       ac_exempt;         /**< Exempt keyword trie. */
+    regex_t          re_api_key;        /**< API key regex. */
+    regex_t          re_email;          /**< Email regex. */
+    regex_t          re_id_card;        /**< ID card number regex. */
+    regex_t          re_phone;          /**< Phone number regex. */
+    int              regex_ready;       /**< Regex compilation ready flag. */
+    guardrail_webhook_rule_t
+           webhooks[MAX_WEBHOOK_RULES]; /**< Registered webhook inspection rules. */
+    size_t webhook_count;               /**< Number of active webhook rules in table. */
 };
 
 guardrails_ctx_t*
@@ -625,10 +626,11 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
 
 /* --- External Webhook Moderation Engine Implementation --- */
 
+/** @brief Dynamic memory buffer accumulating webhook response body chunks. */
 struct webhook_resp_buf {
-    char*  data;
-    size_t len;
-    size_t cap;
+    char*  data; /**< Dynamically allocated response buffer. */
+    size_t len;  /**< Current response length in bytes. */
+    size_t cap;  /**< Allocated buffer capacity in bytes. */
 };
 
 static size_t
