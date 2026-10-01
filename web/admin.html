@@ -649,6 +649,202 @@
       </div>
     </div>
 
+    <!-- ==================== Tab: Prompt Templates ==================== -->
+    <div id="tab-prompts" class="tab-content hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+            <span>📝</span> Prompt 模板管理与变量沙盒
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">集中维护业务 Prompt 模板库，提取并调试动态变量 {{var}}，一键同步绑定至模型或 API 密钥</p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="resetPromptPresets()" title="恢复预置模板" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition flex items-center space-x-1">
+            <span>↺</span>
+            <span>重置预设</span>
+          </button>
+          <button onclick="exportPromptPresets()" title="导出模板为 JSON" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition flex items-center space-x-1">
+            <span>📥</span>
+            <span>导出</span>
+          </button>
+          <label class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-700/80 cursor-pointer transition flex items-center space-x-1">
+            <span>📤</span>
+            <span>导入</span>
+            <input type="file" id="promptImportFileInput" accept=".json" onchange="importPromptPresets(event)" class="hidden">
+          </label>
+          <button onclick="createNewPromptPreset()" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition flex items-center space-x-1 shadow-sm">
+            <span>+</span>
+            <span>新建模板</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+        <!-- Left: Presets List & Target Sync (5 cols) -->
+        <div class="lg:col-span-5 space-y-6">
+          <!-- Template Presets Card -->
+          <div class="card p-4 space-y-4">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-400">模板库 (<span id="promptPresetCount">0</span>)</span>
+              <input type="text" id="promptSearchInput" oninput="filterPromptPresets()" placeholder="搜索预设或标签..." class="px-2.5 py-1 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 w-36">
+            </div>
+            <div id="promptPresetsList" class="space-y-2 max-h-[380px] overflow-y-auto custom-scroll pr-1">
+              <!-- Rendered via JS -->
+            </div>
+          </div>
+
+          <!-- Model / Key Quick Binding & Sync Card -->
+          <div class="card p-4 space-y-4 border border-brand-500/20 bg-gradient-to-b from-brand-950/20 to-slate-900/40">
+            <div class="flex items-center justify-between">
+              <span class="text-xs font-bold uppercase tracking-wider text-brand-300 flex items-center gap-1.5">
+                <span>🔄</span> 模型 / 密钥 双向绑定
+              </span>
+              <span class="text-[10px] text-slate-400 font-mono">PUT /admin/v1</span>
+            </div>
+            <p class="text-xs text-slate-400 leading-relaxed">
+              将当前编辑的 Prompt 模板与注入模式同步覆盖到目标上游模型或客户端密钥中，或从现有配置中反向载入。
+            </p>
+            <div class="space-y-3">
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">绑定目标类型</label>
+                <div class="grid grid-cols-2 gap-2">
+                  <button type="button" id="promptTargetTypeModel" onclick="setPromptTargetType('model')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-brand-600 text-white border border-brand-500/30 transition">
+                    🤖 目标模型 (Model)
+                  </button>
+                  <button type="button" id="promptTargetTypeKey" onclick="setPromptTargetType('key')" class="px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:text-white transition">
+                    🔑 API 密钥 (Key)
+                  </button>
+                </div>
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1" id="promptTargetLabel">选择模型</label>
+                <select id="promptTargetSelect" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+                  <option value="">加载中…</option>
+                </select>
+              </div>
+              <div class="flex items-center gap-2 pt-1">
+                <button type="button" onclick="syncPromptToTarget()" class="flex-1 px-3 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition flex items-center justify-center gap-1 shadow-sm">
+                  <span>🚀</span>
+                  <span>一键同步至目标</span>
+                </button>
+                <button type="button" onclick="loadPromptFromTarget()" title="从目标读取已有配置" class="px-3 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1">
+                  <span>⬇️</span>
+                  <span>读取目标配置</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Right: Editor & Dynamic Variable Sandbox (7 cols) -->
+        <div class="lg:col-span-7 space-y-6">
+          <!-- Editor Card -->
+          <div class="card p-5 space-y-4">
+            <div class="flex items-center justify-between border-b border-slate-800/80 pb-3">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-400">模板定义与注入模式</span>
+              <div class="flex items-center gap-2">
+                <button onclick="saveCurrentPromptPreset()" class="px-3 py-1 rounded-lg text-xs font-semibold bg-emerald-600/90 hover:bg-emerald-500 text-white transition flex items-center gap-1 shadow-sm">
+                  <span>💾</span>
+                  <span>保存模板</span>
+                </button>
+                <button onclick="deleteCurrentPromptPreset()" id="promptDeleteBtn" class="px-3 py-1 rounded-lg text-xs font-semibold bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 transition flex items-center gap-1">
+                  <span>🗑️</span>
+                  <span>删除</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">模板名称</label>
+                <input type="text" id="promptEditName" oninput="onPromptMetaChange()" placeholder="例如：企业合规守则" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+              </div>
+              <div>
+                <label class="block text-xs font-medium text-slate-300 mb-1">注入模式 (Mode)</label>
+                <select id="promptEditMode" onchange="onPromptModeChange()" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-mono">
+                  <option value="prepend">prepend (优先前置注入)</option>
+                  <option value="append">append (尾部追加注入)</option>
+                  <option value="override">override (完全覆盖原始 System Prompt)</option>
+                </select>
+              </div>
+            </div>
+
+            <div>
+              <label class="block text-xs font-medium text-slate-300 mb-1">模板描述 / 标签</label>
+              <input type="text" id="promptEditDesc" oninput="onPromptMetaChange()" placeholder="简要说明此模板用途或分类" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-400 focus:outline-none focus:border-brand-500">
+            </div>
+
+            <!-- Monospace Prompt Textarea -->
+            <div>
+              <div class="flex items-center justify-between mb-1.5">
+                <label class="text-xs font-medium text-slate-300">System Prompt 正文 (支持 {{var}} 动态插值变量)</label>
+                <div class="flex items-center gap-1 text-[11px] text-slate-400">
+                  <span class="text-slate-500">快捷插入:</span>
+                  <button type="button" onclick="insertPromptVariable('user_id')" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-mono text-[10px] transition">{{user_id}}</button>
+                  <button type="button" onclick="insertPromptVariable('model')" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-mono text-[10px] transition">{{model}}</button>
+                  <button type="button" onclick="insertPromptVariable('date')" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-mono text-[10px] transition">{{date}}</button>
+                  <button type="button" onclick="insertPromptVariable('team')" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-mono text-[10px] transition">{{team}}</button>
+                  <button type="button" onclick="insertPromptVariable('client_ip')" class="px-1.5 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-indigo-300 font-mono text-[10px] transition">{{client_ip}}</button>
+                </div>
+              </div>
+              <textarea id="promptEditTextarea" oninput="onPromptTextChange()" rows="6" placeholder="输入 System Prompt 模板正文，例如：
+你是由 {{company_name}} 部署的安全助手。今天的日期是 {{date}}。请以专业客观的语气回答用户 {{user_id}} 的问题。" class="w-full px-3.5 py-2.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-slate-200 focus:outline-none focus:border-brand-500 custom-scroll leading-relaxed"></textarea>
+            </div>
+
+            <!-- Dynamic Variables Sandbox Form -->
+            <div class="border-t border-slate-800/80 pt-4 space-y-3">
+              <div class="flex items-center justify-between">
+                <div class="flex items-center gap-2">
+                  <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+                    <span>🧪</span> 变量调试沙盒 (Dynamic Variables)
+                  </span>
+                  <span id="promptDetectedVarBadge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">0 个变量</span>
+                </div>
+                <button type="button" onclick="addCustomPromptVariable()" class="text-xs text-brand-400 hover:text-brand-300 transition flex items-center gap-1">
+                  <span>+</span>
+                  <span>添加自定义变量</span>
+                </button>
+              </div>
+
+              <div id="promptVariableInputsContainer" class="grid grid-cols-1 sm:grid-cols-2 gap-3 max-h-[160px] overflow-y-auto custom-scroll pr-1">
+                <!-- Dynamically populated variable input fields -->
+              </div>
+            </div>
+
+            <!-- Real-time Interpolated Preview & Metrics -->
+            <div class="border-t border-slate-800/80 pt-4 space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                  <span>👁️</span> 实时插值预览 (Live Rendered Preview)
+                </span>
+                <div class="flex items-center space-x-3 text-xs text-slate-400 font-mono">
+                  <span>字符: <strong class="text-white" id="promptCharCount">0</strong></span>
+                  <span>预估: <strong class="text-indigo-400" id="promptTokenCount">~0</strong> tokens</span>
+                </div>
+              </div>
+
+              <div class="relative group">
+                <pre id="promptRenderedPreview" class="p-3.5 rounded-xl bg-slate-950 border border-slate-800 text-xs font-mono text-emerald-300/90 whitespace-pre-wrap leading-relaxed max-h-40 overflow-y-auto custom-scroll select-all"></pre>
+                <div class="absolute top-2 right-2 flex items-center gap-1 opacity-80 group-hover:opacity-100 transition">
+                  <button type="button" onclick="copyPromptPreview()" title="复制渲染结果" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-[11px] text-slate-200 border border-slate-700 shadow-sm flex items-center gap-1">
+                    <span>📋</span>
+                    <span>复制</span>
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex items-center justify-end gap-3 pt-1">
+                <button type="button" onclick="testPromptInPlayground()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-gradient-to-r from-amber-600 to-amber-500 hover:from-amber-500 hover:to-amber-400 text-white transition flex items-center gap-1.5 shadow-sm">
+                  <span>⚡</span>
+                  <span>在调试场 (Playground) 中测试发送</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- ==================== Tab 3: API Keys ==================== -->
     <div id="tab-keys" class="tab-content hidden space-y-6">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
