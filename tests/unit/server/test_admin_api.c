@@ -922,18 +922,19 @@ TEST_CASE(test_admin_keys_lifecycle)
     size_t len = 0;
 
     /* 1. Create key */
-    const char* req = "{\"name\":\"alice\",\"allowed_models\":[\"gpt-4o\"],\"rate_qps\":5,\"daily_"
-                      "token_quota\":1000}";
-    int         rc = admin_dispatch(&adm,
-                                    "/admin/v1/keys",
-                                    "POST",
-                                    NULL,
-                                    "admin-secret-token",
-                                    req,
-                                    strlen(req),
-                                    &status,
-                                    &body,
-                                    &len);
+    const char* req =
+        "{\"name\":\"alice\",\"allowed_models\":[\"gpt-4o\"],\"rate_qps\":5,\"daily_"
+        "token_quota\":1000}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/keys",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create key -> 201");
     TEST_ASSERT(body != NULL, "create key body present");
 
@@ -1024,18 +1025,19 @@ TEST_CASE(test_admin_models_lifecycle)
     size_t len = 0;
 
     /* 1. Create model */
-    const char* req = "{\"name\":\"gpt-4o\",\"provider\":\"openai\",\"endpoint\":\"https://"
-                      "api.openai.com/v1\",\"default_params\":{\"temperature\":0.7}}";
-    int         rc = admin_dispatch(&adm,
-                                    "/admin/v1/models",
-                                    "POST",
-                                    NULL,
-                                    "admin-secret-token",
-                                    req,
-                                    strlen(req),
-                                    &status,
-                                    &body,
-                                    &len);
+    const char* req =
+        "{\"name\":\"gpt-4o\",\"provider\":\"openai\",\"endpoint\":\"https://"
+        "api.openai.com/v1\",\"default_params\":{\"temperature\":0.7}}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/models",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create model -> 201");
     free(body);
 
@@ -1209,26 +1211,27 @@ TEST_CASE(test_admin_models_multi_target)
     size_t len = 0;
 
     /* 1. Create model with targets array & lb_policy */
-    const char* req = "{\"name\":\"hybrid-model\","
-                      "\"lb_policy\":\"weighted_round_robin\","
-                      "\"targets\":["
-                      "  "
-                      "{\"provider\":\"openai\",\"endpoint\":\"http://"
-                      "ep1\",\"upstream_key_ref\":\"k1\",\"weight\":2,\"priority\":0},"
-                      "  "
-                      "{\"provider\":\"azure\",\"endpoint\":\"http://"
-                      "ep2\",\"upstream_key_ref\":\"k2\",\"weight\":1,\"priority\":1}"
-                      "]}";
-    int         rc = admin_dispatch(&adm,
-                                    "/admin/v1/models",
-                                    "POST",
-                                    NULL,
-                                    "admin-secret-token",
-                                    req,
-                                    strlen(req),
-                                    &status,
-                                    &body,
-                                    &len);
+    const char* req =
+        "{\"name\":\"hybrid-model\","
+        "\"lb_policy\":\"weighted_round_robin\","
+        "\"targets\":["
+        "  "
+        "{\"provider\":\"openai\",\"endpoint\":\"http://"
+        "ep1\",\"upstream_key_ref\":\"k1\",\"weight\":2,\"priority\":0},"
+        "  "
+        "{\"provider\":\"azure\",\"endpoint\":\"http://"
+        "ep2\",\"upstream_key_ref\":\"k2\",\"weight\":1,\"priority\":1}"
+        "]}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/models",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create multi-target model -> 201");
     free(body);
 
@@ -1460,10 +1463,11 @@ TEST_CASE(test_admin_provider_create_and_list)
     char*  body = NULL;
     size_t len = 0;
 
-    const char* req = "{\"name\":\"deepseek\",\"provider_type\":\"deepseek\",\"endpoint\":\"https:/"
-                      "/api.deepseek.com/v1\","
-                      "\"api_key\":\"sk-0123456789abcdef\",\"models\":[\"deepseek-chat\","
-                      "\"deepseek-reasoner\"],\"enabled\":true}";
+    const char* req =
+        "{\"name\":\"deepseek\",\"provider_type\":\"deepseek\",\"endpoint\":\"https:/"
+        "/api.deepseek.com/v1\","
+        "\"api_key\":\"sk-0123456789abcdef\",\"models\":[\"deepseek-chat\","
+        "\"deepseek-reasoner\"],\"enabled\":true}";
 
     int rc = admin_dispatch(&adm,
                             "/admin/v1/providers",
@@ -1544,19 +1548,20 @@ TEST_CASE(test_admin_provider_sync_failed_reported)
 
     /* create with 2 models; storage fails for both -> sync_failed == 2 */
     db.fail_create_model = 1;
-    const char* req = "{\"name\":\"sync-fail\",\"provider_type\":\"openai\",\"endpoint\":\"https://"
-                      "api.openai.com/v1\","
-                      "\"api_key\":\"sk-test\",\"models\":[\"m-one\",\"m-two\"]}";
-    int         rc = admin_dispatch(&adm,
-                                    "/admin/v1/providers",
-                                    "POST",
-                                    NULL,
-                                    "admin-secret-token",
-                                    req,
-                                    strlen(req),
-                                    &status,
-                                    &body,
-                                    &len);
+    const char* req =
+        "{\"name\":\"sync-fail\",\"provider_type\":\"openai\",\"endpoint\":\"https://"
+        "api.openai.com/v1\","
+        "\"api_key\":\"sk-test\",\"models\":[\"m-one\",\"m-two\"]}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/providers",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create still 201, got %d", status);
     json_t* res = json_loads(body, 0, NULL);
     free(body);
@@ -1819,9 +1824,9 @@ TEST_CASE(test_admin_lockout)
     json_t* res = json_loads(body, 0, NULL);
     free(body);
     json_t* err = json_object_get(res, "error");
-    TEST_ASSERT(err != NULL &&
-                    strcmp(json_string_value(json_object_get(err, "type")), "locked_out") == 0,
-                "locked_out error type");
+    TEST_ASSERT(
+        err != NULL && strcmp(json_string_value(json_object_get(err, "type")), "locked_out") == 0,
+        "locked_out error type");
     json_decref(res);
 
     /* a different IP is not affected */
@@ -2222,9 +2227,9 @@ TEST_CASE(test_admin_groups_crud)
     TEST_ASSERT(status == 404, "group_id 999 -> 404");
     j = json_loads(body, 0, &jerr);
     err = json_object_get(j, "error");
-    TEST_ASSERT(err &&
-                    strcmp(json_string_value(json_object_get(err, "type")), "group_not_found") == 0,
-                "group_not_found error");
+    TEST_ASSERT(
+        err && strcmp(json_string_value(json_object_get(err, "type")), "group_not_found") == 0,
+        "group_not_found error");
     json_decref(j);
     free(body);
 
@@ -2273,9 +2278,9 @@ TEST_CASE(test_admin_groups_crud)
     TEST_ASSERT(status == 409, "delete group with keys -> 409");
     j = json_loads(body, 0, &jerr);
     err = json_object_get(j, "error");
-    TEST_ASSERT(err &&
-                    strcmp(json_string_value(json_object_get(err, "type")), "group_has_keys") == 0,
-                "group_has_keys error");
+    TEST_ASSERT(
+        err && strcmp(json_string_value(json_object_get(err, "type")), "group_has_keys") == 0,
+        "group_has_keys error");
     json_decref(j);
     free(body);
 
@@ -2406,9 +2411,9 @@ TEST_CASE(test_admin_models_pricing)
                 "in_mtok == 2.5");
     TEST_ASSERT(fabs(json_number_value(json_object_get(pricing, "out_mtok")) - 10.0) < 1e-6,
                 "out_mtok == 10.0");
-    TEST_ASSERT(fabs(json_number_value(json_object_get(pricing, "cached_mtok_discount")) - 0.1) <
-                    1e-6,
-                "cached discount == 0.1");
+    TEST_ASSERT(
+        fabs(json_number_value(json_object_get(pricing, "cached_mtok_discount")) - 0.1) < 1e-6,
+        "cached discount == 0.1");
     json_decref(j);
     free(body);
 
@@ -2829,8 +2834,9 @@ test_admin_key_budgets_and_guardrails(void)
     size_t len = 0;
 
     /* 1. Create key with guardrails_enabled=false, monthly_cost_budget=15.5, monthly_token_budget=100000 */
-    const char* post_body = "{\"name\":\"budget-key\",\"guardrails_enabled\":false,\"monthly_cost_"
-                            "budget\":15.5,\"monthly_token_budget\":100000}";
+    const char* post_body =
+        "{\"name\":\"budget-key\",\"guardrails_enabled\":false,\"monthly_cost_"
+        "budget\":15.5,\"monthly_token_budget\":100000}";
     admin_dispatch(&adm,
                    "/admin/v1/keys",
                    "POST",
@@ -2876,8 +2882,9 @@ test_admin_key_budgets_and_guardrails(void)
     /* 3. Patch key: update budgets and toggle guardrails */
     char patch_uri[64];
     snprintf(patch_uri, sizeof patch_uri, "/admin/v1/keys/%ld", key_id);
-    const char* patch_body = "{\"guardrails_enabled\":true,\"monthly_cost_budget\":25.0,\"monthly_"
-                             "token_budget\":200000}";
+    const char* patch_body =
+        "{\"guardrails_enabled\":true,\"monthly_cost_budget\":25.0,\"monthly_"
+        "token_budget\":200000}";
     admin_dispatch(&adm,
                    patch_uri,
                    "PATCH",
@@ -3039,8 +3046,9 @@ test_admin_guardrails_crud_and_reload(void)
     free(body);
 
     /* 3. Create rule 1: keyword block */
-    const char* r1_body = "{\"pattern\":\"leak_secret\",\"rule_type\":\"keyword\",\"action\":"
-                          "\"block\",\"category\":\"safety\"}";
+    const char* r1_body =
+        "{\"pattern\":\"leak_secret\",\"rule_type\":\"keyword\",\"action\":"
+        "\"block\",\"category\":\"safety\"}";
     admin_dispatch(&adm,
                    "/admin/v1/guardrails",
                    "POST",
@@ -3068,8 +3076,9 @@ test_admin_guardrails_crud_and_reload(void)
     free(body);
 
     /* 4. Create rule 2: pii mask */
-    const char* r2_body = "{\"pattern\":\"[PHONE]\",\"rule_type\":\"pii\",\"action\":\"mask\","
-                          "\"category\":\"privacy\"}";
+    const char* r2_body =
+        "{\"pattern\":\"[PHONE]\",\"rule_type\":\"pii\",\"action\":\"mask\","
+        "\"category\":\"privacy\"}";
     admin_dispatch(&adm,
                    "/admin/v1/guardrails",
                    "POST",
@@ -3418,9 +3427,9 @@ TEST_CASE(test_admin_prompt_template_crud)
     TEST_ASSERT(status == 201, "create model with prompt template -> 201");
     json_t* mj = json_loads(body, 0, &jerr);
     TEST_ASSERT(mj != NULL, "parse model create response");
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(mj, "system_prompt")), "Sys ${model}") ==
-                    0,
-                "model system_prompt returned");
+    TEST_ASSERT(
+        strcmp(json_string_value(json_object_get(mj, "system_prompt")), "Sys ${model}") == 0,
+        "model system_prompt returned");
     TEST_ASSERT(strcmp(json_string_value(json_object_get(mj, "prompt_mode")), "append") == 0,
                 "model prompt_mode returned");
     json_decref(mj);
@@ -3442,9 +3451,9 @@ TEST_CASE(test_admin_prompt_template_crud)
             TEST_ASSERT(strcmp(json_string_value(json_object_get(item, "system_prompt")),
                                "Sys ${model}") == 0,
                         "list system_prompt match");
-            TEST_ASSERT(strcmp(json_string_value(json_object_get(item, "prompt_mode")), "append") ==
-                            0,
-                        "list prompt_mode match");
+            TEST_ASSERT(
+                strcmp(json_string_value(json_object_get(item, "prompt_mode")), "append") == 0,
+                "list prompt_mode match");
         }
     }
     TEST_ASSERT(found_m, "tmpl-model found in list");

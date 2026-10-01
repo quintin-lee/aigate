@@ -105,8 +105,9 @@ main(void)
             AIGATE_LOG_INFO(
                 "main: Redis clustering enabled (%s, pool=%d)", cfg.redis_url, cfg.redis_pool_size);
         } else {
-            AIGATE_LOG_WARN("main: AIGATE_REDIS_URL set but Redis pool creation failed "
-                            "— running in standalone mode");
+            AIGATE_LOG_WARN(
+                "main: AIGATE_REDIS_URL set but Redis pool creation failed "
+                "— running in standalone mode");
         }
     }
 

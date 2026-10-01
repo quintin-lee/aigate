@@ -35,8 +35,9 @@ void latency_tracker_record(latency_tracker_t* lt,
 uint32_t latency_tracker_get_p95_ms(latency_tracker_t* lt, const char* model, const char* endpoint);
 
 /** @brief Return the EWMA latency in milliseconds for the given model/endpoint. */
-uint32_t
-latency_tracker_get_ewma_ms(latency_tracker_t* lt, const char* model, const char* endpoint);
+uint32_t latency_tracker_get_ewma_ms(latency_tracker_t* lt,
+                                     const char*        model,
+                                     const char*        endpoint);
 
 /** @brief Check whether a hedged request is admitted for the model under hedge_budget_pct. */
 bool latency_tracker_hedge_admitted(latency_tracker_t* lt, const char* model, int budget_pct);

@@ -833,12 +833,13 @@ static int
 pq_revoke_key(void* vctx, long key_id)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] = "UPDATE api_keys SET revoked_at = now() "
-                            "WHERE key_id = $1 AND revoked_at IS NULL";
-    char              id[32];
-    const char*       vals[1];
-    int               plens[1] = {0};
-    int               n = 0;
+    static const char q[] =
+        "UPDATE api_keys SET revoked_at = now() "
+        "WHERE key_id = $1 AND revoked_at IS NULL";
+    char        id[32];
+    const char* vals[1];
+    int         plens[1] = {0};
+    int         n = 0;
 
     snprintf(id, sizeof id, "%ld", key_id);
     vals[0] = id;
@@ -1939,11 +1940,12 @@ static int
 pq_list_guardrails_rules(void* vctx, guardrail_rule_t* out, int cap, int* n)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] = "SELECT id, rule_type, pattern, action, category, enabled, "
-                            "EXTRACT(EPOCH FROM created_at)::bigint, "
-                            "COALESCE(webhook_secret, ''), COALESCE(timeout_ms, 500), "
-                            "COALESCE(fail_mode, 'open'), COALESCE(phase, 'inbound') "
-                            "FROM guardrails_rules ORDER BY id";
+    static const char q[] =
+        "SELECT id, rule_type, pattern, action, category, enabled, "
+        "EXTRACT(EPOCH FROM created_at)::bigint, "
+        "COALESCE(webhook_secret, ''), COALESCE(timeout_ms, 500), "
+        "COALESCE(fail_mode, 'open'), COALESCE(phase, 'inbound') "
+        "FROM guardrails_rules ORDER BY id";
     *n = 0;
 
     pq_lock(px);

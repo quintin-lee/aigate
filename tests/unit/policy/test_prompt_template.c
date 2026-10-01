@@ -55,9 +55,10 @@ test_prompt_apply_new_system(void)
 static void
 test_prompt_apply_prepend_append_override(void)
 {
-    const char* raw_json = "{\"model\":\"gpt-4o\",\"messages\":["
-                           "{\"role\":\"system\",\"content\":\"Original sys\"},"
-                           "{\"role\":\"user\",\"content\":\"User msg\"}]}";
+    const char* raw_json =
+        "{\"model\":\"gpt-4o\",\"messages\":["
+        "{\"role\":\"system\",\"content\":\"Original sys\"},"
+        "{\"role\":\"user\",\"content\":\"User msg\"}]}";
 
     /* 1. Prepend */
     {

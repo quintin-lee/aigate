@@ -560,10 +560,11 @@ um_requeue_requests(usage_meter_t* um, int n)
         int lost = um->req_tail - UM_REQ_CAP - um->req_head;
         um->req_head = um->req_tail - UM_REQ_CAP;
         atomic_fetch_add(&um->req_dropped, lost);
-        AIGATE_LOG_WARN("usage ring re-queue overflow: %d rows dropped "
-                        "(total dropped: %d)",
-                        lost,
-                        atomic_load(&um->req_dropped));
+        AIGATE_LOG_WARN(
+            "usage ring re-queue overflow: %d rows dropped "
+            "(total dropped: %d)",
+            lost,
+            atomic_load(&um->req_dropped));
     }
     pthread_mutex_unlock(&um->mtx);
     return 0;

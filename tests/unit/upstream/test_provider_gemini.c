@@ -19,12 +19,13 @@ TEST_CASE(test_gemini_build_system_and_contents)
     snprintf(route.endpoint, sizeof route.endpoint, "https://generativelanguage.googleapis.com");
     snprintf(route.upstream_key, sizeof route.upstream_key, "AIzaSyTestKey");
 
-    const char* in_req = "{\"model\":\"gemini-1.5-pro\",\"messages\":["
-                         "{\"role\":\"system\",\"content\":\"You are an assistant.\"},"
-                         "{\"role\":\"user\",\"content\":\"Hi Gemini\"},"
-                         "{\"role\":\"assistant\",\"content\":\"Hello there!\"},"
-                         "{\"role\":\"user\",\"content\":\"How are you?\"}"
-                         "]}";
+    const char* in_req =
+        "{\"model\":\"gemini-1.5-pro\",\"messages\":["
+        "{\"role\":\"system\",\"content\":\"You are an assistant.\"},"
+        "{\"role\":\"user\",\"content\":\"Hi Gemini\"},"
+        "{\"role\":\"assistant\",\"content\":\"Hello there!\"},"
+        "{\"role\":\"user\",\"content\":\"How are you?\"}"
+        "]}";
 
     char        url[512];
     const char* hdrs[4][2];
@@ -83,9 +84,10 @@ TEST_CASE(test_gemini_build_generation_config)
     snprintf(route.provider, sizeof route.provider, "google");
     snprintf(route.upstream_key, sizeof route.upstream_key, "key123");
 
-    const char* in_req = "{\"model\":\"gemini-1.5-flash\",\"temperature\":0.7,\"max_tokens\":256,"
-                         "\"top_p\":0.9,\"stop\":[\"END\",\"STOP\"],"
-                         "\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}";
+    const char* in_req =
+        "{\"model\":\"gemini-1.5-flash\",\"temperature\":0.7,\"max_tokens\":256,"
+        "\"top_p\":0.9,\"stop\":[\"END\",\"STOP\"],"
+        "\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}]}";
 
     char        url[512];
     const char* hdrs[4][2];
@@ -171,8 +173,9 @@ TEST_CASE(test_gemini_resp_translation)
 
 TEST_CASE(test_gemini_resp_error_unwrapping)
 {
-    const char* raw_err = "{\"error\":{\"code\":400,\"message\":\"API key not valid. Please pass a "
-                          "valid API key.\",\"status\":\"INVALID_ARGUMENT\"}}";
+    const char* raw_err =
+        "{\"error\":{\"code\":400,\"message\":\"API key not valid. Please pass a "
+        "valid API key.\",\"status\":\"INVALID_ARGUMENT\"}}";
 
     char*  out = NULL;
     size_t out_len = 0;
@@ -200,10 +203,11 @@ TEST_CASE(test_gemini_resp_error_unwrapping)
 
 TEST_CASE(test_gemini_sniff_usage_json)
 {
-    const char* json_resp = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello "
-                            "World\"}],\"role\":\"model\"}}],"
-                            "\"usageMetadata\":{\"promptTokenCount\":18,\"candidatesTokenCount\":"
-                            "25,\"totalTokenCount\":43,\"cachedContentTokenCount\":8}}";
+    const char* json_resp =
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello "
+        "World\"}],\"role\":\"model\"}}],"
+        "\"usageMetadata\":{\"promptTokenCount\":18,\"candidatesTokenCount\":"
+        "25,\"totalTokenCount\":43,\"cachedContentTokenCount\":8}}";
 
     long ptok = 0, ctok = 0, cached = 0;
     int  rc = gemini_sniff_usage_json(json_resp, &ptok, &ctok, &cached);

@@ -191,7 +191,6 @@ handle_chat_sync(chat_req_t* q)
 
         if (adapter0 != NULL && adapter0->build_chat != NULL && adapter1 != NULL &&
             adapter1->build_chat != NULL) {
-
             model_rec_t cur_route0 = q->route;
             fill_cur_route(&q->route, target0, &cur_route0);
             char        url0[1024];

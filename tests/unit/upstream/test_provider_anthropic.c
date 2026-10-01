@@ -23,11 +23,12 @@ TEST_CASE(test_anthropic_build_system_and_defaults)
     snprintf(route.endpoint, sizeof route.endpoint, "http://127.0.0.1:8080");
     snprintf(route.upstream_key, sizeof route.upstream_key, "sk-ant-testkey");
 
-    const char* in_req = "{\"model\":\"claude-3-5-sonnet-20241022\",\"messages\":["
-                         "{\"role\":\"system\",\"content\":\"System Rule 1\"},"
-                         "{\"role\":\"user\",\"content\":\"Hello Claude\"},"
-                         "{\"role\":\"system\",\"content\":\"System Rule 2\"}"
-                         "]}";
+    const char* in_req =
+        "{\"model\":\"claude-3-5-sonnet-20241022\",\"messages\":["
+        "{\"role\":\"system\",\"content\":\"System Rule 1\"},"
+        "{\"role\":\"user\",\"content\":\"Hello Claude\"},"
+        "{\"role\":\"system\",\"content\":\"System Rule 2\"}"
+        "]}";
 
     char        url[512];
     const char* hdrs[4][2];
@@ -43,9 +44,9 @@ TEST_CASE(test_anthropic_build_system_and_defaults)
     TEST_ASSERT(n_hdrs == 2, "2 extra headers");
     TEST_ASSERT(strcmp(hdrs[0][0], "x-api-key") == 0 && strcmp(hdrs[0][1], "sk-ant-testkey") == 0,
                 "x-api-key");
-    TEST_ASSERT(strcmp(hdrs[1][0], "anthropic-version") == 0 &&
-                    strcmp(hdrs[1][1], "2023-06-01") == 0,
-                "anthropic-version");
+    TEST_ASSERT(
+        strcmp(hdrs[1][0], "anthropic-version") == 0 && strcmp(hdrs[1][1], "2023-06-01") == 0,
+        "anthropic-version");
 
     json_t* out = json_loads(body, 0, NULL);
     TEST_ASSERT(out != NULL, "parsed output json");
@@ -215,30 +216,34 @@ TEST_CASE(test_anthropic_bridge_streaming)
     anthropic_bridge_t bridge;
     anthropic_bridge_init(&bridge, &rc);
 
-    const char* chunk1 = "event: message_start\r\n"
-                         "data: "
-                         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_stream_test\","
-                         "\"model\":\"claude-3-5\",\"usage\":{\"input_tokens\":10}}}\r\n\r\n";
+    const char* chunk1 =
+        "event: message_start\r\n"
+        "data: "
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_stream_test\","
+        "\"model\":\"claude-3-5\",\"usage\":{\"input_tokens\":10}}}\r\n\r\n";
     anthropic_bridge_feed(&bridge, chunk1, strlen(chunk1));
 
-    const char* chunk2 = "event: content_block_delta\r\n"
-                         "data: "
-                         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
-                         "delta\",\"text\":\"Hello \"}}\r\n\r\n";
+    const char* chunk2 =
+        "event: content_block_delta\r\n"
+        "data: "
+        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
+        "delta\",\"text\":\"Hello \"}}\r\n\r\n";
     anthropic_bridge_feed(&bridge, chunk2, strlen(chunk2));
 
-    const char* chunk3 = "event: content_block_delta\r\n"
-                         "data: "
-                         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
-                         "delta\",\"text\":\"world!\"}}\r\n\r\n";
+    const char* chunk3 =
+        "event: content_block_delta\r\n"
+        "data: "
+        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
+        "delta\",\"text\":\"world!\"}}\r\n\r\n";
     anthropic_bridge_feed(&bridge, chunk3, strlen(chunk3));
 
-    const char* chunk4 = "event: message_delta\r\n"
-                         "data: "
-                         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
-                         "\"usage\":{\"output_tokens\":20}}\r\n\r\n"
-                         "event: message_stop\r\n"
-                         "data: {\"type\":\"message_stop\"}\r\n\r\n";
+    const char* chunk4 =
+        "event: message_delta\r\n"
+        "data: "
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+        "\"usage\":{\"output_tokens\":20}}\r\n\r\n"
+        "event: message_stop\r\n"
+        "data: {\"type\":\"message_stop\"}\r\n\r\n";
     anthropic_bridge_feed(&bridge, chunk4, strlen(chunk4));
 
     anthropic_bridge_finish(&bridge);
@@ -279,10 +284,11 @@ TEST_CASE(test_anthropic_bridge_client_abort)
     anthropic_bridge_init(&bridge, &rc);
 
     /* feed a content delta: the underlying write fails, so feed must report -1 */
-    const char* chunk = "event: content_block_delta\r\n"
-                        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":"
-                        "{\"type\":\"text_delta\",\"text\":\"hi\"}}\r\n\r\n";
-    int         fr = anthropic_bridge_feed(&bridge, chunk, strlen(chunk));
+    const char* chunk =
+        "event: content_block_delta\r\n"
+        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":"
+        "{\"type\":\"text_delta\",\"text\":\"hi\"}}\r\n\r\n";
+    int fr = anthropic_bridge_feed(&bridge, chunk, strlen(chunk));
     TEST_ASSERT(fr == -1, "feed returns -1 after client abort");
     TEST_ASSERT(bridge.aborted, "bridge.aborted set");
 }
@@ -399,8 +405,9 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
         rq.path = "/v1/chat/completions";
         rq.bearer = "claude-key";
         rq.client_ip = "127.0.0.1";
-        const char* b = "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\","
-                        "\"content\":\"hi\"}]}";
+        const char* b =
+            "{\"model\":\"claude-3-5-sonnet\",\"messages\":[{\"role\":\"user\","
+            "\"content\":\"hi\"}]}";
         rq.body = b;
         rq.body_len = strlen(b);
 
@@ -433,8 +440,9 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
         rq.path = "/v1/chat/completions";
         rq.bearer = "claude-key";
         rq.client_ip = "127.0.0.1";
-        const char* b = "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{\"role\":"
-                        "\"user\",\"content\":\"hi\"}]}";
+        const char* b =
+            "{\"model\":\"claude-3-5-sonnet\",\"stream\":true,\"messages\":[{\"role\":"
+            "\"user\",\"content\":\"hi\"}]}";
         rq.body = b;
         rq.body_len = strlen(b);
 
@@ -463,10 +471,11 @@ TEST_CASE(test_anthropic_pipeline_end_to_end)
 
 TEST_CASE(test_anthropic_sniff_usage_json)
 {
-    const char* json_resp = "{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\","
-                            "\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}],"
-                            "\"usage\":{\"input_tokens\":25,\"output_tokens\":40,"
-                            "\"cache_creation_input_tokens\":10,\"cache_read_input_tokens\":5}}";
+    const char* json_resp =
+        "{\"id\":\"msg_123\",\"type\":\"message\",\"role\":\"assistant\","
+        "\"content\":[{\"type\":\"text\",\"text\":\"Hello\"}],"
+        "\"usage\":{\"input_tokens\":25,\"output_tokens\":40,"
+        "\"cache_creation_input_tokens\":10,\"cache_read_input_tokens\":5}}";
 
     long ptok = 0, ctok = 0, cached = 0;
     int  rc = anthropic_sniff_usage_json(json_resp, &ptok, &ctok, &cached);
@@ -481,21 +490,24 @@ TEST_CASE(test_anthropic_sniff_streaming_sse)
     anthropic_sniffer_t sniffer;
     anthropic_sniffer_init(&sniffer);
 
-    const char* chunk1 = "event: message_start\n"
-                         "data: "
-                         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\",\"usage\":{"
-                         "\"input_tokens\":30,\"cache_read_input_tokens\":12}}}\n\n";
+    const char* chunk1 =
+        "event: message_start\n"
+        "data: "
+        "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_01\",\"usage\":{"
+        "\"input_tokens\":30,\"cache_read_input_tokens\":12}}}\n\n";
 
-    const char* chunk2 = "event: content_block_delta\n"
-                         "data: "
-                         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
-                         "delta\",\"text\":\"Hi\"}}\n\n";
+    const char* chunk2 =
+        "event: content_block_delta\n"
+        "data: "
+        "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
+        "delta\",\"text\":\"Hi\"}}\n\n";
 
-    const char* chunk3 = "event: message_delta\n"
-                         "data: "
-                         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
-                         "\"usage\":{\"output_tokens\":15}}\n\n"
-                         "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
+    const char* chunk3 =
+        "event: message_delta\n"
+        "data: "
+        "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+        "\"usage\":{\"output_tokens\":15}}\n\n"
+        "event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n";
 
     anthropic_sniffer_feed(&sniffer, chunk1, strlen(chunk1));
     anthropic_sniffer_feed(&sniffer, chunk2, strlen(chunk2));

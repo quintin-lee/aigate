@@ -12,24 +12,25 @@
 
 TEST_CASE(test_deepseek_reasoning_non_streaming)
 {
-    const char* raw_resp = "{\"id\":\"chatcmpl-ds-test\","
-                           "\"object\":\"chat.completion\","
-                           "\"choices\":[{"
-                           "\"index\":0,"
-                           "\"message\":{"
-                           "\"role\":\"assistant\","
-                           "\"content\":\"The result is 42.\","
-                           "\"reasoning_content\":\"Let me ponder the universe and everything...\""
-                           "},"
-                           "\"finish_reason\":\"stop\""
-                           "}],"
-                           "\"usage\":{"
-                           "\"prompt_tokens\":120,"
-                           "\"completion_tokens\":60,"
-                           "\"total_tokens\":180,"
-                           "\"prompt_cache_hit_tokens\":95,"
-                           "\"prompt_cache_miss_tokens\":25"
-                           "}}";
+    const char* raw_resp =
+        "{\"id\":\"chatcmpl-ds-test\","
+        "\"object\":\"chat.completion\","
+        "\"choices\":[{"
+        "\"index\":0,"
+        "\"message\":{"
+        "\"role\":\"assistant\","
+        "\"content\":\"The result is 42.\","
+        "\"reasoning_content\":\"Let me ponder the universe and everything...\""
+        "},"
+        "\"finish_reason\":\"stop\""
+        "}],"
+        "\"usage\":{"
+        "\"prompt_tokens\":120,"
+        "\"completion_tokens\":60,"
+        "\"total_tokens\":180,"
+        "\"prompt_cache_hit_tokens\":95,"
+        "\"prompt_cache_miss_tokens\":25"
+        "}}";
 
     int    status = 0;
     char*  out_body = NULL;
@@ -154,16 +155,18 @@ TEST_CASE(test_deepseek_streaming_reasoning_and_cache)
     stream_bridge_t* b = g_provider_openai.stream_bridge_new(&rc, "deepseek-r1");
     TEST_ASSERT(b != NULL, "bridge new ok");
 
-    const char* chunk1 = "data: "
-                         "{\"id\":\"ds-stream-1\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_"
-                         "content\":\"Step 1: start thinking...\"}}]}\n\n";
+    const char* chunk1 =
+        "data: "
+        "{\"id\":\"ds-stream-1\",\"choices\":[{\"index\":0,\"delta\":{\"reasoning_"
+        "content\":\"Step 1: start thinking...\"}}]}\n\n";
     const char* chunk2 =
         "data: {\"id\":\"ds-stream-1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Final "
         "conclusion.\"}}]}\n\n";
-    const char* chunk3 = "data: "
-                         "{\"id\":\"ds-stream-1\",\"choices\":[],\"usage\":{\"prompt_tokens\":250,"
-                         "\"completion_tokens\":75,\"prompt_cache_hit_tokens\":180}}\n\n"
-                         "data: [DONE]\n\n";
+    const char* chunk3 =
+        "data: "
+        "{\"id\":\"ds-stream-1\",\"choices\":[],\"usage\":{\"prompt_tokens\":250,"
+        "\"completion_tokens\":75,\"prompt_cache_hit_tokens\":180}}\n\n"
+        "data: [DONE]\n\n";
 
     TEST_ASSERT(g_provider_openai.stream_bridge_feed(b, chunk1, strlen(chunk1)) == 0,
                 "feed chunk 1");

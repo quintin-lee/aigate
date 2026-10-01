@@ -699,10 +699,10 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* qu
         json_object_set_new(o, "guardrails_enabled", json_boolean(recs[i].guardrails_enabled));
         json_object_set_new(o, "monthly_cost_budget", json_real(recs[i].monthly_cost_budget));
         json_object_set_new(o, "monthly_token_budget", json_integer(recs[i].monthly_token_budget));
-        json_object_set_new(o,
-                            "system_prompt",
-                            recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt)
-                                                             : json_null());
+        json_object_set_new(
+            o,
+            "system_prompt",
+            recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt) : json_null());
         json_object_set_new(o, "prompt_mode", json_string(prompt_mode_str(recs[i].prompt_mode)));
         json_array_append_new(arr, o);
         key_rec_free(&recs[i]);
@@ -1205,10 +1205,10 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
             json_array_append_new(tgts_arr, to);
         }
         json_object_set_new(o, "targets", tgts_arr);
-        json_object_set_new(o,
-                            "system_prompt",
-                            recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt)
-                                                             : json_null());
+        json_object_set_new(
+            o,
+            "system_prompt",
+            recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt) : json_null());
         json_object_set_new(o, "prompt_mode", json_string(prompt_mode_str(recs[i].prompt_mode)));
 
         json_array_append_new(arr, o);
@@ -1542,10 +1542,10 @@ sync_provider_models(admin_ctx_t* adm, const provider_rec_t* p)
                                sizeof existing.targets[0].provider,
                                p->provider_type);
                 }
-                if (ops->update_model(ops->ctx,
-                                      &existing,
-                                      MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED |
-                                          MMASK_TARGETS) != 0) {
+                if (ops->update_model(
+                        ops->ctx,
+                        &existing,
+                        MMASK_ENDPOINT | MMASK_KEYREF | MMASK_ENABLED | MMASK_TARGETS) != 0) {
                     failed++;
                 }
             } else if (ops->update_model(ops->ctx,
@@ -1978,8 +1978,9 @@ provider_health_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
 {
     if (adm->hp == NULL) {
         *status = 200;
-        *body = strdup("{\"providers\":[],\"total\":0,\"healthy\":0,\"degraded\":0,\"down\":0,"
-                       "\"paused\":0,\"checked_at\":0}");
+        *body = strdup(
+            "{\"providers\":[],\"total\":0,\"healthy\":0,\"degraded\":0,\"down\":0,"
+            "\"paused\":0,\"checked_at\":0}");
         *len = *body ? strlen(*body) : 0;
         return 0;
     }

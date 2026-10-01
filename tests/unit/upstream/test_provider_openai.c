@@ -40,10 +40,11 @@ TEST_CASE(test_openai_responses_build)
 
 TEST_CASE(test_openai_responses_parse_usage_nonstream)
 {
-    const char* json_resp = "{\"id\":\"resp_123\",\"object\":\"response\",\"status\":\"completed\","
-                            "\"usage\":{\"input_tokens\":12,\"output_tokens\":25,"
-                            "\"input_tokens_details\":{\"cached_tokens\":4},"
-                            "\"output_tokens_details\":{\"reasoning_tokens\":7}}}";
+    const char* json_resp =
+        "{\"id\":\"resp_123\",\"object\":\"response\",\"status\":\"completed\","
+        "\"usage\":{\"input_tokens\":12,\"output_tokens\":25,"
+        "\"input_tokens_details\":{\"cached_tokens\":4},"
+        "\"output_tokens_details\":{\"reasoning_tokens\":7}}}";
 
     long ptok = 0, ctok = 0, cached = 0, reasoning = 0;
     int  rc = provider_openai_parse_responses_usage(
@@ -57,12 +58,13 @@ TEST_CASE(test_openai_responses_parse_usage_nonstream)
 
 TEST_CASE(test_openai_responses_parse_usage_stream)
 {
-    const char* sse_stream = "event: response.created\ndata: {\"type\":\"response.created\"}\n\n"
-                             "event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n"
-                             "event: response.completed\ndata: {\"type\":\"response.completed\","
-                             "\"response\":{\"usage\":{\"input_tokens\":15,\"output_tokens\":40,"
-                             "\"input_tokens_details\":{\"cached_tokens\":5},"
-                             "\"output_tokens_details\":{\"reasoning_tokens\":10}}}}\n\n";
+    const char* sse_stream =
+        "event: response.created\ndata: {\"type\":\"response.created\"}\n\n"
+        "event: response.output_text.delta\ndata: {\"delta\":\"Hello\"}\n\n"
+        "event: response.completed\ndata: {\"type\":\"response.completed\","
+        "\"response\":{\"usage\":{\"input_tokens\":15,\"output_tokens\":40,"
+        "\"input_tokens_details\":{\"cached_tokens\":5},"
+        "\"output_tokens_details\":{\"reasoning_tokens\":10}}}}\n\n";
 
     long ptok = 0, ctok = 0, cached = 0, reasoning = 0;
     int  rc = provider_openai_parse_responses_usage(

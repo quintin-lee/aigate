@@ -14,12 +14,15 @@ static void
 test_fingerprint_normalization(void)
 {
     printf("running test_fingerprint_normalization...\n");
-    const char* req1 = "{\"model\":\"GPT-4O\",\"messages\":[{\"role\":\"user\",\"content\":\"hello "
-                       "world\"}],\"temperature\":0.7}";
-    const char* req2 = "{\"temperature\":0.7000,\"messages\":[{\"role\":\"user\",\"content\":"
-                       "\"hello world\"}],\"model\":\"gpt-4o\"}";
-    const char* req3 = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
-                       "\"different text\"}],\"temperature\":0.7}";
+    const char* req1 =
+        "{\"model\":\"GPT-4O\",\"messages\":[{\"role\":\"user\",\"content\":\"hello "
+        "world\"}],\"temperature\":0.7}";
+    const char* req2 =
+        "{\"temperature\":0.7000,\"messages\":[{\"role\":\"user\",\"content\":"
+        "\"hello world\"}],\"model\":\"gpt-4o\"}";
+    const char* req3 =
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":"
+        "\"different text\"}],\"temperature\":0.7}";
 
     char k1[65], k2[65], k3[65];
     assert(response_cache_fingerprint("GPT-4o", req1, strlen(req1), k1) == 0);

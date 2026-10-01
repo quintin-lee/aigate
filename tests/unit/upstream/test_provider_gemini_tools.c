@@ -26,13 +26,14 @@ make_gemini_route(void)
 TEST_CASE(test_gemini_tools_request_build)
 {
     model_rec_t route = make_gemini_route();
-    const char* in_body = "{\"model\":\"gemini-1.5-pro\","
-                          "\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather?\"}],"
-                          "\"tools\":[{\"type\":\"function\",\"function\":{"
-                          "\"name\":\"get_weather\",\"description\":\"Get weather\","
-                          "\"parameters\":{\"type\":\"object\",\"properties\":{"
-                          "\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],"
-                          "\"tool_choice\":\"auto\"}";
+    const char* in_body =
+        "{\"model\":\"gemini-1.5-pro\","
+        "\"messages\":[{\"role\":\"user\",\"content\":\"What is the weather?\"}],"
+        "\"tools\":[{\"type\":\"function\",\"function\":{"
+        "\"name\":\"get_weather\",\"description\":\"Get weather\","
+        "\"parameters\":{\"type\":\"object\",\"properties\":{"
+        "\"location\":{\"type\":\"string\"}},\"required\":[\"location\"]}}}],"
+        "\"tool_choice\":\"auto\"}";
 
     char        url[512];
     const char* hdrs[4][2];
@@ -94,9 +95,9 @@ TEST_CASE(test_gemini_function_call_response_parse)
     TEST_ASSERT(strcmp(json_string_value(json_object_get(fn, "name")), "get_weather") == 0, "name");
     const char* args = json_string_value(json_object_get(fn, "arguments"));
     json_t*     pargs = json_loads(args, 0, NULL);
-    TEST_ASSERT(pargs &&
-                    strcmp(json_string_value(json_object_get(pargs, "location")), "Beijing") == 0,
-                "location arg");
+    TEST_ASSERT(
+        pargs && strcmp(json_string_value(json_object_get(pargs, "location")), "Beijing") == 0,
+        "location arg");
 
     json_decref(pargs);
     json_decref(out);
@@ -180,12 +181,13 @@ TEST_CASE(test_gemini_tool_result_name_missing_fallback)
 /* --------------------------------------- Test 5: multi tool_calls response */
 TEST_CASE(test_gemini_multi_tool_calls_response)
 {
-    const char* gemini_resp = "{\"candidates\":[{"
-                              "\"content\":{\"role\":\"model\",\"parts\":["
-                              "{\"functionCall\":{\"name\":\"fn_a\",\"args\":{\"x\":1}}},"
-                              "{\"functionCall\":{\"name\":\"fn_b\",\"args\":{\"y\":2}}}"
-                              "]},"
-                              "\"finishReason\":\"STOP\"}]}";
+    const char* gemini_resp =
+        "{\"candidates\":[{"
+        "\"content\":{\"role\":\"model\",\"parts\":["
+        "{\"functionCall\":{\"name\":\"fn_a\",\"args\":{\"x\":1}}},"
+        "{\"functionCall\":{\"name\":\"fn_b\",\"args\":{\"y\":2}}}"
+        "]},"
+        "\"finishReason\":\"STOP\"}]}";
 
     char*  oai = NULL;
     size_t olen = 0;
