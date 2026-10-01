@@ -159,6 +159,15 @@ ALTER TABLE api_keys
   ADD COLUMN IF NOT EXISTS prompt_mode INT NOT NULL DEFAULT 0;
 
 INSERT INTO schema_migrations(version) VALUES (10) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v11: external webhook moderation plugin support
+ALTER TABLE guardrails_rules
+  ADD COLUMN IF NOT EXISTS webhook_secret TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS timeout_ms INT NOT NULL DEFAULT 500,
+  ADD COLUMN IF NOT EXISTS fail_mode VARCHAR(16) NOT NULL DEFAULT 'open',
+  ADD COLUMN IF NOT EXISTS phase VARCHAR(16) NOT NULL DEFAULT 'inbound';
+
+INSERT INTO schema_migrations(version) VALUES (11) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

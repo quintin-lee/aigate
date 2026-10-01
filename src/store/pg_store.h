@@ -106,13 +106,17 @@ typedef struct group_rec {
 
 /** @brief Guardrail rule record (guardrails_rules row). */
 typedef struct guardrail_rule {
-    long   id;            /**< Primary key */
-    char   rule_type[32]; /**< "keyword" | "regex" | "pii" */
-    char   pattern[512];  /**< Match pattern (keyword/regex/text-to-redact signature) */
-    char   action[32];    /**< "block" | "mask" */
-    char   category[64];  /**< "general" | "profanity" | "safety" etc. */
-    int    enabled;       /**< 1 = true, 0 = false */
-    time_t created_at;    /**< Creation timestamp */
+    long   id;                  /**< Primary key */
+    char   rule_type[32];       /**< "keyword" | "regex" | "pii" | "webhook" */
+    char   pattern[512];        /**< Match pattern (keyword/regex/webhook URL) */
+    char   action[32];          /**< "block" | "mask" */
+    char   category[64];        /**< "general" | "profanity" | "safety" etc. */
+    int    enabled;             /**< 1 = true, 0 = false */
+    char   webhook_secret[256]; /**< Optional Bearer token / auth secret */
+    int    timeout_ms;          /**< Webhook HTTP timeout in ms (default: 500) */
+    char   fail_mode[16];       /**< "open" (fail-open) | "closed" (fail-closed) */
+    char   phase[16];           /**< "inbound" | "outbound" | "both" */
+    time_t created_at;          /**< Creation timestamp */
 } guardrail_rule_t;
 
 /** @brief One cost attribution row. */

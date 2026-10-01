@@ -1892,7 +1892,9 @@ pq_list_guardrails_rules(void* vctx, guardrail_rule_t* out, int cap, int* n)
 {
     struct pq_ctx*    px = vctx;
     static const char q[] = "SELECT id, rule_type, pattern, action, category, enabled, "
-                            "EXTRACT(EPOCH FROM created_at)::bigint "
+                            "EXTRACT(EPOCH FROM created_at)::bigint, "
+                            "COALESCE(webhook_secret, ''), COALESCE(timeout_ms, 500), "
+                            "COALESCE(fail_mode, 'open'), COALESCE(phase, 'inbound') "
                             "FROM guardrails_rules ORDER BY id";
     *n = 0;
 
@@ -1917,6 +1919,13 @@ pq_list_guardrails_rules(void* vctx, guardrail_rule_t* out, int cap, int* n)
         copy_field(out[i].category, sizeof out[i].category, PQgetvalue(res, i, 4));
         out[i].enabled = strcmp(PQgetvalue(res, i, 5), "t") == 0;
         out[i].created_at = (time_t)atol(PQgetvalue(res, i, 6));
+        copy_field(out[i].webhook_secret, sizeof out[i].webhook_secret, PQgetvalue(res, i, 7));
+        out[i].timeout_ms = atoi(PQgetvalue(res, i, 8));
+        if (out[i].timeout_ms <= 0) {
+            out[i].timeout_ms = 500;
+        }
+        copy_field(out[i].fail_mode, sizeof out[i].fail_mode, PQgetvalue(res, i, 9));
+        copy_field(out[i].phase, sizeof out[i].phase, PQgetvalue(res, i, 10));
     }
     *n = nt;
     PQclear(res);
@@ -1929,18 +1938,28 @@ pq_create_guardrails_rule(void* vctx, const guardrail_rule_t* rule, long* out_id
 {
     struct pq_ctx*    px = vctx;
     static const char q[] =
-        "INSERT INTO guardrails_rules(rule_type, pattern, action, category, enabled) "
-        "VALUES($1, $2, $3, $4, $5) RETURNING id";
+        "INSERT INTO guardrails_rules(rule_type, pattern, action, category, enabled, "
+        "webhook_secret, timeout_ms, fail_mode, phase) "
+        "VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id";
     const char* enabled_str = rule->enabled ? "true" : "false";
-    const char* vals[5] = {rule->rule_type[0] != '\0' ? rule->rule_type : "keyword",
+    char        timeout_str[32];
+    snprintf(timeout_str, sizeof timeout_str, "%d", rule->timeout_ms > 0 ? rule->timeout_ms : 500);
+    const char* fail_mode_str = rule->fail_mode[0] != '\0' ? rule->fail_mode : "open";
+    const char* phase_str = rule->phase[0] != '\0' ? rule->phase : "inbound";
+
+    const char* vals[9] = {rule->rule_type[0] != '\0' ? rule->rule_type : "keyword",
                            rule->pattern,
                            rule->action[0] != '\0' ? rule->action : "block",
                            rule->category[0] != '\0' ? rule->category : "general",
-                           enabled_str};
-    int         plens[5] = {0, 0, 0, 0, 0};
+                           enabled_str,
+                           rule->webhook_secret,
+                           timeout_str,
+                           fail_mode_str,
+                           phase_str};
+    int         plens[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 5, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 9, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
         long id = atol(PQgetvalue(res, 0, 0));
@@ -1966,16 +1985,30 @@ pq_update_guardrails_rule(void* vctx, const guardrail_rule_t* rule)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "UPDATE guardrails_rules SET rule_type = $1, pattern = $2, action = $3, "
-        "category = $4, enabled = $5 WHERE id = $6";
+        "category = $4, enabled = $5, webhook_secret = $6, timeout_ms = $7, "
+        "fail_mode = $8, phase = $9 WHERE id = $10";
     char id_str[32];
     snprintf(id_str, sizeof id_str, "%ld", rule->id);
     const char* enabled_str = rule->enabled ? "true" : "false";
-    const char* vals[6] = {
-        rule->rule_type, rule->pattern, rule->action, rule->category, enabled_str, id_str};
-    int plens[6] = {0, 0, 0, 0, 0, 0};
+    char        timeout_str[32];
+    snprintf(timeout_str, sizeof timeout_str, "%d", rule->timeout_ms > 0 ? rule->timeout_ms : 500);
+    const char* fail_mode_str = rule->fail_mode[0] != '\0' ? rule->fail_mode : "open";
+    const char* phase_str = rule->phase[0] != '\0' ? rule->phase : "inbound";
+
+    const char* vals[10] = {rule->rule_type,
+                            rule->pattern,
+                            rule->action,
+                            rule->category,
+                            enabled_str,
+                            rule->webhook_secret,
+                            timeout_str,
+                            fail_mode_str,
+                            phase_str,
+                            id_str};
+    int         plens[10] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 6, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 10, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
         int rows = atoi(PQcmdTuples(res));
