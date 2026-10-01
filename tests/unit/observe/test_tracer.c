@@ -3,7 +3,11 @@
  */
 #include "observe/tracer.h"
 #include "run_tests.h"
+#include <pthread.h>
+#include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <unistd.h>
 
 TEST_CASE(test_w3c_traceparent_parsing)
 {
@@ -158,4 +162,215 @@ TEST_CASE(test_span_lifecycle_and_timing)
     tracer_context_cleanup(&ctx);
     TEST_ASSERT(ctx.trace_id[0] == '\0', "context zeroed out on cleanup");
     TEST_ASSERT(ctx.span_count == 0, "span_count reset to 0");
+}
+
+TEST_CASE(test_trace_tail_sampling_decision)
+{
+    tracer_config_t cfg = {
+        .enabled = true,
+        .sample_rate = 0.0, /* 0% regular sampling */
+        .slow_threshold_ms = 1000,
+        .otlp_endpoint = "http://localhost:4318/v1/traces",
+    };
+
+    trace_context_t ctx;
+    tracer_context_init(&ctx, NULL, false);
+    ctx.is_sampled = false;
+
+    /* Disabled tracer should never sample */
+    tracer_config_t disabled_cfg = cfg;
+    disabled_cfg.enabled = false;
+    TEST_ASSERT(tracer_should_sample(&ctx, &disabled_cfg, 500, 5000) == false,
+                "disabled tracer never samples even on error and slow");
+    TEST_ASSERT(tracer_should_sample(&ctx, NULL, 500, 5000) == false, "null config never samples");
+
+    /* Regular 200 OK within threshold should NOT be sampled */
+    bool decision1 = tracer_should_sample(&ctx, &cfg, 200, 200);
+    TEST_ASSERT(decision1 == false, "normal fast 200 is unsampled when rate is 0");
+
+    /* HTTP 500 error MUST be tail-sampled */
+    bool decision2 = tracer_should_sample(&ctx, &cfg, 500, 200);
+    TEST_ASSERT(decision2 == true, "error 500 is tail-sampled");
+
+    /* Slow query (> 1000ms) MUST be tail-sampled */
+    bool decision3 = tracer_should_sample(&ctx, &cfg, 200, 1500);
+    TEST_ASSERT(decision3 == true, "slow query > threshold is tail-sampled");
+
+    /* Guardrail blocked (400) MUST be tail-sampled */
+    bool decision4 = tracer_should_sample(&ctx, &cfg, 400, 50);
+    TEST_ASSERT(decision4 == true, "blocked 400 is tail-sampled");
+
+    /* Already-sampled context stays sampled */
+    ctx.is_sampled = true;
+    bool decision5 = tracer_should_sample(&ctx, &cfg, 200, 100);
+    TEST_ASSERT(decision5 == true, "already-sampled ctx stays sampled");
+
+    /* Sample rate 1.0 always samples */
+    tracer_config_t full_cfg = cfg;
+    full_cfg.sample_rate = 1.0;
+    ctx.is_sampled = false;
+    TEST_ASSERT(tracer_should_sample(&ctx, &full_cfg, 200, 100) == true,
+                "sample rate 1.0 always samples");
+}
+
+struct concurrency_worker_arg {
+    trace_ring_buffer_t* rb;
+    int                  push_count;
+    int                  worker_id;
+};
+
+static void*
+ring_buffer_writer_worker(void* arg)
+{
+    struct concurrency_worker_arg* warg = (struct concurrency_worker_arg*)arg;
+    for (int i = 0; i < warg->push_count; i++) {
+        trace_context_t ctx;
+        tracer_context_init(&ctx, NULL, true);
+        snprintf(ctx.trace_id,
+                 sizeof(ctx.trace_id),
+                 "%08x%08x%08x%08x",
+                 (unsigned int)warg->worker_id,
+                 (unsigned int)i,
+                 (unsigned int)warg->worker_id,
+                 (unsigned int)i);
+        trace_ring_buffer_push(warg->rb, &ctx);
+        usleep(100);
+    }
+    return NULL;
+}
+
+static volatile bool g_concurrency_done = false;
+static int           g_reader_popped = 0;
+
+static void*
+ring_buffer_reader_worker(void* arg)
+{
+    trace_ring_buffer_t* rb = (trace_ring_buffer_t*)arg;
+    trace_context_t      out_ctx;
+    while (!g_concurrency_done || trace_ring_buffer_count(rb) > 0) {
+        if (trace_ring_buffer_pop(rb, &out_ctx, 10)) {
+            g_reader_popped++;
+        }
+    }
+    return NULL;
+}
+
+TEST_CASE(test_trace_ring_buffer_operations)
+{
+    /* 1. Basic create, push up to capacity and beyond (non-blocking overwrite & dropped counter) */
+    trace_ring_buffer_t* rb = trace_ring_buffer_create(8);
+    TEST_ASSERT(rb != NULL, "ring buffer created");
+    TEST_ASSERT(trace_ring_buffer_count(rb) == 0, "initial count is 0");
+    TEST_ASSERT(trace_ring_buffer_dropped(rb) == 0, "initial dropped is 0");
+
+    trace_context_t sample_ctx;
+    tracer_context_init(&sample_ctx, NULL, true);
+
+    /* Push until full and beyond */
+    for (int i = 0; i < 12; i++) {
+        bool pushed = trace_ring_buffer_push(rb, &sample_ctx);
+        TEST_ASSERT(pushed == true, "push returns true");
+    }
+
+    TEST_ASSERT(trace_ring_buffer_count(rb) == 8, "count is capped at capacity 8");
+    TEST_ASSERT(trace_ring_buffer_dropped(rb) == 4, "4 overflow traces dropped without blocking");
+
+    trace_context_t out_ctx;
+    TEST_ASSERT(trace_ring_buffer_pop(rb, &out_ctx, 10) == true, "pop succeeds");
+    TEST_ASSERT(trace_ring_buffer_count(rb) == 7, "count decremented to 7");
+
+    trace_ring_buffer_destroy(rb);
+
+    /* 2. FIFO order and overwrite correctness verification */
+    trace_ring_buffer_t* fifo_rb = trace_ring_buffer_create(3);
+    TEST_ASSERT(fifo_rb != NULL, "fifo ring buffer created");
+
+    trace_context_t ctx1, ctx2, ctx3, ctx4, ctx5;
+    tracer_context_init(&ctx1, NULL, true);
+    strncpy(ctx1.trace_id, "00000000000000000000000000000001", sizeof(ctx1.trace_id));
+    tracer_context_init(&ctx2, NULL, true);
+    strncpy(ctx2.trace_id, "00000000000000000000000000000002", sizeof(ctx2.trace_id));
+    tracer_context_init(&ctx3, NULL, true);
+    strncpy(ctx3.trace_id, "00000000000000000000000000000003", sizeof(ctx3.trace_id));
+    tracer_context_init(&ctx4, NULL, true);
+    strncpy(ctx4.trace_id, "00000000000000000000000000000004", sizeof(ctx4.trace_id));
+    tracer_context_init(&ctx5, NULL, true);
+    strncpy(ctx5.trace_id, "00000000000000000000000000000005", sizeof(ctx5.trace_id));
+
+    trace_ring_buffer_push(fifo_rb, &ctx1);
+    trace_ring_buffer_push(fifo_rb, &ctx2);
+    trace_ring_buffer_push(fifo_rb, &ctx3);
+    TEST_ASSERT(trace_ring_buffer_count(fifo_rb) == 3, "fifo buffer full (count 3)");
+    TEST_ASSERT(trace_ring_buffer_dropped(fifo_rb) == 0, "fifo buffer dropped 0");
+
+    /* Pushing 4 and 5 overwrites 1 and 2 */
+    trace_ring_buffer_push(fifo_rb, &ctx4);
+    trace_ring_buffer_push(fifo_rb, &ctx5);
+    TEST_ASSERT(trace_ring_buffer_count(fifo_rb) == 3, "count remains 3");
+    TEST_ASSERT(trace_ring_buffer_dropped(fifo_rb) == 2, "dropped count is 2");
+
+    /* Popping should return ctx3, ctx4, ctx5 in FIFO order */
+    trace_context_t pop_res;
+    TEST_ASSERT(trace_ring_buffer_pop(fifo_rb, &pop_res, 0) == true, "pop ctx3");
+    TEST_ASSERT(strcmp(pop_res.trace_id, "00000000000000000000000000000003") == 0,
+                "first popped is ctx3 (oldest remaining)");
+
+    TEST_ASSERT(trace_ring_buffer_pop(fifo_rb, &pop_res, 0) == true, "pop ctx4");
+    TEST_ASSERT(strcmp(pop_res.trace_id, "00000000000000000000000000000004") == 0,
+                "second popped is ctx4");
+
+    TEST_ASSERT(trace_ring_buffer_pop(fifo_rb, &pop_res, 0) == true, "pop ctx5");
+    TEST_ASSERT(strcmp(pop_res.trace_id, "00000000000000000000000000000005") == 0,
+                "third popped is ctx5");
+
+    TEST_ASSERT(trace_ring_buffer_count(fifo_rb) == 0, "buffer is now empty");
+
+    /* 3. Pop timeout on empty buffer */
+    struct timespec start_ts, end_ts;
+    clock_gettime(CLOCK_MONOTONIC, &start_ts);
+    bool timed_pop = trace_ring_buffer_pop(fifo_rb, &pop_res, 50);
+    clock_gettime(CLOCK_MONOTONIC, &end_ts);
+    TEST_ASSERT(timed_pop == false, "pop on empty buffer times out and returns false");
+    uint64_t wait_ms = (uint64_t)(end_ts.tv_sec - start_ts.tv_sec) * 1000ULL +
+                       (uint64_t)(end_ts.tv_nsec - start_ts.tv_nsec) / 1000000ULL;
+    TEST_ASSERT(wait_ms >= 35, "waited approximately 50ms on timeout");
+    trace_ring_buffer_destroy(fifo_rb);
+
+    /* 4. Concurrency with reader/writer threads */
+    trace_ring_buffer_t* concurrent_rb = trace_ring_buffer_create(8);
+    TEST_ASSERT(concurrent_rb != NULL, "concurrent ring buffer created");
+
+    pthread_t                     writer_threads[4];
+    pthread_t                     reader_thread;
+    struct concurrency_worker_arg wargs[4];
+
+    g_concurrency_done = false;
+    g_reader_popped = 0;
+
+    for (int i = 0; i < 4; i++) {
+        wargs[i].rb = concurrent_rb;
+        wargs[i].push_count = 50;
+        wargs[i].worker_id = i;
+        pthread_create(&writer_threads[i], NULL, ring_buffer_writer_worker, &wargs[i]);
+    }
+    pthread_create(&reader_thread, NULL, ring_buffer_reader_worker, concurrent_rb);
+
+    for (int i = 0; i < 4; i++) {
+        pthread_join(writer_threads[i], NULL);
+    }
+    g_concurrency_done = true;
+    pthread_join(reader_thread, NULL);
+
+    /* Verify ring buffer invariants after concurrent stress */
+    size_t   final_count = trace_ring_buffer_count(concurrent_rb);
+    uint64_t final_dropped = trace_ring_buffer_dropped(concurrent_rb);
+
+    TEST_ASSERT((size_t)(g_reader_popped + final_count + final_dropped) == 200,
+                "conservation invariant: popped + count + dropped == pushed");
+    TEST_ASSERT(final_count == 0, "reader drained buffer completely");
+    TEST_ASSERT(g_reader_popped > 0, "reader popped items concurrently");
+    TEST_ASSERT(g_reader_popped + final_dropped == 200,
+                "all pushed items were either popped or dropped");
+
+    trace_ring_buffer_destroy(concurrent_rb);
 }

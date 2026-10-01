@@ -165,4 +165,96 @@ tracer_span_set_attr(trace_context_t* ctx, const char* name, const char* key, co
 void
 tracer_span_set_attr_int(trace_context_t* ctx, const char* name, const char* key, int64_t value);
 
+/**
+ * @brief Configuration parameters for OpenTelemetry tracing and tail sampling.
+ */
+typedef struct {
+    bool     enabled;            /**< Whether tracing is enabled. */
+    double   sample_rate;        /**< Probabilistic sample rate 0.0 to 1.0. */
+    uint32_t slow_threshold_ms;  /**< Latency threshold (ms) for tail-sampling slow requests. */
+    char     otlp_endpoint[256]; /**< OTLP/HTTP collector endpoint URL. */
+} tracer_config_t;
+
+/**
+ * @brief Evaluate whether a completed request trace should be sampled for export.
+ *
+ * Implements head and adaptive tail sampling:
+ * - Unconditionally false if config is NULL or tracing is disabled.
+ * - Always true if trace was already marked sampled (e.g. inbound W3C traceparent flag).
+ * - Always true if http_status >= 400 (tail-sampling errors and guardrail blocks).
+ * - Always true if elapsed_ms >= cfg->slow_threshold_ms (tail-sampling slow queries).
+ * - Probabilistic sampling according to cfg->sample_rate (0.0 to 1.0).
+ *
+ * @param ctx         Trace context for the request (may be NULL).
+ * @param cfg         Tracer configuration (may be NULL).
+ * @param http_status HTTP status code returned for the request.
+ * @param elapsed_ms  Total request elapsed time in milliseconds.
+ * @return true if the trace should be sampled and retained, false otherwise.
+ */
+bool tracer_should_sample(const trace_context_t* ctx,
+                          const tracer_config_t* cfg,
+                          int                    http_status,
+                          uint64_t               elapsed_ms);
+
+/** @brief Default capacity for trace ring buffer. */
+#define TRACE_RING_BUFFER_DEFAULT_CAPACITY 1024
+
+/**
+ * @brief Thread-safe ring buffer for queued trace contexts awaiting export.
+ */
+typedef struct trace_ring_buffer trace_ring_buffer_t;
+
+/**
+ * @brief Create a new thread-safe trace ring buffer.
+ *
+ * @param capacity Maximum number of trace contexts to buffer (0 for default 1024).
+ * @return Pointer to newly allocated ring buffer, or NULL on allocation failure.
+ */
+trace_ring_buffer_t* trace_ring_buffer_create(size_t capacity);
+
+/**
+ * @brief Destroy a trace ring buffer and free all associated resources.
+ *
+ * @param rb Ring buffer to destroy (safe with NULL).
+ */
+void trace_ring_buffer_destroy(trace_ring_buffer_t* rb);
+
+/**
+ * @brief Non-blocking push of a trace context into the ring buffer.
+ *
+ * If the ring buffer is full, the oldest trace context is overwritten and the
+ * dropped count is incremented. This function never blocks the caller.
+ *
+ * @param rb  Ring buffer instance.
+ * @param ctx Trace context to copy into the buffer.
+ * @return true on success, false if parameters are invalid.
+ */
+bool trace_ring_buffer_push(trace_ring_buffer_t* rb, const trace_context_t* ctx);
+
+/**
+ * @brief Pop a trace context from the ring buffer, waiting up to timeout_ms if empty.
+ *
+ * @param rb         Ring buffer instance.
+ * @param out_ctx    Destination buffer for popped trace context.
+ * @param timeout_ms Maximum time to wait in milliseconds if buffer is empty.
+ * @return true if a trace was popped, false if timed out or parameters are invalid.
+ */
+bool trace_ring_buffer_pop(trace_ring_buffer_t* rb, trace_context_t* out_ctx, uint32_t timeout_ms);
+
+/**
+ * @brief Get the current number of trace contexts stored in the ring buffer.
+ *
+ * @param rb Ring buffer instance.
+ * @return Number of queued items.
+ */
+size_t trace_ring_buffer_count(trace_ring_buffer_t* rb);
+
+/**
+ * @brief Get the cumulative count of traces dropped due to ring buffer overflow.
+ *
+ * @param rb Ring buffer instance.
+ * @return Total number of dropped traces.
+ */
+uint64_t trace_ring_buffer_dropped(trace_ring_buffer_t* rb);
+
 #endif /* AIGATE_TRACER_H */

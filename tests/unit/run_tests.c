@@ -503,6 +503,12 @@ main(void)
     extern void test_span_lifecycle_and_timing(void);
     test_register("span_lifecycle_and_timing", test_span_lifecycle_and_timing);
 
+    extern void test_trace_tail_sampling_decision(void);
+    test_register("trace_tail_sampling_decision", test_trace_tail_sampling_decision);
+
+    extern void test_trace_ring_buffer_operations(void);
+    test_register("trace_ring_buffer_operations", test_trace_ring_buffer_operations);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

@@ -3,9 +3,11 @@
  */
 #include "tracer.h"
 #include <ctype.h>
+#include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
 #include <openssl/rand.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -354,4 +356,194 @@ tracer_span_set_attr_int(trace_context_t* ctx, const char* name, const char* key
     char val_buf[32];
     snprintf(val_buf, sizeof(val_buf), "%" PRId64, value);
     tracer_span_set_attr(ctx, name, key, val_buf);
+}
+
+bool
+tracer_should_sample(const trace_context_t* ctx,
+                     const tracer_config_t* cfg,
+                     int                    http_status,
+                     uint64_t               elapsed_ms)
+{
+    if (!cfg || !cfg->enabled) {
+        return false;
+    }
+
+    if (ctx && ctx->is_sampled) {
+        return true;
+    }
+
+    if (http_status >= 400) {
+        return true;
+    }
+
+    if (cfg->slow_threshold_ms > 0 && elapsed_ms >= cfg->slow_threshold_ms) {
+        return true;
+    }
+
+    if (cfg->sample_rate >= 1.0) {
+        return true;
+    }
+
+    if (cfg->sample_rate <= 0.0) {
+        return false;
+    }
+
+    double roll = (double)rand() / (double)RAND_MAX;
+    return roll < cfg->sample_rate;
+}
+
+/**
+ * @brief Internal implementation of the thread-safe trace ring buffer.
+ */
+struct trace_ring_buffer {
+    trace_context_t* items;         /**< Dynamically allocated array of trace contexts. */
+    size_t           capacity;      /**< Buffer capacity. */
+    size_t           head;          /**< Read index. */
+    size_t           tail;          /**< Write index. */
+    size_t           count;         /**< Number of items currently in buffer. */
+    uint64_t         dropped_count; /**< Cumulative dropped items due to overflow. */
+    pthread_mutex_t  lock;          /**< Mutex protecting buffer operations. */
+    pthread_cond_t   not_empty;     /**< Condition variable signaled on new items. */
+};
+
+trace_ring_buffer_t*
+trace_ring_buffer_create(size_t capacity)
+{
+    if (capacity == 0) {
+        capacity = TRACE_RING_BUFFER_DEFAULT_CAPACITY;
+    }
+
+    trace_ring_buffer_t* rb = calloc(1, sizeof(trace_ring_buffer_t));
+    if (!rb) {
+        return NULL;
+    }
+
+    rb->items = calloc(capacity, sizeof(trace_context_t));
+    if (!rb->items) {
+        free(rb);
+        return NULL;
+    }
+
+    rb->capacity = capacity;
+    rb->head = 0;
+    rb->tail = 0;
+    rb->count = 0;
+    rb->dropped_count = 0;
+
+    if (pthread_mutex_init(&rb->lock, NULL) != 0) {
+        free(rb->items);
+        free(rb);
+        return NULL;
+    }
+
+    if (pthread_cond_init(&rb->not_empty, NULL) != 0) {
+        pthread_mutex_destroy(&rb->lock);
+        free(rb->items);
+        free(rb);
+        return NULL;
+    }
+
+    return rb;
+}
+
+void
+trace_ring_buffer_destroy(trace_ring_buffer_t* rb)
+{
+    if (!rb) {
+        return;
+    }
+
+    pthread_mutex_destroy(&rb->lock);
+    pthread_cond_destroy(&rb->not_empty);
+
+    free(rb->items);
+    free(rb);
+}
+
+bool
+trace_ring_buffer_push(trace_ring_buffer_t* rb, const trace_context_t* ctx)
+{
+    if (!rb || !ctx) {
+        return false;
+    }
+
+    pthread_mutex_lock(&rb->lock);
+
+    if (rb->count == rb->capacity) {
+        /* Buffer is full: overwrite oldest item at head without blocking */
+        rb->items[rb->head] = *ctx;
+        rb->head = (rb->head + 1) % rb->capacity;
+        rb->tail = rb->head;
+        rb->dropped_count++;
+    } else {
+        rb->items[rb->tail] = *ctx;
+        rb->tail = (rb->tail + 1) % rb->capacity;
+        rb->count++;
+    }
+
+    pthread_cond_signal(&rb->not_empty);
+    pthread_mutex_unlock(&rb->lock);
+
+    return true;
+}
+
+bool
+trace_ring_buffer_pop(trace_ring_buffer_t* rb, trace_context_t* out_ctx, uint32_t timeout_ms)
+{
+    if (!rb || !out_ctx) {
+        return false;
+    }
+
+    pthread_mutex_lock(&rb->lock);
+
+    if (rb->count == 0 && timeout_ms > 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        uint64_t nsec = (uint64_t)ts.tv_nsec + (uint64_t)timeout_ms * 1000000ULL;
+        ts.tv_sec += (time_t)(nsec / 1000000000ULL);
+        ts.tv_nsec = (long)(nsec % 1000000000ULL);
+
+        while (rb->count == 0) {
+            int rc = pthread_cond_timedwait(&rb->not_empty, &rb->lock, &ts);
+            if (rc != 0) {
+                break;
+            }
+        }
+    }
+
+    if (rb->count == 0) {
+        pthread_mutex_unlock(&rb->lock);
+        return false;
+    }
+
+    *out_ctx = rb->items[rb->head];
+    rb->head = (rb->head + 1) % rb->capacity;
+    rb->count--;
+
+    pthread_mutex_unlock(&rb->lock);
+    return true;
+}
+
+size_t
+trace_ring_buffer_count(trace_ring_buffer_t* rb)
+{
+    if (!rb) {
+        return 0;
+    }
+    pthread_mutex_lock(&rb->lock);
+    size_t count = rb->count;
+    pthread_mutex_unlock(&rb->lock);
+    return count;
+}
+
+uint64_t
+trace_ring_buffer_dropped(trace_ring_buffer_t* rb)
+{
+    if (!rb) {
+        return 0;
+    }
+    pthread_mutex_lock(&rb->lock);
+    uint64_t dropped = rb->dropped_count;
+    pthread_mutex_unlock(&rb->lock);
+    return dropped;
 }
