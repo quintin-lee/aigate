@@ -1520,92 +1520,181 @@
     </div>
 
     <!-- ==================== Tab 5: Playground ==================== -->
-    <div id="tab-playground" class="tab-content hidden space-y-6">
-      <div class="flex items-center justify-between">
+    <div id="tab-playground" class="tab-content hidden space-y-4">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h2 class="text-xl font-extrabold text-white">实时调试场</h2>
-          <p class="text-xs text-slate-400 mt-0.5">透明地测试实时对话补全与 SSE 流式输出</p>
+          <div class="flex items-center gap-2">
+            <h2 class="text-xl font-extrabold text-white">⚡ 实时调试场 (Playground)</h2>
+            <span class="text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">多轮对话 & 通道直测</span>
+          </div>
+          <p class="text-xs text-slate-400 mt-0.5">测试多轮对话补全、SSE 流式响应、通道路由与首字时延分析</p>
+        </div>
+        <div class="flex items-center space-x-2">
+          <button onclick="clearPlaygroundChat()" class="px-3 py-1.5 rounded-xl text-xs font-medium bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-700 transition flex items-center space-x-1.5">
+            <span>🧹</span><span>清空会话</span>
+          </button>
         </div>
       </div>
 
-      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        <!-- Request config column (spans 5 cols) -->
-        <div class="lg:col-span-5 glass-panel p-5 rounded-2xl border border-slate-800 space-y-4">
+      <!-- 3-Column Workbench Grid -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <!-- Col 1: Config & Routing (3 cols) -->
+        <div class="lg:col-span-3 glass-panel p-4 rounded-2xl border border-slate-800 space-y-3.5">
+          <div class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5 border-b border-slate-800/80 pb-2">
+            <span>⚙️</span><span>参数与通道路由</span>
+          </div>
+
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">选择模型</label>
-            <select id="playModelSelect" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500 font-medium">
-              <!-- Populated from the model list -->
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">选择模型</label>
+            <select id="playModelSelect" onchange="onPlaygroundModelChange()" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500 font-medium">
             </select>
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">API 密钥 (Bearer)</label>
-            <div class="flex space-x-2">
-              <input type="password" id="playApiKeyInput" placeholder="aig_..." class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
-              <button onclick="autoFillPlaygroundKey()" class="px-2.5 py-1 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 whitespace-nowrap">自动填充</button>
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">上游通道路由 (Channel)</label>
+            <select id="playChannelSelect" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-indigo-300 focus:outline-none focus:border-brand-500 font-mono">
+              <option value="">⚡ 默认智能路由 (加权/对冲/故障转移)</option>
+            </select>
+            <p class="text-[10px] text-slate-500 mt-1">可强制直连单个物理通道排查连通性</p>
+          </div>
+
+          <div>
+            <label class="block text-[11px] font-semibold text-slate-300 mb-1">API 密钥 (Bearer)</label>
+            <div class="flex space-x-1.5">
+              <input type="password" id="playApiKeyInput" placeholder="aig_..." class="flex-1 px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+              <button onclick="autoFillPlaygroundKey()" title="填充首个可用密钥" class="px-2 py-1 text-[11px] rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 whitespace-nowrap">自动填充</button>
             </div>
-            <p class="text-[10px] text-slate-500 mt-1">使用客户端密钥，可测试限流与权限</p>
           </div>
 
           <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">系统提示词</label>
-            <textarea id="playSystemPrompt" rows="2" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-sans" placeholder="系统提示词...">你是一个乐于助人的 AI 助手。</textarea>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-[11px] font-semibold text-slate-300">系统提示词 (System)</label>
+              <select id="playPromptPresetSelect" onchange="applyPromptPresetToPlayground()" class="bg-slate-950 text-[10px] text-indigo-300 border border-slate-800 rounded px-1.5 py-0.5 max-w-[130px] truncate">
+                <option value="">+ 载入模板...</option>
+              </select>
+            </div>
+            <textarea id="playSystemPrompt" rows="3" class="w-full px-2.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-sans leading-relaxed custom-scroll" placeholder="系统级提示词...">你是一个专业、严谨的 AI 助手。</textarea>
           </div>
 
-          <div>
-            <label class="block text-xs font-semibold text-slate-300 mb-1">用户消息</label>
-            <textarea id="playUserPrompt" rows="4" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-sans" placeholder="在此输入提示词...（Ctrl+Enter 发送）">用三个简洁的要点解释什么是 AI 网关。</textarea>
-          </div>
-
-          <div class="grid grid-cols-2 gap-3 pt-1">
+          <!-- Hyperparameter sliders & toggles -->
+          <div class="space-y-2.5 pt-1 border-t border-slate-800/80">
             <div>
-              <label class="block text-[11px] font-semibold text-slate-400 mb-1">温度：<span id="tempDisplay" class="text-brand-400 font-mono">0.7</span></label>
+              <div class="flex justify-between text-[11px] font-semibold mb-1">
+                <span class="text-slate-400">温度 (Temperature)</span>
+                <span id="tempDisplay" class="text-brand-400 font-mono">0.7</span>
+              </div>
               <input type="range" id="playTempInput" min="0" max="2" step="0.1" value="0.7" oninput="document.getElementById('tempDisplay').innerText=this.value" class="w-full accent-brand-500">
             </div>
-            <div class="flex items-center space-x-2 pt-3">
-              <input type="checkbox" id="playStreamToggle" checked class="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500 w-4 h-4">
-              <label for="playStreamToggle" class="text-xs text-slate-300 font-medium cursor-pointer">流式输出 (SSE)</label>
-            </div>
-          </div>
 
-          <div class="pt-2 flex space-x-3">
-            <button id="playSendBtn" onclick="runPlaygroundRequest()" class="flex-1 py-2.5 rounded-xl font-semibold text-xs bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white shadow-lg shadow-brand-500/25 transition flex items-center justify-center space-x-2">
-              <span id="playSendIcon">🚀</span>
-              <span id="playSendText">发送请求</span>
-            </button>
-            <button id="playStopBtn" onclick="stopPlaygroundStream()" class="hidden px-4 py-2.5 rounded-xl font-semibold text-xs bg-rose-600 hover:bg-rose-500 text-white transition">
-              停止
-            </button>
+            <div>
+              <div class="flex justify-between text-[11px] font-semibold mb-1">
+                <span class="text-slate-400">最大生成 Token</span>
+                <span id="maxTokensDisplay" class="text-brand-400 font-mono">2048</span>
+              </div>
+              <input type="range" id="playMaxTokensInput" min="64" max="8192" step="64" value="2048" oninput="document.getElementById('maxTokensDisplay').innerText=this.value" class="w-full accent-brand-500">
+            </div>
+
+            <div class="flex items-center justify-between pt-1">
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="playStreamToggle" checked class="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500 w-4 h-4">
+                <label for="playStreamToggle" class="text-xs text-slate-300 font-medium cursor-pointer">流式 (SSE)</label>
+              </div>
+              <div class="flex items-center space-x-2">
+                <input type="checkbox" id="playJsonModeToggle" class="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500 w-4 h-4">
+                <label for="playJsonModeToggle" class="text-xs text-slate-300 font-medium cursor-pointer">JSON 模式</label>
+              </div>
+            </div>
           </div>
         </div>
 
-        <!-- Response output column (spans 7 cols) -->
-        <div class="lg:col-span-7 space-y-4">
-          <div class="glass-panel p-5 rounded-2xl border border-slate-800 flex flex-col h-[520px]">
-            <div class="flex items-center justify-between border-b border-slate-800 pb-3 mb-3">
-              <div class="flex items-center space-x-2">
-                <span class="text-xs font-bold text-slate-300 uppercase tracking-wider">助手回复</span>
-                <span id="playStatusBadge" class="hidden text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">200 OK</span>
-              </div>
-              <div class="flex items-center space-x-3 text-[11px] font-mono text-slate-400">
-                <span id="playLatencyStat" class="hidden">延迟：<strong class="text-slate-200">0ms</strong></span>
-                <button onclick="clearPlaygroundResponse()" class="text-slate-500 hover:text-slate-300 transition">清空</button>
+        <!-- Col 2: Chat Stream Dialog (6 cols) -->
+        <div class="lg:col-span-6 space-y-3">
+          <div class="glass-panel p-4 rounded-2xl border border-slate-800 flex flex-col h-[600px]">
+            <!-- Messages scroll container -->
+            <div id="playChatHistory" class="flex-1 overflow-y-auto custom-scroll p-3 space-y-3 rounded-xl bg-slate-950/70 border border-slate-800/80 text-xs">
+              <div class="text-center py-16 text-slate-500 text-xs flex flex-col items-center justify-center space-y-2">
+                <span class="text-2xl">💬</span>
+                <span>在下方输入消息开始多轮交互调试</span>
+                <span class="text-[10px] text-slate-600">按 Enter 发送，Shift+Enter 换行</span>
               </div>
             </div>
 
-            <!-- Output message body -->
-            <div id="playOutputArea" class="flex-1 overflow-y-auto custom-scroll p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 font-mono text-xs leading-relaxed text-slate-200 whitespace-pre-wrap">
-              <span class="text-slate-600 italic">响应将实时显示在这里...</span>
+            <!-- Input area -->
+            <div class="mt-3 pt-2 border-t border-slate-800">
+              <div class="flex space-x-2">
+                <textarea id="playUserInput" rows="2" onkeydown="handlePlaygroundKeydown(event)" placeholder="输入提示词或问题... (Enter 发送, Shift+Enter 换行)" class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-100 focus:outline-none focus:border-brand-500 font-sans custom-scroll"></textarea>
+                <div class="flex flex-col space-y-1.5">
+                  <button id="playSendBtn" onclick="runPlaygroundRequest()" class="flex-1 px-4 py-2 rounded-xl font-bold text-xs bg-gradient-to-r from-brand-600 to-indigo-600 hover:from-brand-500 hover:to-indigo-500 text-white shadow-md shadow-brand-500/25 transition flex items-center justify-center space-x-1">
+                    <span>🚀</span><span>发送</span>
+                  </button>
+                  <button id="playStopBtn" onclick="stopPlaygroundStream()" class="hidden px-4 py-2 rounded-xl font-bold text-xs bg-rose-600 hover:bg-rose-500 text-white transition">
+                    停止
+                  </button>
+                </div>
+              </div>
             </div>
+          </div>
+        </div>
 
-            <!-- Inspector collapse panel -->
-            <div class="mt-3 pt-2 border-t border-slate-800 text-[11px]">
-              <button onclick="toggleInspector()" class="text-slate-400 hover:text-slate-200 flex items-center space-x-1">
+        <!-- Col 3: Realtime Telemetry & Diagnostics (3 cols) -->
+        <div class="lg:col-span-3 glass-panel p-4 rounded-2xl border border-slate-800 space-y-3.5">
+          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <span class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+              <span>📡</span><span>实时遥测诊断</span>
+            </span>
+            <span id="playStatusBadge" class="hidden text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">200 OK</span>
+          </div>
+
+          <!-- 2x2 Telemetry Cards -->
+          <div class="grid grid-cols-2 gap-2">
+            <div class="bg-slate-900/80 border border-slate-800 p-2.5 rounded-xl">
+              <div class="text-[10px] text-slate-400 font-medium">首字时延 (TTFT)</div>
+              <div id="playStatTTFT" class="text-base font-extrabold text-cyan-400 font-mono mt-0.5">-</div>
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 p-2.5 rounded-xl">
+              <div class="text-[10px] text-slate-400 font-medium">生成速率</div>
+              <div id="playStatTPS" class="text-base font-extrabold text-emerald-400 font-mono mt-0.5">-</div>
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 p-2.5 rounded-xl">
+              <div class="text-[10px] text-slate-400 font-medium">端到端耗时</div>
+              <div id="playStatLatency" class="text-base font-extrabold text-white font-mono mt-0.5">-</div>
+            </div>
+            <div class="bg-slate-900/80 border border-slate-800 p-2.5 rounded-xl">
+              <div class="text-[10px] text-slate-400 font-medium">单次折算成本</div>
+              <div id="playStatCost" class="text-base font-extrabold text-amber-400 font-mono mt-0.5">$0.0000</div>
+            </div>
+          </div>
+
+          <!-- Routing Metadata -->
+          <div class="bg-slate-900/60 border border-slate-800/80 p-3 rounded-xl space-y-1.5 text-[11px] font-mono">
+            <div class="flex justify-between items-center text-slate-400">
+              <span>命中上游:</span>
+              <span id="playStatProvider" class="font-bold text-indigo-300">--</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-400">
+              <span>缓存标记:</span>
+              <span id="playStatCache" class="font-bold text-slate-300">--</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-400">
+              <span>提示词 Token:</span>
+              <span id="playStatPromptTokens" class="text-slate-200">0</span>
+            </div>
+            <div class="flex justify-between items-center text-slate-400">
+              <span>补全 Token:</span>
+              <span id="playStatCompTokens" class="text-slate-200">0</span>
+            </div>
+          </div>
+
+          <!-- Raw inspector collapse -->
+          <div class="pt-1">
+            <button onclick="toggleInspector()" class="w-full text-left text-slate-400 hover:text-slate-200 flex items-center justify-between text-[11px]">
+              <span class="flex items-center space-x-1">
                 <span id="inspectorArrow">▶</span>
-                <span>查看原始流事件</span>
-              </button>
-              <div id="inspectorPanel" class="hidden mt-2 p-2.5 rounded-xl bg-slate-900/90 border border-slate-800 max-h-36 overflow-y-auto custom-scroll font-mono text-[10px] text-slate-400 whitespace-pre"></div>
-            </div>
+                <span>查看原始流事件/响应体</span>
+              </span>
+              <span class="text-[10px] text-slate-500 font-mono">RAW</span>
+            </button>
+            <div id="inspectorPanel" class="hidden mt-2 p-2.5 rounded-xl bg-slate-950 border border-slate-800 max-h-44 overflow-y-auto custom-scroll font-mono text-[10px] text-emerald-400/90 whitespace-pre select-all"></div>
           </div>
         </div>
       </div>
@@ -5900,107 +5989,262 @@
       showToast(`已导出 ${auditFilteredRecords.length} 条审计记录为 JSON`, "success");
     }
 
-    // --- Playground Logic ---
+    // --- Playground Logic (Multi-turn & Telemetry) ---
+    const playState = {
+      messages: [],
+      activeAssistantBubble: null,
+      streamAbortController: null,
+      t0: 0,
+      tFirstToken: 0,
+      completionTokens: 0,
+      activeStreamText: ""
+    };
+
     async function fetchModelsForPlayground() {
-      await fetchModels();
+      await Promise.all([fetchModels(), fetchPrompts()]);
       const sel = document.getElementById("playModelSelect");
+      if (!sel) return;
+      const currentVal = sel.value;
       sel.innerHTML = "";
-      if (state.models.length === 0) {
+      if (!state.models || state.models.length === 0) {
         sel.innerHTML = `<option value="">（暂无可用模型）</option>`;
       } else {
         state.models.forEach(m => {
           const opt = document.createElement("option");
           opt.value = m.name;
-          opt.innerText = `${m.name} (${m.provider})`;
+          opt.innerText = `${m.name} (${m.provider || "default"})`;
           sel.appendChild(opt);
+        });
+        if (currentVal && state.models.some(m => m.name === currentVal)) {
+          sel.value = currentVal;
+        }
+      }
+      onPlaygroundModelChange();
+      populatePlaygroundPromptPresets();
+    }
+
+    function onPlaygroundModelChange() {
+      const modelSelect = document.getElementById("playModelSelect");
+      const chanSelect = document.getElementById("playChannelSelect");
+      if (!modelSelect || !chanSelect) return;
+      const modelName = modelSelect.value;
+      chanSelect.innerHTML = '<option value="">⚡ 默认智能路由 (加权/对冲/故障转移)</option>';
+      const model = (state.models || []).find(m => m.name === modelName);
+      if (model && Array.isArray(model.targets)) {
+        model.targets.forEach(tgt => {
+          const opt = document.createElement("option");
+          opt.value = tgt.provider;
+          const prioLabel = tgt.priority > 0 ? ` (Tier ${tgt.priority} 备用)` : "";
+          opt.textContent = `🎯 强制直连: ${tgt.provider} [权重 ${tgt.weight || 1}${prioLabel}]`;
+          chanSelect.appendChild(opt);
         });
       }
     }
 
-// Open the playground for a model.
+    function populatePlaygroundPromptPresets() {
+      const select = document.getElementById("playPromptPresetSelect");
+      if (!select) return;
+      select.innerHTML = '<option value="">+ 载入模板...</option>';
+      if (Array.isArray(state.prompts)) {
+        state.prompts.forEach(p => {
+          const opt = document.createElement("option");
+          opt.value = p.id || p.name;
+          opt.textContent = p.name;
+          select.appendChild(opt);
+        });
+      }
+    }
+
+    function applyPromptPresetToPlayground() {
+      const select = document.getElementById("playPromptPresetSelect");
+      if (!select) return;
+      const id = select.value;
+      if (!id) return;
+      const tpl = (state.prompts || []).find(p => (p.id || p.name) === id);
+      if (tpl && tpl.template) {
+        document.getElementById("playSystemPrompt").value = tpl.template;
+        showToast(`已载入模板「${tpl.name}」`, "info");
+      }
+    }
+
+    function clearPlaygroundChat() {
+      playState.messages = [];
+      const history = document.getElementById("playChatHistory");
+      if (history) {
+        history.innerHTML = `
+          <div class="text-center py-16 text-slate-500 text-xs flex flex-col items-center justify-center space-y-2">
+            <span class="text-2xl">💬</span>
+            <span>会话已清空，在下方输入消息开始多轮交互调试</span>
+            <span class="text-[10px] text-slate-600">按 Enter 发送，Shift+Enter 换行</span>
+          </div>`;
+      }
+      document.getElementById("playStatTTFT").innerText = "-";
+      document.getElementById("playStatTPS").innerText = "-";
+      document.getElementById("playStatLatency").innerText = "-";
+      document.getElementById("playStatCost").innerText = "$0.0000";
+      document.getElementById("playStatProvider").innerText = "--";
+      document.getElementById("playStatCache").innerText = "--";
+      document.getElementById("playStatPromptTokens").innerText = "0";
+      document.getElementById("playStatCompTokens").innerText = "0";
+      document.getElementById("inspectorPanel").innerText = "";
+      document.getElementById("playStatusBadge").classList.add("hidden");
+    }
+
+    function handlePlaygroundKeydown(event) {
+      if (event.key === "Enter" && !event.shiftKey) {
+        event.preventDefault();
+        runPlaygroundRequest();
+      }
+    }
+
     function openPlaygroundForModel(name) {
       switchTab("playground");
       setTimeout(() => {
-        document.getElementById("playModelSelect").value = name;
-      }, 50);
+        const sel = document.getElementById("playModelSelect");
+        if (sel) {
+          sel.value = name;
+          onPlaygroundModelChange();
+        }
+      }, 60);
     }
 
-// Auto-fill the debug key.
     function autoFillPlaygroundKey() {
-      const activeKey = state.keys.find(k => !k.revoked);
+      const activeKey = (state.keys || []).find(k => !k.revoked);
       if (activeKey) {
-        showToast("已提示：请从密钥列表复制明文使用", "info");
+        if (activeKey.key) {
+          document.getElementById("playApiKeyInput").value = activeKey.key;
+          showToast(`已自动填充密钥 (${activeKey.name || "Key"})`, "success");
+        } else {
+          showToast("已选择首个活跃密钥，若为掩码请粘贴明文使用", "info");
+        }
       } else {
         showToast("请先在「API 密钥」页创建密钥并复制明文", "warning");
       }
     }
 
-// Send a debug request (streaming supported).
+    function copyPlaygroundMessage(btn) {
+      const bubble = btn.closest(".assistant-bubble-container");
+      if (!bubble) return;
+      const textEl = bubble.querySelector(".assistant-msg-text");
+      if (!textEl) return;
+      navigator.clipboard.writeText(textEl.innerText).then(() => {
+        showToast("已复制回答内容到剪贴板", "success");
+      }).catch(() => {
+        showToast("复制失败，请手动选择复制", "warning");
+      });
+    }
+
+    function updatePlaygroundTokenUsage(usage, modelName, latencyMs) {
+      if (!usage) return;
+      const pTokens = usage.prompt_tokens || 0;
+      const cTokens = usage.completion_tokens || 0;
+      document.getElementById("playStatPromptTokens").innerText = pTokens;
+      document.getElementById("playStatCompTokens").innerText = cTokens;
+      const model = (state.models || []).find(m => m.name === modelName);
+      if (model) {
+        const pRate = parseFloat(model.price_prompt_1m) || 0;
+        const cRate = parseFloat(model.price_completion_1m) || 0;
+        const cost = (pTokens * pRate + cTokens * cRate) / 1000000.0;
+        document.getElementById("playStatCost").innerText = `$${cost.toFixed(5)}`;
+      }
+    }
+
     async function runPlaygroundRequest() {
       const model = document.getElementById("playModelSelect").value;
+      const targetChannel = document.getElementById("playChannelSelect").value;
       const key = document.getElementById("playApiKeyInput").value.trim();
       const sys = document.getElementById("playSystemPrompt").value.trim();
-      const usr = document.getElementById("playUserPrompt").value.trim();
+      const inputEl = document.getElementById("playUserInput");
+      const usr = inputEl.value.trim();
       const temp = parseFloat(document.getElementById("playTempInput").value) || 0.7;
+      const maxTokens = parseInt(document.getElementById("playMaxTokensInput").value, 10) || 2048;
       const stream = document.getElementById("playStreamToggle").checked;
+      const jsonMode = document.getElementById("playJsonModeToggle").checked;
 
-      if (!model) {
-        showToast("请选择模型", "warning");
-        return;
+      if (!model) { showToast("请选择模型", "warning"); return; }
+      if (!usr) { showToast("请输入用户消息", "warning"); return; }
+
+      const history = document.getElementById("playChatHistory");
+      if (playState.messages.length === 0) {
+        history.innerHTML = "";
       }
-      if (!usr) {
-        showToast("请输入用户消息", "warning");
-        return;
-      }
 
-      const outArea = document.getElementById("playOutputArea");
-      const statusBadge = document.getElementById("playStatusBadge");
-      const latencyStat = document.getElementById("playLatencyStat");
-      const sendBtn = document.getElementById("playSendBtn");
-      const stopBtn = document.getElementById("playStopBtn");
-      const inspector = document.getElementById("inspectorPanel");
+      // 1. User message bubble
+      const userContainer = document.createElement("div");
+      userContainer.className = "flex justify-end";
+      userContainer.innerHTML = `
+        <div class="max-w-[85%] bg-brand-600 text-white p-3 rounded-2xl rounded-tr-sm shadow-md text-xs leading-relaxed whitespace-pre-wrap word-break">
+          ${escapeHtml(usr)}
+        </div>`;
+      history.appendChild(userContainer);
 
-      outArea.innerHTML = "";
-      inspector.innerText = "";
-      // User bubble + assistant bubble (streamed chunks append into the assistant bubble)
-      const userBubble = document.createElement("div");
-      userBubble.className = "msg-user";
-      userBubble.textContent = usr;
-      outArea.appendChild(userBubble);
+      // 2. Assistant message placeholder
+      const assistantContainer = document.createElement("div");
+      assistantContainer.className = "flex justify-start assistant-bubble-container group";
       const assistantBubble = document.createElement("div");
-      assistantBubble.className = "msg-assistant";
-      assistantBubble.textContent = "思考中…";
-      outArea.appendChild(assistantBubble);
-      statusBadge.classList.add("hidden");
-      latencyStat.classList.add("hidden");
-      sendBtn.classList.add("hidden");
-      stopBtn.classList.remove("hidden");
+      assistantBubble.className = "max-w-[90%] bg-slate-900 border border-slate-800 text-slate-200 p-3 rounded-2xl rounded-tl-sm text-xs leading-relaxed space-y-1.5 shadow-sm";
+      assistantBubble.innerHTML = `
+        <div class="flex items-center justify-between text-[10px] text-slate-500 pb-1 border-b border-slate-800/60 font-mono">
+          <span class="flex items-center gap-1.5">
+            <span>🤖</span><span class="text-indigo-300 font-semibold">${escapeHtml(model)}</span>
+            <span class="text-slate-600">•</span>
+            <span class="assistant-provider-tag text-slate-400">正在寻址…</span>
+          </span>
+          <button onclick="copyPlaygroundMessage(this)" title="复制内容" class="text-slate-400 hover:text-white transition px-1.5 py-0.5 rounded hover:bg-slate-800">📋 复制</button>
+        </div>
+        <div class="assistant-msg-text font-sans whitespace-pre-wrap word-break text-slate-300"><span class="text-slate-500 italic">思考中…</span></div>`;
+      assistantContainer.appendChild(assistantBubble);
+      history.appendChild(assistantContainer);
+      history.scrollTop = history.scrollHeight;
 
-      const messages = [];
-      if (sys) messages.push({ role: "system", content: sys });
-      messages.push({ role: "user", content: usr });
+      inputEl.value = "";
+
+      // Push user message to context
+      playState.messages.push({ role: "user", content: usr });
+
+      const reqMessages = [];
+      if (sys) reqMessages.push({ role: "system", content: sys });
+      reqMessages.push(...playState.messages);
 
       const reqBody = {
         model: model,
-        messages: messages,
+        messages: reqMessages,
         temperature: temp,
+        max_tokens: maxTokens,
         stream: stream
       };
-
-      const headers = { "Content-Type": "application/json" };
-      if (key) {
-        headers["Authorization"] = `Bearer ${key}`;
+      if (jsonMode) {
+        reqBody.response_format = { type: "json_object" };
       }
 
-      state.streamAbortController = new AbortController();
-      const t0 = performance.now();
+      const headers = { "Content-Type": "application/json" };
+      if (key) headers["Authorization"] = `Bearer ${key}`;
+      if (targetChannel) headers["X-Aigate-Target-Provider"] = targetChannel;
+
+      const sendBtn = document.getElementById("playSendBtn");
+      const stopBtn = document.getElementById("playStopBtn");
+      const statusBadge = document.getElementById("playStatusBadge");
+      const inspector = document.getElementById("inspectorPanel");
+
+      sendBtn.classList.add("hidden");
+      stopBtn.classList.remove("hidden");
+      inspector.innerText = "";
+
+      playState.streamAbortController = new AbortController();
+      playState.t0 = performance.now();
+      playState.tFirstToken = 0;
+      playState.completionTokens = 0;
+      playState.activeStreamText = "";
+
+      const msgTextEl = assistantBubble.querySelector(".assistant-msg-text");
+      const provTagEl = assistantBubble.querySelector(".assistant-provider-tag");
 
       try {
         const resp = await fetch("/v1/chat/completions", {
           method: "POST",
           headers: headers,
           body: JSON.stringify(reqBody),
-          signal: state.streamAbortController.signal
+          signal: playState.streamAbortController.signal
         });
 
         statusBadge.innerText = `${resp.status} ${resp.statusText}`;
@@ -6009,41 +6253,62 @@
           : "text-[10px] px-2 py-0.5 rounded-full font-mono font-bold bg-rose-500/20 text-rose-300 border border-rose-500/30";
         statusBadge.classList.remove("hidden");
 
+        const winningProvider = resp.headers.get("X-Upstream-Provider") || targetChannel || "default";
+        const cacheHeader = resp.headers.get("X-Cache") || "MISS";
+        document.getElementById("playStatProvider").innerText = winningProvider;
+        document.getElementById("playStatCache").innerText = cacheHeader;
+        if (provTagEl) {
+          provTagEl.innerText = `通道: ${winningProvider} [${cacheHeader}]`;
+        }
+
         if (!resp.ok) {
           const errText = await resp.text();
-          assistantBubble.textContent = `错误 (${resp.status})：
-${errText}`;
+          msgTextEl.innerHTML = `<span class="text-rose-400 font-mono">请求失败 (${resp.status}):\n${escapeHtml(errText)}</span>`;
+          inspector.innerText = errText;
           return;
         }
 
         if (!stream) {
           const json = await resp.json();
-          const lat = Math.round(performance.now() - t0);
-          latencyStat.innerHTML = `延迟：<strong class="text-slate-200">${lat}ms</strong>`;
-          latencyStat.classList.remove("hidden");
-          const reply = json.choices && json.choices[0] && json.choices[0].message
+          const tEnd = performance.now();
+          const latency = Math.round(tEnd - playState.t0);
+          document.getElementById("playStatLatency").innerText = `${latency}ms`;
+          document.getElementById("playStatTTFT").innerText = `${latency}ms`;
+
+          const reply = (json.choices && json.choices[0] && json.choices[0].message)
             ? json.choices[0].message.content
             : JSON.stringify(json, null, 2);
-          assistantBubble.textContent = reply;
+
+          msgTextEl.innerText = reply;
+          playState.messages.push({ role: "assistant", content: reply });
           inspector.innerText = JSON.stringify(json, null, 2);
+
+          if (json.usage) {
+            updatePlaygroundTokenUsage(json.usage, model, latency);
+          }
         } else {
           // SSE Stream processing
-          assistantBubble.classList.add("typewriter-cursor");
+          msgTextEl.innerText = "";
+          msgTextEl.classList.add("typewriter-cursor");
           const reader = resp.body.getReader();
           const decoder = new TextDecoder("utf-8");
-          let fullText = "";
           let buffer = "";
 
           while (true) {
             const { done, value } = await reader.read();
             if (done) break;
 
+            if (!playState.tFirstToken) {
+              playState.tFirstToken = performance.now();
+              const ttft = Math.round(playState.tFirstToken - playState.t0);
+              document.getElementById("playStatTTFT").innerText = `${ttft}ms`;
+            }
+
             const chunkStr = decoder.decode(value, { stream: true });
             inspector.innerText += chunkStr;
             buffer += chunkStr;
-
             const lines = buffer.split("\n");
-            buffer = lines.pop(); // keep last incomplete line
+            buffer = lines.pop();
 
             for (const line of lines) {
               const trimmed = line.trim();
@@ -6051,47 +6316,54 @@ ${errText}`;
                 const dataPart = trimmed.slice(6);
                 if (dataPart === "[DONE]") continue;
                 try {
-                  const chunkJson = JSON.parse(dataPart);
-                  if (chunkJson.choices && chunkJson.choices[0] && chunkJson.choices[0].delta) {
-                    const delta = chunkJson.choices[0].delta.content || "";
-                    fullText += delta;
-                    assistantBubble.textContent = fullText;
+                  const parsed = JSON.parse(dataPart);
+                  if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
+                    const delta = parsed.choices[0].delta.content;
+                    playState.activeStreamText += delta;
+                    msgTextEl.innerText = playState.activeStreamText;
+                    history.scrollTop = history.scrollHeight;
+                    playState.completionTokens++;
+                  }
+                  if (parsed.usage) {
+                    updatePlaygroundTokenUsage(parsed.usage, model, Math.round(performance.now() - playState.t0));
                   }
                 } catch (_) {}
               }
             }
           }
-          assistantBubble.classList.remove("typewriter-cursor");
-          const lat = Math.round(performance.now() - t0);
-          latencyStat.innerHTML = `流式输出完成，共 <strong class="text-slate-200">${lat}ms</strong>`;
-          latencyStat.classList.remove("hidden");
+
+          msgTextEl.classList.remove("typewriter-cursor");
+          playState.messages.push({ role: "assistant", content: playState.activeStreamText });
+
+          // Calculate final metrics
+          const tEnd = performance.now();
+          const totalLat = Math.round(tEnd - playState.t0);
+          document.getElementById("playStatLatency").innerText = `${totalLat}ms`;
+          const genDurationSec = (tEnd - (playState.tFirstToken || playState.t0)) / 1000.0;
+          if (genDurationSec > 0 && playState.completionTokens > 0) {
+            const tps = (playState.completionTokens / genDurationSec).toFixed(1);
+            document.getElementById("playStatTPS").innerText = `${tps} tps`;
+          }
         }
       } catch (err) {
         if (err.name === "AbortError") {
-          assistantBubble.textContent += "\n[用户已停止流式输出]";
+          msgTextEl.innerText += "\n[用户已中断流式输出]";
         } else {
-          assistantBubble.textContent = `网络 / 请求错误：${err.message}`;
+          msgTextEl.innerHTML = `<span class="text-rose-400">请求异常: ${escapeHtml(err.message)}</span>`;
         }
       } finally {
-        assistantBubble.classList.remove("typewriter-cursor");
+        msgTextEl.classList.remove("typewriter-cursor");
         sendBtn.classList.remove("hidden");
         stopBtn.classList.add("hidden");
+        history.scrollTop = history.scrollHeight;
       }
     }
 
-// Stop the debug stream.
     function stopPlaygroundStream() {
-      if (state.streamAbortController) {
-        state.streamAbortController.abort();
+      if (playState.streamAbortController) {
+        playState.streamAbortController.abort();
+        showToast("已停止流式响应", "info");
       }
-    }
-
-// Clear the debug response.
-    function clearPlaygroundResponse() {
-      document.getElementById("playOutputArea").innerHTML = '<span class="text-slate-600 italic">响应将实时显示在这里...</span>';
-      document.getElementById("inspectorPanel").innerText = "";
-      document.getElementById("playStatusBadge").classList.add("hidden");
-      document.getElementById("playLatencyStat").classList.add("hidden");
     }
 
 // Toggle the request inspector.
