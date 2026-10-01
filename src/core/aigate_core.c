@@ -449,7 +449,7 @@ resolve_chat_target(chat_req_t* q)
     /* --- candidate targets selection --- */
     q->n_candidates = 0;
     if (model_router_select_candidates(
-            ac->cb, &q->route, q->candidates, MAX_TARGETS_PER_MODEL, &q->n_candidates) != 0 ||
+            ac->cb, NULL, &q->route, q->candidates, MAX_TARGETS_PER_MODEL, &q->n_candidates) != 0 ||
         q->n_candidates == 0) {
         aigate_write_error(
             rc, PIPE_MODEL, "no_healthy_upstream", "no upstream targets available for model");

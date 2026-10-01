@@ -45,9 +45,13 @@ int model_router_resolve(model_router_t* mr, const char* model, model_rec_t* out
 /** @brief Invalidate the cached route after an admin model mutation. */
 void model_router_invalidate(model_router_t* mr, const char* model);
 
+struct latency_tracker;
+typedef struct latency_tracker latency_tracker_t;
+
 /** @brief Select ordered candidate targets for a request based on priority,
- *         load balancing policy, and circuit breaker status.
+ *         load balancing policy, circuit breaker status, and adaptive latency metrics.
  * @param cb             Optional circuit breaker to check target health (can be NULL).
+ * @param lt             Optional latency tracker for adaptive routing (can be NULL).
  * @param model          Model record containing targets and lb_policy.
  * @param out_candidates Array of size @p cap to receive ordered candidates.
  * @param cap            Maximum number of candidates (e.g. MAX_TARGETS_PER_MODEL).
@@ -55,6 +59,7 @@ void model_router_invalidate(model_router_t* mr, const char* model);
  * @return 0 on success, -1 on error (e.g. invalid arguments or 0 targets).
  */
 int model_router_select_candidates(circuit_breaker_t* cb,
+                                   latency_tracker_t* lt,
                                    const model_rec_t* model,
                                    upstream_target_t* out_candidates,
                                    int                cap,

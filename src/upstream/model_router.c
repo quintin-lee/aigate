@@ -2,6 +2,7 @@
  *  @brief Model routing + upstream-key resolution (see model_router.h). */
 #include "model_router.h"
 #include "aigate_log.h"
+#include "latency_tracker.h"
 #include "lru.h"
 #include "secrets.h"
 
@@ -200,6 +201,7 @@ model_router_invalidate(model_router_t* mr, const char* model)
 
 int
 model_router_select_candidates(circuit_breaker_t* cb,
+                               latency_tracker_t* lt,
                                const model_rec_t* model,
                                upstream_target_t* out_candidates,
                                int                cap,
@@ -369,6 +371,83 @@ model_router_select_candidates(circuit_breaker_t* cb,
                 }
                 for (int k = 0; k < n_rem && total_added < cap; k++) {
                     out_candidates[total_added++] = src_targets[rem_k[k]];
+                }
+            } else if (strcmp(model->lb_policy, "latency_p95") == 0 && n_th > 1) {
+                struct {
+                    int      src_idx;
+                    uint32_t p95;
+                } lat_cands[MAX_TARGETS_PER_MODEL];
+                for (int k = 0; k < n_th; k++) {
+                    int src_idx = tier_healthy_idx[k];
+                    lat_cands[k].src_idx = src_idx;
+                    lat_cands[k].p95 =
+                        latency_tracker_get_p95_ms(lt, model->name, src_targets[src_idx].endpoint);
+                }
+                /* Sort ascending by p95 */
+                for (int a = 0; a < n_th - 1; a++) {
+                    for (int b = a + 1; b < n_th; b++) {
+                        if (lat_cands[b].p95 < lat_cands[a].p95) {
+                            int      tmp_idx = lat_cands[a].src_idx;
+                            uint32_t tmp_p95 = lat_cands[a].p95;
+                            lat_cands[a].src_idx = lat_cands[b].src_idx;
+                            lat_cands[a].p95 = lat_cands[b].p95;
+                            lat_cands[b].src_idx = tmp_idx;
+                            lat_cands[b].p95 = tmp_p95;
+                        }
+                    }
+                }
+                for (int k = 0; k < n_th && total_added < cap; k++) {
+                    out_candidates[total_added++] = src_targets[lat_cands[k].src_idx];
+                }
+            } else if (strcmp(model->lb_policy, "dynamic_weighted") == 0 && n_th > 1) {
+                int dyn_weights[MAX_TARGETS_PER_MODEL];
+                int total_w = 0;
+                for (int k = 0; k < n_th; k++) {
+                    int      src_idx = tier_healthy_idx[k];
+                    uint32_t ewma =
+                        latency_tracker_get_ewma_ms(lt, model->name, src_targets[src_idx].endpoint);
+                    int w = 1000 / (int)(ewma + 10);
+                    if (w < 1) {
+                        w = 1;
+                    }
+                    dyn_weights[k] = w;
+                    total_w += w;
+                }
+                if (total_w <= 0) {
+                    total_w = n_th;
+                }
+                unsigned long pick =
+                    atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) %
+                    (unsigned long)total_w;
+                int chosen_k = 0;
+                int acc = 0;
+                for (int k = 0; k < n_th; k++) {
+                    acc += dyn_weights[k];
+                    if ((unsigned long)acc > pick) {
+                        chosen_k = k;
+                        break;
+                    }
+                }
+                out_candidates[total_added++] = src_targets[tier_healthy_idx[chosen_k]];
+                /* Add remaining targets sorted by dynamic weight descending */
+                int rem_k[MAX_TARGETS_PER_MODEL];
+                int n_rem = 0;
+                for (int k = 0; k < n_th; k++) {
+                    if (k != chosen_k) {
+                        rem_k[n_rem++] = k;
+                    }
+                }
+                for (int a = 0; a < n_rem - 1; a++) {
+                    for (int b = a + 1; b < n_rem; b++) {
+                        if (dyn_weights[rem_k[b]] > dyn_weights[rem_k[a]]) {
+                            int tmp = rem_k[a];
+                            rem_k[a] = rem_k[b];
+                            rem_k[b] = tmp;
+                        }
+                    }
+                }
+                for (int k = 0; k < n_rem && total_added < cap; k++) {
+                    out_candidates[total_added++] = src_targets[tier_healthy_idx[rem_k[k]]];
                 }
             } else {
                 /* Default "priority": retain original definition order */
