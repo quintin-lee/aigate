@@ -218,3 +218,109 @@ TEST_CASE(test_guardrails_inbound_json_inspection)
 
     guardrails_destroy(ctx);
 }
+
+TEST_CASE(test_guardrails_webhook_unit)
+{
+    /* 1. Standalone probe tests with invalid/unreachable endpoints */
+    char   err_msg[256] = {0};
+    double latency_ms = 0.0;
+    int    prc = guardrails_webhook_probe(NULL, NULL, 50, err_msg, sizeof err_msg, &latency_ms);
+    TEST_ASSERT(prc == -1, "probe NULL url -> -1");
+    TEST_ASSERT(err_msg[0] != '\0', "probe NULL url error message set");
+
+    prc = guardrails_webhook_probe("", "", 50, err_msg, sizeof err_msg, &latency_ms);
+    TEST_ASSERT(prc == -1, "probe empty url -> -1");
+
+    prc = guardrails_webhook_probe(
+        "http://127.0.0.1:1/probe", "secret-tok", 50, err_msg, sizeof err_msg, &latency_ms);
+    TEST_ASSERT(prc == -1, "probe unreachable url -> -1");
+    TEST_ASSERT(err_msg[0] != '\0', "probe unreachable error message populated");
+
+    /* 2. Webhook engine inspection with no webhook rules */
+    guardrails_ctx_t* ctx = guardrails_create();
+    TEST_ASSERT(ctx != NULL, "guardrails_create");
+
+    char*               sanitized = NULL;
+    size_t              san_len = 0;
+    char                reason[128] = {0};
+    guardrails_action_t act;
+
+    act = guardrails_inspect_webhook_inbound(
+        ctx, "gpt-4o", 1, "{\"prompt\":\"hi\"}", 15, &sanitized, &san_len, reason, sizeof reason);
+    TEST_ASSERT(act == GUARDRAILS_PASS, "no webhook rules -> inbound pass");
+
+    act = guardrails_inspect_webhook_outbound(
+        ctx, "gpt-4o", 1, "{\"choices\":[]}", 14, &sanitized, &san_len, reason, sizeof reason);
+    TEST_ASSERT(act == GUARDRAILS_PASS, "no webhook rules -> outbound pass");
+
+    /* 3. Load rules: verify webhook rule does not pollute keyword AC trie */
+    guardrail_rule_t r[2];
+    memset(r, 0, sizeof r);
+    strcpy(r[0].rule_type, "webhook");
+    strcpy(r[0].pattern, "http://127.0.0.1:1/moderation");
+    strcpy(r[0].action, "block");
+    strcpy(r[0].fail_mode, "open");
+    strcpy(r[0].phase, "both");
+    r[0].timeout_ms = 50;
+    r[0].enabled = 1;
+
+    strcpy(r[1].rule_type, "keyword");
+    strcpy(r[1].pattern, "bad_payload_keyword");
+    strcpy(r[1].action, "block");
+    r[1].enabled = 1;
+
+    TEST_ASSERT(guardrails_load_rules(ctx, r, 2) == 0, "load rules with webhook and keyword");
+
+    /* Ensure pattern in webhook rule is NOT matched by L1 keyword inspection */
+    const char* txt_webhook = "Check http://127.0.0.1:1/moderation please";
+    char        kw_reason[64] = {0};
+    act = guardrails_inspect_inbound(
+        ctx, txt_webhook, strlen(txt_webhook), &sanitized, &san_len, kw_reason, sizeof kw_reason);
+    TEST_ASSERT(act == GUARDRAILS_PASS, "webhook URL not treated as blocked keyword in L1");
+
+    /* 4. Test fail-open on network failure */
+    const char* inbound_sample =
+        "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}";
+    act = guardrails_inspect_webhook_inbound(ctx,
+                                             "gpt-4o",
+                                             1,
+                                             inbound_sample,
+                                             strlen(inbound_sample),
+                                             &sanitized,
+                                             &san_len,
+                                             reason,
+                                             sizeof reason);
+    TEST_ASSERT(act == GUARDRAILS_PASS, "fail-open on network failure returns PASS");
+    TEST_ASSERT(sanitized == NULL, "sanitized body NULL on pass");
+
+    /* 5. Test fail-closed on network failure */
+    strcpy(r[0].fail_mode, "closed");
+    TEST_ASSERT(guardrails_load_rules(ctx, r, 2) == 0, "reload rules with fail-closed");
+
+    act = guardrails_inspect_webhook_inbound(ctx,
+                                             "gpt-4o",
+                                             1,
+                                             inbound_sample,
+                                             strlen(inbound_sample),
+                                             &sanitized,
+                                             &san_len,
+                                             reason,
+                                             sizeof reason);
+    TEST_ASSERT(act == GUARDRAILS_BLOCKED, "fail-closed on network failure returns BLOCKED");
+    TEST_ASSERT(strstr(reason, "unavailable") != NULL, "unavailable reason set");
+
+    const char* outbound_sample =
+        "{\"choices\":[{\"message\":{\"role\":\"assistant\",\"content\":\"hello reply\"}}]}";
+    act = guardrails_inspect_webhook_outbound(ctx,
+                                              "gpt-4o",
+                                              1,
+                                              outbound_sample,
+                                              strlen(outbound_sample),
+                                              &sanitized,
+                                              &san_len,
+                                              reason,
+                                              sizeof reason);
+    TEST_ASSERT(act == GUARDRAILS_BLOCKED, "fail-closed outbound network failure returns BLOCKED");
+
+    guardrails_destroy(ctx);
+}

@@ -6,13 +6,20 @@
 #include "guardrails.h"
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <time.h>
 #include <pthread.h>
 #include <regex.h>
 #include <ctype.h>
 #include <jansson.h>
+#include <curl/curl.h>
+#include "aigate_log.h"
 
 /** @brief Initial AC automaton node capacity (grown on demand). */
 #define AC_INIT_CAP 256
+
+/** @brief Maximum concurrent external webhook rules. */
+#define MAX_WEBHOOK_RULES 16
 
 ac_trie_t*
 ac_trie_create(void)
@@ -164,14 +171,16 @@ ac_trie_search(const ac_trie_t* trie, const char* text, size_t len)
 
 /** @brief Guardrails engine instance: rwlock/block+exempt tries/PII regex group/ready flag. */
 struct guardrails_ctx {
-    pthread_rwlock_t rwlock;      /**< Rule hot-reload rwlock. */
-    ac_trie_t*       ac_block;    /**< Blocklist keyword trie. */
-    ac_trie_t*       ac_exempt;   /**< Exempt keyword trie. */
-    regex_t          re_api_key;  /**< API key regex. */
-    regex_t          re_email;    /**< Email regex. */
-    regex_t          re_id_card;  /**< ID card number regex. */
-    regex_t          re_phone;    /**< Phone number regex. */
-    int              regex_ready; /**< Regex compilation ready flag. */
+    pthread_rwlock_t         rwlock;      /**< Rule hot-reload rwlock. */
+    ac_trie_t*               ac_block;    /**< Blocklist keyword trie. */
+    ac_trie_t*               ac_exempt;   /**< Exempt keyword trie. */
+    regex_t                  re_api_key;  /**< API key regex. */
+    regex_t                  re_email;    /**< Email regex. */
+    regex_t                  re_id_card;  /**< ID card number regex. */
+    regex_t                  re_phone;    /**< Phone number regex. */
+    int                      regex_ready; /**< Regex compilation ready flag. */
+    guardrail_webhook_rule_t webhooks[MAX_WEBHOOK_RULES];
+    size_t                   webhook_count;
 };
 
 guardrails_ctx_t*
@@ -233,11 +242,33 @@ guardrails_load_rules(guardrails_ctx_t* ctx, const guardrail_rule_t* rules, size
         return -1;
     }
 
+    guardrail_webhook_rule_t temp_webhooks[MAX_WEBHOOK_RULES];
+    size_t                   temp_webhook_count = 0;
+
     for (size_t i = 0; i < count; i++) {
         if (!rules[i].enabled) {
             continue;
         }
-        if (strcmp(rules[i].rule_type, "keyword") == 0 || strcmp(rules[i].action, "block") == 0) {
+        if (strcmp(rules[i].rule_type, "webhook") == 0) {
+            if (temp_webhook_count < MAX_WEBHOOK_RULES) {
+                guardrail_webhook_rule_t* wh = &temp_webhooks[temp_webhook_count++];
+                wh->id = rules[i].id;
+                strncpy(wh->url, rules[i].pattern, sizeof(wh->url) - 1);
+                wh->url[sizeof(wh->url) - 1] = '\0';
+                strncpy(wh->secret, rules[i].webhook_secret, sizeof(wh->secret) - 1);
+                wh->secret[sizeof(wh->secret) - 1] = '\0';
+                wh->timeout_ms = rules[i].timeout_ms > 0 ? rules[i].timeout_ms : 500;
+                strncpy(wh->fail_mode,
+                        rules[i].fail_mode[0] != '\0' ? rules[i].fail_mode : "open",
+                        sizeof(wh->fail_mode) - 1);
+                wh->fail_mode[sizeof(wh->fail_mode) - 1] = '\0';
+                strncpy(wh->phase,
+                        rules[i].phase[0] != '\0' ? rules[i].phase : "inbound",
+                        sizeof(wh->phase) - 1);
+                wh->phase[sizeof(wh->phase) - 1] = '\0';
+            }
+        } else if (strcmp(rules[i].rule_type, "keyword") == 0 ||
+                   strcmp(rules[i].action, "block") == 0) {
             ac_trie_insert(new_block, rules[i].pattern);
         } else if (strcmp(rules[i].rule_type, "exempt") == 0) {
             ac_trie_insert(new_exempt, rules[i].pattern);
@@ -251,6 +282,8 @@ guardrails_load_rules(guardrails_ctx_t* ctx, const guardrail_rule_t* rules, size
     ac_trie_destroy(ctx->ac_exempt);
     ctx->ac_block = new_block;
     ctx->ac_exempt = new_exempt;
+    memcpy(ctx->webhooks, temp_webhooks, sizeof(temp_webhooks[0]) * temp_webhook_count);
+    ctx->webhook_count = temp_webhook_count;
     pthread_rwlock_unlock(&ctx->rwlock);
     return 0;
 }
@@ -588,4 +621,690 @@ guardrails_inspect_inbound(guardrails_ctx_t* ctx,
         *sanitized_len = 0;
     }
     return GUARDRAILS_PASS;
+}
+
+/* --- External Webhook Moderation Engine Implementation --- */
+
+struct webhook_resp_buf {
+    char*  data;
+    size_t len;
+    size_t cap;
+};
+
+static size_t
+webhook_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata)
+{
+    size_t                   total = size * nmemb;
+    struct webhook_resp_buf* b = userdata;
+    if (b->len + total > 2 * 1024 * 1024) {
+        return 0;
+    }
+    if (b->len + total + 1 > b->cap) {
+        size_t ncap = (b->cap == 0 ? 2048 : b->cap * 2) + total;
+        char*  nd = realloc(b->data, ncap);
+        if (nd == NULL) {
+            return 0;
+        }
+        b->data = nd;
+        b->cap = ncap;
+    }
+    memcpy(b->data + b->len, ptr, total);
+    b->len += total;
+    b->data[b->len] = '\0';
+    return total;
+}
+
+static void
+extract_inbound_info(json_t* root, const char* raw_body, char** out_content, json_t** out_msgs)
+{
+    *out_content = NULL;
+    *out_msgs = NULL;
+
+    if (root != NULL && json_is_object(root)) {
+        json_t* j_msgs = json_object_get(root, "messages");
+        if (j_msgs != NULL && json_is_array(j_msgs)) {
+            *out_msgs = j_msgs;
+            size_t n = json_array_size(j_msgs);
+            for (size_t i = n; i > 0; i--) {
+                json_t* m = json_array_get(j_msgs, i - 1);
+                if (!json_is_object(m)) {
+                    continue;
+                }
+                json_t* r = json_object_get(m, "role");
+                if (r != NULL && json_is_string(r) && strcmp(json_string_value(r), "user") == 0) {
+                    json_t* c = json_object_get(m, "content");
+                    if (c != NULL && json_is_string(c)) {
+                        *out_content = strdup(json_string_value(c));
+                        return;
+                    }
+                    if (c != NULL && json_is_array(c)) {
+                        size_t pn = json_array_size(c);
+                        for (size_t pi = 0; pi < pn; pi++) {
+                            json_t* part = json_array_get(c, pi);
+                            json_t* txt = json_object_get(part, "text");
+                            if (txt != NULL && json_is_string(txt)) {
+                                *out_content = strdup(json_string_value(txt));
+                                return;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        json_t* j_prompt = json_object_get(root, "prompt");
+        if (j_prompt != NULL && json_is_string(j_prompt)) {
+            *out_content = strdup(json_string_value(j_prompt));
+            return;
+        }
+        json_t* j_contents = json_object_get(root, "contents");
+        if (j_contents != NULL && json_is_array(j_contents)) {
+            size_t n = json_array_size(j_contents);
+            for (size_t i = n; i > 0; i--) {
+                json_t* item = json_array_get(j_contents, i - 1);
+                json_t* parts = json_object_get(item, "parts");
+                if (parts != NULL && json_is_array(parts)) {
+                    size_t pn = json_array_size(parts);
+                    for (size_t pi = 0; pi < pn; pi++) {
+                        json_t* p = json_array_get(parts, pi);
+                        json_t* txt = json_object_get(p, "text");
+                        if (txt != NULL && json_is_string(txt)) {
+                            *out_content = strdup(json_string_value(txt));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if (*out_content == NULL && raw_body != NULL) {
+        *out_content = strdup(raw_body);
+    }
+}
+
+static char*
+apply_inbound_mask(const char* body, const char* masked_content)
+{
+    json_error_t err;
+    json_t*      root = json_loads(body, 0, &err);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return strdup(masked_content);
+    }
+
+    int     replaced = 0;
+    json_t* j_msgs = json_object_get(root, "messages");
+    if (j_msgs != NULL && json_is_array(j_msgs)) {
+        size_t n = json_array_size(j_msgs);
+        for (size_t i = n; i > 0; i--) {
+            json_t* m = json_array_get(j_msgs, i - 1);
+            if (!json_is_object(m)) {
+                continue;
+            }
+            json_t* r = json_object_get(m, "role");
+            if (r != NULL && json_is_string(r) && strcmp(json_string_value(r), "user") == 0) {
+                json_object_set_new(m, "content", json_string(masked_content));
+                replaced = 1;
+                break;
+            }
+        }
+        if (!replaced && n > 0) {
+            json_t* m = json_array_get(j_msgs, n - 1);
+            if (json_is_object(m)) {
+                json_object_set_new(m, "content", json_string(masked_content));
+                replaced = 1;
+            }
+        }
+    }
+    if (!replaced) {
+        json_t* j_prompt = json_object_get(root, "prompt");
+        if (j_prompt != NULL) {
+            json_object_set_new(root, "prompt", json_string(masked_content));
+            replaced = 1;
+        }
+    }
+    if (!replaced) {
+        json_t* j_contents = json_object_get(root, "contents");
+        if (j_contents != NULL && json_is_array(j_contents)) {
+            size_t n = json_array_size(j_contents);
+            if (n > 0) {
+                json_t* item = json_array_get(j_contents, n - 1);
+                json_t* parts = json_object_get(item, "parts");
+                if (parts != NULL && json_is_array(parts) && json_array_size(parts) > 0) {
+                    json_t* p = json_array_get(parts, 0);
+                    if (json_is_object(p)) {
+                        json_object_set_new(p, "text", json_string(masked_content));
+                        replaced = 1;
+                    }
+                }
+            }
+        }
+    }
+
+    char* res = json_dumps(root, JSON_COMPACT);
+    json_decref(root);
+    return res != NULL ? res : strdup(masked_content);
+}
+
+static char*
+extract_outbound_content(json_t* root, const char* response_body)
+{
+    if (root != NULL && json_is_object(root)) {
+        json_t* choices = json_object_get(root, "choices");
+        if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+            json_t* c0 = json_array_get(choices, 0);
+            if (json_is_object(c0)) {
+                json_t* msg = json_object_get(c0, "message");
+                if (msg != NULL && json_is_object(msg)) {
+                    json_t* cont = json_object_get(msg, "content");
+                    if (cont != NULL && json_is_string(cont)) {
+                        return strdup(json_string_value(cont));
+                    }
+                }
+                json_t* txt = json_object_get(c0, "text");
+                if (txt != NULL && json_is_string(txt)) {
+                    return strdup(json_string_value(txt));
+                }
+            }
+        }
+    }
+    return response_body != NULL ? strdup(response_body) : strdup("");
+}
+
+static char*
+apply_outbound_mask(const char* response_body, const char* masked_content)
+{
+    json_error_t err;
+    json_t*      root = json_loads(response_body, 0, &err);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return strdup(masked_content);
+    }
+    json_t* choices = json_object_get(root, "choices");
+    if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+        json_t* c0 = json_array_get(choices, 0);
+        if (json_is_object(c0)) {
+            json_t* msg = json_object_get(c0, "message");
+            if (msg != NULL && json_is_object(msg)) {
+                json_object_set_new(msg, "content", json_string(masked_content));
+            } else {
+                json_t* txt = json_object_get(c0, "text");
+                if (txt != NULL) {
+                    json_object_set_new(c0, "text", json_string(masked_content));
+                }
+            }
+        }
+    }
+    char* res = json_dumps(root, JSON_COMPACT);
+    json_decref(root);
+    return res != NULL ? res : strdup(masked_content);
+}
+
+static guardrails_action_t
+execute_single_webhook(const guardrail_webhook_rule_t* rule,
+                       const char*                     phase,
+                       const char*                     model,
+                       long                            key_id,
+                       const char*                     content,
+                       json_t*                         messages_arr,
+                       char**                          out_masked_content,
+                       char*                           block_reason,
+                       size_t                          block_reason_sz)
+{
+    if (out_masked_content != NULL) {
+        *out_masked_content = NULL;
+    }
+
+    json_t* req_obj = json_object();
+    json_object_set_new(req_obj, "phase", json_string(phase));
+    json_object_set_new(req_obj, "model", json_string(model != NULL ? model : ""));
+    json_object_set_new(req_obj, "key_id", json_integer((json_int_t)key_id));
+    json_object_set_new(req_obj, "content", json_string(content != NULL ? content : ""));
+    if (messages_arr != NULL) {
+        json_object_set(req_obj, "messages", messages_arr);
+    } else {
+        json_object_set_new(req_obj, "messages", json_null());
+    }
+    json_object_set_new(req_obj, "timestamp", json_integer((json_int_t)time(NULL)));
+
+    char* req_str = json_dumps(req_obj, JSON_COMPACT);
+    json_decref(req_obj);
+    if (req_str == NULL) {
+        return GUARDRAILS_PASS;
+    }
+
+    CURL* c = curl_easy_init();
+    if (c == NULL) {
+        free(req_str);
+        if (strcasecmp(rule->fail_mode, "closed") == 0) {
+            if (block_reason != NULL && block_reason_sz > 0) {
+                snprintf(block_reason, block_reason_sz, "moderation_curl_init_failed");
+            }
+            return GUARDRAILS_BLOCKED;
+        }
+        return GUARDRAILS_PASS;
+    }
+
+    struct curl_slist* hdrs = NULL;
+    hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
+    hdrs = curl_slist_append(hdrs, "Accept: application/json");
+    if (rule->secret[0] != '\0') {
+        char auth[512];
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", rule->secret);
+        hdrs = curl_slist_append(hdrs, auth);
+    }
+
+    struct webhook_resp_buf rb = {0};
+
+    curl_easy_setopt(c, CURLOPT_URL, rule->url);
+    curl_easy_setopt(c, CURLOPT_POST, 1L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, req_str);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)strlen(req_str));
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, webhook_write_cb);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &rb);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, (long)(rule->timeout_ms > 0 ? rule->timeout_ms : 500));
+    long conn_timeout =
+        rule->timeout_ms > 1000 ? 1000 : (rule->timeout_ms > 0 ? rule->timeout_ms : 500);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, conn_timeout);
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+#if CURL_AT_LEAST_VERSION(7, 85, 0)
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
+
+    CURLcode cret = curl_easy_perform(c);
+    long     http_code = 0;
+    curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(c);
+    free(req_str);
+
+    guardrails_action_t act = GUARDRAILS_PASS;
+    if (cret != CURLE_OK || http_code < 200 || http_code >= 300) {
+        if (cret == CURLE_OPERATION_TIMEDOUT) {
+            AIGATE_LOG_WARN(
+                "guardrails webhook [%s] timed out (%d ms)", rule->url, rule->timeout_ms);
+        } else {
+            AIGATE_LOG_WARN("guardrails webhook [%s] error: %s (http %ld)",
+                            rule->url,
+                            curl_easy_strerror(cret),
+                            http_code);
+        }
+        if (strcasecmp(rule->fail_mode, "closed") == 0) {
+            if (block_reason != NULL && block_reason_sz > 0) {
+                snprintf(block_reason, block_reason_sz, "moderation_webhook_unavailable");
+            }
+            act = GUARDRAILS_BLOCKED;
+        } else {
+            act = GUARDRAILS_PASS;
+        }
+        free(rb.data);
+        return act;
+    }
+
+    json_error_t jerr;
+    json_t*      resp_json = json_loads(rb.data != NULL ? rb.data : "", 0, &jerr);
+    free(rb.data);
+
+    if (resp_json == NULL || !json_is_object(resp_json)) {
+        if (resp_json != NULL) {
+            json_decref(resp_json);
+        }
+        AIGATE_LOG_WARN("guardrails webhook [%s] returned invalid JSON: %s", rule->url, jerr.text);
+        if (strcasecmp(rule->fail_mode, "closed") == 0) {
+            if (block_reason != NULL && block_reason_sz > 0) {
+                snprintf(block_reason, block_reason_sz, "moderation_webhook_invalid_response");
+            }
+            return GUARDRAILS_BLOCKED;
+        }
+        return GUARDRAILS_PASS;
+    }
+
+    json_t*     j_act = json_object_get(resp_json, "action");
+    const char* act_str =
+        (j_act != NULL && json_is_string(j_act)) ? json_string_value(j_act) : "pass";
+
+    if (strcasecmp(act_str, "block") == 0) {
+        json_t*     j_reason = json_object_get(resp_json, "reason");
+        const char* reason_str = (j_reason != NULL && json_is_string(j_reason))
+                                     ? json_string_value(j_reason)
+                                     : "content_policy_violation";
+        if (block_reason != NULL && block_reason_sz > 0) {
+            snprintf(block_reason, block_reason_sz, "%s", reason_str);
+        }
+        act = GUARDRAILS_BLOCKED;
+    } else if (strcasecmp(act_str, "mask") == 0) {
+        json_t* j_masked = json_object_get(resp_json, "masked_content");
+        if (j_masked != NULL && json_is_string(j_masked)) {
+            if (out_masked_content != NULL) {
+                *out_masked_content = strdup(json_string_value(j_masked));
+            }
+            act = GUARDRAILS_MASKED;
+        } else {
+            act = GUARDRAILS_PASS;
+        }
+    } else {
+        act = GUARDRAILS_PASS;
+    }
+
+    json_decref(resp_json);
+    return act;
+}
+
+guardrails_action_t
+guardrails_inspect_webhook_inbound(guardrails_ctx_t* ctx,
+                                   const char*       model,
+                                   long              key_id,
+                                   const char*       raw_body,
+                                   size_t            raw_len,
+                                   char**            sanitized_body,
+                                   size_t*           sanitized_len,
+                                   char*             block_reason,
+                                   size_t            block_reason_sz)
+{
+    if (sanitized_body != NULL) {
+        *sanitized_body = NULL;
+    }
+    if (sanitized_len != NULL) {
+        *sanitized_len = 0;
+    }
+    if (block_reason != NULL && block_reason_sz > 0) {
+        block_reason[0] = '\0';
+    }
+    if (ctx == NULL || raw_body == NULL || raw_len == 0) {
+        return GUARDRAILS_PASS;
+    }
+
+    guardrail_webhook_rule_t rules_copy[MAX_WEBHOOK_RULES];
+    size_t                   n_rules = 0;
+
+    pthread_rwlock_rdlock(&ctx->rwlock);
+    for (size_t i = 0; i < ctx->webhook_count; i++) {
+        const guardrail_webhook_rule_t* r = &ctx->webhooks[i];
+        if (strcasecmp(r->phase, "inbound") == 0 || strcasecmp(r->phase, "both") == 0) {
+            if (n_rules < MAX_WEBHOOK_RULES) {
+                rules_copy[n_rules++] = *r;
+            }
+        }
+    }
+    pthread_rwlock_unlock(&ctx->rwlock);
+
+    if (n_rules == 0) {
+        return GUARDRAILS_PASS;
+    }
+
+    const char* current_body = raw_body;
+    char*       cur_sanitized = NULL;
+    int         any_masked = 0;
+
+    for (size_t i = 0; i < n_rules; i++) {
+        json_error_t jerr;
+        json_t*      root = json_loads(current_body, 0, &jerr);
+        char*        content = NULL;
+        json_t*      msgs = NULL;
+        extract_inbound_info(root, current_body, &content, &msgs);
+
+        char*               masked_text = NULL;
+        guardrails_action_t act = execute_single_webhook(&rules_copy[i],
+                                                         "inbound",
+                                                         model,
+                                                         key_id,
+                                                         content,
+                                                         msgs,
+                                                         &masked_text,
+                                                         block_reason,
+                                                         block_reason_sz);
+        free(content);
+        if (root != NULL) {
+            json_decref(root);
+        }
+
+        if (act == GUARDRAILS_BLOCKED) {
+            free(masked_text);
+            free(cur_sanitized);
+            return GUARDRAILS_BLOCKED;
+        }
+        if (act == GUARDRAILS_MASKED && masked_text != NULL) {
+            char* next_body = apply_inbound_mask(current_body, masked_text);
+            free(masked_text);
+            free(cur_sanitized);
+            cur_sanitized = next_body;
+            current_body = cur_sanitized;
+            any_masked = 1;
+        }
+    }
+
+    if (any_masked && cur_sanitized != NULL) {
+        if (sanitized_body != NULL) {
+            *sanitized_body = cur_sanitized;
+        } else {
+            free(cur_sanitized);
+        }
+        if (sanitized_len != NULL) {
+            *sanitized_len = cur_sanitized != NULL ? strlen(cur_sanitized) : 0;
+        }
+        return GUARDRAILS_MASKED;
+    }
+
+    free(cur_sanitized);
+    return GUARDRAILS_PASS;
+}
+
+guardrails_action_t
+guardrails_inspect_webhook_outbound(guardrails_ctx_t* ctx,
+                                    const char*       model,
+                                    long              key_id,
+                                    const char*       response_body,
+                                    size_t            response_len,
+                                    char**            sanitized_body,
+                                    size_t*           sanitized_len,
+                                    char*             block_reason,
+                                    size_t            block_reason_sz)
+{
+    if (sanitized_body != NULL) {
+        *sanitized_body = NULL;
+    }
+    if (sanitized_len != NULL) {
+        *sanitized_len = 0;
+    }
+    if (block_reason != NULL && block_reason_sz > 0) {
+        block_reason[0] = '\0';
+    }
+    if (ctx == NULL || response_body == NULL || response_len == 0) {
+        return GUARDRAILS_PASS;
+    }
+
+    guardrail_webhook_rule_t rules_copy[MAX_WEBHOOK_RULES];
+    size_t                   n_rules = 0;
+
+    pthread_rwlock_rdlock(&ctx->rwlock);
+    for (size_t i = 0; i < ctx->webhook_count; i++) {
+        const guardrail_webhook_rule_t* r = &ctx->webhooks[i];
+        if (strcasecmp(r->phase, "outbound") == 0 || strcasecmp(r->phase, "both") == 0) {
+            if (n_rules < MAX_WEBHOOK_RULES) {
+                rules_copy[n_rules++] = *r;
+            }
+        }
+    }
+    pthread_rwlock_unlock(&ctx->rwlock);
+
+    if (n_rules == 0) {
+        return GUARDRAILS_PASS;
+    }
+
+    const char* current_body = response_body;
+    char*       cur_sanitized = NULL;
+    int         any_masked = 0;
+
+    for (size_t i = 0; i < n_rules; i++) {
+        json_error_t jerr;
+        json_t*      root = json_loads(current_body, 0, &jerr);
+        char*        content = extract_outbound_content(root, current_body);
+
+        char*               masked_text = NULL;
+        guardrails_action_t act = execute_single_webhook(&rules_copy[i],
+                                                         "outbound",
+                                                         model,
+                                                         key_id,
+                                                         content,
+                                                         NULL,
+                                                         &masked_text,
+                                                         block_reason,
+                                                         block_reason_sz);
+        free(content);
+        if (root != NULL) {
+            json_decref(root);
+        }
+
+        if (act == GUARDRAILS_BLOCKED) {
+            free(masked_text);
+            free(cur_sanitized);
+            return GUARDRAILS_BLOCKED;
+        }
+        if (act == GUARDRAILS_MASKED && masked_text != NULL) {
+            char* next_body = apply_outbound_mask(current_body, masked_text);
+            free(masked_text);
+            free(cur_sanitized);
+            cur_sanitized = next_body;
+            current_body = cur_sanitized;
+            any_masked = 1;
+        }
+    }
+
+    if (any_masked && cur_sanitized != NULL) {
+        if (sanitized_body != NULL) {
+            *sanitized_body = cur_sanitized;
+        } else {
+            free(cur_sanitized);
+        }
+        if (sanitized_len != NULL) {
+            *sanitized_len = cur_sanitized != NULL ? strlen(cur_sanitized) : 0;
+        }
+        return GUARDRAILS_MASKED;
+    }
+
+    free(cur_sanitized);
+    return GUARDRAILS_PASS;
+}
+
+int
+guardrails_webhook_probe(const char* url,
+                         const char* secret,
+                         int         timeout_ms,
+                         char*       out_err,
+                         size_t      err_sz,
+                         double*     out_latency_ms)
+{
+    if (out_err != NULL && err_sz > 0) {
+        out_err[0] = '\0';
+    }
+    if (out_latency_ms != NULL) {
+        *out_latency_ms = 0.0;
+    }
+    if (url == NULL || url[0] == '\0') {
+        if (out_err != NULL && err_sz > 0) {
+            snprintf(out_err, err_sz, "Invalid empty URL");
+        }
+        return -1;
+    }
+
+    CURL* c = curl_easy_init();
+    if (c == NULL) {
+        if (out_err != NULL && err_sz > 0) {
+            snprintf(out_err, err_sz, "Failed to initialize CURL");
+        }
+        return -1;
+    }
+
+    json_t* req = json_object();
+    json_object_set_new(req, "phase", json_string("probe"));
+    json_object_set_new(req, "model", json_string("probe-test"));
+    json_object_set_new(req, "key_id", json_integer(0));
+    json_object_set_new(req, "content", json_string("AIGate connection probe test"));
+    json_object_set_new(req, "timestamp", json_integer((json_int_t)time(NULL)));
+    char* req_str = json_dumps(req, JSON_COMPACT);
+    json_decref(req);
+    if (req_str == NULL) {
+        curl_easy_cleanup(c);
+        if (out_err != NULL && err_sz > 0) {
+            snprintf(out_err, err_sz, "Failed to serialize test JSON");
+        }
+        return -1;
+    }
+
+    struct curl_slist* hdrs = NULL;
+    hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
+    hdrs = curl_slist_append(hdrs, "Accept: application/json");
+    if (secret != NULL && secret[0] != '\0') {
+        char auth[512];
+        snprintf(auth, sizeof(auth), "Authorization: Bearer %s", secret);
+        hdrs = curl_slist_append(hdrs, auth);
+    }
+
+    struct webhook_resp_buf rb = {0};
+
+    struct timespec ts_start, ts_end;
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
+
+    curl_easy_setopt(c, CURLOPT_URL, url);
+    curl_easy_setopt(c, CURLOPT_POST, 1L);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDS, req_str);
+    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)strlen(req_str));
+    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+    curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, webhook_write_cb);
+    curl_easy_setopt(c, CURLOPT_WRITEDATA, &rb);
+    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, (long)(timeout_ms > 0 ? timeout_ms : 3000));
+    long conn_timeout = timeout_ms > 1000 ? 1000 : (timeout_ms > 0 ? timeout_ms : 1000);
+    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, conn_timeout);
+    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+    curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+#if CURL_AT_LEAST_VERSION(7, 85, 0)
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+    curl_easy_setopt(c, CURLOPT_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+    curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, (long)(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
+
+    CURLcode cret = curl_easy_perform(c);
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
+
+    double latency = (double)(ts_end.tv_sec - ts_start.tv_sec) * 1000.0 +
+                     (double)(ts_end.tv_nsec - ts_start.tv_nsec) / 1000000.0;
+    if (out_latency_ms != NULL) {
+        *out_latency_ms = latency;
+    }
+
+    long http_code = 0;
+    curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_slist_free_all(hdrs);
+    curl_easy_cleanup(c);
+    free(req_str);
+    free(rb.data);
+
+    if (cret != CURLE_OK) {
+        if (out_err != NULL && err_sz > 0) {
+            snprintf(out_err, err_sz, "Connection failed: %s", curl_easy_strerror(cret));
+        }
+        return -1;
+    }
+    if (http_code < 200 || http_code >= 300) {
+        if (out_err != NULL && err_sz > 0) {
+            snprintf(out_err, err_sz, "Webhook returned HTTP %ld", http_code);
+        }
+        return -1;
+    }
+
+    return 0;
 }

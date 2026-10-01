@@ -86,4 +86,46 @@ guardrails_action_t guardrails_inspect_inbound(guardrails_ctx_t* ctx,
  *  @return Masked new string (caller frees); NULL on no hit/empty input. */
 char* guardrails_mask_pii_text(guardrails_ctx_t* ctx, const char* text, size_t len, int* changed);
 
+/* --- External Webhook Moderation Plugin --- */
+
+/** @brief Webhook rule runtime definition. */
+typedef struct guardrail_webhook_rule {
+    long id;
+    char url[512];
+    char secret[256];
+    int  timeout_ms;
+    char fail_mode[16]; /**< "open" | "closed" */
+    char phase[16];     /**< "inbound" | "outbound" | "both" */
+} guardrail_webhook_rule_t;
+
+/** @brief Inbound Webhook inspection. */
+guardrails_action_t guardrails_inspect_webhook_inbound(guardrails_ctx_t* ctx,
+                                                       const char*       model,
+                                                       long              key_id,
+                                                       const char*       raw_body,
+                                                       size_t            raw_len,
+                                                       char**            sanitized_body,
+                                                       size_t*           sanitized_len,
+                                                       char*             block_reason,
+                                                       size_t            block_reason_sz);
+
+/** @brief Outbound Webhook inspection on LLM response. */
+guardrails_action_t guardrails_inspect_webhook_outbound(guardrails_ctx_t* ctx,
+                                                        const char*       model,
+                                                        long              key_id,
+                                                        const char*       response_body,
+                                                        size_t            response_len,
+                                                        char**            sanitized_body,
+                                                        size_t*           sanitized_len,
+                                                        char*             block_reason,
+                                                        size_t            block_reason_sz);
+
+/** @brief Single standalone probe helper for Webhook test endpoint. */
+int guardrails_webhook_probe(const char* url,
+                             const char* secret,
+                             int         timeout_ms,
+                             char*       out_err,
+                             size_t      err_sz,
+                             double*     out_latency_ms);
+
 #endif /* AIGATE_GUARDRAILS_H */
