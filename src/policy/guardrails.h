@@ -178,6 +178,21 @@ typedef struct {
     pii_rule_t rules[PII_TYPE_COUNT]; /**< Per-entity PII rules array. */
 } pii_config_t;
 
+/**
+ * @brief Retrieve current PII configuration from guardrails context.
+ * @param ctx Guardrails context.
+ * @return Copy of active pii_config_t structure.
+ */
+pii_config_t guardrails_get_pii_config(const guardrails_ctx_t* ctx);
+
+/**
+ * @brief Update PII configuration rules in guardrails context.
+ * @param ctx Guardrails context.
+ * @param cfg Pointer to new pii_config_t configuration.
+ * @return 0 on success, non-zero on error.
+ */
+int guardrails_set_pii_config(guardrails_ctx_t* ctx, const pii_config_t* cfg);
+
 /** @brief Maximum number of distinct sensitive entities tracked per request session. */
 #define PII_MAX_SESSION_ENTRIES 64
 

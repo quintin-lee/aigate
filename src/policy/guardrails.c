@@ -270,6 +270,32 @@ guardrails_destroy(guardrails_ctx_t* ctx)
     free(ctx);
 }
 
+pii_config_t
+guardrails_get_pii_config(const guardrails_ctx_t* ctx)
+{
+    pii_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    if (ctx == NULL) {
+        return cfg;
+    }
+    pthread_rwlock_rdlock((pthread_rwlock_t*)&ctx->rwlock);
+    cfg = ctx->pii_cfg;
+    pthread_rwlock_unlock((pthread_rwlock_t*)&ctx->rwlock);
+    return cfg;
+}
+
+int
+guardrails_set_pii_config(guardrails_ctx_t* ctx, const pii_config_t* cfg)
+{
+    if (ctx == NULL || cfg == NULL) {
+        return -1;
+    }
+    pthread_rwlock_wrlock(&ctx->rwlock);
+    ctx->pii_cfg = *cfg;
+    pthread_rwlock_unlock(&ctx->rwlock);
+    return 0;
+}
+
 int
 guardrails_load_rules(guardrails_ctx_t* ctx, const guardrail_rule_t* rules, size_t count)
 {
