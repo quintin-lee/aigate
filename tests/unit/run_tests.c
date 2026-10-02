@@ -521,6 +521,16 @@ main(void)
     extern void test_admin_traces_endpoints(void);
     test_register("admin_traces_endpoints", test_admin_traces_endpoints);
 
+    extern void test_shadow_rule_matching_and_sampling(void);
+    test_register("shadow_rule_matching_and_sampling", test_shadow_rule_matching_and_sampling);
+
+    extern void test_shadow_queue_push_pop_overflow(void);
+    test_register("shadow_queue_push_pop_overflow", test_shadow_queue_push_pop_overflow);
+
+    extern void test_shadow_eval_cache_circular_and_stats(void);
+    test_register("shadow_eval_cache_circular_and_stats",
+                  test_shadow_eval_cache_circular_and_stats);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
