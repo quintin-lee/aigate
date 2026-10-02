@@ -39,31 +39,31 @@ struct shadow_eval_cache {
 
 /** @brief In-flight pairing slot for dual-track correlation. */
 typedef struct {
-    char           eval_id[33];               /**< Unique evaluation ID */
-    char           trace_id[33];              /**< Associated trace ID */
-    char           source_model[64];          /**< Source primary model */
-    char           target_model[64];          /**< Candidate shadow/canary model */
-    traffic_mode_t mode;                      /**< Traffic mode */
-    char           prompt_preview[256];       /**< User prompt snippet */
-    bool           active;                    /**< Whether slot is occupied */
-    bool           primary_done;              /**< Whether primary side has completed */
-    bool           shadow_done;               /**< Whether shadow side has completed */
+    char           eval_id[33];         /**< Unique evaluation ID */
+    char           trace_id[33];        /**< Associated trace ID */
+    char           source_model[64];    /**< Source primary model */
+    char           target_model[64];    /**< Candidate shadow/canary model */
+    traffic_mode_t mode;                /**< Traffic mode */
+    char           prompt_preview[256]; /**< User prompt snippet */
+    bool           active;              /**< Whether slot is occupied */
+    bool           primary_done;        /**< Whether primary side has completed */
+    bool           shadow_done;         /**< Whether shadow side has completed */
 
-    double         primary_latency_ms;        /**< Primary response latency */
-    double         shadow_latency_ms;         /**< Shadow response latency */
-    double         primary_ttft_ms;           /**< Primary time to first token */
-    double         shadow_ttft_ms;            /**< Shadow time to first token */
+    double primary_latency_ms;          /**< Primary response latency */
+    double shadow_latency_ms;           /**< Shadow response latency */
+    double primary_ttft_ms;             /**< Primary time to first token */
+    double shadow_ttft_ms;              /**< Shadow time to first token */
 
-    int            primary_http_status;       /**< Primary HTTP status */
-    int            shadow_http_status;        /**< Shadow HTTP status */
-    long           primary_tokens;            /**< Primary token count */
-    long           shadow_tokens;             /**< Shadow token count */
-    double         primary_cost_usd;          /**< Primary estimated cost */
-    double         shadow_cost_usd;           /**< Shadow estimated cost */
+    int    primary_http_status;         /**< Primary HTTP status */
+    int    shadow_http_status;          /**< Shadow HTTP status */
+    long   primary_tokens;              /**< Primary token count */
+    long   shadow_tokens;               /**< Shadow token count */
+    double primary_cost_usd;            /**< Primary estimated cost */
+    double shadow_cost_usd;             /**< Shadow estimated cost */
 
-    char           primary_resp_snippet[512]; /**< Primary response snippet */
-    char           shadow_resp_snippet[512];  /**< Shadow response snippet */
-    uint64_t       timestamp_us;              /**< Monotonic timestamp in microseconds */
+    char     primary_resp_snippet[512]; /**< Primary response snippet */
+    char     shadow_resp_snippet[512];  /**< Shadow response snippet */
+    uint64_t timestamp_us;              /**< Monotonic timestamp in microseconds */
 } pairing_slot_t;
 
 /** @brief Shadow engine internal structure. */
