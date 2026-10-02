@@ -43,4 +43,14 @@ TEST_CASE(admin_ui_content)
                 "missing compressorKpiLatency");
     TEST_ASSERT(strstr(html, "id=\"compressorRuleModal\"") != NULL, "missing compressorRuleModal");
     TEST_ASSERT(strstr(html, "id=\"compressorDiffModal\"") != NULL, "missing compressorDiffModal");
+    TEST_ASSERT(strstr(html, "data-tab=\"cache-optimizer\"") != NULL,
+                "missing cache-optimizer tab button");
+    TEST_ASSERT(strstr(html, "id=\"tab-cache-optimizer\"") != NULL,
+                "missing tab-cache-optimizer section");
+    TEST_ASSERT(strstr(html, "id=\"cacheOptKpiHitRate\"") != NULL, "missing cacheOptKpiHitRate");
+    TEST_ASSERT(strstr(html, "id=\"cacheOptKpiTokens\"") != NULL, "missing cacheOptKpiTokens");
+    TEST_ASSERT(strstr(html, "id=\"cacheOptKpiSavings\"") != NULL, "missing cacheOptKpiSavings");
+    TEST_ASSERT(strstr(html, "id=\"cacheOptKpiLatency\"") != NULL, "missing cacheOptKpiLatency");
+    TEST_ASSERT(strstr(html, "id=\"cacheOptRuleModal\"") != NULL, "missing cacheOptRuleModal");
+    TEST_ASSERT(strstr(html, "id=\"cacheOptDetailModal\"") != NULL, "missing cacheOptDetailModal");
 }
