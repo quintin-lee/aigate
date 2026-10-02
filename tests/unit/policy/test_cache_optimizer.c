@@ -57,3 +57,38 @@ TEST_CASE(test_cache_optimizer_normalize_whitespace)
     TEST_ASSERT(strstr(out_buf, "Hello world from\n\naigate") != NULL,
                 "Normalization formatting unexpected");
 }
+
+TEST_CASE(test_cache_optimizer_sink_dynamic_system)
+{
+    const char* raw_system = "Today is 2026-10-02 17:15:30. You are a senior AI coding assistant. "
+                             "Follow clean code principles.";
+    char        out_buf[1024];
+    bool        sunk = cache_optimizer_sink_dynamic_system(
+        raw_system, strlen(raw_system), out_buf, sizeof(out_buf));
+    TEST_ASSERT(sunk == true, "Expected dynamic timestamp to be detected and sunk");
+
+    /* Static instructions must now be at the very beginning */
+    TEST_ASSERT(strncmp(out_buf, "You are a senior AI coding assistant", 36) == 0,
+                "Static rules should be moved to front");
+    /* The dynamic timestamp must be preserved in a runtime context tag */
+    TEST_ASSERT(strstr(out_buf, "Today is 2026-10-02 17:15:30") != NULL,
+                "Dynamic timestamp must be preserved");
+    TEST_ASSERT(strstr(out_buf, "[Runtime Context:") != NULL,
+                "Runtime context block expected at end");
+
+    /* Test that static text without dynamic elements remains unchanged */
+    const char* static_system =
+        "You are a senior AI coding assistant. Follow clean code principles.";
+    bool sunk2 = cache_optimizer_sink_dynamic_system(
+        static_system, strlen(static_system), out_buf, sizeof(out_buf));
+    TEST_ASSERT(sunk2 == false, "Static system should not be modified");
+
+    /* Also test UUID / Session ID pattern */
+    const char* session_system =
+        "Session ID: 12345678-abcd-1234-abcd-1234567890ab. Follow guidelines.";
+    bool sunk3 = cache_optimizer_sink_dynamic_system(
+        session_system, strlen(session_system), out_buf, sizeof(out_buf));
+    TEST_ASSERT(sunk3 == true, "Session ID should be detected and sunk");
+    TEST_ASSERT(strncmp(out_buf, "Follow guidelines", 17) == 0, "Static guidelines moved to front");
+    TEST_ASSERT(strstr(out_buf, "12345678-abcd-1234-abcd-1234567890ab") != NULL, "UUID preserved");
+}

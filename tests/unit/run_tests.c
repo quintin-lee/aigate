@@ -588,6 +588,9 @@ main(void)
     test_register("cache_optimizer_normalize_whitespace",
                   test_cache_optimizer_normalize_whitespace);
 
+    extern void test_cache_optimizer_sink_dynamic_system(void);
+    test_register("cache_optimizer_sink_dynamic_system", test_cache_optimizer_sink_dynamic_system);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

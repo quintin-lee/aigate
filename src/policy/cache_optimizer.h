@@ -112,6 +112,18 @@ bool cache_optimizer_sort_tools(json_t* root);
 size_t
 cache_optimizer_normalize_whitespace(const char* in, size_t in_len, char* out, size_t out_sz);
 
+/**
+ * @brief Detects volatile timestamps, dates, or UUID/Session IDs in the header of system prompt,
+ *        and relocates them to the end in a runtime context block, preserving exact prefix alignment.
+ *
+ * @param in Input system prompt string.
+ * @param in_len Length of input string.
+ * @param out Output buffer to write transformed system prompt.
+ * @param out_sz Capacity of output buffer.
+ * @return true if volatile dynamic context was detected and relocated, false if unchanged.
+ */
+bool cache_optimizer_sink_dynamic_system(const char* in, size_t in_len, char* out, size_t out_sz);
+
 #ifdef __cplusplus
 }
 #endif

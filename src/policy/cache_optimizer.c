@@ -175,3 +175,106 @@ cache_optimizer_normalize_whitespace(const char* in, size_t in_len, char* out, s
     out[w] = '\0';
     return w;
 }
+
+/**
+ * @brief Checks if a string prefix matches common volatile date/time or session patterns.
+ */
+static bool
+is_dynamic_header_prefix(const char* p, size_t len)
+{
+    if (len < 8) {
+        return false;
+    }
+
+    if (strncasecmp(p, "today is", 8) == 0) {
+        return true;
+    }
+    if (strncasecmp(p, "current date", 12) == 0 || strncasecmp(p, "current time", 12) == 0) {
+        return true;
+    }
+    if (strncasecmp(p, "session id:", 11) == 0 || strncasecmp(p, "session_id:", 11) == 0 ||
+        strncasecmp(p, "session:", 8) == 0) {
+        return true;
+    }
+    if (strncasecmp(p, "request id:", 11) == 0 || strncasecmp(p, "request_id:", 11) == 0) {
+        return true;
+    }
+
+    /* Check for leading ISO date: YYYY-MM-DD or YYYY/MM/DD */
+    if (len >= 10 && isdigit((unsigned char)p[0]) && isdigit((unsigned char)p[1]) &&
+        isdigit((unsigned char)p[2]) && isdigit((unsigned char)p[3]) &&
+        (p[4] == '-' || p[4] == '/') && isdigit((unsigned char)p[5]) &&
+        isdigit((unsigned char)p[6]) && (p[7] == '-' || p[7] == '/') &&
+        isdigit((unsigned char)p[8]) && isdigit((unsigned char)p[9])) {
+        return true;
+    }
+
+    return false;
+}
+
+bool
+cache_optimizer_sink_dynamic_system(const char* in, size_t in_len, char* out, size_t out_sz)
+{
+    if (!in || in_len == 0 || !out || out_sz == 0) {
+        return false;
+    }
+
+    /* Skip leading whitespace */
+    size_t start = 0;
+    while (start < in_len && isspace((unsigned char)in[start])) {
+        start++;
+    }
+
+    if (!is_dynamic_header_prefix(in + start, in_len - start)) {
+        return false;
+    }
+
+    /* Find end of the first dynamic sentence or line */
+    size_t end = start;
+    while (end < in_len) {
+        if (in[end] == '\n') {
+            break;
+        }
+        if (in[end] == '.' && (end + 1 >= in_len || isspace((unsigned char)in[end + 1]))) {
+            end++; /* include the period */
+            break;
+        }
+        end++;
+    }
+
+    /* Extract dynamic slice, trimming trailing period and whitespace */
+    size_t dyn_start = start;
+    size_t dyn_end = end;
+    while (dyn_end > dyn_start &&
+           (in[dyn_end - 1] == '.' || isspace((unsigned char)in[dyn_end - 1]))) {
+        dyn_end--;
+    }
+    size_t dyn_len = dyn_end - dyn_start;
+    if (dyn_len == 0) {
+        return false;
+    }
+
+    /* Find start of remaining static content */
+    size_t static_start = end;
+    while (static_start < in_len && isspace((unsigned char)in[static_start])) {
+        static_start++;
+    }
+
+    if (static_start >= in_len) {
+        /* No static content following the dynamic header */
+        return false;
+    }
+
+    size_t static_len = in_len - static_start;
+
+    /* Format into out: static content first, then [Runtime Context: <dyn>]\n */
+    int written = snprintf(out,
+                           out_sz,
+                           "%.*s\n\n[Runtime Context: %.*s]\n",
+                           (int)static_len,
+                           in + static_start,
+                           (int)dyn_len,
+                           in + dyn_start);
+
+    return (written > 0 && (size_t)written < out_sz);
+}
