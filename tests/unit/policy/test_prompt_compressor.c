@@ -129,3 +129,32 @@ TEST_CASE(test_compressor_sentence_density_pruning_and_cache)
 
     compressor_cache_destroy(cache);
 }
+
+TEST_CASE(test_compressor_rule_serialization_and_match)
+{
+    compressor_rule_t rule;
+    memset(&rule, 0, sizeof(rule));
+    snprintf(rule.id, sizeof(rule.id), "rule-c01");
+    snprintf(rule.model_pattern, sizeof(rule.model_pattern), "gpt-4o*");
+    rule.enabled = true;
+    rule.level = COMPRESS_LEVEL_AGGRESSIVE;
+    rule.min_tokens = 1024;
+    rule.max_history_turns = 4;
+    rule.target_ratio = 0.50;
+    rule.preserve_system = true;
+    rule.preserve_code = true;
+    rule.preserve_tools = true;
+
+    /* Matching test */
+    TEST_ASSERT(compressor_rule_match(&rule, "gpt-4o", 2000) == true,
+                "Should match gpt-4o above min_tokens");
+    TEST_ASSERT(compressor_rule_match(&rule, "gpt-4o", 500) == false,
+                "Should not match below min_tokens");
+    TEST_ASSERT(compressor_rule_match(&rule, "claude-3-5-sonnet", 2000) == false,
+                "Should not match different model");
+
+    /* Wildcard match */
+    snprintf(rule.model_pattern, sizeof(rule.model_pattern), "*");
+    TEST_ASSERT(compressor_rule_match(&rule, "claude-3-5-sonnet", 2000) == true,
+                "Wildcard should match any model");
+}

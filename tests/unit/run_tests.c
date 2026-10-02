@@ -570,6 +570,10 @@ main(void)
     test_register("compressor_sentence_density_pruning_and_cache",
                   test_compressor_sentence_density_pruning_and_cache);
 
+    extern void test_compressor_rule_serialization_and_match(void);
+    test_register("compressor_rule_serialization_and_match",
+                  test_compressor_rule_serialization_and_match);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

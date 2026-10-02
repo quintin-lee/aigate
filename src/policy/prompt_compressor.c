@@ -605,3 +605,24 @@ compressor_cache_get_snapshots(compressor_cache_t*    cache,
     pthread_mutex_unlock(&cache->lock);
     return to_copy;
 }
+
+bool
+compressor_rule_match(const compressor_rule_t* rule, const char* model, uint32_t estimated_tokens)
+{
+    if (!rule || !rule->enabled || !model) {
+        return false;
+    }
+    if (estimated_tokens < rule->min_tokens) {
+        return false;
+    }
+    if (strcmp(rule->model_pattern, "*") == 0) {
+        return true;
+    }
+    size_t pat_len = strlen(rule->model_pattern);
+    if (pat_len > 0 && rule->model_pattern[pat_len - 1] == '*') {
+        if (strncmp(model, rule->model_pattern, pat_len - 1) == 0) {
+            return true;
+        }
+    }
+    return strcmp(rule->model_pattern, model) == 0;
+}

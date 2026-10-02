@@ -192,6 +192,17 @@ size_t compressor_cache_get_snapshots(compressor_cache_t*    cache,
                                       compressor_snapshot_t* out_snapshots,
                                       size_t                 max_count);
 
+/**
+ * @brief Checks if a rule matches the specified model name and estimated token count.
+ *
+ * @param rule Pointer to rule.
+ * @param model Model name string.
+ * @param estimated_tokens Estimated token count.
+ * @return true if the rule matches and is enabled, false otherwise.
+ */
+bool
+compressor_rule_match(const compressor_rule_t* rule, const char* model, uint32_t estimated_tokens);
+
 #ifdef __cplusplus
 }
 #endif

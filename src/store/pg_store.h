@@ -17,6 +17,7 @@
 #include <stdint.h>
 #include <time.h>
 #include "policy/shadow.h"
+#include "policy/prompt_compressor.h"
 
 /** @brief Client API key record (api_keys row; allowed_models is a copy). */
 typedef struct key_rec {
@@ -324,6 +325,15 @@ typedef struct pg_ops {
     int (*update_shadow_rule)(
         void* ctx, const shadow_rule_t* rule);     /**< Full-field update of shadow rule by id. */
     int (*delete_shadow_rule)(void* ctx, long id); /**< Delete shadow rule by numeric id. */
+
+    int (*list_compressor_rules)(void*              ctx,
+                                 compressor_rule_t* out,
+                                 int                cap,
+                                 int*               n); /**< List prompt compressor rules. */
+    int (*upsert_compressor_rule)(
+        void* ctx, const compressor_rule_t* rule); /**< Upsert prompt compressor rule by UUID id. */
+    int (*delete_compressor_rule)(void*       ctx,
+                                  const char* id); /**< Delete prompt compressor rule by UUID id. */
 } pg_ops_t;
 
 /** @brief Storage handle (opaque; holder of a libpq connection or a fake context). */
@@ -403,5 +413,25 @@ int pg_store_update_shadow_rule(const pg_store_t* ps, const shadow_rule_t* rule)
  *  @param id Rule ID.
  *  @return 0 on success, -1 on storage error. */
 int pg_store_delete_shadow_rule(const pg_store_t* ps, long id);
+
+/** @brief List prompt compressor rules.
+ *  @param ps   Storage handle.
+ *  @param out  Output array.
+ *  @param cap  Maximum entries.
+ *  @param n    Receives written count.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_list_compressor_rules(const pg_store_t* ps, compressor_rule_t* out, int cap, int* n);
+
+/** @brief Create or update prompt compressor rule.
+ *  @param ps   Storage handle.
+ *  @param rule Rule content.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_upsert_compressor_rule(const pg_store_t* ps, const compressor_rule_t* rule);
+
+/** @brief Delete prompt compressor rule.
+ *  @param ps Storage handle.
+ *  @param id Rule UUID.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_delete_compressor_rule(const pg_store_t* ps, const char* id);
 
 #endif /* AIGATE_PG_STORE_H */

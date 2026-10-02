@@ -2266,6 +2266,135 @@ pq_delete_shadow_rule(void* vctx, long id)
     return -1;
 }
 
+/** @brief libpq implementation of pg_ops.list_compressor_rules: 0 on success, -1 on error. */
+static int
+pq_list_compressor_rules(void* vctx, compressor_rule_t* out, int cap, int* n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT id, model_pattern, enabled, level, min_tokens, max_history_turns, "
+        "target_ratio, preserve_system, preserve_code, preserve_tools, created_at, updated_at "
+        "FROM compressor_rules ORDER BY created_at";
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_compressor_rules: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        copy_field(out[i].id, sizeof out[i].id, PQgetvalue(res, i, 0));
+        copy_field(out[i].model_pattern, sizeof out[i].model_pattern, PQgetvalue(res, i, 1));
+        out[i].enabled = strcmp(PQgetvalue(res, i, 2), "t") == 0;
+        out[i].level = (compressor_level_t)atoi(PQgetvalue(res, i, 3));
+        out[i].min_tokens = (uint32_t)atoi(PQgetvalue(res, i, 4));
+        out[i].max_history_turns = (uint32_t)atoi(PQgetvalue(res, i, 5));
+        out[i].target_ratio = atof(PQgetvalue(res, i, 6));
+        out[i].preserve_system = strcmp(PQgetvalue(res, i, 7), "t") == 0;
+        out[i].preserve_code = strcmp(PQgetvalue(res, i, 8), "t") == 0;
+        out[i].preserve_tools = strcmp(PQgetvalue(res, i, 9), "t") == 0;
+        out[i].created_at = atoll(PQgetvalue(res, i, 10));
+        out[i].updated_at = atoll(PQgetvalue(res, i, 11));
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
+/** @brief libpq implementation of pg_ops.upsert_compressor_rule: 0 on success, -1 on error. */
+static int
+pq_upsert_compressor_rule(void* vctx, const compressor_rule_t* rule)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO compressor_rules(id, model_pattern, enabled, level, min_tokens, "
+        "max_history_turns, target_ratio, preserve_system, preserve_code, preserve_tools, "
+        "created_at, updated_at) "
+        "VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) "
+        "ON CONFLICT(id) DO UPDATE SET model_pattern=$2, enabled=$3, level=$4, min_tokens=$5, "
+        "max_history_turns=$6, target_ratio=$7, preserve_system=$8, preserve_code=$9, "
+        "preserve_tools=$10, updated_at=$12";
+
+    const char* enabled_str = rule->enabled ? "true" : "false";
+    char        level_str[16], min_tokens_str[16], max_turns_str[16], target_ratio_str[32];
+    char        pres_sys_str[8], pres_code_str[8], pres_tools_str[8];
+    char        created_at_str[32], updated_at_str[32];
+
+    snprintf(level_str, sizeof(level_str), "%d", (int)rule->level);
+    snprintf(min_tokens_str, sizeof(min_tokens_str), "%u", rule->min_tokens);
+    snprintf(max_turns_str, sizeof(max_turns_str), "%u", rule->max_history_turns);
+    snprintf(target_ratio_str, sizeof(target_ratio_str), "%.4f", rule->target_ratio);
+    snprintf(pres_sys_str, sizeof(pres_sys_str), "%s", rule->preserve_system ? "true" : "false");
+    snprintf(pres_code_str, sizeof(pres_code_str), "%s", rule->preserve_code ? "true" : "false");
+    snprintf(pres_tools_str, sizeof(pres_tools_str), "%s", rule->preserve_tools ? "true" : "false");
+    snprintf(created_at_str, sizeof(created_at_str), "%lld", (long long)rule->created_at);
+    snprintf(updated_at_str, sizeof(updated_at_str), "%lld", (long long)rule->updated_at);
+
+    const char* vals[12] = {rule->id,
+                            rule->model_pattern,
+                            enabled_str,
+                            level_str,
+                            min_tokens_str,
+                            max_turns_str,
+                            target_ratio_str,
+                            pres_sys_str,
+                            pres_code_str,
+                            pres_tools_str,
+                            created_at_str,
+                            updated_at_str};
+    int         plens[12] = {0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 12, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL &&
+        (PQresultStatus(res) == PGRES_COMMAND_OK || PQresultStatus(res) == PGRES_TUPLES_OK)) {
+        PQclear(res);
+        return 0;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg upsert_compressor_rule: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg upsert_compressor_rule: query alloc failed");
+    }
+    return -1;
+}
+
+/** @brief libpq implementation of pg_ops.delete_compressor_rule: 0 on success, -1 on error. */
+static int
+pq_delete_compressor_rule(void* vctx, const char* id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "DELETE FROM compressor_rules WHERE id = $1";
+    const char*       vals[1] = {id};
+    int               plens[1] = {0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg delete_compressor_rule: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg delete_compressor_rule: query alloc failed");
+    }
+    return -1;
+}
+
 /* ------------------------------------------------------- store lifecycle */
 
 pg_store_t*
@@ -2354,6 +2483,9 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.create_shadow_rule = pq_create_shadow_rule;
     ps->ops.update_shadow_rule = pq_update_shadow_rule;
     ps->ops.delete_shadow_rule = pq_delete_shadow_rule;
+    ps->ops.list_compressor_rules = pq_list_compressor_rules;
+    ps->ops.upsert_compressor_rule = pq_upsert_compressor_rule;
+    ps->ops.delete_compressor_rule = pq_delete_compressor_rule;
     ps->ops.ctx = px;
     ps->ctx = px;
     ps->owns_ctx = 1;
@@ -2495,4 +2627,31 @@ pg_store_delete_shadow_rule(const pg_store_t* ps, long id)
     const pg_ops_t* ops = pg_store_ops(ps);
     return (ops != NULL && ops->delete_shadow_rule != NULL) ? ops->delete_shadow_rule(ops->ctx, id)
                                                             : -1;
+}
+
+int
+pg_store_list_compressor_rules(const pg_store_t* ps, compressor_rule_t* out, int cap, int* n)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->list_compressor_rules != NULL)
+               ? ops->list_compressor_rules(ops->ctx, out, cap, n)
+               : -1;
+}
+
+int
+pg_store_upsert_compressor_rule(const pg_store_t* ps, const compressor_rule_t* rule)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->upsert_compressor_rule != NULL)
+               ? ops->upsert_compressor_rule(ops->ctx, rule)
+               : -1;
+}
+
+int
+pg_store_delete_compressor_rule(const pg_store_t* ps, const char* id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->delete_compressor_rule != NULL)
+               ? ops->delete_compressor_rule(ops->ctx, id)
+               : -1;
 }
