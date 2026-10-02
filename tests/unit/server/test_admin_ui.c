@@ -24,4 +24,12 @@ TEST_CASE(admin_ui_content)
     TEST_ASSERT(strstr(html, "tab-metrics") != NULL, "missing tab-metrics");
     TEST_ASSERT(strstr(html, "tab-groups") != NULL, "missing tab-groups");
     TEST_ASSERT(strstr(html, "tab-cost") != NULL, "missing tab-cost");
+    TEST_ASSERT(strstr(html, "data-tab=\"shadow\"") != NULL, "missing shadow nav button");
+    TEST_ASSERT(strstr(html, "id=\"tab-shadow\"") != NULL, "missing tab-shadow pane");
+    TEST_ASSERT(strstr(html, "id=\"shadowKpiTotal\"") != NULL, "missing shadowKpiTotal");
+    TEST_ASSERT(strstr(html, "id=\"shadowKpiLatency\"") != NULL, "missing shadowKpiLatency");
+    TEST_ASSERT(strstr(html, "id=\"shadowKpiCost\"") != NULL, "missing shadowKpiCost");
+    TEST_ASSERT(strstr(html, "id=\"shadowKpiHealth\"") != NULL, "missing shadowKpiHealth");
+    TEST_ASSERT(strstr(html, "id=\"shadowRuleModal\"") != NULL, "missing shadowRuleModal");
+    TEST_ASSERT(strstr(html, "id=\"shadowDiffModal\"") != NULL, "missing shadowDiffModal");
 }

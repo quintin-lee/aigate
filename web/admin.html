@@ -295,6 +295,10 @@
         <span class="text-base">🛠️</span>
         <span>监控指标</span>
       </button>
+      <button data-tab="shadow" onclick="switchTab('shadow')" class="side-link" id="nav-shadow-side">
+        <span class="text-base">🧪</span>
+        <span>流量镜像/金丝雀</span>
+      </button>
     </nav>
 
     <!-- Sidebar bottom status -->
@@ -2354,6 +2358,159 @@
       </div>
     </div>
 
+    <!-- ==================== Tab 13: Traffic Shadowing & Canary Evaluation ==================== -->
+    <div id="tab-shadow" class="tab-content tab-pane hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+            <span>🧪</span>
+            <span>流量镜像与金丝雀评估引擎 (Traffic Shadowing & Canary A/B Testing)</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">零风险异步请求克隆（&lt; 10μs 开销）• 生产流量百分比灰度切流 • 连续 3 次 5xx 自动熔断回滚 • Side-by-Side 左右双栏对比</p>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button onclick="loadShadowTab()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:text-white hover:border-slate-700 transition flex items-center space-x-1.5">
+            <span>🔄</span>
+            <span>刷新数据</span>
+          </button>
+          <button onclick="openShadowRuleModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/20 transition flex items-center space-x-1.5">
+            <span>➕</span>
+            <span>添加评测规则</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4 Core KPI cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- 1. Total Evaluated -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">累计评测请求</div>
+            <span class="stat-ico cy">📊</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="shadowKpiTotal" class="text-3xl font-extrabold text-cyan-400 font-mono">0</div>
+            <div class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono">全量对齐</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">主模型 vs 候选模型双路对齐</div>
+        </div>
+
+        <!-- 2. Latency delta -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">时延表现对比</div>
+            <span class="stat-ico em">⚡</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="shadowKpiLatency" class="text-2xl font-extrabold text-emerald-400 font-mono">0ms ➔ 0ms</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">主模型 vs 影子候选响应时延</div>
+        </div>
+
+        <!-- 3. Cost saved -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">成本节约预估</div>
+            <span class="stat-ico" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">💰</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="shadowKpiCost" class="text-3xl font-extrabold text-amber-400 font-mono">$0.0000</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">若切换至目标候选模型累计节约</div>
+        </div>
+
+        <!-- 4. Shadow health -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">影子执行成功率</div>
+            <span class="stat-ico" style="background: rgba(168, 85, 247, 0.15); color: #a855f7;">🛡️</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="shadowKpiHealth" class="text-3xl font-extrabold text-purple-400 font-mono">100.0%</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">自愈熔断保护中 (3次5xx自动回滚)</div>
+        </div>
+      </div>
+
+      <!-- Rules Management Table -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>⚙️</span>
+              <span>评测分流规则配置 (Shadow & Canary Rules)</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">支持按源模型、分流模式（SHADOW 异步镜像 / CANARY 真实灰度切流）、采样比率与特定 Header 条件精准触发</p>
+          </div>
+          <button onclick="openShadowRuleModal()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-brand-600/80 hover:bg-brand-500 text-white transition flex items-center gap-1.5">
+            <span>➕ 新建规则</span>
+          </button>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll rounded-xl border border-slate-800/80">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/90 text-slate-400 uppercase font-semibold border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3 whitespace-nowrap">ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">分流模式</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">模型路由 (源 ➔ 目标)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">目标供应商</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">采样率</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">匹配条件</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
+                <th class="py-2.5 px-3 whitespace-nowrap text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="shadowRulesTbody" class="divide-y divide-slate-800/50 text-[11px]">
+              <tr>
+                <td colspan="8" class="py-8 text-center text-xs text-slate-500">
+                  正在加载评测规则列表...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Side-by-Side Dual-Track Stream Table -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>🔀</span>
+              <span>实时 Side-by-Side 双路对比数据流 (Evaluation Cache)</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">轻量环形缓存（容量 200 槽位），毫秒级聚合主请求与影子请求完整耗时、TTFT、成本与回答快照</p>
+          </div>
+          <span class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono" id="shadowEvalsCountBadge">最近 200 条</span>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll rounded-xl border border-slate-800/80">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/90 text-slate-400 uppercase font-semibold border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3 whitespace-nowrap">评测 ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">模式</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">模型流向</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">Prompt 摘要</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">时延对比 (主 vs 候)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">预估成本对比</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
+                <th class="py-2.5 px-3 whitespace-nowrap text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="shadowEvalsTbody" class="divide-y divide-slate-800/50 text-[11px]">
+              <tr>
+                <td colspan="8" class="py-8 text-center text-xs text-slate-500">
+                  暂无完成评测的双路数据，等待流量进入...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <!-- Page footer -->
@@ -2370,6 +2527,162 @@
 </div>
 
 <!-- ==================== Modals ==================== -->
+
+  <!-- Shadow Rule Modal -->
+  <div id="shadowRuleModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-lg w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center space-x-2">
+          <span>🧪</span>
+          <span id="shadowRuleModalTitle">添加流量镜像 / 金丝雀规则</span>
+        </h3>
+        <button onclick="closeShadowRuleModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <input type="hidden" id="shadowRuleId">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">源模型 (Primary Model)</label>
+            <input type="text" id="shadowRuleSourceModel" placeholder="例如 gpt-4o" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">目标模型 (Candidate Model)</label>
+            <input type="text" id="shadowRuleTargetModel" placeholder="例如 deepseek-chat" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">分流模式</label>
+            <select id="shadowRuleMode" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500">
+              <option value="SHADOW">SHADOW (零风险异步镜像)</option>
+              <option value="CANARY">CANARY (灰度切流 + 熔断保护)</option>
+            </select>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">目标供应商 (Provider)</label>
+            <input type="text" id="shadowRuleTargetProvider" value="openai" placeholder="openai" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+          </div>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">采样率 (0.00 ~ 1.00，例如 0.2 代表 20%)</label>
+          <div class="flex items-center gap-3">
+            <input type="range" id="shadowRuleSampleRateSlider" min="0" max="1" step="0.05" value="1.0" class="flex-1 accent-indigo-500" oninput="document.getElementById('shadowRuleSampleRate').value = this.value">
+            <input type="number" id="shadowRuleSampleRate" min="0" max="1" step="0.01" value="1.0" class="w-20 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500" oninput="document.getElementById('shadowRuleSampleRateSlider').value = this.value">
+          </div>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">匹配条件 Header (可选，留空匹配所有请求)</label>
+          <input type="text" id="shadowRuleHeaderMatch" placeholder="例如 x-env: test" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div class="flex items-center gap-2 pt-1">
+          <input type="checkbox" id="shadowRuleEnabled" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+          <label for="shadowRuleEnabled" class="text-xs text-slate-300 select-none">立即启用此规则</label>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
+        <button onclick="closeShadowRuleModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition">取消</button>
+        <button onclick="saveShadowRule()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">保存规则</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side-by-Side Diff Modal -->
+  <div id="shadowDiffModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-4xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h3 class="text-lg font-bold text-white flex items-center space-x-2">
+            <span>🔍</span>
+            <span>Side-by-Side 左右双栏模型回答与性能对比</span>
+          </h3>
+          <p class="text-xs text-slate-400 mt-0.5">
+            评测 ID: <span id="diffEvalId" class="font-mono text-cyan-400"></span> • 
+            Trace ID: <span id="diffTraceId" class="font-mono text-indigo-400"></span>
+          </p>
+        </div>
+        <button onclick="closeShadowDiffModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <!-- Prompt Preview -->
+      <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800 text-xs">
+        <div class="font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+          <span>💬</span>
+          <span>用户 Prompt 输入:</span>
+        </div>
+        <div id="diffPrompt" class="text-slate-200 font-mono text-[11px] whitespace-pre-wrap max-h-24 overflow-y-auto custom-scroll"></div>
+      </div>
+
+      <!-- Side-by-side comparison columns -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 overflow-hidden min-h-0">
+        <!-- Primary Left Column -->
+        <div class="glass-panel p-4 rounded-xl border border-slate-800 flex flex-col space-y-3 bg-slate-900/40">
+          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-cyan-400 px-2 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/20">PRIMARY (主模型)</span>
+              <span id="diffPrimaryModel" class="font-mono text-xs font-bold text-white"></span>
+            </div>
+            <span id="diffPrimaryStatus" class="font-mono text-[11px] text-emerald-400">200 OK</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-[11px] font-mono">
+            <div class="p-2 rounded bg-slate-900 border border-slate-800">
+              <div class="text-[9px] text-slate-400 uppercase">总时延</div>
+              <div id="diffPrimaryLatency" class="text-white font-bold">0ms</div>
+            </div>
+            <div class="p-2 rounded bg-slate-900 border border-slate-800">
+              <div class="text-[9px] text-slate-400 uppercase">TTFT</div>
+              <div id="diffPrimaryTtft" class="text-white font-bold">0ms</div>
+            </div>
+            <div class="p-2 rounded bg-slate-900 border border-slate-800">
+              <div class="text-[9px] text-slate-400 uppercase">Tokens / 成本</div>
+              <div id="diffPrimaryCost" class="text-white font-bold">$0.0000</div>
+            </div>
+          </div>
+          <div class="flex-1 flex flex-col min-h-0">
+            <div class="text-[10px] font-semibold text-slate-400 mb-1">模型回答 (前 512 字节):</div>
+            <div id="diffPrimarySnippet" class="flex-1 p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] font-mono text-slate-200 overflow-y-auto custom-scroll whitespace-pre-wrap"></div>
+          </div>
+        </div>
+
+        <!-- Candidate Right Column -->
+        <div class="glass-panel p-4 rounded-xl border border-slate-800 flex flex-col space-y-3 bg-slate-900/40">
+          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xs font-bold text-amber-400 px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20">CANDIDATE (候选)</span>
+              <span id="diffShadowModel" class="font-mono text-xs font-bold text-white"></span>
+            </div>
+            <span id="diffShadowStatus" class="font-mono text-[11px] text-emerald-400">200 OK</span>
+          </div>
+          <div class="grid grid-cols-3 gap-2 text-[11px] font-mono">
+            <div class="p-2 rounded bg-slate-900 border border-slate-800">
+              <div class="text-[9px] text-slate-400 uppercase">总时延</div>
+              <div id="diffShadowLatency" class="text-white font-bold">0ms</div>
+            </div>
+            <div class="p-2 rounded bg-slate-900 border border-slate-800">
+              <div class="text-[9px] text-slate-400 uppercase">TTFT</div>
+              <div id="diffShadowTtft" class="text-white font-bold">0ms</div>
+            </div>
+            <div class="p-2 rounded bg-slate-900 border border-slate-800">
+              <div class="text-[9px] text-slate-400 uppercase">Tokens / 成本</div>
+              <div id="diffShadowCost" class="text-white font-bold">$0.0000</div>
+            </div>
+          </div>
+          <div class="flex-1 flex flex-col min-h-0">
+            <div class="text-[10px] font-semibold text-slate-400 mb-1">候选回答 (前 512 字节):</div>
+            <div id="diffShadowSnippet" class="flex-1 p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] font-mono text-slate-200 overflow-y-auto custom-scroll whitespace-pre-wrap"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Diff Metric Summary Bar -->
+      <div class="p-3 rounded-xl bg-slate-900 border border-slate-800 flex items-center justify-between text-xs">
+        <div class="flex items-center gap-4">
+          <div>时延差异: <span id="diffLatencyDelta" class="font-mono font-bold text-emerald-400">0ms</span></div>
+          <div>成本差异: <span id="diffCostDelta" class="font-mono font-bold text-amber-400">$0.0000</span></div>
+        </div>
+        <button onclick="closeShadowDiffModal()" class="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-white transition">关闭对比</button>
+      </div>
+    </div>
+  </div>
 
   <!-- 1. Admin token modal -->
   <div id="tokenModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
@@ -3339,7 +3652,8 @@
         usage: "用量统计",
         audit: "请求审计日志流",
         playground: "调试场",
-        metrics: "监控指标"
+        metrics: "监控指标",
+        shadow: "流量镜像与金丝雀"
       };
       const titleEl = document.getElementById("currentTabTitle");
       if (titleEl && tabTitles[tabId]) {
@@ -3384,6 +3698,8 @@
       } else if (state.activeTab === "metrics") {
         fetchPrometheusMetrics();
         if (typeof fetchTraceConfig === "function") fetchTraceConfig();
+      } else if (state.activeTab === "shadow") {
+        if (typeof loadShadowTab === "function") loadShadowTab();
       }
     }
 
@@ -8482,6 +8798,289 @@
       const input = document.getElementById("cachePurgeModelInput");
       const model = input ? input.value.trim() : "";
       triggerCachePurge(model || undefined);
+    }
+
+    // --- Traffic Shadowing & Canary Logic ---
+    let shadowRecentEvaluations = [];
+
+    async function loadShadowTab() {
+      await Promise.all([
+        renderShadowStats(),
+        renderShadowRules(),
+        renderShadowEvaluations()
+      ]);
+    }
+
+    async function renderShadowStats() {
+      try {
+        const resp = await apiCall("/admin/v1/shadow/stats");
+        if (!resp || !resp.ok) return;
+        const data = await resp.json();
+
+        const totalEl = document.getElementById("shadowKpiTotal");
+        if (totalEl) totalEl.textContent = (data.total_evaluated || 0).toLocaleString();
+
+        const latEl = document.getElementById("shadowKpiLatency");
+        if (latEl) {
+          const primLat = data.avg_primary_lat_ms || 0;
+          const shadLat = data.avg_shadow_lat_ms || 0;
+          let diffStr = "";
+          if (primLat > 0) {
+            const diffPct = ((shadLat - primLat) / primLat) * 100;
+            const sign = diffPct > 0 ? "+" : "";
+            diffStr = ` ⚡ ${sign}${diffPct.toFixed(1)}%`;
+          }
+          latEl.innerHTML = `${primLat.toFixed(0)}ms ➔ <span class="${shadLat <= primLat ? 'text-emerald-400' : 'text-amber-400'}">${shadLat.toFixed(0)}ms</span><span class="text-xs ml-1">${diffStr}</span>`;
+        }
+
+        const costEl = document.getElementById("shadowKpiCost");
+        if (costEl) {
+          const saved = data.cost_saved_usd || 0;
+          costEl.textContent = `$${saved.toFixed(4)}`;
+        }
+
+        const healthEl = document.getElementById("shadowKpiHealth");
+        if (healthEl) {
+          const succ = data.successful_shadow || 0;
+          const fail = data.failed_shadow || 0;
+          const tot = succ + fail;
+          if (tot > 0) {
+            const rate = (succ / tot) * 100;
+            healthEl.textContent = `${rate.toFixed(1)}%`;
+          } else {
+            healthEl.textContent = "100.0%";
+          }
+        }
+      } catch (err) {
+        console.error("Failed to fetch shadow stats:", err);
+      }
+    }
+
+    async function renderShadowRules() {
+      const tbody = document.getElementById("shadowRulesTbody");
+      if (!tbody) return;
+      try {
+        const resp = await apiCall("/admin/v1/shadow/rules");
+        if (!resp || !resp.ok) return;
+        const data = await resp.json();
+        const rules = data && data.rules ? data.rules : [];
+        if (rules.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-slate-500 font-sans">暂无评测分流规则，点击右上角「添加评测规则」新建</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = rules.map(r => {
+          const modeBadge = r.mode === "CANARY"
+            ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">CANARY (灰度)</span>`
+            : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">SHADOW (镜像)</span>`;
+          const statusBadge = r.enabled
+            ? `<button onclick="toggleShadowRule(${r.id}, true)" class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 hover:bg-emerald-500/20">已启用 🟢</button>`
+            : `<button onclick="toggleShadowRule(${r.id}, false)" class="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700">已暂停 ⚪</button>`;
+          const matchStr = r.header_match && r.header_match.length > 0 ? escapeHtml(r.header_match) : `<span class="text-slate-500 font-sans">全部流量</span>`;
+          return `
+            <tr class="hover:bg-slate-900/40 transition">
+              <td class="py-2.5 px-3 font-mono font-bold text-slate-300">#${r.id}</td>
+              <td class="py-2.5 px-3">${modeBadge}</td>
+              <td class="py-2.5 px-3 font-mono font-medium text-slate-200">${escapeHtml(r.source_model)} <span class="text-slate-500">➔</span> <span class="text-cyan-400">${escapeHtml(r.target_model)}</span></td>
+              <td class="py-2.5 px-3 font-mono text-slate-400">${escapeHtml(r.target_provider || 'openai')}</td>
+              <td class="py-2.5 px-3 font-mono text-amber-300 font-bold">${((r.sample_rate || 1.0) * 100).toFixed(0)}%</td>
+              <td class="py-2.5 px-3 font-mono text-slate-400">${matchStr}</td>
+              <td class="py-2.5 px-3">${statusBadge}</td>
+              <td class="py-2.5 px-3 text-right">
+                <button onclick="deleteShadowRule(${r.id})" class="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/20 text-[10px] transition">删除</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-rose-400 font-sans">加载评测规则失败: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    async function renderShadowEvaluations() {
+      const tbody = document.getElementById("shadowEvalsTbody");
+      if (!tbody) return;
+      try {
+        const resp = await apiCall("/admin/v1/shadow/evaluations");
+        if (!resp || !resp.ok) return;
+        const data = await resp.json();
+        const evals = data && data.evaluations ? data.evaluations : [];
+        shadowRecentEvaluations = evals;
+        const countBadge = document.getElementById("shadowEvalsCountBadge");
+        if (countBadge) countBadge.textContent = `共 ${evals.length} 条快照`;
+
+        if (evals.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-slate-500 font-sans">暂无完成评测的双路数据，等待流量进入...</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = evals.map(it => {
+          const modeBadge = it.mode === "CANARY"
+            ? `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">CANARY</span>`
+            : `<span class="px-1.5 py-0.5 rounded text-[9px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">SHADOW</span>`;
+          const latDiff = it.shadow_latency_ms - it.primary_latency_ms;
+          const latClass = latDiff <= 0 ? "text-emerald-400" : "text-amber-400";
+          const sign = latDiff > 0 ? "+" : "";
+          const latStr = `${it.primary_latency_ms.toFixed(0)}ms vs ${it.shadow_latency_ms.toFixed(0)}ms <span class="${latClass} font-bold font-mono">(${sign}${latDiff.toFixed(0)}ms)</span>`;
+          const costStr = `$${(it.primary_cost_usd || 0).toFixed(4)} vs $${(it.shadow_cost_usd || 0).toFixed(4)}`;
+          const promptPreview = escapeHtml(it.prompt_preview || "（空）");
+
+          return `
+            <tr class="hover:bg-slate-900/40 transition">
+              <td class="py-2.5 px-3 font-mono text-[10px] text-cyan-400">${it.eval_id ? it.eval_id.substring(0, 8) : ''}...</td>
+              <td class="py-2.5 px-3">${modeBadge}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${escapeHtml(it.source_model)} <span class="text-slate-500">➔</span> <span class="text-cyan-300">${escapeHtml(it.target_model)}</span></td>
+              <td class="py-2.5 px-3 text-slate-400 max-w-[200px] truncate" title="${promptPreview}">${promptPreview}</td>
+              <td class="py-2.5 px-3 font-mono">${latStr}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${costStr}</td>
+              <td class="py-2.5 px-3 font-mono text-emerald-400">${it.primary_http_status} / ${it.shadow_http_status}</td>
+              <td class="py-2.5 px-3 text-right whitespace-nowrap space-x-1.5">
+                <button onclick="openShadowDiffModal('${it.eval_id}')" class="px-2 py-1 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 text-[10px] transition font-medium">🔍 双路对比</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-rose-400 font-sans">加载评测快照失败: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    function openShadowRuleModal() {
+      document.getElementById("shadowRuleId").value = "";
+      document.getElementById("shadowRuleSourceModel").value = "";
+      document.getElementById("shadowRuleTargetModel").value = "";
+      document.getElementById("shadowRuleMode").value = "SHADOW";
+      document.getElementById("shadowRuleTargetProvider").value = "openai";
+      document.getElementById("shadowRuleSampleRate").value = "1.0";
+      document.getElementById("shadowRuleSampleRateSlider").value = "1.0";
+      document.getElementById("shadowRuleHeaderMatch").value = "";
+      document.getElementById("shadowRuleEnabled").checked = true;
+      document.getElementById("shadowRuleModal").classList.remove("hidden");
+    }
+
+    function closeShadowRuleModal() {
+      document.getElementById("shadowRuleModal").classList.add("hidden");
+    }
+
+    async function saveShadowRule() {
+      const srcModel = document.getElementById("shadowRuleSourceModel").value.trim();
+      const tgtModel = document.getElementById("shadowRuleTargetModel").value.trim();
+      if (!srcModel || !tgtModel) {
+        showToast("源模型与目标模型为必填项", "error");
+        return;
+      }
+      const mode = document.getElementById("shadowRuleMode").value;
+      const targetProvider = document.getElementById("shadowRuleTargetProvider").value.trim() || "openai";
+      const sampleRate = parseFloat(document.getElementById("shadowRuleSampleRate").value) || 1.0;
+      const headerMatch = document.getElementById("shadowRuleHeaderMatch").value.trim();
+      const enabled = document.getElementById("shadowRuleEnabled").checked;
+
+      const payload = {
+        source_model: srcModel,
+        target_model: tgtModel,
+        mode: mode,
+        target_provider: targetProvider,
+        sample_rate: sampleRate,
+        header_match: headerMatch,
+        enabled: enabled
+      };
+
+      try {
+        const resp = await apiCall("/admin/v1/shadow/rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (resp && resp.ok) {
+          showToast("评测规则已成功创建", "success");
+          closeShadowRuleModal();
+          loadShadowTab();
+        } else {
+          showToast("保存失败", "error");
+        }
+      } catch (err) {
+        showToast(`保存失败: ${err.message}`, "error");
+      }
+    }
+
+    async function toggleShadowRule(id, currentEnabled) {
+      try {
+        const resp = await apiCall(`/admin/v1/shadow/rules/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !currentEnabled })
+        });
+        if (resp && resp.ok) {
+          showToast(`规则 #${id} 状态已更新`, "success");
+          renderShadowRules();
+        } else {
+          showToast("更新失败", "error");
+        }
+      } catch (err) {
+        showToast(`更新失败: ${err.message}`, "error");
+      }
+    }
+
+    async function deleteShadowRule(id) {
+      if (!confirm(`确定要删除评测规则 #${id} 吗？`)) return;
+      try {
+        const resp = await apiCall(`/admin/v1/shadow/rules/${id}`, {
+          method: "DELETE"
+        });
+        if (resp && resp.ok) {
+          showToast(`规则 #${id} 已删除`, "success");
+          renderShadowRules();
+        } else {
+          showToast("删除失败", "error");
+        }
+      } catch (err) {
+        showToast(`删除失败: ${err.message}`, "error");
+      }
+    }
+
+    function openShadowDiffModal(evalId) {
+      const it = shadowRecentEvaluations.find(x => x.eval_id === evalId);
+      if (!it) {
+        showToast("未找到该评测条目", "error");
+        return;
+      }
+      document.getElementById("diffEvalId").textContent = it.eval_id;
+      document.getElementById("diffTraceId").textContent = it.trace_id || "（无）";
+      document.getElementById("diffPrompt").textContent = it.prompt_preview || "（空）";
+
+      document.getElementById("diffPrimaryModel").textContent = it.source_model;
+      document.getElementById("diffPrimaryStatus").textContent = `HTTP ${it.primary_http_status}`;
+      document.getElementById("diffPrimaryLatency").textContent = `${it.primary_latency_ms.toFixed(1)}ms`;
+      document.getElementById("diffPrimaryTtft").textContent = `${it.primary_ttft_ms.toFixed(1)}ms`;
+      document.getElementById("diffPrimaryCost").textContent = `$${(it.primary_cost_usd || 0).toFixed(4)}`;
+      document.getElementById("diffPrimarySnippet").textContent = it.primary_resp_snippet || "（无内容返回）";
+
+      document.getElementById("diffShadowModel").textContent = it.target_model;
+      document.getElementById("diffShadowStatus").textContent = `HTTP ${it.shadow_http_status}`;
+      document.getElementById("diffShadowLatency").textContent = `${it.shadow_latency_ms.toFixed(1)}ms`;
+      document.getElementById("diffShadowTtft").textContent = `${it.shadow_ttft_ms.toFixed(1)}ms`;
+      document.getElementById("diffShadowCost").textContent = `$${(it.shadow_cost_usd || 0).toFixed(4)}`;
+      document.getElementById("diffShadowSnippet").textContent = it.shadow_resp_snippet || "（无内容返回）";
+
+      const latDiff = it.shadow_latency_ms - it.primary_latency_ms;
+      const latPct = it.primary_latency_ms > 0 ? ((latDiff / it.primary_latency_ms) * 100).toFixed(1) : "0.0";
+      const latSign = latDiff > 0 ? "+" : "";
+      const latEl = document.getElementById("diffLatencyDelta");
+      if (latEl) {
+        latEl.textContent = `${latSign}${latDiff.toFixed(1)}ms (${latSign}${latPct}%)`;
+        latEl.className = latDiff <= 0 ? "font-mono font-bold text-emerald-400" : "font-mono font-bold text-amber-400";
+      }
+
+      const costSaved = (it.primary_cost_usd || 0) - (it.shadow_cost_usd || 0);
+      const costEl = document.getElementById("diffCostDelta");
+      if (costEl) {
+        costEl.textContent = `$${costSaved.toFixed(4)} 节约`;
+      }
+
+      document.getElementById("shadowDiffModal").classList.remove("hidden");
+    }
+
+    function closeShadowDiffModal() {
+      document.getElementById("shadowDiffModal").classList.add("hidden");
     }
   </script>
 </body>
