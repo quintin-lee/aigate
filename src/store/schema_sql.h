@@ -192,6 +192,24 @@ CREATE TABLE IF NOT EXISTS shadow_rules (
 );
 CREATE INDEX IF NOT EXISTS ix_shadow_rules_enabled ON shadow_rules(enabled, source_model);
 INSERT INTO schema_migrations(version) VALUES (13) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v14: prompt compression and token pruning rules
+CREATE TABLE IF NOT EXISTS compressor_rules (
+    id                  VARCHAR(36) PRIMARY KEY,
+    model_pattern       VARCHAR(64) NOT NULL,
+    enabled             BOOLEAN NOT NULL DEFAULT TRUE,
+    level               INTEGER NOT NULL DEFAULT 1,
+    min_tokens          INTEGER NOT NULL DEFAULT 2048,
+    max_history_turns   INTEGER NOT NULL DEFAULT 6,
+    target_ratio        DOUBLE PRECISION NOT NULL DEFAULT 0.60,
+    preserve_system     BOOLEAN NOT NULL DEFAULT TRUE,
+    preserve_code       BOOLEAN NOT NULL DEFAULT TRUE,
+    preserve_tools      BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at          BIGINT NOT NULL,
+    updated_at          BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_compressor_rules_model ON compressor_rules(enabled, model_pattern);
+INSERT INTO schema_migrations(version) VALUES (14) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

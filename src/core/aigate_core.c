@@ -75,6 +75,24 @@ aigate_core_reload_shadow_rules(aigate_core* ac)
     return 0;
 }
 
+int
+aigate_core_reload_compressor_rules(aigate_core* ac)
+{
+    if (ac == NULL) {
+        return -1;
+    }
+    pthread_mutex_lock(&ac->comp_rules_lock);
+    ac->n_comp_rules = 0;
+    if (ac->ps != NULL) {
+        const pg_ops_t* ops = pg_store_ops(ac->ps);
+        if (ops != NULL && ops->list_compressor_rules != NULL) {
+            ops->list_compressor_rules(ops->ctx, ac->comp_rules, 64, &ac->n_comp_rules);
+        }
+    }
+    pthread_mutex_unlock(&ac->comp_rules_lock);
+    return 0;
+}
+
 /** @brief Extract prompt preview snippet from parsed JSON body. */
 static void
 extract_prompt_snippet(json_t* jbody, char* out, size_t out_sz)
@@ -251,7 +269,16 @@ aigate_core_init(aigate_core*   ac,
     }
     aigate_core_reload_shadow_rules(ac);
 
+    pthread_mutex_init(&ac->comp_rules_lock, NULL);
+    ac->comp_cache = compressor_cache_create(200);
+    aigate_core_reload_compressor_rules(ac);
+
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
+        if (ac->comp_cache != NULL) {
+            compressor_cache_destroy(ac->comp_cache);
+            ac->comp_cache = NULL;
+        }
+        pthread_mutex_destroy(&ac->comp_rules_lock);
         if (ac->shadow_eng != NULL) {
             shadow_engine_destroy(ac->shadow_eng);
             ac->shadow_eng = NULL;
@@ -363,6 +390,11 @@ aigate_core_shutdown(aigate_core* ac)
         ac->shadow_eng = NULL;
     }
     pthread_mutex_destroy(&ac->shadow_rules_lock);
+    if (ac->comp_cache != NULL) {
+        compressor_cache_destroy(ac->comp_cache);
+        ac->comp_cache = NULL;
+    }
+    pthread_mutex_destroy(&ac->comp_rules_lock);
     auth_key_shutdown(&ac->keys);
 }
 
@@ -500,6 +532,7 @@ chat_req_cleanup(chat_req_t* q)
     free(q->sanitized_body);
     q->sanitized_body = NULL;
     memset(&q->pii_map, 0, sizeof(q->pii_map));
+    prompt_compressor_result_cleanup(&q->comp_result);
 }
 
 /** @brief Auth → QPS → daily quota → monthly budget gates.
@@ -1353,6 +1386,145 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     if (cache_handled != 0) {
         chat_req_cleanup(&chatq);
         return 0;
+    }
+
+    /* --- prompt compression and token pruning --- */
+    if (ac != NULL && ac->comp_cache != NULL && chatq.eff_body != NULL && chatq.eff_len > 0) {
+        const char* comp_hdr = rq->compress_control;
+        bool        skip_comp =
+            (comp_hdr != NULL && (strcmp(comp_hdr, "off") == 0 || strcmp(comp_hdr, "none") == 0));
+        if (!skip_comp) {
+            uint32_t est_tokens =
+                compressor_estimate_tokens((const char*)chatq.eff_body, chatq.eff_len);
+            compressor_rule_t matched_rule;
+            bool              have_rule = false;
+
+            pthread_mutex_lock(&ac->comp_rules_lock);
+            for (int i = 0; i < ac->n_comp_rules; i++) {
+                if (compressor_rule_match(&ac->comp_rules[i], chatq.model, est_tokens)) {
+                    matched_rule = ac->comp_rules[i];
+                    have_rule = true;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&ac->comp_rules_lock);
+
+            if (!have_rule && comp_hdr != NULL) {
+                if (strcmp(comp_hdr, "moderate") == 0 || strcmp(comp_hdr, "aggressive") == 0) {
+                    memset(&matched_rule, 0, sizeof(matched_rule));
+                    matched_rule.enabled = true;
+                    matched_rule.level = (strcmp(comp_hdr, "aggressive") == 0)
+                                             ? COMPRESS_LEVEL_AGGRESSIVE
+                                             : COMPRESS_LEVEL_MODERATE;
+                    matched_rule.min_tokens = 0;
+                    matched_rule.max_history_turns = 6;
+                    matched_rule.target_ratio = 0.60;
+                    matched_rule.preserve_system = true;
+                    matched_rule.preserve_code = true;
+                    matched_rule.preserve_tools = true;
+                    have_rule = true;
+                }
+            } else if (have_rule && comp_hdr != NULL) {
+                if (strcmp(comp_hdr, "aggressive") == 0) {
+                    matched_rule.level = COMPRESS_LEVEL_AGGRESSIVE;
+                } else if (strcmp(comp_hdr, "moderate") == 0) {
+                    matched_rule.level = COMPRESS_LEVEL_MODERATE;
+                }
+            }
+
+            if (have_rule) {
+                tracer_span_start(&chatq.trace_ctx,
+                                  "prompt_compression",
+                                  SPAN_KIND_INTERNAL,
+                                  chatq.trace_ctx.root_span_id);
+                bool ok = prompt_compressor_process_payload(
+                    (const char*)chatq.eff_body, chatq.eff_len, &matched_rule, &chatq.comp_result);
+                if (ok && chatq.comp_result.compressed &&
+                    chatq.comp_result.compressed_payload != NULL) {
+                    chatq.eff_body = chatq.comp_result.compressed_payload;
+                    chatq.eff_len = chatq.comp_result.compressed_len;
+
+                    tracer_span_set_attr(&chatq.trace_ctx,
+                                         "prompt_compression",
+                                         "aigate.compression.applied",
+                                         "true");
+                    tracer_span_set_attr(&chatq.trace_ctx,
+                                         "prompt_compression",
+                                         "aigate.compression.level",
+                                         matched_rule.level == COMPRESS_LEVEL_AGGRESSIVE
+                                             ? "aggressive"
+                                             : "moderate");
+                    tracer_span_set_attr_int(&chatq.trace_ctx,
+                                             "prompt_compression",
+                                             "aigate.compression.original_tokens",
+                                             chatq.comp_result.original_tokens);
+                    tracer_span_set_attr_int(&chatq.trace_ctx,
+                                             "prompt_compression",
+                                             "aigate.compression.compressed_tokens",
+                                             chatq.comp_result.compressed_tokens);
+                    tracer_span_set_attr_int(&chatq.trace_ctx,
+                                             "prompt_compression",
+                                             "aigate.compression.saved_tokens",
+                                             chatq.comp_result.saved_tokens);
+                    char ratio_buf[32];
+                    snprintf(
+                        ratio_buf, sizeof(ratio_buf), "%.2f", chatq.comp_result.compression_ratio);
+                    tracer_span_set_attr(&chatq.trace_ctx,
+                                         "prompt_compression",
+                                         "aigate.compression.ratio",
+                                         ratio_buf);
+                    tracer_span_set_attr_int(&chatq.trace_ctx,
+                                             "prompt_compression",
+                                             "aigate.compression.duration_us",
+                                             chatq.comp_result.elapsed_us);
+                    tracer_span_end(&chatq.trace_ctx, "prompt_compression", SPAN_STATUS_OK, NULL);
+
+                    if (rc->set_header != NULL) {
+                        char hbuf[32];
+                        snprintf(hbuf, sizeof(hbuf), "%u", chatq.comp_result.original_tokens);
+                        rc->set_header(rc->impl, "X-Aigate-Prompt-Original-Tokens", hbuf);
+                        snprintf(hbuf, sizeof(hbuf), "%u", chatq.comp_result.compressed_tokens);
+                        rc->set_header(rc->impl, "X-Aigate-Prompt-Compressed-Tokens", hbuf);
+                        snprintf(hbuf, sizeof(hbuf), "%.2f", chatq.comp_result.compression_ratio);
+                        rc->set_header(rc->impl, "X-Aigate-Compression-Ratio", hbuf);
+                        snprintf(hbuf, sizeof(hbuf), "%u", chatq.comp_result.saved_tokens);
+                        rc->set_header(rc->impl, "X-Aigate-Compression-Saved-Tokens", hbuf);
+                    }
+
+                    compressor_snapshot_t snap;
+                    memset(&snap, 0, sizeof(snap));
+                    snprintf(snap.req_id, sizeof(snap.req_id), "%s", chatq.trace_ctx.trace_id);
+                    snprintf(snap.model, sizeof(snap.model), "%s", chatq.model);
+                    snap.timestamp = (int64_t)time(NULL);
+                    snap.original_tokens = chatq.comp_result.original_tokens;
+                    snap.compressed_tokens = chatq.comp_result.compressed_tokens;
+                    snap.saved_tokens = chatq.comp_result.saved_tokens;
+                    snap.compression_ratio = chatq.comp_result.compression_ratio;
+                    snap.elapsed_us = chatq.comp_result.elapsed_us;
+                    extract_prompt_snippet(
+                        chatq.jbody, snap.prompt_preview, sizeof(snap.prompt_preview));
+                    if (chatq.rq->body != NULL) {
+                        snprintf(snap.orig_preview,
+                                 sizeof(snap.orig_preview),
+                                 "%.511s",
+                                 (const char*)chatq.rq->body);
+                    }
+                    if (chatq.comp_result.compressed_payload != NULL) {
+                        snprintf(snap.comp_preview,
+                                 sizeof(snap.comp_preview),
+                                 "%.511s",
+                                 chatq.comp_result.compressed_payload);
+                    }
+                    compressor_cache_record(ac->comp_cache, &snap);
+                } else {
+                    tracer_span_set_attr(&chatq.trace_ctx,
+                                         "prompt_compression",
+                                         "aigate.compression.applied",
+                                         "false");
+                    tracer_span_end(&chatq.trace_ctx, "prompt_compression", SPAN_STATUS_OK, NULL);
+                }
+            }
+        }
     }
 
     if (is_streaming) {

@@ -45,26 +45,32 @@ struct fake_shadow_rule {
     shadow_rule_t r;
 };
 
+struct fake_compressor_rule {
+    int               in_use;
+    compressor_rule_t r;
+};
+
 struct fake_db {
-    struct fake_key         keys[FAKE_CAP];
-    model_rec_t             models[FAKE_CAP];
-    int                     n_models;
-    int                     fail_create_model; /* when nonzero, create_model fails */
-    struct fake_provider    providers[FAKE_CAP];
-    long                    next_provider_id;
-    struct fake_group       groups[FAKE_CAP];
-    long                    next_group_id;
-    struct fake_rule        rules[FAKE_CAP];
-    long                    next_rule_id;
-    struct fake_shadow_rule shadow_rules[FAKE_CAP];
-    long                    next_shadow_rule_id;
-    usage_row_t             usage[FAKE_CAP];
-    int                     n_usage;
-    long                    next_key_id;
-    usage_request_row_t     reqs[FAKE_CAP];
-    int                     n_reqs;
-    cost_row_t              cost_rows[FAKE_CAP];
-    int                     n_cost_rows;
+    struct fake_key             keys[FAKE_CAP];
+    model_rec_t                 models[FAKE_CAP];
+    int                         n_models;
+    int                         fail_create_model; /* when nonzero, create_model fails */
+    struct fake_provider        providers[FAKE_CAP];
+    long                        next_provider_id;
+    struct fake_group           groups[FAKE_CAP];
+    long                        next_group_id;
+    struct fake_rule            rules[FAKE_CAP];
+    long                        next_rule_id;
+    struct fake_shadow_rule     shadow_rules[FAKE_CAP];
+    long                        next_shadow_rule_id;
+    struct fake_compressor_rule compressor_rules[FAKE_CAP];
+    usage_row_t                 usage[FAKE_CAP];
+    int                         n_usage;
+    long                        next_key_id;
+    usage_request_row_t         reqs[FAKE_CAP];
+    int                         n_reqs;
+    cost_row_t                  cost_rows[FAKE_CAP];
+    int                         n_cost_rows;
 };
 
 /** @brief Deep-copy a key record (including dynamic arrays). */
@@ -856,6 +862,60 @@ fake_delete_shadow_rule(void* ctx, long id)
     return 1;
 }
 
+/** @brief Fake compressor-rule listing. */
+static int
+fake_list_compressor_rules(void* ctx, compressor_rule_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        if (db->compressor_rules[i].in_use) {
+            out[(*n)++] = db->compressor_rules[i].r;
+        }
+    }
+    return 0;
+}
+
+/** @brief Fake compressor-rule upsert. */
+static int
+fake_upsert_compressor_rule(void* ctx, const compressor_rule_t* rule)
+{
+    struct fake_db* db = ctx;
+    /* If exists by id, update */
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_compressor_rule* fr = &db->compressor_rules[i];
+        if (fr->in_use && strcmp(fr->r.id, rule->id) == 0) {
+            fr->r = *rule;
+            return 0;
+        }
+    }
+    /* Otherwise insert */
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_compressor_rule* fr = &db->compressor_rules[i];
+        if (!fr->in_use) {
+            fr->in_use = 1;
+            fr->r = *rule;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/** @brief Fake compressor-rule delete. */
+static int
+fake_delete_compressor_rule(void* ctx, const char* id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_compressor_rule* fr = &db->compressor_rules[i];
+        if (fr->in_use && strcmp(fr->r.id, id) == 0) {
+            fr->in_use = 0;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /** @brief Assemble the pg_ops vtable for admin_api tests. */
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
@@ -897,6 +957,9 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->create_shadow_rule = fake_create_shadow_rule;
     ops->update_shadow_rule = fake_update_shadow_rule;
     ops->delete_shadow_rule = fake_delete_shadow_rule;
+    ops->list_compressor_rules = fake_list_compressor_rules;
+    ops->upsert_compressor_rule = fake_upsert_compressor_rule;
+    ops->delete_compressor_rule = fake_delete_compressor_rule;
 }
 
 /** @brief Set up the admin test fixture: in-memory store + core + admin context. */
@@ -3949,6 +4012,181 @@ TEST_CASE(test_admin_shadow_endpoints)
     TEST_ASSERT(status == 200, "GET /admin/v1/shadow/rules returns 200");
     TEST_ASSERT(body != NULL && strstr(body, "\"id\":2") != NULL, "rule 2 remains");
     TEST_ASSERT(strstr(body, "\"id\":1") == NULL, "rule 1 no longer present");
+    free(body);
+    body = NULL;
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_compressor_endpoints)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps = NULL;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. GET /admin/v1/compressor/rules -> initially empty */
+    admin_dispatch(&adm,
+                   "/admin/v1/compressor/rules",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/compressor/rules returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"rules\":[]") != NULL,
+                "compressor rules list initially empty");
+    free(body);
+    body = NULL;
+
+    /* 2. POST /admin/v1/compressor/rules with missing model_pattern -> 400 */
+    const char* bad_payload = "{\"level\":1}";
+    admin_dispatch(&adm,
+                   "/admin/v1/compressor/rules",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   bad_payload,
+                   strlen(bad_payload),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 400, "POST without model_pattern returns 400");
+    free(body);
+    body = NULL;
+
+    /* 3. POST /admin/v1/compressor/rules -> create rule */
+    const char* r1_payload =
+        "{\"id\":\"rule-c1\",\"model_pattern\":\"gpt-4o\",\"enabled\":true,"
+        "\"level\":1,\"min_tokens\":1024,\"max_history_turns\":4,"
+        "\"target_ratio\":0.60,\"preserve_system\":true,\"preserve_code\":true,"
+        "\"preserve_tools\":true}";
+    admin_dispatch(&adm,
+                   "/admin/v1/compressor/rules",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   r1_payload,
+                   strlen(r1_payload),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "POST /admin/v1/compressor/rules returns 201");
+    TEST_ASSERT(body != NULL, "body not NULL");
+    TEST_ASSERT(strstr(body, "\"id\":\"rule-c1\"") != NULL, "rule id is rule-c1");
+    TEST_ASSERT(strstr(body, "\"model_pattern\":\"gpt-4o\"") != NULL, "model_pattern matches");
+    TEST_ASSERT(strstr(body, "\"min_tokens\":1024") != NULL, "min_tokens matches");
+    free(body);
+    body = NULL;
+
+    /* 4. PUT /admin/v1/compressor/rules/rule-c1 -> update rule */
+    const char* r1_update = "{\"level\":2,\"target_ratio\":0.50,\"min_tokens\":512}";
+    admin_dispatch(&adm,
+                   "/admin/v1/compressor/rules/rule-c1",
+                   "PUT",
+                   NULL,
+                   "admin-secret-token",
+                   r1_update,
+                   strlen(r1_update),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "PUT /admin/v1/compressor/rules/rule-c1 returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"level\":2") != NULL, "level updated to 2");
+    TEST_ASSERT(strstr(body, "\"min_tokens\":512") != NULL, "min_tokens updated to 512");
+    free(body);
+    body = NULL;
+
+    /* 5. GET /admin/v1/compressor/snapshots -> returns snapshots array */
+    compressor_snapshot_t snap;
+    memset(&snap, 0, sizeof(snap));
+    snprintf(snap.req_id, sizeof(snap.req_id), "snap-test-1");
+    snprintf(snap.model, sizeof(snap.model), "gpt-4o");
+    snap.original_tokens = 2000;
+    snap.compressed_tokens = 1200;
+    snap.saved_tokens = 800;
+    snap.compression_ratio = 0.60;
+    snap.elapsed_us = 150;
+    snprintf(snap.prompt_preview, sizeof(snap.prompt_preview), "Hello world prompt");
+    compressor_cache_record(core.comp_cache, &snap);
+
+    admin_dispatch(&adm,
+                   "/admin/v1/compressor/snapshots",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/compressor/snapshots returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"snapshots\"") != NULL, "contains snapshots array");
+    TEST_ASSERT(strstr(body, "snap-test-1") != NULL, "snapshot req_id found");
+    free(body);
+    body = NULL;
+
+    /* 6. GET /admin/v1/compressor/stats -> returns stats */
+    admin_dispatch(&adm,
+                   "/admin/v1/compressor/stats",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/compressor/stats returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"total_evaluated\"") != NULL,
+                "contains total_evaluated");
+    TEST_ASSERT(strstr(body, "\"total_compressed\"") != NULL, "contains total_compressed");
+    TEST_ASSERT(strstr(body, "\"total_saved_tokens\"") != NULL, "contains total_saved_tokens");
+    TEST_ASSERT(strstr(body, "\"avg_compression_ratio\"") != NULL,
+                "contains avg_compression_ratio");
+    free(body);
+    body = NULL;
+
+    /* 7. DELETE /admin/v1/compressor/rules/rule-c1 -> delete rule */
+    admin_dispatch(&adm,
+                   "/admin/v1/compressor/rules/rule-c1",
+                   "DELETE",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "DELETE /admin/v1/compressor/rules/rule-c1 returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"deleted\":true") != NULL, "deleted is true");
+    free(body);
+    body = NULL;
+
+    /* 8. GET /admin/v1/compressor/rules -> empty */
+    admin_dispatch(&adm,
+                   "/admin/v1/compressor/rules",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/compressor/rules returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"rules\":[]") != NULL,
+                "compressor rules empty after delete");
     free(body);
     body = NULL;
 

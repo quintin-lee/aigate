@@ -556,6 +556,31 @@ main(void)
     extern void test_admin_shadow_endpoints(void);
     test_register("admin_shadow_endpoints", test_admin_shadow_endpoints);
 
+    extern void test_compressor_fast_token_estimate(void);
+    test_register("compressor_fast_token_estimate", test_compressor_fast_token_estimate);
+
+    extern void test_compressor_whitespace_sanitization(void);
+    test_register("compressor_whitespace_sanitization", test_compressor_whitespace_sanitization);
+
+    extern void test_compressor_history_windowing_and_safety(void);
+    test_register("compressor_history_windowing_and_safety",
+                  test_compressor_history_windowing_and_safety);
+
+    extern void test_compressor_sentence_density_pruning_and_cache(void);
+    test_register("compressor_sentence_density_pruning_and_cache",
+                  test_compressor_sentence_density_pruning_and_cache);
+
+    extern void test_compressor_rule_serialization_and_match(void);
+    test_register("compressor_rule_serialization_and_match",
+                  test_compressor_rule_serialization_and_match);
+
+    extern void test_pipeline_prompt_compression_and_headers(void);
+    test_register("pipeline_prompt_compression_and_headers",
+                  test_pipeline_prompt_compression_and_headers);
+
+    extern void test_admin_compressor_endpoints(void);
+    test_register("admin_compressor_endpoints", test_admin_compressor_endpoints);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

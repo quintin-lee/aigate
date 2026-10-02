@@ -38,17 +38,19 @@ struct fkey {
 };
 
 struct fdb {
-    struct fkey      keys[FKEYS];
-    model_rec_t      models[FMODELS];
-    int              n_models;
-    int              fail_list; /* when nonzero, list_models returns -1 */
-    usage_row_t      usage[FUSAGE];
-    int              n_usage;
-    int              flush_calls;
-    guardrail_rule_t guardrails[8];
-    int              n_guardrails;
-    shadow_rule_t    shadow_rules[8];
-    int              n_shadow_rules;
+    struct fkey       keys[FKEYS];
+    model_rec_t       models[FMODELS];
+    int               n_models;
+    int               fail_list; /* when nonzero, list_models returns -1 */
+    usage_row_t       usage[FUSAGE];
+    int               n_usage;
+    int               flush_calls;
+    guardrail_rule_t  guardrails[8];
+    int               n_guardrails;
+    shadow_rule_t     shadow_rules[8];
+    int               n_shadow_rules;
+    compressor_rule_t compressor_rules[8];
+    int               n_compressor_rules;
 };
 
 /** @brief Fake allowlist: copy the whole key record. */
@@ -183,6 +185,22 @@ f_list_shadow_rules(void* ctx, shadow_rule_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief Fake compressor-rule listing: copy in-memory table to output. */
+static int
+f_list_compressor_rules(void* ctx, compressor_rule_t* out, int cap, int* n)
+{
+    struct fdb* db = ctx;
+    int         cnt = db->n_compressor_rules;
+    if (cnt > cap) {
+        cnt = cap;
+    }
+    for (int i = 0; i < cnt; i++) {
+        out[i] = db->compressor_rules[i];
+    }
+    *n = cnt;
+    return 0;
+}
+
 /** @brief Assemble the fake pg_ops vtable with ctx pointing at the in-memory store. */
 static void
 fbuild_ops(struct fdb* db, pg_ops_t* ops)
@@ -194,6 +212,7 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
     ops->list_models = f_list_models;
     ops->list_guardrails_rules = f_list_guardrails;
     ops->list_shadow_rules = f_list_shadow_rules;
+    ops->list_compressor_rules = f_list_compressor_rules;
     ops->flush_usage = f_flush_rows;
     ops->flush_usage_requests = (int (*)(void*, const usage_request_row_t*, int))f_req_stub;
     ops->query_usage_requests =
@@ -1360,6 +1379,102 @@ TEST_CASE(test_pipeline_traffic_shadowing_cloning_and_pairing)
     shadow_stats_t stats;
     shadow_engine_get_stats(ac.shadow_eng, &stats);
     TEST_ASSERT(stats.total_evaluated >= 1, "at least 1 evaluation recorded in shadow engine");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_pipeline_prompt_compression_and_headers)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    /* Model 0: gpt-4o */
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    /* Compressor rule: gpt-4o, min_tokens=10, max_history_turns=1, moderate */
+    snprintf(db.compressor_rules[0].id, sizeof(db.compressor_rules[0].id), "rule-c01");
+    snprintf(db.compressor_rules[0].model_pattern,
+             sizeof(db.compressor_rules[0].model_pattern),
+             "gpt-4o");
+    db.compressor_rules[0].enabled = true;
+    db.compressor_rules[0].level = COMPRESS_LEVEL_MODERATE;
+    db.compressor_rules[0].min_tokens = 10;
+    db.compressor_rules[0].max_history_turns = 1;
+    db.compressor_rules[0].target_ratio = 0.60;
+    db.compressor_rules[0].preserve_system = true;
+    db.compressor_rules[0].preserve_code = true;
+    db.compressor_rules[0].preserve_tools = true;
+    db.n_compressor_rules = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    const char* multi_turn_body =
+        "{\n"
+        "  \"model\": \"gpt-4o\",\n"
+        "  \"messages\": [\n"
+        "    {\"role\": \"system\", \"content\": \"System instructions.\"},\n"
+        "    {\"role\": \"user\", \"content\": \"Old turn 1 question with extra words to make it "
+        "long enough.\"},\n"
+        "    {\"role\": \"assistant\", \"content\": \"Old turn 1 answer.\"},\n"
+        "    {\"role\": \"user\", \"content\": \"Old turn 2 question with more extra words.\"},\n"
+        "    {\"role\": \"assistant\", \"content\": \"Old turn 2 answer.\"},\n"
+        "    {\"role\": \"user\", \"content\": \"Final question: hello world!\"}\n"
+        "  ]\n"
+        "}";
+
+    struct cap c1;
+    memset(&c1, 0, sizeof c1);
+    run_with_body(&ac, "test-key", multi_turn_body, &c1);
+    TEST_ASSERT(c1.status == 200, "status 200, got %d", c1.status);
+    TEST_ASSERT(cap_has_header(&c1, "X-Aigate-Prompt-Original-Tokens:"),
+                "missing X-Aigate-Prompt-Original-Tokens header");
+    TEST_ASSERT(cap_has_header(&c1, "X-Aigate-Prompt-Compressed-Tokens:"),
+                "missing X-Aigate-Prompt-Compressed-Tokens header");
+    TEST_ASSERT(cap_has_header(&c1, "X-Aigate-Compression-Ratio:"),
+                "missing X-Aigate-Compression-Ratio header");
+    TEST_ASSERT(cap_has_header(&c1, "X-Aigate-Compression-Saved-Tokens:"),
+                "missing X-Aigate-Compression-Saved-Tokens header");
+
+    compressor_stats_t stats;
+    compressor_cache_get_stats(ac.comp_cache, &stats);
+    TEST_ASSERT(stats.total_compressed >= 1, "at least 1 request compressed");
+    TEST_ASSERT(stats.total_saved_tokens > 0, "positive saved tokens recorded");
+
+    /* Test with X-Aigate-Compress: off */
+    aigate_request_ctx rq_off;
+    memset(&rq_off, 0, sizeof rq_off);
+    rq_off.method = "POST";
+    rq_off.path = "/v1/chat/completions";
+    rq_off.bearer = "test-key";
+    rq_off.client_ip = "127.0.0.1";
+    rq_off.body = multi_turn_body;
+    rq_off.body_len = strlen(multi_turn_body);
+    rq_off.compress_control = "off";
+
+    struct cap c2;
+    memset(&c2, 0, sizeof c2);
+    aigate_response_ctx rc2 = cap_rc(&c2);
+    aigate_handle_request(&ac, &rq_off, &rc2);
+    TEST_ASSERT(rc2.status == 200, "status 200 on off, got %d", rc2.status);
+    TEST_ASSERT(!cap_has_header(&c2, "X-Aigate-Prompt-Original-Tokens:"),
+                "should not have compression header when off");
 
     aigate_core_shutdown(&ac);
     pg_store_close(ps);
