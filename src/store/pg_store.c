@@ -2100,6 +2100,172 @@ pq_delete_guardrails_rule(void* vctx, long id)
     return -1;
 }
 
+/** @brief libpq implementation of pg_ops.list_shadow_rules: 0 on success, -1 on error. */
+static int
+pq_list_shadow_rules(void* vctx, shadow_rule_t* out, int cap, int* n)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "SELECT id, source_model, target_model, target_provider, "
+                            "mode, sample_rate, header_match, enabled, timeout_ms "
+                            "FROM shadow_rules ORDER BY id";
+    *n = 0;
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_shadow_rules: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        PQclear(res);
+        return -1;
+    }
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        out[i].id = atol(PQgetvalue(res, i, 0));
+        copy_field(out[i].source_model, sizeof out[i].source_model, PQgetvalue(res, i, 1));
+        copy_field(out[i].target_model, sizeof out[i].target_model, PQgetvalue(res, i, 2));
+        copy_field(out[i].target_provider, sizeof out[i].target_provider, PQgetvalue(res, i, 3));
+        const char* mode_str = PQgetvalue(res, i, 4);
+        out[i].mode = (mode_str != NULL && strcmp(mode_str, "canary") == 0) ? TRAFFIC_MODE_CANARY
+                                                                            : TRAFFIC_MODE_SHADOW;
+        out[i].sample_rate = atof(PQgetvalue(res, i, 5));
+        copy_field(out[i].header_match, sizeof out[i].header_match, PQgetvalue(res, i, 6));
+        out[i].enabled = strcmp(PQgetvalue(res, i, 7), "t") == 0;
+        out[i].timeout_ms = (uint32_t)atoi(PQgetvalue(res, i, 8));
+        if (out[i].timeout_ms == 0) {
+            out[i].timeout_ms = 10000;
+        }
+    }
+    *n = nt;
+    PQclear(res);
+    return 0;
+}
+
+/** @brief libpq implementation of pg_ops.create_shadow_rule: 0 on success, -1 on error. */
+static int
+pq_create_shadow_rule(void* vctx, const shadow_rule_t* rule, long* out_id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO shadow_rules(source_model, target_model, target_provider, mode, "
+        "sample_rate, header_match, enabled, timeout_ms) "
+        "VALUES($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id";
+    const char* mode_str = (rule->mode == TRAFFIC_MODE_CANARY) ? "canary" : "shadow";
+    char        sample_rate_str[32];
+    snprintf(sample_rate_str, sizeof sample_rate_str, "%.4f", rule->sample_rate);
+    const char* enabled_str = rule->enabled ? "true" : "false";
+    char        timeout_str[32];
+    snprintf(
+        timeout_str, sizeof timeout_str, "%u", rule->timeout_ms > 0 ? rule->timeout_ms : 10000);
+
+    const char* vals[8] = {rule->source_model,
+                           rule->target_model,
+                           rule->target_provider,
+                           mode_str,
+                           sample_rate_str,
+                           rule->header_match,
+                           enabled_str,
+                           timeout_str};
+    int         plens[8] = {0, 0, 0, 0, 0, 0, 0, 0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 8, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
+        long id = atol(PQgetvalue(res, 0, 0));
+        PQclear(res);
+        if (out_id != NULL) {
+            *out_id = id;
+        }
+        return 0;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg create_shadow_rule: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg create_shadow_rule: query alloc failed");
+    }
+    return -1;
+}
+
+/** @brief libpq implementation of pg_ops.update_shadow_rule: 0 on success, -1 on error. */
+static int
+pq_update_shadow_rule(void* vctx, const shadow_rule_t* rule)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "UPDATE shadow_rules SET source_model = $1, target_model = $2, target_provider = $3, "
+        "mode = $4, sample_rate = $5, header_match = $6, enabled = $7, timeout_ms = $8 "
+        "WHERE id = $9";
+    char id_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", rule->id);
+    const char* mode_str = (rule->mode == TRAFFIC_MODE_CANARY) ? "canary" : "shadow";
+    char        sample_rate_str[32];
+    snprintf(sample_rate_str, sizeof sample_rate_str, "%.4f", rule->sample_rate);
+    const char* enabled_str = rule->enabled ? "true" : "false";
+    char        timeout_str[32];
+    snprintf(
+        timeout_str, sizeof timeout_str, "%u", rule->timeout_ms > 0 ? rule->timeout_ms : 10000);
+
+    const char* vals[9] = {rule->source_model,
+                           rule->target_model,
+                           rule->target_provider,
+                           mode_str,
+                           sample_rate_str,
+                           rule->header_match,
+                           enabled_str,
+                           timeout_str,
+                           id_str};
+    int         plens[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 9, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg update_shadow_rule: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg update_shadow_rule: query alloc failed");
+    }
+    return -1;
+}
+
+/** @brief libpq implementation of pg_ops.delete_shadow_rule: 0 on success, -1 on error. */
+static int
+pq_delete_shadow_rule(void* vctx, long id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "DELETE FROM shadow_rules WHERE id = $1";
+    char              id_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", id);
+    const char* vals[1] = {id_str};
+    int         plens[1] = {0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg delete_shadow_rule: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg delete_shadow_rule: query alloc failed");
+    }
+    return -1;
+}
+
 /* ------------------------------------------------------- store lifecycle */
 
 pg_store_t*
@@ -2184,6 +2350,10 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.create_guardrails_rule = pq_create_guardrails_rule;
     ps->ops.update_guardrails_rule = pq_update_guardrails_rule;
     ps->ops.delete_guardrails_rule = pq_delete_guardrails_rule;
+    ps->ops.list_shadow_rules = pq_list_shadow_rules;
+    ps->ops.create_shadow_rule = pq_create_shadow_rule;
+    ps->ops.update_shadow_rule = pq_update_shadow_rule;
+    ps->ops.delete_shadow_rule = pq_delete_shadow_rule;
     ps->ops.ctx = px;
     ps->ctx = px;
     ps->owns_ctx = 1;
@@ -2290,4 +2460,39 @@ pg_store_delete_guardrails_rule(const pg_store_t* ps, long id)
     return (ops != NULL && ops->delete_guardrails_rule != NULL)
                ? ops->delete_guardrails_rule(ops->ctx, id)
                : -1;
+}
+
+int
+pg_store_list_shadow_rules(const pg_store_t* ps, shadow_rule_t* out, int cap, int* n)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->list_shadow_rules != NULL)
+               ? ops->list_shadow_rules(ops->ctx, out, cap, n)
+               : -1;
+}
+
+int
+pg_store_create_shadow_rule(const pg_store_t* ps, const shadow_rule_t* rule, long* out_id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->create_shadow_rule != NULL)
+               ? ops->create_shadow_rule(ops->ctx, rule, out_id)
+               : -1;
+}
+
+int
+pg_store_update_shadow_rule(const pg_store_t* ps, const shadow_rule_t* rule)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->update_shadow_rule != NULL)
+               ? ops->update_shadow_rule(ops->ctx, rule)
+               : -1;
+}
+
+int
+pg_store_delete_shadow_rule(const pg_store_t* ps, long id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->delete_shadow_rule != NULL) ? ops->delete_shadow_rule(ops->ctx, id)
+                                                            : -1;
 }

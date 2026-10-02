@@ -401,3 +401,82 @@ TEST_CASE(test_model_router_target_provider_override)
                 "select non-existent target");
     TEST_ASSERT(count == 3, "fallback returns all targets");
 }
+
+TEST_CASE(test_canary_routing_and_circuit_breaker_rollback)
+{
+    struct mro_db db;
+    memset(&db, 0, sizeof db);
+    db.n_models = 2;
+
+    /* Primary model */
+    strcpy(db.models[0].name, "gpt-4o");
+    strcpy(db.models[0].provider, "openai");
+    strcpy(db.models[0].endpoint, "http://127.0.0.1:9001/v1");
+    strcpy(db.models[0].upstream_key_ref, "env:TEST_KEY");
+    strcpy(db.models[0].default_params_json, "{\"model\":\"gpt-4o\"}");
+    db.models[0].enabled = 1;
+    db.models[0].n_targets = 1;
+    strcpy(db.models[0].targets[0].provider, "openai");
+    strcpy(db.models[0].targets[0].endpoint, "http://127.0.0.1:9001/v1");
+
+    /* Canary target model */
+    strcpy(db.models[1].name, "gpt-4o-mini");
+    strcpy(db.models[1].provider, "openai");
+    strcpy(db.models[1].endpoint, "http://127.0.0.1:9002/v1");
+    strcpy(db.models[1].upstream_key_ref, "env:TEST_KEY");
+    strcpy(db.models[1].default_params_json, "{\"model\":\"gpt-4o-mini\"}");
+    db.models[1].enabled = 1;
+    db.models[1].n_targets = 1;
+    strcpy(db.models[1].targets[0].provider, "openai");
+    strcpy(db.models[1].targets[0].endpoint, "http://127.0.0.1:9002/v1");
+
+    setenv("TEST_KEY", "sk-test", 1);
+    pg_store_t* ps = open_mro_store(&db);
+    TEST_ASSERT(ps != NULL, "store open");
+    model_router_t* mr = model_router_new(ps, NULL);
+    TEST_ASSERT(mr != NULL, "router new");
+    circuit_breaker_t* cb = cb_create();
+    cb_set_time_fn(cb, fake_time_provider);
+
+    shadow_rule_t rule;
+    memset(&rule, 0, sizeof(rule));
+    rule.id = 42;
+    strcpy(rule.source_model, "gpt-4o");
+    strcpy(rule.target_model, "gpt-4o-mini");
+    rule.mode = TRAFFIC_MODE_CANARY;
+    rule.sample_rate = 1.0;
+    rule.enabled = true;
+
+    char eff_model[64];
+    bool is_canary = false;
+    long canary_id = 0;
+
+    /* 1. Canary active and healthy -> routes to target model */
+    int rc = model_router_apply_canary(
+        mr, cb, &rule, 1, "gpt-4o", NULL, eff_model, sizeof(eff_model), &is_canary, &canary_id);
+    TEST_ASSERT(rc == 0, "apply canary ok");
+    TEST_ASSERT(is_canary == true, "canary is true");
+    TEST_ASSERT(canary_id == 42, "canary rule id is 42");
+    TEST_ASSERT(strcmp(eff_model, "gpt-4o-mini") == 0, "effective model is gpt-4o-mini");
+
+    /* 2. Trip circuit breaker for canary model (3 failures) */
+    cb_record_failure(cb, "gpt-4o-mini", "http://127.0.0.1:9002/v1", 500);
+    cb_record_failure(cb, "gpt-4o-mini", "http://127.0.0.1:9002/v1", 500);
+    cb_record_failure(cb, "gpt-4o-mini", "http://127.0.0.1:9002/v1", 500);
+    TEST_ASSERT(cb_get_state(cb, "gpt-4o-mini", "http://127.0.0.1:9002/v1") == CB_OPEN,
+                "canary endpoint tripped to OPEN");
+
+    /* 3. Canary evaluation should auto-rollback to source model */
+    is_canary = false;
+    canary_id = 0;
+    eff_model[0] = '\0';
+    rc = model_router_apply_canary(
+        mr, cb, &rule, 1, "gpt-4o", NULL, eff_model, sizeof(eff_model), &is_canary, &canary_id);
+    TEST_ASSERT(rc == 0, "apply canary ok");
+    TEST_ASSERT(is_canary == false, "canary is false on tripped candidate");
+    TEST_ASSERT(strcmp(eff_model, "gpt-4o") == 0, "auto-rollback to source model gpt-4o");
+
+    cb_destroy(cb);
+    model_router_free(mr);
+    pg_store_close(ps);
+}

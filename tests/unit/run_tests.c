@@ -541,6 +541,10 @@ main(void)
     test_register("shadow_engine_lifecycle_and_task_submission",
                   test_shadow_engine_lifecycle_and_task_submission);
 
+    extern void test_canary_routing_and_circuit_breaker_rollback(void);
+    test_register("canary_routing_and_circuit_breaker_rollback",
+                  test_canary_routing_and_circuit_breaker_rollback);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
