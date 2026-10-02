@@ -556,6 +556,12 @@ main(void)
     extern void test_admin_shadow_endpoints(void);
     test_register("admin_shadow_endpoints", test_admin_shadow_endpoints);
 
+    extern void test_compressor_fast_token_estimate(void);
+    test_register("compressor_fast_token_estimate", test_compressor_fast_token_estimate);
+
+    extern void test_compressor_whitespace_sanitization(void);
+    test_register("compressor_whitespace_sanitization", test_compressor_whitespace_sanitization);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
