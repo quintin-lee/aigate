@@ -90,3 +90,42 @@ TEST_CASE(test_compressor_history_windowing_and_safety)
 
     prompt_compressor_result_cleanup(&res);
 }
+
+TEST_CASE(test_compressor_sentence_density_pruning_and_cache)
+{
+    /* Text with polite fillers and low entropy sentences */
+    const char* text_with_filler =
+        "As an AI assistant, I would be pleased to assist you with this comprehensive request. "
+        "The server port is configured to 8080 and bind to 127.0.0.1. "
+        "Please feel free to ask if you have any further questions or inquiries.";
+
+    char   pruned[512];
+    size_t pruned_len = compressor_prune_sentence_density(
+        text_with_filler, strlen(text_with_filler), 0.60, pruned, sizeof(pruned));
+    TEST_ASSERT(pruned_len > 0, "Prune failed");
+    /* Core config sentence preserved */
+    TEST_ASSERT(strstr(pruned, "port is configured to 8080") != NULL, "Core sentence was pruned");
+
+    /* Test Snapshot Cache & Stats */
+    compressor_cache_t* cache = compressor_cache_create(200);
+    TEST_ASSERT(cache != NULL, "cache create failed");
+
+    compressor_snapshot_t snap;
+    memset(&snap, 0, sizeof(snap));
+    snprintf(snap.req_id, sizeof(snap.req_id), "req-12345");
+    snprintf(snap.model, sizeof(snap.model), "gpt-4o");
+    snap.original_tokens = 3000;
+    snap.compressed_tokens = 1500;
+    snap.saved_tokens = 1500;
+    snap.compression_ratio = 0.50;
+    snap.elapsed_us = 210;
+
+    compressor_cache_record(cache, &snap);
+
+    compressor_stats_t stats;
+    compressor_cache_get_stats(cache, &stats);
+    TEST_ASSERT(stats.total_evaluated == 1, "evaluated mismatch");
+    TEST_ASSERT(stats.total_saved_tokens == 1500, "saved mismatch");
+
+    compressor_cache_destroy(cache);
+}

@@ -130,6 +130,68 @@ bool prompt_compressor_process_payload(const char*              payload,
  */
 void prompt_compressor_result_cleanup(compressor_result_t* res);
 
+/**
+ * @brief Opaque in-memory circular cache for recent compression snapshots.
+ */
+typedef struct compressor_cache compressor_cache_t;
+
+/**
+ * @brief Prunes low-information/polite filler sentences based on sentence density, while preserving
+ *        PII placeholders, constraint terms, and topic sentences.
+ *
+ * @param src Input text.
+ * @param src_len Byte length of input text.
+ * @param target_ratio Target length ratio (e.g. 0.60).
+ * @param dst Destination buffer.
+ * @param dst_cap Destination buffer capacity.
+ * @return size_t Length written to dst.
+ */
+size_t compressor_prune_sentence_density(
+    const char* src, size_t src_len, double target_ratio, char* dst, size_t dst_cap);
+
+/**
+ * @brief Creates a circular cache for prompt compression snapshots.
+ *
+ * @param capacity Maximum number of snapshots to retain (e.g. 200).
+ * @return compressor_cache_t* Pointer to newly allocated cache, or NULL on error.
+ */
+compressor_cache_t* compressor_cache_create(size_t capacity);
+
+/**
+ * @brief Destroys the circular cache and frees internal resources.
+ *
+ * @param cache Pointer to cache.
+ */
+void compressor_cache_destroy(compressor_cache_t* cache);
+
+/**
+ * @brief Records a compression snapshot into the circular cache and updates global statistics.
+ *
+ * @param cache Pointer to cache.
+ * @param snapshot Pointer to snapshot to copy.
+ */
+void compressor_cache_record(compressor_cache_t* cache, const compressor_snapshot_t* snapshot);
+
+/**
+ * @brief Retrieves cumulative statistics from the compression cache.
+ *
+ * @param cache Pointer to cache.
+ * @param out_stats Output statistics struct.
+ */
+void compressor_cache_get_stats(compressor_cache_t* cache, compressor_stats_t* out_stats);
+
+/**
+ * @brief Retrieves up to max_count recent snapshots in descending chronological order.
+ *
+ * @param cache Pointer to cache.
+ * @param out_snapshots Array to populate with snapshots.
+ * @param max_count Maximum number of snapshots to retrieve.
+ * @return size_t Actual number of snapshots populated.
+ */
+size_t compressor_cache_get_snapshots(compressor_cache_t*    cache,
+                                      compressor_snapshot_t* out_snapshots,
+                                      size_t                 max_count);
+
 #ifdef __cplusplus
 }
 #endif

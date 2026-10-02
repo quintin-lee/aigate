@@ -1,6 +1,7 @@
 /**
  * @file prompt_compressor.c
- * @brief Implementation of prompt compression, token estimation, and whitespace sanitization.
+ * @brief Implementation of prompt compression, token estimation, whitespace sanitization,
+ *        sentence density pruning, and circular snapshot cache.
  */
 
 #include "policy/prompt_compressor.h"
@@ -11,6 +12,39 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/**
+ * @brief Internal representation of prompt compression circular cache.
+ */
+struct compressor_cache {
+    compressor_snapshot_t* items;    /**< Dynamic array of snapshots */
+    size_t                 capacity; /**< Maximum capacity */
+    size_t                 head;     /**< Next write index in circular ring */
+    size_t                 count;    /**< Current stored snapshot count */
+    compressor_stats_t     stats;    /**< Aggregated cumulative statistics */
+    pthread_mutex_t        lock;     /**< Mutex protecting cache accesses */
+};
+
+/** @brief Maximum number of sentences processed in sentence density pruner */
+#define MAX_SENTENCES 128
+
+static bool
+str_has_substr(const char* haystack, size_t hlen, const char* needle)
+{
+    if (!haystack || !needle) {
+        return false;
+    }
+    size_t nlen = strlen(needle);
+    if (nlen == 0 || nlen > hlen) {
+        return false;
+    }
+    for (size_t i = 0; i <= hlen - nlen; i++) {
+        if (strncmp(haystack + i, needle, nlen) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
 
 uint32_t
 compressor_estimate_tokens(const char* text, size_t len)
@@ -125,6 +159,158 @@ compressor_sanitize_whitespace(
         r++;
     }
 
+    dst[w] = '\0';
+    return w;
+}
+
+size_t
+compressor_prune_sentence_density(
+    const char* src, size_t src_len, double target_ratio, char* dst, size_t dst_cap)
+{
+    if (!src || src_len == 0 || !dst || dst_cap == 0) {
+        return 0;
+    }
+    if (target_ratio <= 0.0 || target_ratio >= 1.0) {
+        size_t copy_len = (src_len < dst_cap - 1) ? src_len : dst_cap - 1;
+        memcpy(dst, src, copy_len);
+        dst[copy_len] = '\0';
+        return copy_len;
+    }
+
+    typedef struct {
+        size_t start;
+        size_t len;
+        bool   is_protected;
+        bool   keep;
+        double score;
+    } sentence_t;
+
+    sentence_t sents[MAX_SENTENCES];
+    size_t     count = 0;
+
+    size_t cur_start = 0;
+    while (cur_start < src_len && count < MAX_SENTENCES) {
+        while (cur_start < src_len && isspace((unsigned char)src[cur_start])) {
+            cur_start++;
+        }
+        if (cur_start >= src_len) {
+            break;
+        }
+
+        size_t cur_end = cur_start;
+        while (cur_end < src_len) {
+            char c = src[cur_end];
+            if (c == '.' || c == '!' || c == '?' || c == '\n') {
+                cur_end++;
+                break;
+            }
+            /* CJK fullwidth punctuation checking */
+            if ((unsigned char)c >= 0x80 && cur_end + 2 < src_len) {
+                if ((unsigned char)c == 0xE3 && (unsigned char)src[cur_end + 1] == 0x80 &&
+                    (unsigned char)src[cur_end + 2] == 0x82) { /* '。' */
+                    cur_end += 3;
+                    break;
+                }
+                if ((unsigned char)c == 0xEF && (unsigned char)src[cur_end + 1] == 0xBC &&
+                    ((unsigned char)src[cur_end + 2] == 0x81 ||
+                     (unsigned char)src[cur_end + 2] == 0x9F)) { /* '！' or '？' */
+                    cur_end += 3;
+                    break;
+                }
+            }
+            cur_end++;
+        }
+
+        sents[count].start = cur_start;
+        sents[count].len = cur_end - cur_start;
+        sents[count].is_protected = false;
+        sents[count].keep = false;
+        sents[count].score = 1.0;
+
+        const char* s_ptr = src + cur_start;
+        size_t      s_len = sents[count].len;
+
+        /* PII placeholder check */
+        if (str_has_substr(s_ptr, s_len, "{{PII_")) {
+            sents[count].is_protected = true;
+        }
+
+        /* Essential instructions keywords */
+        if (str_has_substr(s_ptr, s_len, "must") || str_has_substr(s_ptr, s_len, "json") ||
+            str_has_substr(s_ptr, s_len, "schema") || str_has_substr(s_ptr, s_len, "format") ||
+            str_has_substr(s_ptr, s_len, "必须") || str_has_substr(s_ptr, s_len, "禁止")) {
+            sents[count].is_protected = true;
+        }
+
+        /* Check common polite filler phrases */
+        if (str_has_substr(s_ptr, s_len, "As an AI") || str_has_substr(s_ptr, s_len, "as an ai") ||
+            str_has_substr(s_ptr, s_len, "pleased to assist") ||
+            str_has_substr(s_ptr, s_len, "feel free to ask") ||
+            str_has_substr(s_ptr, s_len, "很高兴为您") || str_has_substr(s_ptr, s_len, "作为AI")) {
+            sents[count].score = 0.1;
+        }
+
+        count++;
+        cur_start = cur_end;
+    }
+
+    if (count == 0) {
+        dst[0] = '\0';
+        return 0;
+    }
+
+    /* Protect first and last sentences if count > 2 and they are not fillers */
+    if (count > 2) {
+        if (sents[0].score > 0.5) {
+            sents[0].is_protected = true;
+        }
+        if (sents[count - 1].score > 0.5) {
+            sents[count - 1].is_protected = true;
+        }
+    }
+
+    size_t target_len = (size_t)((double)src_len * target_ratio);
+    if (target_len == 0) {
+        target_len = 1;
+    }
+
+    size_t acc_len = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (sents[i].is_protected) {
+            sents[i].keep = true;
+            acc_len += sents[i].len;
+        }
+    }
+
+    /* Greedy selection of remaining sentences by score */
+    while (acc_len < target_len) {
+        ssize_t best_idx = -1;
+        double  best_score = -1.0;
+        for (size_t i = 0; i < count; i++) {
+            if (!sents[i].keep && sents[i].score > best_score) {
+                best_score = sents[i].score;
+                best_idx = (ssize_t)i;
+            }
+        }
+        if (best_idx < 0) {
+            break;
+        }
+        sents[best_idx].keep = true;
+        acc_len += sents[best_idx].len;
+    }
+
+    /* Assemble kept sentences */
+    size_t w = 0;
+    for (size_t i = 0; i < count; i++) {
+        if (sents[i].keep) {
+            if (w > 0 && w + 1 < dst_cap && dst[w - 1] != '\n' && dst[w - 1] != ' ') {
+                dst[w++] = ' ';
+            }
+            size_t copy_bytes = (sents[i].len < dst_cap - 1 - w) ? sents[i].len : dst_cap - 1 - w;
+            memcpy(dst + w, src + sents[i].start, copy_bytes);
+            w += copy_bytes;
+        }
+    }
     dst[w] = '\0';
     return w;
 }
@@ -251,7 +437,7 @@ prompt_compressor_process_payload(const char*              payload,
         }
     }
 
-    /* 5. Sanitize content on kept messages */
+    /* 5. Sanitize content and apply sentence density pruning in aggressive mode */
     for (size_t i = 0; i < num_msgs; i++) {
         if (!keep[i]) {
             continue;
@@ -265,7 +451,23 @@ prompt_compressor_process_payload(const char*              payload,
             if (sanitized) {
                 size_t s_len = compressor_sanitize_whitespace(
                     text, text_len, sanitized, text_len + 1, rule->preserve_code);
-                json_object_set_new(msg, "content", json_stringn(sanitized, s_len));
+                sanitized[s_len] = '\0';
+
+                const char* role = json_string_value(json_object_get(msg, "role"));
+                if (rule->level == COMPRESS_LEVEL_AGGRESSIVE && role &&
+                    strcmp(role, "assistant") == 0 && s_len > 120) {
+                    char* pruned = (char*)malloc(s_len + 1);
+                    if (pruned) {
+                        size_t p_len = compressor_prune_sentence_density(
+                            sanitized, s_len, rule->target_ratio, pruned, s_len + 1);
+                        json_object_set_new(msg, "content", json_stringn(pruned, p_len));
+                        free(pruned);
+                    } else {
+                        json_object_set_new(msg, "content", json_stringn(sanitized, s_len));
+                    }
+                } else {
+                    json_object_set_new(msg, "content", json_stringn(sanitized, s_len));
+                }
                 free(sanitized);
             }
         }
@@ -318,4 +520,88 @@ prompt_compressor_result_cleanup(compressor_result_t* res)
         free(res->compressed_payload);
         res->compressed_payload = NULL;
     }
+}
+
+compressor_cache_t*
+compressor_cache_create(size_t capacity)
+{
+    if (capacity == 0) {
+        capacity = 200;
+    }
+    compressor_cache_t* cache = (compressor_cache_t*)calloc(1, sizeof(compressor_cache_t));
+    if (!cache) {
+        return NULL;
+    }
+    cache->capacity = capacity;
+    cache->items = (compressor_snapshot_t*)calloc(capacity, sizeof(compressor_snapshot_t));
+    if (!cache->items) {
+        free(cache);
+        return NULL;
+    }
+    pthread_mutex_init(&cache->lock, NULL);
+    return cache;
+}
+
+void
+compressor_cache_destroy(compressor_cache_t* cache)
+{
+    if (!cache) {
+        return;
+    }
+    pthread_mutex_destroy(&cache->lock);
+    free(cache->items);
+    free(cache);
+}
+
+void
+compressor_cache_record(compressor_cache_t* cache, const compressor_snapshot_t* snapshot)
+{
+    if (!cache || !snapshot) {
+        return;
+    }
+    pthread_mutex_lock(&cache->lock);
+    cache->items[cache->head] = *snapshot;
+    cache->head = (cache->head + 1) % cache->capacity;
+    if (cache->count < cache->capacity) {
+        cache->count++;
+    }
+    cache->stats.total_evaluated++;
+    if (snapshot->saved_tokens > 0) {
+        cache->stats.total_compressed++;
+    }
+    cache->stats.total_orig_tokens += snapshot->original_tokens;
+    cache->stats.total_comp_tokens += snapshot->compressed_tokens;
+    cache->stats.total_saved_tokens += snapshot->saved_tokens;
+    cache->stats.total_duration_us += snapshot->elapsed_us;
+    cache->stats.estimated_cost_saved += (double)snapshot->saved_tokens * 0.000005;
+    pthread_mutex_unlock(&cache->lock);
+}
+
+void
+compressor_cache_get_stats(compressor_cache_t* cache, compressor_stats_t* out_stats)
+{
+    if (!cache || !out_stats) {
+        return;
+    }
+    pthread_mutex_lock(&cache->lock);
+    *out_stats = cache->stats;
+    pthread_mutex_unlock(&cache->lock);
+}
+
+size_t
+compressor_cache_get_snapshots(compressor_cache_t*    cache,
+                               compressor_snapshot_t* out_snapshots,
+                               size_t                 max_count)
+{
+    if (!cache || !out_snapshots || max_count == 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&cache->lock);
+    size_t to_copy = (cache->count < max_count) ? cache->count : max_count;
+    for (size_t i = 0; i < to_copy; i++) {
+        size_t idx = (cache->head + cache->capacity - 1 - i) % cache->capacity;
+        out_snapshots[i] = cache->items[idx];
+    }
+    pthread_mutex_unlock(&cache->lock);
+    return to_copy;
 }

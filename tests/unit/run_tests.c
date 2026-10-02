@@ -566,6 +566,10 @@ main(void)
     test_register("compressor_history_windowing_and_safety",
                   test_compressor_history_windowing_and_safety);
 
+    extern void test_compressor_sentence_density_pruning_and_cache(void);
+    test_register("compressor_sentence_density_pruning_and_cache",
+                  test_compressor_sentence_density_pruning_and_cache);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
