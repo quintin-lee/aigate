@@ -581,6 +581,13 @@ main(void)
     extern void test_admin_compressor_endpoints(void);
     test_register("admin_compressor_endpoints", test_admin_compressor_endpoints);
 
+    extern void test_cache_optimizer_sort_tools(void);
+    test_register("cache_optimizer_sort_tools", test_cache_optimizer_sort_tools);
+
+    extern void test_cache_optimizer_normalize_whitespace(void);
+    test_register("cache_optimizer_normalize_whitespace",
+                  test_cache_optimizer_normalize_whitespace);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
