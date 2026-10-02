@@ -473,7 +473,6 @@ struct cache_optimizer_cache {
     pthread_mutex_t             lock;     /**< Mutex protecting cache access */
 };
 
-
 cache_optimizer_cache_t*
 cache_optimizer_cache_create(size_t capacity)
 {
@@ -577,4 +576,118 @@ cache_optimizer_result_cleanup(cache_optimizer_result_t* res)
         free(res->optimized_payload);
         res->optimized_payload = NULL;
     }
+}
+
+bool
+cache_optimizer_process_payload(const char*                   payload,
+                                size_t                        payload_len,
+                                const cache_optimizer_rule_t* rule,
+                                cache_optimizer_result_t*     out_result)
+{
+    if (!payload || payload_len == 0 || !rule || !out_result) {
+        return false;
+    }
+
+    struct timespec ts_start, ts_end;
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
+
+    memset(out_result, 0, sizeof(*out_result));
+
+    json_error_t err;
+    json_t*      root = json_loads(payload, 0, &err);
+    if (!root || !json_is_object(root)) {
+        if (root) {
+            json_decref(root);
+        }
+        return false;
+    }
+
+    bool modified = false;
+
+    /* 1. Sort tools if enabled */
+    if (rule->sort_tools) {
+        if (cache_optimizer_sort_tools(root)) {
+            out_result->tools_sorted = true;
+            modified = true;
+        }
+    }
+
+    /* 2. Sink dynamic system prompt if enabled */
+    if (rule->sink_dynamic_system) {
+        /* Check messages array */
+        json_t* messages = json_object_get(root, "messages");
+        if (messages && json_is_array(messages)) {
+            size_t n_msgs = json_array_size(messages);
+            for (size_t i = 0; i < n_msgs; i++) {
+                json_t*     msg = json_array_get(messages, i);
+                const char* role = json_string_value(json_object_get(msg, "role"));
+                if (role && strcmp(role, "system") == 0) {
+                    json_t* content = json_object_get(msg, "content");
+                    if (json_is_string(content)) {
+                        const char* text = json_string_value(content);
+                        if (text && strlen(text) > 0) {
+                            size_t tlen = strlen(text);
+                            char*  buf = (char*)malloc(tlen + 512);
+                            if (buf) {
+                                if (cache_optimizer_sink_dynamic_system(
+                                        text, tlen, buf, tlen + 512)) {
+                                    json_object_set_new(msg, "content", json_string(buf));
+                                    out_result->dynamic_sunk = true;
+                                    modified = true;
+                                }
+                                free(buf);
+                            }
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+
+        /* Check top-level system if string */
+        json_t* sys_item = json_object_get(root, "system");
+        if (sys_item && json_is_string(sys_item)) {
+            const char* text = json_string_value(sys_item);
+            if (text && strlen(text) > 0) {
+                size_t tlen = strlen(text);
+                char*  buf = (char*)malloc(tlen + 512);
+                if (buf) {
+                    if (cache_optimizer_sink_dynamic_system(text, tlen, buf, tlen + 512)) {
+                        json_object_set_new(root, "system", json_string(buf));
+                        out_result->dynamic_sunk = true;
+                        modified = true;
+                    }
+                    free(buf);
+                }
+            }
+        }
+    }
+
+    /* 3. Inject Anthropic breakpoints if enabled */
+    if (rule->inject_anthropic_breakpoints) {
+        int bp = cache_optimizer_inject_anthropic_breakpoints(root, rule->min_tokens_threshold);
+        if (bp > 0) {
+            out_result->breakpoints_injected = bp;
+            modified = true;
+        }
+    }
+
+    /* 4. If modified, serialize new payload */
+    if (modified) {
+        char* dumped = json_dumps(root, JSON_COMPACT);
+        if (dumped) {
+            out_result->optimized = true;
+            out_result->optimized_payload = dumped;
+            out_result->optimized_len = strlen(dumped);
+        }
+    }
+
+    json_decref(root);
+
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
+    uint64_t elapsed_us = (uint64_t)(ts_end.tv_sec - ts_start.tv_sec) * 1000000ULL +
+                          (uint64_t)(ts_end.tv_nsec - ts_start.tv_nsec) / 1000ULL;
+    out_result->latency_us = (uint32_t)elapsed_us;
+
+    return true;
 }

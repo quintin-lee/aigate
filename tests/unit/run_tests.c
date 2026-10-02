@@ -601,6 +601,10 @@ main(void)
     extern void test_cache_optimizer_rule_match(void);
     test_register("cache_optimizer_rule_match", test_cache_optimizer_rule_match);
 
+    extern void test_pipeline_cache_optimizer_and_headers(void);
+    test_register("pipeline_cache_optimizer_and_headers",
+                  test_pipeline_cache_optimizer_and_headers);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

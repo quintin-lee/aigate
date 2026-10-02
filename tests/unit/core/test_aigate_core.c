@@ -14,6 +14,7 @@
  */
 #include "run_tests.h"
 #include "aigate_core.h"
+#include "aigate_core_internal.h"
 #include "mock_upstream.h"
 #include "pg_store.h"
 #include "provider_openai.h"
@@ -38,19 +39,21 @@ struct fkey {
 };
 
 struct fdb {
-    struct fkey       keys[FKEYS];
-    model_rec_t       models[FMODELS];
-    int               n_models;
-    int               fail_list; /* when nonzero, list_models returns -1 */
-    usage_row_t       usage[FUSAGE];
-    int               n_usage;
-    int               flush_calls;
-    guardrail_rule_t  guardrails[8];
-    int               n_guardrails;
-    shadow_rule_t     shadow_rules[8];
-    int               n_shadow_rules;
-    compressor_rule_t compressor_rules[8];
-    int               n_compressor_rules;
+    struct fkey            keys[FKEYS];
+    model_rec_t            models[FMODELS];
+    int                    n_models;
+    int                    fail_list; /* when nonzero, list_models returns -1 */
+    usage_row_t            usage[FUSAGE];
+    int                    n_usage;
+    int                    flush_calls;
+    guardrail_rule_t       guardrails[8];
+    int                    n_guardrails;
+    shadow_rule_t          shadow_rules[8];
+    int                    n_shadow_rules;
+    compressor_rule_t      compressor_rules[8];
+    int                    n_compressor_rules;
+    cache_optimizer_rule_t cache_opt_rules[8];
+    int                    n_cache_opt_rules;
 };
 
 /** @brief Fake allowlist: copy the whole key record. */
@@ -201,6 +204,22 @@ f_list_compressor_rules(void* ctx, compressor_rule_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief Fake cache-optimizer-rule listing: copy in-memory table to output. */
+static int
+f_list_cache_optimizer_rules(void* ctx, cache_optimizer_rule_t* out, int cap, int* n)
+{
+    struct fdb* db = ctx;
+    int         cnt = db->n_cache_opt_rules;
+    if (cnt > cap) {
+        cnt = cap;
+    }
+    for (int i = 0; i < cnt; i++) {
+        out[i] = db->cache_opt_rules[i];
+    }
+    *n = cnt;
+    return 0;
+}
+
 /** @brief Assemble the fake pg_ops vtable with ctx pointing at the in-memory store. */
 static void
 fbuild_ops(struct fdb* db, pg_ops_t* ops)
@@ -213,6 +232,7 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
     ops->list_guardrails_rules = f_list_guardrails;
     ops->list_shadow_rules = f_list_shadow_rules;
     ops->list_compressor_rules = f_list_compressor_rules;
+    ops->list_cache_optimizer_rules = f_list_cache_optimizer_rules;
     ops->flush_usage = f_flush_rows;
     ops->flush_usage_requests = (int (*)(void*, const usage_request_row_t*, int))f_req_stub;
     ops->query_usage_requests =
@@ -1475,6 +1495,112 @@ TEST_CASE(test_pipeline_prompt_compression_and_headers)
     TEST_ASSERT(rc2.status == 200, "status 200 on off, got %d", rc2.status);
     TEST_ASSERT(!cap_has_header(&c2, "X-Aigate-Prompt-Original-Tokens:"),
                 "should not have compression header when off");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_pipeline_cache_optimizer_and_headers)
+{
+    /* 1. Direct header injection assertion */
+    chat_req_t chatq;
+    memset(&chatq, 0, sizeof(chatq));
+    struct cap c0;
+    memset(&c0, 0, sizeof(c0));
+    aigate_response_ctx rc0 = cap_rc(&c0);
+    chatq.rc = &rc0;
+    chatq.cache_opt_result.optimized = true;
+    chatq.cache_opt_result.tools_sorted = true;
+    chatq.cache_opt_result.dynamic_sunk = true;
+    chatq.cache_opt_result.breakpoints_injected = 2;
+    chatq.upstream_cached_tokens = 3072;
+    chatq.upstream_prompt_tokens = 4096;
+    chatq.upstream_cache_savings_usd = 0.0092;
+
+    aigate_inject_cache_optimizer_headers(&chatq, NULL);
+
+    TEST_ASSERT(cap_has_header(&c0, "X-Aigate-Prompt-Cache-Hit: true"), "Missing cache hit header");
+    TEST_ASSERT(cap_has_header(&c0, "X-Aigate-Prompt-Cache-Tokens: 3072"),
+                "Missing cached tokens header");
+    TEST_ASSERT(cap_has_header(&c0, "X-Aigate-Prompt-Cache-Savings: 0.0092"),
+                "Missing savings header");
+
+    /* 2. End-to-end pipeline execution with rule matching and snapshot recording */
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "claude-3-5-sonnet");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    snprintf(db.cache_opt_rules[0].id, sizeof(db.cache_opt_rules[0].id), "rule-opt-01");
+    snprintf(db.cache_opt_rules[0].model_pattern,
+             sizeof(db.cache_opt_rules[0].model_pattern),
+             "claude-*");
+    db.cache_opt_rules[0].enabled = true;
+    db.cache_opt_rules[0].sort_tools = true;
+    db.cache_opt_rules[0].sink_dynamic_system = true;
+    db.cache_opt_rules[0].inject_anthropic_breakpoints = true;
+    db.cache_opt_rules[0].min_tokens_threshold = 10;
+    db.n_cache_opt_rules = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    const char* req_body = "{\n"
+                           "  \"model\": \"claude-3-5-sonnet\",\n"
+                           "  \"messages\": [\n"
+                           "    {\"role\": \"system\", \"content\": \"Today is 2026-10-02 "
+                           "17:15:30. System instructions.\"},\n"
+                           "    {\"role\": \"user\", \"content\": \"Hello world\"}\n"
+                           "  ]\n"
+                           "}";
+
+    struct cap c1;
+    memset(&c1, 0, sizeof c1);
+    run_with_body(&ac, "test-key", req_body, &c1);
+    TEST_ASSERT(c1.status == 200, "status 200, got %d", c1.status);
+    TEST_ASSERT(cap_has_header(&c1, "X-Aigate-Prompt-Cache-Hit:"),
+                "missing prompt cache hit header");
+    TEST_ASSERT(cap_has_header(&c1, "X-Aigate-Prompt-Cache-Tokens:"),
+                "missing prompt cache tokens header");
+    TEST_ASSERT(cap_has_header(&c1, "X-Aigate-Prompt-Cache-Savings:"),
+                "missing prompt cache savings header");
+
+    cache_optimizer_stats_t stats;
+    cache_optimizer_cache_get_stats(ac.cache_opt_cache, &stats);
+    TEST_ASSERT(stats.total_optimized_requests >= 1,
+                "at least 1 request recorded in cache optimizer");
+
+    /* 3. Test with X-Aigate-Prompt-Cache: off */
+    aigate_request_ctx rq_off;
+    memset(&rq_off, 0, sizeof rq_off);
+    rq_off.method = "POST";
+    rq_off.path = "/v1/chat/completions";
+    rq_off.bearer = "test-key";
+    rq_off.client_ip = "127.0.0.1";
+    rq_off.body = req_body;
+    rq_off.body_len = strlen(req_body);
+    rq_off.prompt_cache_control = "off";
+
+    struct cap c2;
+    memset(&c2, 0, sizeof c2);
+    aigate_response_ctx rc2 = cap_rc(&c2);
+    aigate_handle_request(&ac, &rq_off, &rc2);
+    TEST_ASSERT(rc2.status == 200, "status 200 on off, got %d", rc2.status);
 
     aigate_core_shutdown(&ac);
     pg_store_close(ps);

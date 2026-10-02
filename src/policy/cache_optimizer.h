@@ -197,6 +197,22 @@ size_t cache_optimizer_cache_get_snapshots(cache_optimizer_cache_t*    cache,
  */
 void cache_optimizer_result_cleanup(cache_optimizer_result_t* res);
 
+/**
+ * @brief Processes and optimizes a chat completion request payload for maximum cache prefix alignment.
+ *
+ * Performs deterministic tools sorting, volatile header sinking, and Anthropic ephemeral breakpoint injection.
+ *
+ * @param payload Raw JSON request string.
+ * @param payload_len Length of raw JSON string.
+ * @param rule Active cache optimizer rule.
+ * @param out_result Output result struct populated with metrics and optimized payload.
+ * @return true on success (even if no change was necessary), false on parse failure.
+ */
+bool cache_optimizer_process_payload(const char*                   payload,
+                                     size_t                        payload_len,
+                                     const cache_optimizer_rule_t* rule,
+                                     cache_optimizer_result_t*     out_result);
+
 #ifdef __cplusplus
 }
 #endif
