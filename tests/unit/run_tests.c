@@ -591,6 +591,13 @@ main(void)
     extern void test_cache_optimizer_sink_dynamic_system(void);
     test_register("cache_optimizer_sink_dynamic_system", test_cache_optimizer_sink_dynamic_system);
 
+    extern void test_cache_optimizer_inject_anthropic_breakpoints(void);
+    test_register("cache_optimizer_inject_anthropic_breakpoints",
+                  test_cache_optimizer_inject_anthropic_breakpoints);
+
+    extern void test_cache_optimizer_cache_and_stats(void);
+    test_register("cache_optimizer_cache_and_stats", test_cache_optimizer_cache_and_stats);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

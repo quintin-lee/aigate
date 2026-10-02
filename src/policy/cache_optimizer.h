@@ -124,6 +124,79 @@ cache_optimizer_normalize_whitespace(const char* in, size_t in_len, char* out, s
  */
 bool cache_optimizer_sink_dynamic_system(const char* in, size_t in_len, char* out, size_t out_sz);
 
+/**
+ * @brief Injects ephemeral cache_control breakpoints into Claude/Anthropic payloads.
+ *
+ * Places up to 4 cache breakpoints on qualifying elements (Tools, System, conversation turns)
+ * exceeding the min_tokens threshold.
+ *
+ * @param root Parsed request JSON object.
+ * @param min_tokens Minimum token length threshold for eligibility (default 1024).
+ * @return Number of breakpoints successfully injected (0 to 4).
+ */
+int cache_optimizer_inject_anthropic_breakpoints(json_t* root, uint32_t min_tokens);
+
+/**
+ * @brief Matches a candidate model against a rule wildcard pattern.
+ *
+ * @param rule Pointer to rule configuration.
+ * @param model Model name string to test.
+ * @return true if model matches rule pattern, false otherwise.
+ */
+bool cache_optimizer_rule_matches(const cache_optimizer_rule_t* rule, const char* model);
+
+/**
+ * @brief Creates a thread-safe circular evaluation cache for request snapshots.
+ *
+ * @param capacity Maximum number of entries (default 200).
+ * @return Pointer to newly allocated cache, or NULL on failure.
+ */
+cache_optimizer_cache_t* cache_optimizer_cache_create(size_t capacity);
+
+/**
+ * @brief Frees all memory associated with a circular evaluation cache.
+ *
+ * @param cache Pointer to cache.
+ */
+void cache_optimizer_cache_destroy(cache_optimizer_cache_t* cache);
+
+/**
+ * @brief Records a request evaluation snapshot into the circular cache.
+ *
+ * @param cache Pointer to cache.
+ * @param snap Snapshot data to record.
+ */
+void cache_optimizer_cache_record(cache_optimizer_cache_t*          cache,
+                                  const cache_optimizer_snapshot_t* snap);
+
+/**
+ * @brief Retrieves cumulative efficiency statistics from the cache.
+ *
+ * @param cache Pointer to cache.
+ * @param out_stats Buffer to populate with statistics.
+ */
+void cache_optimizer_cache_get_stats(cache_optimizer_cache_t* cache,
+                                     cache_optimizer_stats_t* out_stats);
+
+/**
+ * @brief Copies the most recent snapshots from the circular cache.
+ *
+ * @param cache Pointer to cache.
+ * @param out_snaps Array to populate with snapshots.
+ * @param max_snaps Maximum number of snapshots to copy.
+ * @return Number of snapshots copied.
+ */
+size_t cache_optimizer_cache_get_snapshots(cache_optimizer_cache_t*    cache,
+                                           cache_optimizer_snapshot_t* out_snaps,
+                                           size_t                      max_snaps);
+
+/**
+ * @brief Releases any allocated buffers inside an optimization result.
+ *
+ * @param res Pointer to result to clean up.
+ */
+void cache_optimizer_result_cleanup(cache_optimizer_result_t* res);
+
 #ifdef __cplusplus
 }
 #endif

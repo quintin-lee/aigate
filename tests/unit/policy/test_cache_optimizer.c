@@ -92,3 +92,70 @@ TEST_CASE(test_cache_optimizer_sink_dynamic_system)
     TEST_ASSERT(strncmp(out_buf, "Follow guidelines", 17) == 0, "Static guidelines moved to front");
     TEST_ASSERT(strstr(out_buf, "12345678-abcd-1234-abcd-1234567890ab") != NULL, "UUID preserved");
 }
+
+TEST_CASE(test_cache_optimizer_inject_anthropic_breakpoints)
+{
+    const char* json_str = "{"
+                           "\"model\":\"claude-3-5-sonnet\","
+                           "\"messages\":["
+                           "  {\"role\":\"system\",\"content\":\"Large system instruction "
+                           "exceeding token threshold...\"},"
+                           "  {\"role\":\"user\",\"content\":\"Hi\"},"
+                           "  {\"role\":\"assistant\",\"content\":\"Hello there! How can I assist "
+                           "you today with coding?\"},"
+                           "  {\"role\":\"user\",\"content\":\"What is prompt caching?\"}"
+                           "]"
+                           "}";
+
+    json_error_t err;
+    json_t*      root = json_loads(json_str, 0, &err);
+    TEST_ASSERT(root != NULL, "JSON parse failed");
+
+    int bp_count = cache_optimizer_inject_anthropic_breakpoints(root, 10);
+    TEST_ASSERT(bp_count >= 1, "Expected at least 1 breakpoint injected");
+
+    char* dumped = json_dumps(root, JSON_COMPACT);
+    TEST_ASSERT(dumped != NULL, "json_dumps failed");
+    TEST_ASSERT(strstr(dumped, "\"cache_control\":{\"type\":\"ephemeral\"}") != NULL,
+                "Missing ephemeral cache_control");
+
+    free(dumped);
+    json_decref(root);
+}
+
+TEST_CASE(test_cache_optimizer_cache_and_stats)
+{
+    cache_optimizer_cache_t* cache = cache_optimizer_cache_create(200);
+    TEST_ASSERT(cache != NULL, "Cache creation failed");
+
+    cache_optimizer_snapshot_t snap;
+    memset(&snap, 0, sizeof(snap));
+    strncpy(snap.req_id, "req-12345", sizeof(snap.req_id) - 1);
+    strncpy(snap.model, "claude-3-5-sonnet", sizeof(snap.model) - 1);
+    snap.timestamp = time(NULL);
+    snap.upstream_cache_hit = true;
+    snap.prompt_tokens = 4096;
+    snap.cached_tokens = 3072;
+    snap.cost_savings_usd = 0.0092;
+    snap.latency_us = 120;
+    snap.breakpoints_count = 2;
+    snap.dynamic_sunk = true;
+    snap.tools_sorted = true;
+
+    cache_optimizer_cache_record(cache, &snap);
+
+    cache_optimizer_stats_t stats;
+    cache_optimizer_cache_get_stats(cache, &stats);
+
+    TEST_ASSERT(stats.total_optimized_requests == 1, "Expected total_optimized_requests == 1");
+    TEST_ASSERT(stats.upstream_cache_hit_requests == 1,
+                "Expected upstream_cache_hit_requests == 1");
+    TEST_ASSERT(stats.total_cached_tokens == 3072, "Expected total_cached_tokens == 3072");
+
+    cache_optimizer_snapshot_t snapshots[10];
+    size_t                     count = cache_optimizer_cache_get_snapshots(cache, snapshots, 10);
+    TEST_ASSERT(count == 1, "Expected 1 snapshot returned");
+    TEST_ASSERT(strcmp(snapshots[0].req_id, "req-12345") == 0, "Snapshot req_id mismatch");
+
+    cache_optimizer_cache_destroy(cache);
+}
