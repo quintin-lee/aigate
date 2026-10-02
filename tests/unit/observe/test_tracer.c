@@ -3,6 +3,7 @@
  */
 #include "observe/tracer.h"
 #include "run_tests.h"
+#include <jansson.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -373,4 +374,193 @@ TEST_CASE(test_trace_ring_buffer_operations)
                 "all pushed items were either popped or dropped");
 
     trace_ring_buffer_destroy(concurrent_rb);
+}
+
+TEST_CASE(test_otlp_json_serialization)
+{
+    /* Edge case: empty input */
+    char* empty_json = tracer_serialize_otlp_json(NULL, 0);
+    TEST_ASSERT(empty_json == NULL, "empty serialization returns NULL");
+
+    trace_context_t ctx;
+    tracer_context_init(&ctx, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", true);
+
+    int root_idx = tracer_span_start(&ctx, "root", SPAN_KIND_SERVER, NULL);
+    TEST_ASSERT(root_idx == 0, "root span index 0");
+    tracer_span_set_attr(&ctx, "root", "gen_ai.system", "openai");
+    tracer_span_set_attr(&ctx, "root", "gen_ai.request.model", "gpt-4o");
+
+    int auth_idx =
+        tracer_span_start(&ctx, "auth_and_limits", SPAN_KIND_INTERNAL, ctx.spans[0].span_id);
+    TEST_ASSERT(auth_idx == 1, "auth span index 1");
+    tracer_span_set_attr_int(&ctx, "auth_and_limits", "aigate.status", 200);
+    tracer_span_end(&ctx, "auth_and_limits", SPAN_STATUS_OK, NULL);
+
+    int client_idx =
+        tracer_span_start(&ctx, "upstream_ttft", SPAN_KIND_CLIENT, ctx.spans[0].span_id);
+    TEST_ASSERT(client_idx == 2, "client span index 2");
+    tracer_span_end(&ctx, "upstream_ttft", SPAN_STATUS_ERROR, "connection timed out");
+
+    tracer_span_end(&ctx, "root", SPAN_STATUS_OK, NULL);
+
+    char* json_str = tracer_serialize_otlp_json(&ctx, 1);
+    TEST_ASSERT(json_str != NULL, "serialized json should not be NULL");
+
+    json_error_t err;
+    json_t*      root = json_loads(json_str, 0, &err);
+    TEST_ASSERT(root != NULL, "serialized json should be valid JSON: %s", err.text);
+
+    json_t* res_spans = json_object_get(root, "resourceSpans");
+    TEST_ASSERT(json_is_array(res_spans), "resourceSpans must be an array");
+    TEST_ASSERT(json_array_size(res_spans) == 1, "1 resourceSpan entry");
+
+    json_t* res0 = json_array_get(res_spans, 0);
+    json_t* scope_spans = json_object_get(res0, "scopeSpans");
+    TEST_ASSERT(json_is_array(scope_spans), "scopeSpans must be an array");
+
+    json_t* sc0 = json_array_get(scope_spans, 0);
+    json_t* spans = json_object_get(sc0, "spans");
+    TEST_ASSERT(json_is_array(spans), "spans must be an array");
+    TEST_ASSERT(json_array_size(spans) == 3, "spans array must contain 3 spans");
+
+    /* Check first span (root) */
+    json_t*     sp0 = json_array_get(spans, 0);
+    const char* t_id = json_string_value(json_object_get(sp0, "traceId"));
+    TEST_ASSERT(t_id != NULL && strcmp(t_id, "4bf92f3577b34da6a3ce929d0e0e4736") == 0,
+                "traceId matches");
+    const char* s_name = json_string_value(json_object_get(sp0, "name"));
+    TEST_ASSERT(s_name != NULL && strcmp(s_name, "root") == 0, "root span name matches");
+
+    /* Check span attributes */
+    json_t* attrs = json_object_get(sp0, "attributes");
+    TEST_ASSERT(json_is_array(attrs) && json_array_size(attrs) >= 2, "root attributes present");
+
+    /* Check error status on third span */
+    json_t* sp2 = json_array_get(spans, 2);
+    json_t* status_obj = json_object_get(sp2, "status");
+    TEST_ASSERT(status_obj != NULL, "status object present");
+    json_t* code_val = json_object_get(status_obj, "code");
+    TEST_ASSERT(code_val != NULL && json_integer_value(code_val) == 2, "error status code is 2");
+
+    json_decref(root);
+    free(json_str);
+    tracer_context_cleanup(&ctx);
+}
+
+TEST_CASE(test_tracer_recent_cache)
+{
+    tracer_cache_clear();
+
+    trace_context_t out;
+    TEST_ASSERT(tracer_cache_get("nonexistent_id", &out) == false, "not found on empty cache");
+
+    trace_context_t ctx1, ctx2, ctx3;
+    tracer_context_init(&ctx1, NULL, true);
+    snprintf(ctx1.trace_id, sizeof(ctx1.trace_id), "%032x", 1);
+    tracer_span_start(&ctx1, "root", SPAN_KIND_SERVER, NULL);
+    tracer_span_end(&ctx1, "root", SPAN_STATUS_OK, NULL);
+
+    tracer_context_init(&ctx2, NULL, true);
+    snprintf(ctx2.trace_id, sizeof(ctx2.trace_id), "%032x", 2);
+
+    tracer_context_init(&ctx3, NULL, true);
+    snprintf(ctx3.trace_id, sizeof(ctx3.trace_id), "%032x", 3);
+
+    tracer_cache_add(&ctx1);
+    tracer_cache_add(&ctx2);
+    tracer_cache_add(&ctx3);
+
+    TEST_ASSERT(tracer_cache_get(ctx1.trace_id, &out) == true, "ctx1 found");
+    TEST_ASSERT(strcmp(out.trace_id, ctx1.trace_id) == 0, "ctx1 trace_id matches");
+    TEST_ASSERT(out.span_count == 1, "ctx1 span_count preserved");
+
+    TEST_ASSERT(tracer_cache_get(ctx2.trace_id, &out) == true, "ctx2 found");
+    TEST_ASSERT(tracer_cache_get(ctx3.trace_id, &out) == true, "ctx3 found");
+
+    /* List recent */
+    trace_context_t list[10];
+    size_t          count = tracer_cache_list_recent(list, 10);
+    TEST_ASSERT(count == 3, "3 recent traces listed");
+    TEST_ASSERT(strcmp(list[0].trace_id, ctx3.trace_id) == 0, "most recent is ctx3");
+    TEST_ASSERT(strcmp(list[1].trace_id, ctx2.trace_id) == 0, "second is ctx2");
+    TEST_ASSERT(strcmp(list[2].trace_id, ctx1.trace_id) == 0, "third is ctx1");
+
+    /* Test overflow beyond TRACE_RECENT_CACHE_CAPACITY */
+    tracer_cache_clear();
+    for (int i = 0; i < TRACE_RECENT_CACHE_CAPACITY + 10; i++) {
+        trace_context_t c;
+        tracer_context_init(&c, NULL, true);
+        snprintf(c.trace_id, sizeof(c.trace_id), "%032x", i + 1);
+        tracer_cache_add(&c);
+    }
+
+    count = tracer_cache_list_recent(list, 10);
+    TEST_ASSERT(count == 10, "10 items returned");
+    /* Oldest (e.g. 1..10) should have been evicted */
+    char oldest_id[33];
+    snprintf(oldest_id, sizeof(oldest_id), "%032x", 1);
+    TEST_ASSERT(tracer_cache_get(oldest_id, &out) == false, "oldest trace was evicted");
+
+    /* Latest (TRACE_RECENT_CACHE_CAPACITY + 10) must be present */
+    char latest_id[33];
+    snprintf(latest_id, sizeof(latest_id), "%032x", TRACE_RECENT_CACHE_CAPACITY + 10);
+    TEST_ASSERT(tracer_cache_get(latest_id, &out) == true, "latest trace is present");
+
+    tracer_cache_clear();
+}
+
+TEST_CASE(test_tracer_manager_lifecycle)
+{
+    tracer_cache_clear();
+
+    trace_ring_buffer_t* rb = trace_ring_buffer_create(16);
+    TEST_ASSERT(rb != NULL, "ring buffer created");
+
+    tracer_config_t cfg = {
+        .enabled = true,
+        .sample_rate = 1.0,
+        .slow_threshold_ms = 1000,
+        .otlp_endpoint = "http://127.0.0.1:65530/v1/traces", /* unreachable test endpoint */
+    };
+
+    tracer_manager_t* tm = tracer_manager_create(&cfg, rb);
+    TEST_ASSERT(tm != NULL, "tracer manager created");
+
+    /* Test config get */
+    tracer_config_t curr_cfg = tracer_manager_get_config(tm);
+    TEST_ASSERT(curr_cfg.enabled == true, "cfg enabled");
+    TEST_ASSERT(strcmp(curr_cfg.otlp_endpoint, cfg.otlp_endpoint) == 0, "endpoint matches");
+
+    /* Test config update */
+    curr_cfg.sample_rate = 0.5;
+    curr_cfg.slow_threshold_ms = 3000;
+    tracer_manager_update_config(tm, &curr_cfg);
+    tracer_config_t updated_cfg = tracer_manager_get_config(tm);
+    TEST_ASSERT(updated_cfg.sample_rate == 0.5, "sample rate updated");
+    TEST_ASSERT(updated_cfg.slow_threshold_ms == 3000, "slow threshold updated");
+
+    /* Push a trace into ring buffer; worker thread should pop it and add to recent cache */
+    trace_context_t ctx;
+    tracer_context_init(&ctx, NULL, true);
+    snprintf(ctx.trace_id, sizeof(ctx.trace_id), "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    tracer_span_start(&ctx, "root", SPAN_KIND_SERVER, NULL);
+    tracer_span_end(&ctx, "root", SPAN_STATUS_OK, NULL);
+
+    trace_ring_buffer_push(rb, &ctx);
+
+    /* Wait briefly for background worker to consume */
+    trace_context_t cached;
+    bool            found = false;
+    for (int retry = 0; retry < 50; retry++) {
+        if (tracer_cache_get("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", &cached)) {
+            found = true;
+            break;
+        }
+        usleep(10000); /* 10ms */
+    }
+    TEST_ASSERT(found == true, "trace pushed to ring buffer was processed by worker into cache");
+
+    tracer_manager_destroy(tm);
+    trace_ring_buffer_destroy(rb);
+    tracer_cache_clear();
 }

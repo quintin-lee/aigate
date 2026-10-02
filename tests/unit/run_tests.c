@@ -509,6 +509,15 @@ main(void)
     extern void test_trace_ring_buffer_operations(void);
     test_register("trace_ring_buffer_operations", test_trace_ring_buffer_operations);
 
+    extern void test_otlp_json_serialization(void);
+    test_register("otlp_json_serialization", test_otlp_json_serialization);
+
+    extern void test_tracer_recent_cache(void);
+    test_register("tracer_recent_cache", test_tracer_recent_cache);
+
+    extern void test_tracer_manager_lifecycle(void);
+    test_register("tracer_manager_lifecycle", test_tracer_manager_lifecycle);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

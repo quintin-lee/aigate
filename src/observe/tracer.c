@@ -2,12 +2,16 @@
  *  @brief OpenTelemetry distributed tracing and W3C TraceContext implementation.
  */
 #include "tracer.h"
+#include "aigate_log.h"
 #include <ctype.h>
+#include <curl/curl.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <jansson.h>
 #include <openssl/rand.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -546,4 +550,388 @@ trace_ring_buffer_dropped(trace_ring_buffer_t* rb)
     uint64_t dropped = rb->dropped_count;
     pthread_mutex_unlock(&rb->lock);
     return dropped;
+}
+
+char*
+tracer_serialize_otlp_json(const trace_context_t* traces, int count)
+{
+    if (traces == NULL || count <= 0) {
+        return NULL;
+    }
+
+    json_t* root = json_object();
+    json_t* res_spans_arr = json_array();
+
+    json_t* res_span_obj = json_object();
+
+    /* 1. Resource: service.name & service.version */
+    json_t* resource_obj = json_object();
+    json_t* res_attrs_arr = json_array();
+
+    json_t* attr_svc = json_object();
+    json_object_set_new(attr_svc, "key", json_string("service.name"));
+    json_t* val_svc = json_object();
+    json_object_set_new(val_svc, "stringValue", json_string("aigate"));
+    json_object_set_new(attr_svc, "value", val_svc);
+    json_array_append_new(res_attrs_arr, attr_svc);
+
+    json_t* attr_ver = json_object();
+    json_object_set_new(attr_ver, "key", json_string("service.version"));
+    json_t* val_ver = json_object();
+    json_object_set_new(val_ver, "stringValue", json_string("0.1.0"));
+    json_object_set_new(attr_ver, "value", val_ver);
+    json_array_append_new(res_attrs_arr, attr_ver);
+
+    json_object_set_new(resource_obj, "attributes", res_attrs_arr);
+    json_object_set_new(res_span_obj, "resource", resource_obj);
+
+    /* 2. ScopeSpans */
+    json_t* scope_spans_arr = json_array();
+    json_t* scope_span_obj = json_object();
+
+    json_t* scope_obj = json_object();
+    json_object_set_new(scope_obj, "name", json_string("aigate.tracer"));
+    json_object_set_new(scope_obj, "version", json_string("1.0.0"));
+    json_object_set_new(scope_span_obj, "scope", scope_obj);
+
+    json_t* spans_arr = json_array();
+    for (int t = 0; t < count; t++) {
+        const trace_context_t* ctx = &traces[t];
+        uint64_t               root_start_mono = 0;
+        if (ctx->span_count > 0) {
+            root_start_mono = ctx->spans[0].start_time_ns;
+        }
+
+        for (int s = 0; s < ctx->span_count; s++) {
+            const trace_span_t* span = &ctx->spans[s];
+            json_t*             span_obj = json_object();
+
+            json_object_set_new(span_obj, "traceId", json_string(ctx->trace_id));
+            json_object_set_new(span_obj, "spanId", json_string(span->span_id));
+            if (span->parent_span_id[0] != '\0') {
+                json_object_set_new(span_obj, "parentSpanId", json_string(span->parent_span_id));
+            } else if (ctx->inbound_parent_id[0] != '\0' && s == 0) {
+                json_object_set_new(span_obj, "parentSpanId", json_string(ctx->inbound_parent_id));
+            }
+
+            json_object_set_new(span_obj, "name", json_string(span->name));
+
+            /* Map span_kind_t: INTERNAL=1, SERVER=2, CLIENT=3 */
+            int otlp_kind = 1;
+            if (span->kind == SPAN_KIND_SERVER) {
+                otlp_kind = 2;
+            } else if (span->kind == SPAN_KIND_CLIENT) {
+                otlp_kind = 3;
+            }
+            json_object_set_new(span_obj, "kind", json_integer(otlp_kind));
+
+            /* Nanosecond Unix epoch timestamps */
+            uint64_t offset_ns = (span->start_time_ns >= root_start_mono)
+                                     ? (span->start_time_ns - root_start_mono)
+                                     : 0;
+            uint64_t dur_ns = (span->end_time_ns >= span->start_time_ns)
+                                  ? (span->end_time_ns - span->start_time_ns)
+                                  : 0;
+            uint64_t start_unix_ns = ctx->req_start_realtime_us * 1000ULL + offset_ns;
+            uint64_t end_unix_ns = start_unix_ns + dur_ns;
+
+            char start_str[32];
+            char end_str[32];
+            snprintf(start_str, sizeof(start_str), "%" PRIu64, start_unix_ns);
+            snprintf(end_str, sizeof(end_str), "%" PRIu64, end_unix_ns);
+            json_object_set_new(span_obj, "startTimeUnixNano", json_string(start_str));
+            json_object_set_new(span_obj, "endTimeUnixNano", json_string(end_str));
+
+            /* Attributes */
+            json_t* attrs_arr = json_array();
+            for (int a = 0; a < span->attr_count; a++) {
+                json_t* attr = json_object();
+                json_object_set_new(attr, "key", json_string(span->attributes[a].key));
+                json_t* v_obj = json_object();
+                json_object_set_new(v_obj, "stringValue", json_string(span->attributes[a].value));
+                json_object_set_new(attr, "value", v_obj);
+                json_array_append_new(attrs_arr, attr);
+            }
+            json_object_set_new(span_obj, "attributes", attrs_arr);
+
+            /* Status: code 1 = OK, code 2 = ERROR */
+            json_t* status_obj = json_object();
+            int     st_code = (span->status == SPAN_STATUS_ERROR) ? 2 : 1;
+            json_object_set_new(status_obj, "code", json_integer(st_code));
+            if (span->status_desc[0] != '\0') {
+                json_object_set_new(status_obj, "message", json_string(span->status_desc));
+            }
+            json_object_set_new(span_obj, "status", status_obj);
+
+            json_array_append_new(spans_arr, span_obj);
+        }
+    }
+
+    json_object_set_new(scope_span_obj, "spans", spans_arr);
+    json_array_append_new(scope_spans_arr, scope_span_obj);
+    json_object_set_new(res_span_obj, "scopeSpans", scope_spans_arr);
+
+    json_array_append_new(res_spans_arr, res_span_obj);
+    json_object_set_new(root, "resourceSpans", res_spans_arr);
+
+    char* out = json_dumps(root, JSON_COMPACT);
+    json_decref(root);
+    return out;
+}
+
+/**
+ * @brief Thread-safe circular array holding recent trace records for Web console queries.
+ */
+typedef struct {
+    trace_context_t items[TRACE_RECENT_CACHE_CAPACITY]; /**< Array of cached traces. */
+    size_t          count;                              /**< Current number of cached traces. */
+    size_t          next_idx;                           /**< Next write slot index. */
+    pthread_mutex_t mtx;                                /**< Mutex protecting cache access. */
+} trace_recent_cache_t;
+
+static trace_recent_cache_t g_recent_cache = {
+    .count = 0, .next_idx = 0, .mtx = PTHREAD_MUTEX_INITIALIZER};
+
+void
+tracer_cache_add(const trace_context_t* ctx)
+{
+    if (ctx == NULL || ctx->trace_id[0] == '\0') {
+        return;
+    }
+    pthread_mutex_lock(&g_recent_cache.mtx);
+    size_t idx = g_recent_cache.next_idx;
+    g_recent_cache.items[idx] = *ctx;
+    g_recent_cache.next_idx = (idx + 1) % TRACE_RECENT_CACHE_CAPACITY;
+    if (g_recent_cache.count < TRACE_RECENT_CACHE_CAPACITY) {
+        g_recent_cache.count++;
+    }
+    pthread_mutex_unlock(&g_recent_cache.mtx);
+}
+
+bool
+tracer_cache_get(const char* trace_id, trace_context_t* out_ctx)
+{
+    if (trace_id == NULL || out_ctx == NULL) {
+        return false;
+    }
+    pthread_mutex_lock(&g_recent_cache.mtx);
+    for (size_t i = 0; i < g_recent_cache.count; i++) {
+        if (strcasecmp(g_recent_cache.items[i].trace_id, trace_id) == 0) {
+            *out_ctx = g_recent_cache.items[i];
+            pthread_mutex_unlock(&g_recent_cache.mtx);
+            return true;
+        }
+    }
+    pthread_mutex_unlock(&g_recent_cache.mtx);
+    return false;
+}
+
+size_t
+tracer_cache_list_recent(trace_context_t* out_array, size_t max_count)
+{
+    if (out_array == NULL || max_count == 0) {
+        return 0;
+    }
+    pthread_mutex_lock(&g_recent_cache.mtx);
+    size_t n = (g_recent_cache.count < max_count) ? g_recent_cache.count : max_count;
+    for (size_t i = 0; i < n; i++) {
+        size_t idx = (g_recent_cache.next_idx + TRACE_RECENT_CACHE_CAPACITY - 1 - i) %
+                     TRACE_RECENT_CACHE_CAPACITY;
+        out_array[i] = g_recent_cache.items[idx];
+    }
+    pthread_mutex_unlock(&g_recent_cache.mtx);
+    return n;
+}
+
+void
+tracer_cache_clear(void)
+{
+    pthread_mutex_lock(&g_recent_cache.mtx);
+    g_recent_cache.count = 0;
+    g_recent_cache.next_idx = 0;
+    pthread_mutex_unlock(&g_recent_cache.mtx);
+}
+
+/**
+ * @brief Internal implementation of background tracer manager.
+ */
+struct tracer_manager {
+    tracer_config_t      cfg;        /**< Active tracer configuration copy. */
+    pthread_mutex_t      cfg_mtx;    /**< Mutex protecting configuration reads/writes. */
+    trace_ring_buffer_t* rb;         /**< Reference to shared ring buffer queue. */
+    pthread_t            worker_tid; /**< Worker pthread handle. */
+    atomic_bool          running;    /**< Flag controlling worker loop execution. */
+};
+
+static void*
+trace_exporter_worker(void* arg)
+{
+    tracer_manager_t* tm = (tracer_manager_t*)arg;
+    trace_context_t   batch[50];
+    time_t            last_warn_time = 0;
+
+    while (atomic_load(&tm->running)) {
+        int             count = 0;
+        trace_context_t ctx;
+
+        /* Pop first item waiting up to 1000ms */
+        if (trace_ring_buffer_pop(tm->rb, &ctx, 1000)) {
+            batch[count++] = ctx;
+            tracer_cache_add(&ctx);
+
+            /* Drain up to 49 more non-blocking */
+            while (count < 50 && trace_ring_buffer_pop(tm->rb, &ctx, 0)) {
+                batch[count++] = ctx;
+                tracer_cache_add(&ctx);
+            }
+        }
+
+        if (count == 0) {
+            continue;
+        }
+
+        pthread_mutex_lock(&tm->cfg_mtx);
+        char endpoint[256];
+        strncpy(endpoint, tm->cfg.otlp_endpoint, sizeof(endpoint) - 1);
+        endpoint[sizeof(endpoint) - 1] = '\0';
+        bool enabled = tm->cfg.enabled;
+        pthread_mutex_unlock(&tm->cfg_mtx);
+
+        if (!enabled || endpoint[0] == '\0') {
+            continue;
+        }
+
+        char* json_str = tracer_serialize_otlp_json(batch, count);
+        if (json_str == NULL) {
+            continue;
+        }
+
+        CURL* c = curl_easy_init();
+        if (c != NULL) {
+            struct curl_slist* hdrs = NULL;
+            hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
+            hdrs = curl_slist_append(hdrs, "User-Agent: aigate-tracer/1.0");
+
+            curl_easy_setopt(c, CURLOPT_URL, endpoint);
+            curl_easy_setopt(c, CURLOPT_POST, 1L);
+            curl_easy_setopt(c, CURLOPT_POSTFIELDS, json_str);
+            curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)strlen(json_str));
+            curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+            curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 2000L);
+            curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 1000L);
+            curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+
+            CURLcode res = curl_easy_perform(c);
+            if (res != CURLE_OK) {
+                time_t now = time(NULL);
+                if (now - last_warn_time > 60) {
+                    last_warn_time = now;
+                    AIGATE_LOG_WARN("OTLP exporter failed to send %d traces to %s: %s",
+                                    count,
+                                    endpoint,
+                                    curl_easy_strerror(res));
+                }
+            }
+            curl_slist_free_all(hdrs);
+            curl_easy_cleanup(c);
+        }
+        free(json_str);
+    }
+
+    /* Drain remaining queued traces into local cache on shutdown */
+    trace_context_t ctx;
+    while (trace_ring_buffer_pop(tm->rb, &ctx, 0)) {
+        tracer_cache_add(&ctx);
+    }
+    return NULL;
+}
+
+tracer_manager_t*
+tracer_manager_create(const tracer_config_t* cfg, trace_ring_buffer_t* rb)
+{
+    if (rb == NULL) {
+        return NULL;
+    }
+
+    tracer_manager_t* tm = calloc(1, sizeof(tracer_manager_t));
+    if (!tm) {
+        return NULL;
+    }
+
+    if (cfg) {
+        tm->cfg = *cfg;
+    } else {
+        tm->cfg.enabled = true;
+        tm->cfg.sample_rate = 1.0;
+        tm->cfg.slow_threshold_ms = 2000;
+        tm->cfg.otlp_endpoint[0] = '\0';
+    }
+
+    if (pthread_mutex_init(&tm->cfg_mtx, NULL) != 0) {
+        free(tm);
+        return NULL;
+    }
+
+    tm->rb = rb;
+    atomic_init(&tm->running, true);
+
+    if (pthread_create(&tm->worker_tid, NULL, trace_exporter_worker, tm) != 0) {
+        pthread_mutex_destroy(&tm->cfg_mtx);
+        free(tm);
+        return NULL;
+    }
+
+    return tm;
+}
+
+void
+tracer_manager_stop(tracer_manager_t* tm)
+{
+    if (tm == NULL) {
+        return;
+    }
+
+    if (atomic_exchange(&tm->running, false)) {
+        /* Wake up worker if blocked in timedwait */
+        trace_context_t dummy;
+        memset(&dummy, 0, sizeof(dummy));
+        trace_ring_buffer_push(tm->rb, &dummy);
+        pthread_join(tm->worker_tid, NULL);
+    }
+}
+
+void
+tracer_manager_destroy(tracer_manager_t* tm)
+{
+    if (tm == NULL) {
+        return;
+    }
+    tracer_manager_stop(tm);
+    pthread_mutex_destroy(&tm->cfg_mtx);
+    free(tm);
+}
+
+void
+tracer_manager_update_config(tracer_manager_t* tm, const tracer_config_t* new_cfg)
+{
+    if (tm == NULL || new_cfg == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&tm->cfg_mtx);
+    tm->cfg = *new_cfg;
+    pthread_mutex_unlock(&tm->cfg_mtx);
+}
+
+tracer_config_t
+tracer_manager_get_config(const tracer_manager_t* tm)
+{
+    tracer_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    if (tm == NULL) {
+        return cfg;
+    }
+    pthread_mutex_lock((pthread_mutex_t*)&tm->cfg_mtx);
+    cfg = tm->cfg;
+    pthread_mutex_unlock((pthread_mutex_t*)&tm->cfg_mtx);
+    return cfg;
 }

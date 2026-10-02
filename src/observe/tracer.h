@@ -257,4 +257,105 @@ size_t trace_ring_buffer_count(trace_ring_buffer_t* rb);
  */
 uint64_t trace_ring_buffer_dropped(trace_ring_buffer_t* rb);
 
+/**
+ * @brief Serialize an array of trace contexts into standard OTLP/HTTP JSON string.
+ *
+ * Output complies with OpenTelemetry Traces OTLP/HTTP JSON schema (resourceSpans, scopeSpans).
+ * Caller is responsible for freeing the returned string using free().
+ *
+ * @param traces Array of trace contexts to serialize.
+ * @param count  Number of trace contexts in array.
+ * @return Dynamically allocated JSON string, or NULL on error or empty input.
+ */
+char* tracer_serialize_otlp_json(const trace_context_t* traces, int count);
+
+/** @brief Default capacity for recent traces cache for web console inspection. */
+#define TRACE_RECENT_CACHE_CAPACITY 500
+
+/**
+ * @brief Store a trace context in the recent traces memory index.
+ *
+ * Thread-safe. Overwrites the oldest trace if cache capacity is exceeded.
+ *
+ * @param ctx Trace context to record.
+ */
+void tracer_cache_add(const trace_context_t* ctx);
+
+/**
+ * @brief Look up a trace context by its 32-hex trace ID in the recent cache.
+ *
+ * Thread-safe.
+ *
+ * @param trace_id 32-hex character trace ID string.
+ * @param out_ctx  Destination buffer to copy the found trace context into.
+ * @return true if found, false if not found or parameters are invalid.
+ */
+bool tracer_cache_get(const char* trace_id, trace_context_t* out_ctx);
+
+/**
+ * @brief Retrieve a list of recently recorded trace contexts.
+ *
+ * Thread-safe. Copies up to max_count trace contexts in reverse chronological order.
+ *
+ * @param out_array Destination array of trace contexts.
+ * @param max_count Maximum number of trace contexts to copy.
+ * @return Number of trace contexts copied into out_array.
+ */
+size_t tracer_cache_list_recent(trace_context_t* out_array, size_t max_count);
+
+/**
+ * @brief Clear all cached traces in the recent traces memory index.
+ */
+void tracer_cache_clear(void);
+
+/**
+ * @brief Background tracer worker manager and OTLP exporter.
+ */
+typedef struct tracer_manager tracer_manager_t;
+
+/**
+ * @brief Create and start a background tracer manager with worker thread.
+ *
+ * @param cfg Initial tracer configuration (may be NULL for defaults).
+ * @param rb  Trace ring buffer from which traces are consumed (non-null).
+ * @return Newly allocated tracer manager, or NULL on error.
+ */
+tracer_manager_t* tracer_manager_create(const tracer_config_t* cfg, trace_ring_buffer_t* rb);
+
+/**
+ * @brief Stop the background exporter worker thread.
+ *
+ * @param tm Tracer manager instance (safe with NULL).
+ */
+void tracer_manager_stop(tracer_manager_t* tm);
+
+/**
+ * @brief Destroy a tracer manager and release its resources.
+ *
+ * Calls tracer_manager_stop if still running.
+ *
+ * @param tm Tracer manager instance (safe with NULL).
+ */
+void tracer_manager_destroy(tracer_manager_t* tm);
+
+/**
+ * @brief Dynamically update tracer configuration at runtime.
+ *
+ * Thread-safe.
+ *
+ * @param tm      Tracer manager instance.
+ * @param new_cfg New configuration parameters.
+ */
+void tracer_manager_update_config(tracer_manager_t* tm, const tracer_config_t* new_cfg);
+
+/**
+ * @brief Retrieve the current tracer configuration.
+ *
+ * Thread-safe.
+ *
+ * @param tm Tracer manager instance.
+ * @return Current configuration copy.
+ */
+tracer_config_t tracer_manager_get_config(const tracer_manager_t* tm);
+
 #endif /* AIGATE_TRACER_H */

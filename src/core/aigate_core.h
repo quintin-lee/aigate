@@ -78,6 +78,7 @@ typedef struct aigate_core {
     struct latency_tracker* lt;                 /**< Latency tracker & hedge budget, may be NULL */
     tracer_config_t         tracer_cfg; /**< OpenTelemetry distributed tracing configuration */
     trace_ring_buffer_t*    trace_rb;   /**< Trace export ring buffer, may be NULL (disabled) */
+    tracer_manager_t*       tm; /**< Background tracer manager and OTLP exporter, may be NULL */
 } aigate_core;
 
 /** @brief Type alias for gateway pipeline context. */

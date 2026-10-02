@@ -195,8 +195,10 @@ aigate_core_init(aigate_core*   ac,
     ac->lt = latency_tracker_create();
 
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
-        /* Roll back any partially built sub-objects; the router teardown
-         * also cleanses its master-key copy. */
+        if (ac->tm != NULL) {
+            tracer_manager_destroy(ac->tm);
+            ac->tm = NULL;
+        }
         if (ac->trace_rb != NULL) {
             trace_ring_buffer_destroy(ac->trace_rb);
             ac->trace_rb = NULL;
@@ -235,6 +237,10 @@ aigate_core_init(aigate_core*   ac,
         memset(ac, 0, sizeof *ac);
         return -1;
     }
+
+    if (ac->trace_rb != NULL) {
+        ac->tm = tracer_manager_create(&ac->tracer_cfg, ac->trace_rb);
+    }
     return 0;
 }
 
@@ -243,6 +249,10 @@ aigate_core_shutdown(aigate_core* ac)
 {
     if (ac == NULL) {
         return;
+    }
+    if (ac->tm != NULL) {
+        tracer_manager_destroy(ac->tm);
+        ac->tm = NULL;
     }
     if (ac->trace_rb != NULL) {
         trace_ring_buffer_destroy(ac->trace_rb);
