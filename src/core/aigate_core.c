@@ -93,6 +93,25 @@ aigate_core_reload_compressor_rules(aigate_core* ac)
     return 0;
 }
 
+int
+aigate_core_reload_cache_optimizer_rules(aigate_core* ac)
+{
+    if (ac == NULL) {
+        return -1;
+    }
+    pthread_mutex_lock(&ac->cache_opt_rules_lock);
+    ac->n_cache_opt_rules = 0;
+    if (ac->ps != NULL) {
+        const pg_ops_t* ops = pg_store_ops(ac->ps);
+        if (ops != NULL && ops->list_cache_optimizer_rules != NULL) {
+            ops->list_cache_optimizer_rules(
+                ops->ctx, ac->cache_opt_rules, 64, &ac->n_cache_opt_rules);
+        }
+    }
+    pthread_mutex_unlock(&ac->cache_opt_rules_lock);
+    return 0;
+}
+
 /** @brief Extract prompt preview snippet from parsed JSON body. */
 static void
 extract_prompt_snippet(json_t* jbody, char* out, size_t out_sz)
@@ -160,6 +179,41 @@ calc_req_cost(const model_rec_t* route, long prompt, long completion, long cache
     return ((double)unhit_prompt * in_mtok + (double)cached * in_mtok * cached_discount +
             (double)completion * out_mtok) /
            1000000.0;
+}
+
+double
+calc_cache_savings(const model_rec_t* route, long cached)
+{
+    if (route == NULL || cached <= 0 || route->pricing_json[0] == '\0') {
+        return 0.0;
+    }
+    json_error_t jerr;
+    json_t*      jp = json_loads(route->pricing_json, 0, &jerr);
+    if (jp == NULL || !json_is_object(jp)) {
+        if (jp != NULL) {
+            json_decref(jp);
+        }
+        return 0.0;
+    }
+    json_t* jin = json_object_get(jp, "in_mtok");
+    if (jin == NULL || !json_is_number(jin)) {
+        json_decref(jp);
+        return 0.0;
+    }
+    double  in_mtok = json_number_value(jin);
+    json_t* jdisc = json_object_get(jp, "cached_mtok_discount");
+    double  cached_discount =
+        (jdisc != NULL && json_is_number(jdisc)) ? json_number_value(jdisc) : 0.50;
+    json_decref(jp);
+
+    if (cached_discount > 1.0) {
+        cached_discount = 1.0;
+    }
+    if (cached_discount < 0.0) {
+        cached_discount = 0.0;
+    }
+
+    return ((double)cached * in_mtok * (1.0 - cached_discount)) / 1000000.0;
 }
 
 /**
@@ -273,7 +327,16 @@ aigate_core_init(aigate_core*   ac,
     ac->comp_cache = compressor_cache_create(200);
     aigate_core_reload_compressor_rules(ac);
 
+    pthread_mutex_init(&ac->cache_opt_rules_lock, NULL);
+    ac->cache_opt_cache = cache_optimizer_cache_create(200);
+    aigate_core_reload_cache_optimizer_rules(ac);
+
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
+        if (ac->cache_opt_cache != NULL) {
+            cache_optimizer_cache_destroy(ac->cache_opt_cache);
+            ac->cache_opt_cache = NULL;
+        }
+        pthread_mutex_destroy(&ac->cache_opt_rules_lock);
         if (ac->comp_cache != NULL) {
             compressor_cache_destroy(ac->comp_cache);
             ac->comp_cache = NULL;
@@ -395,6 +458,11 @@ aigate_core_shutdown(aigate_core* ac)
         ac->comp_cache = NULL;
     }
     pthread_mutex_destroy(&ac->comp_rules_lock);
+    if (ac->cache_opt_cache != NULL) {
+        cache_optimizer_cache_destroy(ac->cache_opt_cache);
+        ac->cache_opt_cache = NULL;
+    }
+    pthread_mutex_destroy(&ac->cache_opt_rules_lock);
     auth_key_shutdown(&ac->keys);
 }
 
@@ -475,6 +543,24 @@ aigate_write_gemini_error(aigate_response_ctx* rc,
     return rv;
 }
 
+void
+aigate_inject_cache_optimizer_headers(const chat_req_t* chatq, void* conn)
+{
+    (void)conn;
+    if (chatq == NULL || chatq->rc == NULL || chatq->rc->set_header == NULL) {
+        return;
+    }
+    const char* hit_str = (chatq->upstream_cached_tokens > 0) ? "true" : "false";
+    chatq->rc->set_header(chatq->rc->impl, "X-Aigate-Prompt-Cache-Hit", hit_str);
+
+    char buf[64];
+    snprintf(buf, sizeof(buf), "%u", chatq->upstream_cached_tokens);
+    chatq->rc->set_header(chatq->rc->impl, "X-Aigate-Prompt-Cache-Tokens", buf);
+
+    snprintf(buf, sizeof(buf), "%.4f", chatq->upstream_cache_savings_usd);
+    chatq->rc->set_header(chatq->rc->impl, "X-Aigate-Prompt-Cache-Savings", buf);
+}
+
 /** @brief Release owned request resources (mirrors the historical triple-cleanup). */
 void
 chat_req_cleanup(chat_req_t* q)
@@ -533,6 +619,7 @@ chat_req_cleanup(chat_req_t* q)
     q->sanitized_body = NULL;
     memset(&q->pii_map, 0, sizeof(q->pii_map));
     prompt_compressor_result_cleanup(&q->comp_result);
+    cache_optimizer_result_cleanup(&q->cache_opt_result);
 }
 
 /** @brief Auth → QPS → daily quota → monthly budget gates.
@@ -1523,6 +1610,84 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                                          "false");
                     tracer_span_end(&chatq.trace_ctx, "prompt_compression", SPAN_STATUS_OK, NULL);
                 }
+            }
+        }
+    }
+
+    /* --- prompt cache optimizer: prefix alignment, tool sorting, timestamp sinking & breakpoints --- */
+    const char* prompt_cache_hdr = rq->prompt_cache_control;
+    bool        prompt_cache_disabled =
+        (prompt_cache_hdr != NULL &&
+         (strcmp(prompt_cache_hdr, "off") == 0 || strcmp(prompt_cache_hdr, "false") == 0 ||
+          strcmp(prompt_cache_hdr, "no") == 0));
+
+    if (!prompt_cache_disabled && ac != NULL) {
+        cache_optimizer_rule_t opt_rule;
+        bool                   have_opt_rule = false;
+
+        pthread_mutex_lock(&ac->cache_opt_rules_lock);
+        for (int i = 0; i < ac->n_cache_opt_rules; i++) {
+            if (ac->cache_opt_rules[i].enabled &&
+                cache_optimizer_rule_matches(&ac->cache_opt_rules[i], chatq.model)) {
+                opt_rule = ac->cache_opt_rules[i];
+                have_opt_rule = true;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&ac->cache_opt_rules_lock);
+
+        if (!have_opt_rule && prompt_cache_hdr != NULL) {
+            if (strcmp(prompt_cache_hdr, "on") == 0 || strcmp(prompt_cache_hdr, "true") == 0 ||
+                strcmp(prompt_cache_hdr, "auto") == 0 || strcmp(prompt_cache_hdr, "force") == 0) {
+                memset(&opt_rule, 0, sizeof(opt_rule));
+                opt_rule.enabled = true;
+                opt_rule.sort_tools = true;
+                opt_rule.sink_dynamic_system = true;
+                opt_rule.inject_anthropic_breakpoints = true;
+                opt_rule.min_tokens_threshold = 1024;
+                have_opt_rule = true;
+            }
+        }
+
+        if (have_opt_rule) {
+            tracer_span_start(&chatq.trace_ctx,
+                              "prompt_cache_optimizer",
+                              SPAN_KIND_INTERNAL,
+                              chatq.trace_ctx.root_span_id);
+            bool ok = cache_optimizer_process_payload(
+                (const char*)chatq.eff_body, chatq.eff_len, &opt_rule, &chatq.cache_opt_result);
+            if (ok && chatq.cache_opt_result.optimized &&
+                chatq.cache_opt_result.optimized_payload != NULL) {
+                chatq.eff_body = chatq.cache_opt_result.optimized_payload;
+                chatq.eff_len = chatq.cache_opt_result.optimized_len;
+
+                tracer_span_set_attr(&chatq.trace_ctx,
+                                     "prompt_cache_optimizer",
+                                     "aigate.prompt_cache.optimized",
+                                     "true");
+                tracer_span_set_attr(&chatq.trace_ctx,
+                                     "prompt_cache_optimizer",
+                                     "aigate.prompt_cache.tools_sorted",
+                                     chatq.cache_opt_result.tools_sorted ? "true" : "false");
+                tracer_span_set_attr(&chatq.trace_ctx,
+                                     "prompt_cache_optimizer",
+                                     "aigate.prompt_cache.dynamic_sunk",
+                                     chatq.cache_opt_result.dynamic_sunk ? "true" : "false");
+                tracer_span_set_attr_int(&chatq.trace_ctx,
+                                         "prompt_cache_optimizer",
+                                         "aigate.prompt_cache.breakpoints_injected",
+                                         chatq.cache_opt_result.breakpoints_injected);
+                tracer_span_set_attr_int(&chatq.trace_ctx,
+                                         "prompt_cache_optimizer",
+                                         "aigate.prompt_cache.duration_us",
+                                         chatq.cache_opt_result.latency_us);
+                tracer_span_end(&chatq.trace_ctx, "prompt_cache_optimizer", SPAN_STATUS_OK, NULL);
+            } else {
+                tracer_span_set_attr(&chatq.trace_ctx,
+                                     "prompt_cache_optimizer",
+                                     "aigate.prompt_cache.optimized",
+                                     "false");
+                tracer_span_end(&chatq.trace_ctx, "prompt_cache_optimizer", SPAN_STATUS_OK, NULL);
             }
         }
     }

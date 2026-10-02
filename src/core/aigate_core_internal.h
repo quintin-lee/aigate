@@ -75,6 +75,10 @@ typedef struct chat_req {
     shadow_rule_t       shadow_rule;      /**< Active shadow rule snapshot. */
     char                eval_id[33];      /**< Unique evaluation ID for shadow/canary pairing. */
     compressor_result_t comp_result;      /**< Prompt compression execution metrics and payload. */
+    cache_optimizer_result_t cache_opt_result; /**< Prompt cache optimizer execution result. */
+    uint32_t                 upstream_cached_tokens; /**< Upstream cached prompt tokens read. */
+    uint32_t                 upstream_prompt_tokens; /**< Upstream total prompt tokens. */
+    double upstream_cache_savings_usd;               /**< Upstream prompt cache dollar savings. */
 } chat_req_t;
 
 /**
@@ -87,6 +91,14 @@ uint64_t mono_ns(void);
  * @brief Calculate estimated request cost in USD based on model pricing and token counts.
  */
 double calc_req_cost(const model_rec_t* route, long prompt, long completion, long cached);
+
+/**
+ * @brief Calculate estimated dollar savings from upstream prompt cache hits.
+ * @param[in] route  Model routing record containing pricing JSON.
+ * @param[in] cached Cached prompt tokens count.
+ * @return Estimated savings in USD.
+ */
+double calc_cache_savings(const model_rec_t* route, long cached);
 
 /**
  * @brief Record request metrics into usage meter and emit event bus notification.
@@ -271,5 +283,12 @@ int handle_chat_sync(chat_req_t* q);
  * @brief Handle streaming (SSE) /v1/chat/completions request.
  */
 int handle_chat_stream(chat_req_t* q);
+
+/**
+ * @brief Inject X-Aigate-Prompt-Cache-* response headers.
+ * @param[in] chatq Request processing context.
+ * @param[in] conn  Civetweb connection or mock sink.
+ */
+void aigate_inject_cache_optimizer_headers(const chat_req_t* chatq, void* conn);
 
 #endif /* AIGATE_CORE_INTERNAL_H */

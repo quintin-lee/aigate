@@ -581,6 +581,33 @@ main(void)
     extern void test_admin_compressor_endpoints(void);
     test_register("admin_compressor_endpoints", test_admin_compressor_endpoints);
 
+    extern void test_admin_cache_optimizer_endpoints(void);
+    test_register("admin_cache_optimizer_endpoints", test_admin_cache_optimizer_endpoints);
+
+    extern void test_cache_optimizer_sort_tools(void);
+    test_register("cache_optimizer_sort_tools", test_cache_optimizer_sort_tools);
+
+    extern void test_cache_optimizer_normalize_whitespace(void);
+    test_register("cache_optimizer_normalize_whitespace",
+                  test_cache_optimizer_normalize_whitespace);
+
+    extern void test_cache_optimizer_sink_dynamic_system(void);
+    test_register("cache_optimizer_sink_dynamic_system", test_cache_optimizer_sink_dynamic_system);
+
+    extern void test_cache_optimizer_inject_anthropic_breakpoints(void);
+    test_register("cache_optimizer_inject_anthropic_breakpoints",
+                  test_cache_optimizer_inject_anthropic_breakpoints);
+
+    extern void test_cache_optimizer_cache_and_stats(void);
+    test_register("cache_optimizer_cache_and_stats", test_cache_optimizer_cache_and_stats);
+
+    extern void test_cache_optimizer_rule_match(void);
+    test_register("cache_optimizer_rule_match", test_cache_optimizer_rule_match);
+
+    extern void test_pipeline_cache_optimizer_and_headers(void);
+    test_register("pipeline_cache_optimizer_and_headers",
+                  test_pipeline_cache_optimizer_and_headers);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

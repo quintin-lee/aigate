@@ -303,6 +303,10 @@
         <span class="text-base">🗜️</span>
         <span>提示词压缩</span>
       </button>
+      <button data-tab="cache-optimizer" onclick="switchTab('cache-optimizer')" class="side-link" id="nav-cache-optimizer-side">
+        <span class="text-base">🎯</span>
+        <span>提示词缓存</span>
+      </button>
     </nav>
 
     <!-- Sidebar bottom status -->
@@ -391,6 +395,7 @@
       <button data-tab="metrics" onclick="switchTab('metrics')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🛠️ 指标</button>
       <button data-tab="shadow" onclick="switchTab('shadow')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🧪 镜像/金丝雀</button>
       <button data-tab="compressor" onclick="switchTab('compressor')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🗜️ 压缩瘦身</button>
+      <button data-tab="cache-optimizer" onclick="switchTab('cache-optimizer')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🎯 提示词缓存</button>
     </div>
 
     <!-- TOAST NOTIFICATIONS -->
@@ -2668,6 +2673,160 @@
             </tbody>
           </table>
         </div>
+    </div>
+
+    <!-- ==================== Tab 15: Prompt Cache Prefix Alignment & KV-Cache Optimizer ==================== -->
+    <div id="tab-cache-optimizer" class="tab-content tab-pane hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+            <span>🎯</span>
+            <span>提示词前缀对齐与 KV/Prompt Cache 命中优化引擎 (Prompt Cache Prefix Alignment & KV-Cache Optimizer)</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">确定性 Tools 字典序重排 • 易变动态时戳与 UUID 智能下沉 • Anthropic 4 处加权断点注入 • 零额外依赖高性能 &lt; 300μs</p>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button onclick="loadCacheOptimizerTab()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:text-white hover:border-slate-700 transition flex items-center space-x-1.5">
+            <span>🔄</span>
+            <span>刷新数据</span>
+          </button>
+          <button onclick="openCacheOptRuleModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/20 transition flex items-center space-x-1.5">
+            <span>➕</span>
+            <span>新建优化规则</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4 Core KPI cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- 1. Cache Hit Rate -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">缓存命中率</div>
+            <span class="stat-ico em">🎯</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheOptKpiHitRate" class="text-3xl font-extrabold text-emerald-400 font-mono">0.0%</div>
+            <div class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">KV 命中率</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">已处理请求命中上游 Prompt Cache 比例</div>
+        </div>
+
+        <!-- 2. Cached Tokens -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">累计缓存 Token</div>
+            <span class="stat-ico cy">⚡</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheOptKpiTokens" class="text-3xl font-extrabold text-cyan-400 font-mono">0</div>
+            <div class="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 font-mono">Tokens</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">上游命中复用的缓存前缀 Token 总量</div>
+        </div>
+
+        <!-- 3. Cost Savings -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">预估节约费用</div>
+            <span class="stat-ico" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">💰</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheOptKpiSavings" class="text-3xl font-extrabold text-amber-400 font-mono">$0.0000</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">根据上游折扣差价折算降低的 API 支出</div>
+        </div>
+
+        <!-- 4. Execution Latency -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">平均优化耗时</div>
+            <span class="stat-ico" style="background: rgba(168, 85, 247, 0.15); color: #a855f7;">⚡</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="cacheOptKpiLatency" class="text-3xl font-extrabold text-purple-400 font-mono">0μs</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">纯 C17 高性能前缀归一与断点注入耗时</div>
+        </div>
+      </div>
+
+      <!-- Cache Optimizer Rules Table -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>⚙️</span>
+              <span>前缀对齐与断点注入规则库 (Optimization Rules)</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">按模型模式配置 Tools 字典序重排、动态时戳下沉与 Anthropic 4 处加权断点</p>
+          </div>
+          <button onclick="openCacheOptRuleModal()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-brand-600/80 hover:bg-brand-500 text-white transition flex items-center gap-1.5">
+            <span>➕ 新建规则</span>
+          </button>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll rounded-xl border border-slate-800/80">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/90 text-slate-400 uppercase font-semibold border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3 whitespace-nowrap">ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">模型匹配 (Pattern)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">触发门槛 (Min Tokens)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">Tools 重排</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">易变时戳下沉</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">Anthropic 断点</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
+                <th class="py-2.5 px-3 whitespace-nowrap text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="cacheOptRulesTbody" class="divide-y divide-slate-800/50 text-[11px]">
+              <tr>
+                <td colspan="8" class="py-8 text-center text-xs text-slate-500">
+                  正在加载优化规则列表...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Real-time Cache Optimizer Snapshot Stream Table -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>🔀</span>
+              <span>实时前缀对齐与缓存命中记录数据流 (Optimization Snapshots)</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">轻量环形快照缓存（最近 200 条），实时审查 Tools 重排、时戳下沉、Anthropic 断点注入与命中情况</p>
+          </div>
+          <span class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono" id="cacheOptSnapshotsCountBadge">最近 200 条</span>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll rounded-xl border border-slate-800/80">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/90 text-slate-400 uppercase font-semibold border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3 whitespace-nowrap">请求 ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">模型</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">原始 / 优化 Token</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">缓存命中</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">缓存 Token</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">预估节省 ($)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">优化耗时</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">执行动作</th>
+                <th class="py-2.5 px-3 whitespace-nowrap text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="cacheOptSnapshotsTbody" class="divide-y divide-slate-800/50 text-[11px]">
+              <tr>
+                <td colspan="9" class="py-8 text-center text-xs text-slate-500">
+                  暂无缓存优化记录
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
       </div>
     </div>
 
@@ -2971,6 +3130,125 @@
           </div>
           <div id="diffCompNewPreview" class="flex-1 p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] font-mono text-emerald-200/90 overflow-y-auto custom-scroll whitespace-pre-wrap leading-relaxed"></div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cache Optimizer Rule Modal -->
+  <div id="cacheOptRuleModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-lg w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center space-x-2">
+          <span>🎯</span>
+          <span id="cacheOptRuleModalTitle">添加提示词缓存对齐规则</span>
+        </h3>
+        <button onclick="closeCacheOptRuleModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <input type="hidden" id="cacheOptRuleId">
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">模型匹配模式 (Pattern)</label>
+          <input type="text" id="cacheOptRuleModelPattern" placeholder="例如 claude-*, *, gpt-4o" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">触发阈值 (Min Tokens)</label>
+          <input type="number" id="cacheOptRuleMinTokens" value="1024" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div class="space-y-2 pt-1">
+          <label class="block font-semibold text-slate-300">前缀优化与断点策略</label>
+          <div class="space-y-1.5">
+            <label class="flex items-center gap-2 text-slate-300 text-xs cursor-pointer">
+              <input type="checkbox" id="cacheOptRuleSortTools" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+              <span>Tools / Functions 数组确定性 ASCII 字典序重排</span>
+            </label>
+            <label class="flex items-center gap-2 text-slate-300 text-xs cursor-pointer">
+              <input type="checkbox" id="cacheOptRuleSinkDynamicSystem" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+              <span>易变动态时戳与 UUID 智能识别并下沉至末尾</span>
+            </label>
+            <label class="flex items-center gap-2 text-slate-300 text-xs cursor-pointer">
+              <input type="checkbox" id="cacheOptRuleInjectBreakpoints" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+              <span>Anthropic 协议加权注入至多 4 处 ephemeral 断点</span>
+            </label>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 pt-1">
+          <input type="checkbox" id="cacheOptRuleEnabled" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+          <label for="cacheOptRuleEnabled" class="text-xs text-slate-300 select-none">立即启用此规则</label>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
+        <button onclick="closeCacheOptRuleModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition">取消</button>
+        <button onclick="saveCacheOptRule()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">保存规则</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Cache Optimizer Detail Modal -->
+  <div id="cacheOptDetailModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[90vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h3 class="text-lg font-bold text-white flex items-center space-x-2">
+            <span>🎯</span>
+            <span>提示词前缀对齐与断点审查详情</span>
+          </h3>
+          <p class="text-xs text-slate-400 mt-0.5">
+            请求 ID: <span id="detailOptReqId" class="font-mono text-cyan-400"></span> • 
+            模型: <span id="detailOptModel" class="font-mono text-indigo-400"></span>
+          </p>
+        </div>
+        <button onclick="closeCacheOptDetailModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <!-- Top Stats Badges -->
+      <div class="grid grid-cols-4 gap-3 text-center">
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="text-[10px] text-slate-400 uppercase">原始 Token 数</div>
+          <div id="detailOptOrigTokens" class="text-base font-bold text-white font-mono">0</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="text-[10px] text-slate-400 uppercase">优化后 Token 数</div>
+          <div id="detailOptOptimizedTokens" class="text-base font-bold text-cyan-400 font-mono">0</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="text-[10px] text-slate-400 uppercase">命中缓存 Token</div>
+          <div id="detailOptCachedTokens" class="text-base font-bold text-emerald-400 font-mono">0</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="text-[10px] text-slate-400 uppercase">预估节省费用</div>
+          <div id="detailOptSavings" class="text-base font-bold text-amber-400 font-mono">$0.0000</div>
+        </div>
+      </div>
+
+      <!-- Detail Execution Checklist -->
+      <div class="space-y-2 p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs">
+        <div class="font-semibold text-slate-300 pb-1 border-b border-slate-800/80">引擎执行动作与优化特征</div>
+        <div class="grid grid-cols-2 gap-3 pt-1">
+          <div class="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+            <span class="text-slate-400">Tools 确定性字典序重排:</span>
+            <span id="detailOptToolsSorted" class="font-mono font-bold"></span>
+          </div>
+          <div class="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+            <span class="text-slate-400">易变时戳与 UUID 动态下沉:</span>
+            <span id="detailOptDynamicSunk" class="font-mono font-bold"></span>
+          </div>
+          <div class="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+            <span class="text-slate-400">Anthropic 加权断点注入数:</span>
+            <span id="detailOptBreakpoints" class="font-mono font-bold text-cyan-400"></span>
+          </div>
+          <div class="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800/80">
+            <span class="text-slate-400">上游 KV-Cache 命中判定:</span>
+            <span id="detailOptCacheHit" class="font-mono font-bold"></span>
+          </div>
+          <div class="flex items-center justify-between p-2 rounded-lg bg-slate-900 border border-slate-800/80 col-span-2">
+            <span class="text-slate-400">优化引擎处理耗时:</span>
+            <span id="detailOptLatency" class="font-mono text-purple-400 font-bold"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex justify-end pt-2 border-t border-slate-800">
+        <button onclick="closeCacheOptDetailModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 transition">关闭</button>
       </div>
     </div>
   </div>
@@ -3945,7 +4223,8 @@
         playground: "调试场",
         metrics: "监控指标",
         shadow: "流量镜像与金丝雀",
-        compressor: "提示词自适应压缩与 Token 瘦身"
+        compressor: "提示词自适应压缩与 Token 瘦身",
+        "cache-optimizer": "提示词前缀对齐与缓存优化"
       };
       const titleEl = document.getElementById("currentTabTitle");
       if (titleEl && tabTitles[tabId]) {
@@ -3994,6 +4273,8 @@
         if (typeof loadShadowTab === "function") loadShadowTab();
       } else if (state.activeTab === "compressor") {
         if (typeof loadCompressorTab === "function") loadCompressorTab();
+      } else if (state.activeTab === "cache-optimizer") {
+        if (typeof loadCacheOptimizerTab === "function") loadCacheOptimizerTab();
       }
     }
 
@@ -9626,6 +9907,281 @@
 
     function closeCompressorDiffModal() {
       document.getElementById("compressorDiffModal").classList.add("hidden");
+    }
+
+    // ==================== Prompt Cache Prefix Alignment & KV-Cache Optimizer Logic ====================
+    let cacheOptRecentSnapshots = [];
+
+    async function loadCacheOptimizerTab() {
+      await Promise.all([
+        renderCacheOptStats(),
+        renderCacheOptRules(),
+        renderCacheOptSnapshots()
+      ]);
+    }
+
+    async function renderCacheOptStats() {
+      try {
+        const resp = await apiCall("/admin/v1/cache-optimizer/stats");
+        if (!resp || !resp.ok) return;
+        const stats = await resp.json();
+
+        const hitRateEl = document.getElementById("cacheOptKpiHitRate");
+        const tokensEl = document.getElementById("cacheOptKpiTokens");
+        const savingsEl = document.getElementById("cacheOptKpiSavings");
+        const latencyEl = document.getElementById("cacheOptKpiLatency");
+
+        const totalReqs = stats.total_optimized_requests || 0;
+        const totalHits = stats.total_cache_hits || 0;
+        const hitRate = totalReqs > 0 ? ((totalHits / totalReqs) * 100).toFixed(1) + "%" : "0.0%";
+
+        if (hitRateEl) hitRateEl.textContent = hitRate;
+        if (tokensEl) tokensEl.textContent = (stats.total_cached_tokens || 0).toLocaleString();
+        if (savingsEl) savingsEl.textContent = `$${(stats.estimated_cost_saved_usd || 0).toFixed(4)}`;
+        if (latencyEl) latencyEl.textContent = `${stats.avg_latency_us || 0}μs`;
+      } catch (err) {
+        console.error("Failed to load cache optimizer stats", err);
+      }
+    }
+
+    async function renderCacheOptRules() {
+      const tbody = document.getElementById("cacheOptRulesTbody");
+      if (!tbody) return;
+      try {
+        const resp = await apiCall("/admin/v1/cache-optimizer/rules");
+        if (!resp || !resp.ok) {
+          tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-rose-400 font-sans">加载规则列表失败</td></tr>`;
+          return;
+        }
+        const data = await resp.json();
+        const rules = data && data.rules ? data.rules : [];
+        if (rules.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-slate-500 font-sans">暂无前缀对齐规则，请点击上方按钮新建规则</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = rules.map(r => {
+          const statusBadge = r.enabled
+            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>启用中</span>`
+            : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>已暂停</span>`;
+
+          const sortToolsBadge = r.sort_tools
+            ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">字典序</span>`
+            : `<span class="px-2 py-0.5 rounded text-[10px] text-slate-500">关闭</span>`;
+
+          const sinkDynamicBadge = r.sink_dynamic_system
+            ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-500/10 text-amber-400 border border-amber-500/20">智能下沉</span>`
+            : `<span class="px-2 py-0.5 rounded text-[10px] text-slate-500">关闭</span>`;
+
+          const injectBpBadge = r.inject_anthropic_breakpoints
+            ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">至多4处</span>`
+            : `<span class="px-2 py-0.5 rounded text-[10px] text-slate-500">关闭</span>`;
+
+          return `
+            <tr class="hover:bg-slate-900/40 transition">
+              <td class="py-2.5 px-3 font-mono text-[10px] text-cyan-400">${escapeHtml(r.id)}</td>
+              <td class="py-2.5 px-3 font-mono font-bold text-white">${escapeHtml(r.model_pattern)}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">&ge; ${r.min_tokens_threshold} Tokens</td>
+              <td class="py-2.5 px-3">${sortToolsBadge}</td>
+              <td class="py-2.5 px-3">${sinkDynamicBadge}</td>
+              <td class="py-2.5 px-3">${injectBpBadge}</td>
+              <td class="py-2.5 px-3">${statusBadge}</td>
+              <td class="py-2.5 px-3 text-right whitespace-nowrap space-x-1.5">
+                <button onclick="toggleCacheOptRule('${r.id}', ${r.enabled})" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] transition">${r.enabled ? '暂停' : '启用'}</button>
+                <button onclick="deleteCacheOptRule('${r.id}')" class="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-[10px] transition">删除</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-rose-400 font-sans">加载规则列表失败: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    async function renderCacheOptSnapshots() {
+      const tbody = document.getElementById("cacheOptSnapshotsTbody");
+      if (!tbody) return;
+      try {
+        const resp = await apiCall("/admin/v1/cache-optimizer/snapshots");
+        if (!resp || !resp.ok) {
+          tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-xs text-rose-400 font-sans">加载快照失败</td></tr>`;
+          return;
+        }
+        const data = await resp.json();
+        const snaps = data && data.snapshots ? data.snapshots : [];
+        cacheOptRecentSnapshots = snaps;
+        const countBadge = document.getElementById("cacheOptSnapshotsCountBadge");
+        if (countBadge) countBadge.textContent = `共 ${snaps.length} 条记录`;
+
+        if (snaps.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-xs text-slate-500 font-sans">暂无提示词缓存优化记录，等待流量进入...</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = snaps.map((s, idx) => {
+          const hitBadge = s.cache_hit
+            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>HIT</span>`
+            : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">MISS</span>`;
+
+          const actions = [];
+          if (s.tools_sorted) actions.push("Tools重排");
+          if (s.dynamic_sunk) actions.push("时戳下沉");
+          if (s.breakpoints_injected > 0) actions.push(`断点x${s.breakpoints_injected}`);
+          const actionStr = actions.length > 0
+            ? `<span class="px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-300 border border-indigo-500/20 text-[10px] font-medium">${actions.join(" • ")}</span>`
+            : `<span class="text-slate-500 text-[10px]">无修改</span>`;
+
+          return `
+            <tr class="hover:bg-slate-900/40 transition">
+              <td class="py-2.5 px-3 font-mono text-[10px] text-cyan-400">${s.request_id ? s.request_id.substring(0, 8) : ''}...</td>
+              <td class="py-2.5 px-3 font-mono font-bold text-white">${escapeHtml(s.model)}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${s.original_tokens} ➔ <span class="text-cyan-400">${s.optimized_tokens}</span></td>
+              <td class="py-2.5 px-3">${hitBadge}</td>
+              <td class="py-2.5 px-3 font-mono font-bold text-emerald-400">${s.cached_tokens}</td>
+              <td class="py-2.5 px-3 font-mono text-amber-400">$${(s.estimated_savings_usd || 0).toFixed(4)}</td>
+              <td class="py-2.5 px-3 font-mono text-purple-400">${s.latency_us}μs</td>
+              <td class="py-2.5 px-3">${actionStr}</td>
+              <td class="py-2.5 px-3 text-right whitespace-nowrap space-x-1.5">
+                <button onclick="openCacheOptDetailModal(${idx})" class="px-2 py-1 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 text-[10px] transition font-medium">🎯 查看详情</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-xs text-rose-400 font-sans">加载快照失败: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    function openCacheOptRuleModal() {
+      document.getElementById("cacheOptRuleId").value = "";
+      document.getElementById("cacheOptRuleModelPattern").value = "";
+      document.getElementById("cacheOptRuleMinTokens").value = "1024";
+      document.getElementById("cacheOptRuleSortTools").checked = true;
+      document.getElementById("cacheOptRuleSinkDynamicSystem").checked = true;
+      document.getElementById("cacheOptRuleInjectBreakpoints").checked = true;
+      document.getElementById("cacheOptRuleEnabled").checked = true;
+      document.getElementById("cacheOptRuleModal").classList.remove("hidden");
+    }
+
+    function closeCacheOptRuleModal() {
+      document.getElementById("cacheOptRuleModal").classList.add("hidden");
+    }
+
+    async function saveCacheOptRule() {
+      const pat = document.getElementById("cacheOptRuleModelPattern").value.trim();
+      if (!pat) {
+        showToast("模型匹配模式为必填项", "error");
+        return;
+      }
+      const minTokens = parseInt(document.getElementById("cacheOptRuleMinTokens").value, 10) || 0;
+      const sortTools = document.getElementById("cacheOptRuleSortTools").checked;
+      const sinkDynamic = document.getElementById("cacheOptRuleSinkDynamicSystem").checked;
+      const injectBp = document.getElementById("cacheOptRuleInjectBreakpoints").checked;
+      const enabled = document.getElementById("cacheOptRuleEnabled").checked;
+
+      const payload = {
+        model_pattern: pat,
+        min_tokens_threshold: minTokens,
+        sort_tools: sortTools,
+        sink_dynamic_system: sinkDynamic,
+        inject_anthropic_breakpoints: injectBp,
+        enabled: enabled
+      };
+
+      try {
+        const resp = await apiCall("/admin/v1/cache-optimizer/rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (resp && resp.ok) {
+          showToast("前缀对齐规则已成功创建", "success");
+          closeCacheOptRuleModal();
+          loadCacheOptimizerTab();
+        } else {
+          showToast("创建规则失败", "error");
+        }
+      } catch (err) {
+        showToast(`创建规则失败: ${err.message}`, "error");
+      }
+    }
+
+    async function toggleCacheOptRule(id, currentEnabled) {
+      try {
+        const resp = await apiCall(`/admin/v1/cache-optimizer/rules/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !currentEnabled })
+        });
+        if (resp && resp.ok) {
+          showToast("规则状态已更新", "success");
+          renderCacheOptRules();
+        } else {
+          showToast("更新失败", "error");
+        }
+      } catch (err) {
+        showToast(`更新失败: ${err.message}`, "error");
+      }
+    }
+
+    async function deleteCacheOptRule(id) {
+      if (!confirm(`确定要删除缓存对齐规则 ${id} 吗？`)) return;
+      try {
+        const resp = await apiCall(`/admin/v1/cache-optimizer/rules/${id}`, {
+          method: "DELETE"
+        });
+        if (resp && resp.ok) {
+          showToast("规则已成功删除", "success");
+          renderCacheOptRules();
+        } else {
+          showToast("删除失败", "error");
+        }
+      } catch (err) {
+        showToast(`删除失败: ${err.message}`, "error");
+      }
+    }
+
+    function openCacheOptDetailModal(idx) {
+      const s = cacheOptRecentSnapshots[idx];
+      if (!s) {
+        showToast("未找到快照记录", "error");
+        return;
+      }
+      document.getElementById("detailOptReqId").textContent = s.request_id || "（未知）";
+      document.getElementById("detailOptModel").textContent = s.model || "（未知）";
+      document.getElementById("detailOptOrigTokens").textContent = s.original_tokens;
+      document.getElementById("detailOptOptimizedTokens").textContent = s.optimized_tokens;
+      document.getElementById("detailOptCachedTokens").textContent = s.cached_tokens;
+      document.getElementById("detailOptSavings").textContent = `$${(s.estimated_savings_usd || 0).toFixed(4)}`;
+      document.getElementById("detailOptLatency").textContent = `${s.latency_us}μs`;
+
+      const elSort = document.getElementById("detailOptToolsSorted");
+      if (elSort) {
+        elSort.textContent = s.tools_sorted ? "已完成 ASCII 字典序重排" : "未执行 / 无 Tools";
+        elSort.className = s.tools_sorted ? "font-mono font-bold text-emerald-400" : "font-mono font-bold text-slate-500";
+      }
+
+      const elDynamic = document.getElementById("detailOptDynamicSunk");
+      if (elDynamic) {
+        elDynamic.textContent = s.dynamic_sunk ? "已识别并下沉至尾部 [Runtime Context]" : "未检测到易变前缀";
+        elDynamic.className = s.dynamic_sunk ? "font-mono font-bold text-emerald-400" : "font-mono font-bold text-slate-500";
+      }
+
+      const elBp = document.getElementById("detailOptBreakpoints");
+      if (elBp) {
+        elBp.textContent = `${s.breakpoints_injected} 处 ephemeral 缓存点`;
+      }
+
+      const elHit = document.getElementById("detailOptCacheHit");
+      if (elHit) {
+        elHit.textContent = s.cache_hit ? "命中 (CACHE HIT)" : "未命中 (CACHE MISS)";
+        elHit.className = s.cache_hit ? "font-mono font-bold text-emerald-400" : "font-mono font-bold text-slate-400";
+      }
+
+      document.getElementById("cacheOptDetailModal").classList.remove("hidden");
+    }
+
+    function closeCacheOptDetailModal() {
+      document.getElementById("cacheOptDetailModal").classList.add("hidden");
     }
   </script>
 </body>

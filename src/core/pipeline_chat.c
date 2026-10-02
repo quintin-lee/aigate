@@ -183,6 +183,50 @@ prepare_chat_cache(chat_req_t* q, bool* is_streaming)
     return 0;
 }
 
+/**
+ * @brief Handle prompt cache accounting, snapshot caching, and header injection.
+ * @param[in,out] q          Request context.
+ * @param[in]     ptok       Upstream total prompt tokens.
+ * @param[in]     cached_tok Upstream cached prompt tokens.
+ */
+static void
+handle_prompt_cache_accounting_and_headers(chat_req_t* q, long ptok, long cached_tok)
+{
+    if (q == NULL) {
+        return;
+    }
+    q->upstream_prompt_tokens = (uint32_t)(ptok > 0 ? ptok : 0);
+    q->upstream_cached_tokens = (uint32_t)(cached_tok > 0 ? cached_tok : 0);
+    if (q->upstream_cached_tokens > 0) {
+        q->upstream_cache_savings_usd = calc_cache_savings(&q->route, cached_tok);
+    } else {
+        q->upstream_cache_savings_usd = 0.0;
+    }
+
+    tracer_span_set_attr_int(
+        &q->trace_ctx, "root", "gen_ai.usage.prompt_tokens_cached", q->upstream_cached_tokens);
+
+    aigate_inject_cache_optimizer_headers(q, q->rc ? q->rc->impl : NULL);
+
+    if (q->ac != NULL && q->ac->cache_opt_cache != NULL &&
+        (q->cache_opt_result.optimized || q->upstream_cached_tokens > 0)) {
+        cache_optimizer_snapshot_t snap;
+        memset(&snap, 0, sizeof(snap));
+        snprintf(snap.req_id, sizeof(snap.req_id), "%s", q->trace_ctx.trace_id);
+        snprintf(snap.model, sizeof(snap.model), "%s", q->model ? q->model : "");
+        snap.timestamp = (int64_t)time(NULL);
+        snap.upstream_cache_hit = (q->upstream_cached_tokens > 0);
+        snap.prompt_tokens = q->upstream_prompt_tokens;
+        snap.cached_tokens = q->upstream_cached_tokens;
+        snap.cost_savings_usd = q->upstream_cache_savings_usd;
+        snap.latency_us = q->cache_opt_result.latency_us;
+        snap.breakpoints_count = q->cache_opt_result.breakpoints_injected;
+        snap.dynamic_sunk = q->cache_opt_result.dynamic_sunk;
+        snap.tools_sorted = q->cache_opt_result.tools_sorted;
+        cache_optimizer_cache_record(q->ac->cache_opt_cache, &snap);
+    }
+}
+
 /** @brief /v1/chat/completions non-streaming failover loop. @return transport rc. */
 int
 handle_chat_sync(chat_req_t* q)
@@ -406,6 +450,8 @@ handle_chat_sync(chat_req_t* q)
                         &q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ptok);
                     tracer_span_set_attr_int(
                         &q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ctok);
+
+                    handle_prompt_cache_accounting_and_headers(q, ptok, cached_tok);
 
                     double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
                     record_usage_and_event(q->ac,
@@ -634,6 +680,8 @@ handle_chat_sync(chat_req_t* q)
 
             tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ptok);
             tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ctok);
+
+            handle_prompt_cache_accounting_and_headers(q, ptok, cached_tok);
 
             double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
             record_usage_and_event(q->ac,
@@ -1042,6 +1090,8 @@ handle_chat_stream(chat_req_t* q)
         adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
         tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ptok);
         tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ctok);
+
+        handle_prompt_cache_accounting_and_headers(q, ptok, cached_tok);
 
         if (urc != 0) {
             const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"

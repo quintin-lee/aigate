@@ -23,7 +23,7 @@
 - Modify: `CMakeLists.txt`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写失败的单元测试 (测试 Tools 字典序重排与空白规范化)**
+- [x] **Step 1: 编写失败的单元测试 (测试 Tools 字典序重排与空白规范化)**
 
 在 `tests/unit/policy/test_cache_optimizer.c` 中：
 ```c
@@ -73,14 +73,14 @@ TEST_CASE(cache_optimizer_normalize_whitespace_test)
 }
 ```
 
-- [ ] **Step 2: 注册测试并运行验证失败**
+- [x] **Step 2: 注册测试并运行验证失败**
 
 在 `tests/unit/run_tests.c` 中注册 `cache_optimizer_sort_tools_test` 与 `cache_optimizer_normalize_whitespace_test`。
 在 `CMakeLists.txt` 中添加 `src/policy/cache_optimizer.c` 与 `tests/unit/policy/test_cache_optimizer.c`。
 执行：`cmake --build build -j`
 预期：编译失败，提示 `cache_optimizer_sort_tools` 和 `cache_optimizer_normalize_whitespace` 未定义。
 
-- [ ] **Step 3: 实现 `src/policy/cache_optimizer.h` 与 `src/policy/cache_optimizer.c`**
+- [x] **Step 3: 实现 `src/policy/cache_optimizer.h` 与 `src/policy/cache_optimizer.c`**
 
 在 `src/policy/cache_optimizer.h` 中定义数据结构与声明：
 ```c
@@ -160,12 +160,12 @@ size_t cache_optimizer_normalize_whitespace(const char* in, size_t in_len, char*
 - `cache_optimizer_sort_tools`: 提取 `tools` 数组中的子项，按 `function.name` 进行 ASCII 稳定排序，并重置 cJSON 链表；
 - `cache_optimizer_normalize_whitespace`: 合并连续制表符和空格，将 3 个以上连续空行折叠为 2 个换行。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS（238/238 全部通过）。
 
-- [ ] **Step 5: 提交 Task 1 代码**
+- [x] **Step 5: 提交 Task 1 代码**
 
 执行：`git add src/policy/cache_optimizer.h src/policy/cache_optimizer.c tests/unit/policy/test_cache_optimizer.c CMakeLists.txt tests/unit/run_tests.c && git commit -m "feat(cache_optimizer): implement tools sorting and whitespace normalization"`
 
@@ -178,7 +178,7 @@ size_t cache_optimizer_normalize_whitespace(const char* in, size_t in_len, char*
 - Modify: `src/policy/cache_optimizer.c`
 - Modify: `tests/unit/policy/test_cache_optimizer.c`
 
-- [ ] **Step 1: 编写失败的单元测试 (测试动态内容识别与下沉)**
+- [x] **Step 1: 编写失败的单元测试 (测试动态内容识别与下沉)**
 
 在 `tests/unit/policy/test_cache_optimizer.c` 中：
 ```c
@@ -202,12 +202,12 @@ TEST_CASE(cache_optimizer_sink_dynamic_system_test)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：编译失败，提示 `cache_optimizer_sink_dynamic_system` 未声明。
 
-- [ ] **Step 3: 实现动态内容识别与下沉算法**
+- [x] **Step 3: 实现动态内容识别与下沉算法**
 
 在 `src/policy/cache_optimizer.h` 中声明：
 ```c
@@ -227,12 +227,12 @@ bool cache_optimizer_sink_dynamic_system(const char* in, size_t in_len, char* ou
   - 在尾部拼接 `\n\n[Runtime Context: %s]\n`；
   - 返回 true。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS。
 
-- [ ] **Step 5: 提交 Task 2 代码**
+- [x] **Step 5: 提交 Task 2 代码**
 
 执行：`git add src/policy/cache_optimizer.h src/policy/cache_optimizer.c tests/unit/policy/test_cache_optimizer.c && git commit -m "feat(cache_optimizer): implement dynamic timestamp and session sinking"`
 
@@ -245,7 +245,7 @@ bool cache_optimizer_sink_dynamic_system(const char* in, size_t in_len, char* ou
 - Modify: `src/policy/cache_optimizer.c`
 - Modify: `tests/unit/policy/test_cache_optimizer.c`
 
-- [ ] **Step 1: 编写失败的单元测试 (测试 Anthropic 打点与快照统计)**
+- [x] **Step 1: 编写失败的单元测试 (测试 Anthropic 打点与快照统计)**
 
 在 `tests/unit/policy/test_cache_optimizer.c` 中：
 ```c
@@ -307,12 +307,12 @@ TEST_CASE(cache_optimizer_cache_and_stats_test)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：编译失败，未定义的断点函数与快照缓存结构体。
 
-- [ ] **Step 3: 实现 Anthropic 打点与快照缓存管理**
+- [x] **Step 3: 实现 Anthropic 打点与快照缓存管理**
 
 在 `src/policy/cache_optimizer.h` 中添加 `cache_optimizer_cache_t` 结构与 API 声明：
 - `int cache_optimizer_inject_anthropic_breakpoints(cJSON* root, uint32_t min_tokens);`
@@ -327,12 +327,12 @@ TEST_CASE(cache_optimizer_cache_and_stats_test)
 - 线程安全（`pthread_mutex_t`）环形缓冲区，容量 200，超过容量自动循环覆盖；
 - 累加统计：`total_optimized_requests`、`upstream_cache_hit_requests`、`total_prompt_tokens`、`total_cached_tokens`、`total_savings_usd`。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS。
 
-- [ ] **Step 5: 提交 Task 3 代码**
+- [x] **Step 5: 提交 Task 3 代码**
 
 执行：`git add src/policy/cache_optimizer.h src/policy/cache_optimizer.c tests/unit/policy/test_cache_optimizer.c && git commit -m "feat(cache_optimizer): implement Anthropic ephemeral breakpoints and snapshot cache"`
 
@@ -347,7 +347,7 @@ TEST_CASE(cache_optimizer_cache_and_stats_test)
 - Modify: `src/store/pg_store.c`
 - Modify: `tests/unit/server/test_admin_api.c` (或相关 store 测试)
 
-- [ ] **Step 1: 编写持久化增删改查单元测试**
+- [x] **Step 1: 编写持久化增删改查单元测试**
 
 在 `tests/unit/policy/test_cache_optimizer.c` 中增加配置序列化与匹配测试：
 ```c
@@ -368,12 +368,12 @@ TEST_CASE(cache_optimizer_rule_match_test)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：编译失败，提示 `cache_optimizer_rule_matches` 未定义。
 
-- [ ] **Step 3: 更新 SQL Schema 与 pg_store**
+- [x] **Step 3: 更新 SQL Schema 与 pg_store**
 
 在 `schema/schema.sql` 和 `src/store/schema_sql.h` 中追加：
 ```sql
@@ -398,12 +398,12 @@ CREATE INDEX IF NOT EXISTS idx_cache_optimizer_rules_model ON cache_optimizer_ru
 - `pg_store_delete_cache_optimizer_rule(...)`
 - 在 `pg_store_migrate()` 中增加 `v15` 迁移逻辑。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS。
 
-- [ ] **Step 5: 提交 Task 4 代码**
+- [x] **Step 5: 提交 Task 4 代码**
 
 执行：`git add schema/schema.sql src/store/schema_sql.h src/store/pg_store.h src/store/pg_store.c tests/unit/policy/test_cache_optimizer.c && git commit -m "feat(store): implement cache optimizer rules schema and postgres persistence"`
 
@@ -419,7 +419,7 @@ CREATE INDEX IF NOT EXISTS idx_cache_optimizer_rules_model ON cache_optimizer_ru
 - Modify: `src/server/transport_civetweb.c`
 - Modify: `tests/unit/core/test_aigate_core.c`
 
-- [ ] **Step 1: 编写流水线前缀优化与响应头断言测试**
+- [x] **Step 1: 编写流水线前缀优化与响应头断言测试**
 
 在 `tests/unit/core/test_aigate_core.c` 中：
 ```c
@@ -446,12 +446,12 @@ TEST_CASE(pipeline_cache_optimizer_and_headers)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：编译失败，提示相关字段与注入函数未定义。
 
-- [ ] **Step 3: 流水线挂载与核心生命周期集成**
+- [x] **Step 3: 流水线挂载与核心生命周期集成**
 
 1. 在 `aigate_ctx` 中添加 `cache_optimizer_cache_t* cache_opt_cache;`；
 2. 在 `chat_req` 中添加 `cache_optimizer_result_t cache_opt_result;`、`uint32_t upstream_cached_tokens;`、`double upstream_cache_savings_usd;`；
@@ -463,12 +463,12 @@ TEST_CASE(pipeline_cache_optimizer_and_headers)
    - 记录快照至 `ac->cache_opt_cache`；
 4. 在 `transport_civetweb.c` 中放行 `X-Aigate-Prompt-Cache-*` 头。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS。
 
-- [ ] **Step 5: 提交 Task 5 代码**
+- [x] **Step 5: 提交 Task 5 代码**
 
 执行：`git add src/core/aigate_core_internal.h src/core/aigate_core.h src/core/aigate_core.c src/core/pipeline_chat.c src/server/transport_civetweb.c tests/unit/core/test_aigate_core.c && git commit -m "feat(core): integrate cache optimizer into pipeline with usage parsing and headers"`
 
@@ -480,7 +480,7 @@ TEST_CASE(pipeline_cache_optimizer_and_headers)
 - Modify: `src/server/admin_api.c`
 - Modify: `tests/unit/server/test_admin_api.c`
 
-- [ ] **Step 1: 编写 Admin API 端点测试**
+- [x] **Step 1: 编写 Admin API 端点测试**
 
 在 `tests/unit/server/test_admin_api.c` 中添加端点测试：
 ```c
@@ -507,12 +507,12 @@ TEST_CASE(admin_cache_optimizer_endpoints)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：返回 404 Not Found。
 
-- [ ] **Step 3: 实现 Admin API 路由与处理器**
+- [x] **Step 3: 实现 Admin API 路由与处理器**
 
 在 `src/server/admin_api.c` 中注册并实现：
 - `GET /admin/v1/cache-optimizer/rules`
@@ -522,12 +522,12 @@ TEST_CASE(admin_cache_optimizer_endpoints)
 - `GET /admin/v1/cache-optimizer/snapshots`
 - `GET /admin/v1/cache-optimizer/stats`
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS。
 
-- [ ] **Step 5: 提交 Task 6 代码**
+- [x] **Step 5: 提交 Task 6 代码**
 
 执行：`git add src/server/admin_api.c tests/unit/server/test_admin_api.c && git commit -m "feat(admin): implement REST endpoints for cache optimizer rules, snapshots, and stats"`
 
@@ -539,7 +539,7 @@ TEST_CASE(admin_cache_optimizer_endpoints)
 - Modify: `tests/unit/server/test_admin_ui.c`
 - Modify: `web/admin.html`
 
-- [ ] **Step 1: 编写 Web UI 结构断言测试**
+- [x] **Step 1: 编写 Web UI 结构断言测试**
 
 在 `tests/unit/server/test_admin_ui.c` 中添加：
 ```c
@@ -553,12 +553,12 @@ TEST_ASSERT(strstr(html, "id=\"cacheOptRuleModal\"") != NULL, "missing cacheOptR
 TEST_ASSERT(strstr(html, "id=\"cacheOptDetailModal\"") != NULL, "missing cacheOptDetailModal");
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：FAIL，缺少 `tab-cache-optimizer` 元素。
 
-- [ ] **Step 3: 更新 `web/admin.html` 实现看板与审查模态框**
+- [x] **Step 3: 更新 `web/admin.html` 实现看板与审查模态框**
 
 1. 侧边栏添加 `🎯 提示词缓存` 导航按钮 (`data-tab="cache-optimizer"`)；
 2. 添加 `#tab-cache-optimizer` 主面板：
@@ -568,12 +568,12 @@ TEST_ASSERT(strstr(html, "id=\"cacheOptDetailModal\"") != NULL, "missing cacheOp
 3. 编写原生 JavaScript 交互函数：
    - `loadCacheOptimizerTab()`, `renderCacheOptStats()`, `renderCacheOptRules()`, `renderCacheOptSnapshots()`, `openCacheOptRuleModal()`, `openCacheOptDetailModal()`。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS（239/239 全部通过）。
 
-- [ ] **Step 5: 提交 Task 7 代码**
+- [x] **Step 5: 提交 Task 7 代码**
 
 执行：`git add web/admin.html tests/unit/server/test_admin_ui.c && git commit -m "feat(ui): add prompt cache optimizer console with detail modal"`
 
@@ -585,23 +585,23 @@ TEST_ASSERT(strstr(html, "id=\"cacheOptDetailModal\"") != NULL, "missing cacheOp
 - Modify: `docs/superpowers/specs/2026-10-02-prompt-cache-prefix-alignment-design.md`
 - Modify: `docs/superpowers/plans/2026-10-02-prompt-cache-prefix-alignment.md`
 
-- [ ] **Step 1: 运行全量 CTest 套件与并发压测**
+- [x] **Step 1: 运行全量 CTest 套件与并发压测**
 
 执行：`ctest --test-dir build --output-on-failure`
 预期：6/6 全部通过（100%）。
 
-- [ ] **Step 2: 执行 Doxygen 静态文档扫描**
+- [x] **Step 2: 执行 Doxygen 静态文档扫描**
 
 执行：`doxygen Doxyfile 2>&1 | grep -i warning || true`
 预期：严格 0 Warnings。
 
-- [ ] **Step 3: 更新设计规范验收状态**
+- [x] **Step 3: 更新设计规范验收状态**
 
 在 `docs/superpowers/specs/2026-10-02-prompt-cache-prefix-alignment-design.md` 中：
 - 将状态更新为 `已实现并通过验证 (Implemented & Verified)`；
 - 勾选所有验收标准复选框 `[x]`。
 
-- [ ] **Step 4: 提交规范更新并合并至 master**
+- [x] **Step 4: 提交规范更新并合并至 master**
 
 执行：
 ```bash

@@ -204,6 +204,21 @@ CREATE TABLE IF NOT EXISTS compressor_rules (
 CREATE INDEX IF NOT EXISTS idx_compressor_rules_model ON compressor_rules(enabled, model_pattern);
 INSERT INTO schema_migrations(version) VALUES (14) ON CONFLICT (version) DO NOTHING;
 
+-- Migration v15: prompt cache prefix alignment and optimization rules
+CREATE TABLE IF NOT EXISTS cache_optimizer_rules (
+    id                          VARCHAR(36) PRIMARY KEY,
+    model_pattern               VARCHAR(64) NOT NULL,
+    enabled                     BOOLEAN NOT NULL DEFAULT TRUE,
+    sort_tools                  BOOLEAN NOT NULL DEFAULT TRUE,
+    sink_dynamic_system         BOOLEAN NOT NULL DEFAULT TRUE,
+    inject_anthropic_breakpoints BOOLEAN NOT NULL DEFAULT TRUE,
+    min_tokens_threshold        INTEGER NOT NULL DEFAULT 1024,
+    created_at                  BIGINT NOT NULL,
+    updated_at                  BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_cache_optimizer_rules_model ON cache_optimizer_rules(enabled, model_pattern);
+INSERT INTO schema_migrations(version) VALUES (15) ON CONFLICT (version) DO NOTHING;
+
 
 
 

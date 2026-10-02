@@ -18,6 +18,7 @@
 #include <time.h>
 #include "policy/shadow.h"
 #include "policy/prompt_compressor.h"
+#include "policy/cache_optimizer.h"
 
 /** @brief Client API key record (api_keys row; allowed_models is a copy). */
 typedef struct key_rec {
@@ -334,6 +335,16 @@ typedef struct pg_ops {
         void* ctx, const compressor_rule_t* rule); /**< Upsert prompt compressor rule by UUID id. */
     int (*delete_compressor_rule)(void*       ctx,
                                   const char* id); /**< Delete prompt compressor rule by UUID id. */
+
+    int (*list_cache_optimizer_rules)(void*                   ctx,
+                                      cache_optimizer_rule_t* out,
+                                      int                     cap,
+                                      int* n); /**< List prompt cache optimizer rules. */
+    int (*upsert_cache_optimizer_rule)(
+        void*                         ctx,
+        const cache_optimizer_rule_t* rule); /**< Upsert prompt cache optimizer rule by UUID id. */
+    int (*delete_cache_optimizer_rule)(
+        void* ctx, const char* id);          /**< Delete prompt cache optimizer rule by UUID id. */
 } pg_ops_t;
 
 /** @brief Storage handle (opaque; holder of a libpq connection or a fake context). */
@@ -433,5 +444,28 @@ int pg_store_upsert_compressor_rule(const pg_store_t* ps, const compressor_rule_
  *  @param id Rule UUID.
  *  @return 0 on success, -1 on storage error. */
 int pg_store_delete_compressor_rule(const pg_store_t* ps, const char* id);
+
+/** @brief List prompt cache optimizer rules.
+ *  @param ps   Storage handle.
+ *  @param out  Output array.
+ *  @param cap  Maximum entries.
+ *  @param n    Receives written count.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_list_cache_optimizer_rules(const pg_store_t*       ps,
+                                        cache_optimizer_rule_t* out,
+                                        int                     cap,
+                                        int*                    n);
+
+/** @brief Create or update prompt cache optimizer rule.
+ *  @param ps   Storage handle.
+ *  @param rule Rule content.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_upsert_cache_optimizer_rule(const pg_store_t* ps, const cache_optimizer_rule_t* rule);
+
+/** @brief Delete prompt cache optimizer rule.
+ *  @param ps Storage handle.
+ *  @param id Rule UUID.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_delete_cache_optimizer_rule(const pg_store_t* ps, const char* id);
 
 #endif /* AIGATE_PG_STORE_H */
