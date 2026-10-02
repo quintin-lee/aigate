@@ -36,6 +36,7 @@ struct mock_upstream {
     int             request_count;
     char            last_path[256];
     char            last_body[MAX_BODY];
+    char            last_headers[MAX_BODY];
     pthread_mutex_t mtx; /* guards recorded fields + flag reads */
 };
 
@@ -111,6 +112,16 @@ server_thread(void* arg)
         const char* hstart = strstr(buf, "\r\n\r\n");
         size_t      body_off = hstart != NULL ? (size_t)(hstart - buf + 4) : 0;
         snprintf(mu->last_body, sizeof mu->last_body, "%s", buf + body_off);
+        if (hstart != NULL) {
+            size_t hlen = (size_t)(hstart - buf);
+            if (hlen >= sizeof(mu->last_headers)) {
+                hlen = sizeof(mu->last_headers) - 1;
+            }
+            memcpy(mu->last_headers, buf, hlen);
+            mu->last_headers[hlen] = '\0';
+        } else {
+            mu->last_headers[0] = '\0';
+        }
         int fail = mu->fail_all;
         int mstatus = mu->mock_status;
         pthread_mutex_unlock(&mu->mtx);
@@ -436,4 +447,10 @@ const char*
 mock_upstream_last_path(const mock_upstream_t* mu)
 {
     return mu->last_path;
+}
+
+const char*
+mock_upstream_last_headers(const mock_upstream_t* mu)
+{
+    return mu->last_headers;
 }

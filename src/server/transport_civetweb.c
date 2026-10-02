@@ -226,6 +226,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     }
     rq.cache_control = cc;
     rq.target_provider = mg_get_header(conn, "X-Aigate-Target-Provider");
+    rq.traceparent = mg_get_header(conn, "traceparent");
 
     aigate_handle_request(cw->ac, &rq, &rc);
 

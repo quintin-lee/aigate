@@ -39,4 +39,7 @@ const char* mock_upstream_last_body(const mock_upstream_t* mu);
 /** @brief The most recently received request path. */
 const char* mock_upstream_last_path(const mock_upstream_t* mu);
 
+/** @brief The most recently received request headers. */
+const char* mock_upstream_last_headers(const mock_upstream_t* mu);
+
 #endif /* MOCK_UPSTREAM_H */

@@ -124,8 +124,16 @@ prepare_chat_cache(chat_req_t* q, bool* is_streaming)
         q->rc->set_header(q->rc->impl, "X-Cache", "MISS");
     }
     if (q->ac->rc != NULL && q->cache_key[0] != '\0') {
+        tracer_span_start(
+            &q->trace_ctx, "cache_lookup", SPAN_KIND_INTERNAL, q->trace_ctx.root_span_id);
         cache_entry_t* ce = response_cache_get(q->ac->rc, q->cache_key);
         if (ce != NULL) {
+            tracer_span_set_attr(&q->trace_ctx, "cache_lookup", "aigate.cache.hit", "true");
+            tracer_span_end(&q->trace_ctx, "cache_lookup", SPAN_STATUS_OK, NULL);
+            tracer_span_set_attr_int(
+                &q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ce->prompt_tokens);
+            tracer_span_set_attr_int(
+                &q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ce->completion_tokens);
             if (!*is_streaming) {
                 if (q->rc->set_header != NULL) {
                     q->rc->set_header(q->rc->impl, "X-Cache", "HIT");
@@ -165,6 +173,8 @@ prepare_chat_cache(chat_req_t* q, bool* is_streaming)
                 return 1;
             }
         } else {
+            tracer_span_set_attr(&q->trace_ctx, "cache_lookup", "aigate.cache.hit", "false");
+            tracer_span_end(&q->trace_ctx, "cache_lookup", SPAN_STATUS_OK, NULL);
             if (q->rc->set_header != NULL) {
                 q->rc->set_header(q->rc->impl, "X-Cache", "MISS");
             }
@@ -196,7 +206,7 @@ handle_chat_sync(chat_req_t* q)
             char        url0[1024];
             char*       merged0 = NULL;
             size_t      mlen0 = 0;
-            const char* extra_hdrs0[4][2] = {{0}};
+            const char* extra_hdrs0[8][2] = {{0}};
             int         n_extra_hdrs0 = 0;
 
             model_rec_t cur_route1 = q->route;
@@ -204,7 +214,7 @@ handle_chat_sync(chat_req_t* q)
             char        url1[1024];
             char*       merged1 = NULL;
             size_t      mlen1 = 0;
-            const char* extra_hdrs1[4][2] = {{0}};
+            const char* extra_hdrs1[8][2] = {{0}};
             int         n_extra_hdrs1 = 0;
 
             int brc0 = adapter0->build_chat(&cur_route0,
@@ -225,6 +235,22 @@ handle_chat_sync(chat_req_t* q)
                                             &mlen1);
 
             if (brc0 == 0 && brc1 == 0) {
+                int s_idx = tracer_span_start(
+                    &q->trace_ctx, "upstream_ttft", SPAN_KIND_CLIENT, q->trace_ctx.root_span_id);
+                char        tp_hdr[64];
+                const char* cid = (s_idx >= 0) ? q->trace_ctx.spans[s_idx].span_id : NULL;
+                tracer_format_traceparent(&q->trace_ctx, cid, tp_hdr, sizeof(tp_hdr));
+                if (n_extra_hdrs0 < 8) {
+                    extra_hdrs0[n_extra_hdrs0][0] = "traceparent";
+                    extra_hdrs0[n_extra_hdrs0][1] = tp_hdr;
+                    n_extra_hdrs0++;
+                }
+                if (n_extra_hdrs1 < 8) {
+                    extra_hdrs1[n_extra_hdrs1][0] = "traceparent";
+                    extra_hdrs1[n_extra_hdrs1][1] = tp_hdr;
+                    n_extra_hdrs1++;
+                }
+
                 hedged_call_params_t hparams;
                 memset(&hparams, 0, sizeof(hparams));
                 hparams.model = q->model;
@@ -272,6 +298,33 @@ handle_chat_sync(chat_req_t* q)
                 int                  hrc = upstream_call_hedged(&hparams, &hres);
                 free(merged0);
                 free(merged1);
+
+                char ttft_str[32];
+                snprintf(ttft_str, sizeof(ttft_str), "%.2f", (double)hres.latency_ns / 1000000.0);
+                tracer_span_set_attr(
+                    &q->trace_ctx, "upstream_ttft", "aigate.latency.ttft_ms", ttft_str);
+                tracer_span_set_attr_int(
+                    &q->trace_ctx, "upstream_ttft", "http.status_code", hres.status);
+                tracer_span_end(&q->trace_ctx,
+                                "upstream_ttft",
+                                (hres.status >= 400 || hrc != 0) ? SPAN_STATUS_ERROR
+                                                                 : SPAN_STATUS_OK,
+                                (hrc != 0) ? "hedged upstream error" : NULL);
+                tracer_span_start(&q->trace_ctx,
+                                  "upstream_streaming",
+                                  SPAN_KIND_CLIENT,
+                                  q->trace_ctx.root_span_id);
+                tracer_span_set_attr_int(&q->trace_ctx,
+                                         "upstream_streaming",
+                                         "aigate.stream.bytes_received",
+                                         hres.body_len);
+                tracer_span_set_attr_int(
+                    &q->trace_ctx, "upstream_streaming", "aigate.stream.chunk_count", 1);
+                tracer_span_end(&q->trace_ctx,
+                                "upstream_streaming",
+                                (hres.status >= 400 || hrc != 0) ? SPAN_STATUS_ERROR
+                                                                 : SPAN_STATUS_OK,
+                                NULL);
 
                 if (hres.was_hedged) {
                     metrics_inc_hedged_requests();
@@ -322,19 +375,37 @@ handle_chat_sync(chat_req_t* q)
                     if (parsed_status == 200) {
                         char*  filtered_resp = NULL;
                         size_t filtered_len = 0;
+                        tracer_span_start(&q->trace_ctx,
+                                          "guardrails_outbound",
+                                          SPAN_KIND_INTERNAL,
+                                          q->trace_ctx.root_span_id);
                         if (filter_chain_execute_outbound(
                                 q, parsed_body, parsed_len, &filtered_resp, &filtered_len) ==
                             FILTER_STOP) {
+                            tracer_span_end(&q->trace_ctx,
+                                            "guardrails_outbound",
+                                            SPAN_STATUS_ERROR,
+                                            "blocked by outbound guardrails");
                             free(parsed_body);
                             chat_req_cleanup(q);
                             return 0;
                         }
+                        tracer_span_set_attr_int(&q->trace_ctx,
+                                                 "guardrails_outbound",
+                                                 "aigate.guardrails.restored_count",
+                                                 q->pii_map.count);
+                        tracer_span_end(&q->trace_ctx, "guardrails_outbound", SPAN_STATUS_OK, NULL);
                         if (filtered_resp != NULL) {
                             free(parsed_body);
                             parsed_body = filtered_resp;
                             parsed_len = filtered_len;
                         }
                     }
+
+                    tracer_span_set_attr_int(
+                        &q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ptok);
+                    tracer_span_set_attr_int(
+                        &q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ctok);
 
                     double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
                     record_usage_and_event(q->ac,
@@ -425,7 +496,7 @@ handle_chat_sync(chat_req_t* q)
         char        url[1024];
         char*       merged = NULL;
         size_t      mlen = 0;
-        const char* extra_hdrs[4][2] = {{0}};
+        const char* extra_hdrs[8][2] = {{0}};
         int         n_extra_hdrs = 0;
 
         if (adapter->build_chat(&cur_route,
@@ -438,6 +509,17 @@ handle_chat_sync(chat_req_t* q)
                                 &mlen) != 0) {
             free(merged);
             continue;
+        }
+
+        int s_idx = tracer_span_start(
+            &q->trace_ctx, "upstream_ttft", SPAN_KIND_CLIENT, q->trace_ctx.root_span_id);
+        char        tp_hdr[64];
+        const char* cid = (s_idx >= 0) ? q->trace_ctx.spans[s_idx].span_id : NULL;
+        tracer_format_traceparent(&q->trace_ctx, cid, tp_hdr, sizeof(tp_hdr));
+        if (n_extra_hdrs < 8) {
+            extra_hdrs[n_extra_hdrs][0] = "traceparent";
+            extra_hdrs[n_extra_hdrs][1] = tp_hdr;
+            n_extra_hdrs++;
         }
 
         int      status = 0;
@@ -473,6 +555,25 @@ handle_chat_sync(chat_req_t* q)
         }
         uint64_t lat = mono_ns() - t0;
         total_lat += lat;
+        char ttft_str[32];
+        snprintf(ttft_str, sizeof(ttft_str), "%.2f", (double)lat / 1000000.0);
+        tracer_span_set_attr(&q->trace_ctx, "upstream_ttft", "aigate.latency.ttft_ms", ttft_str);
+        tracer_span_set_attr_int(&q->trace_ctx, "upstream_ttft", "http.status_code", status);
+        tracer_span_end(&q->trace_ctx,
+                        "upstream_ttft",
+                        (status >= 400 || urc != 0) ? SPAN_STATUS_ERROR : SPAN_STATUS_OK,
+                        (urc != 0) ? "upstream call error" : NULL);
+        tracer_span_start(
+            &q->trace_ctx, "upstream_streaming", SPAN_KIND_CLIENT, q->trace_ctx.root_span_id);
+        tracer_span_set_attr_int(
+            &q->trace_ctx, "upstream_streaming", "aigate.stream.bytes_received", ulen);
+        tracer_span_set_attr_int(
+            &q->trace_ctx, "upstream_streaming", "aigate.stream.chunk_count", 1);
+        tracer_span_end(&q->trace_ctx,
+                        "upstream_streaming",
+                        (status >= 400 || urc != 0) ? SPAN_STATUS_ERROR : SPAN_STATUS_OK,
+                        NULL);
+
         if (q->ac->lt != NULL && lat > 0) {
             latency_tracker_record(q->ac->lt, q->model, target->endpoint, lat);
         }
@@ -505,18 +606,34 @@ handle_chat_sync(chat_req_t* q)
             if (parsed_status == 200) {
                 char*  filtered_resp = NULL;
                 size_t filtered_len = 0;
+                tracer_span_start(&q->trace_ctx,
+                                  "guardrails_outbound",
+                                  SPAN_KIND_INTERNAL,
+                                  q->trace_ctx.root_span_id);
                 if (filter_chain_execute_outbound(
                         q, parsed_body, parsed_len, &filtered_resp, &filtered_len) == FILTER_STOP) {
+                    tracer_span_end(&q->trace_ctx,
+                                    "guardrails_outbound",
+                                    SPAN_STATUS_ERROR,
+                                    "blocked by outbound guardrails");
                     free(parsed_body);
                     chat_req_cleanup(q);
                     return 0;
                 }
+                tracer_span_set_attr_int(&q->trace_ctx,
+                                         "guardrails_outbound",
+                                         "aigate.guardrails.restored_count",
+                                         q->pii_map.count);
+                tracer_span_end(&q->trace_ctx, "guardrails_outbound", SPAN_STATUS_OK, NULL);
                 if (filtered_resp != NULL) {
                     free(parsed_body);
                     parsed_body = filtered_resp;
                     parsed_len = filtered_len;
                 }
             }
+
+            tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ptok);
+            tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ctok);
 
             double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
             record_usage_and_event(q->ac,
@@ -688,13 +805,20 @@ typedef struct stream_feed_wrapper {
     const char*        model;          /**< Target model name for metrics. */
     const char*        endpoint;       /**< Target upstream endpoint address. */
     uint64_t           t0;             /**< Timestamp when request was dispatched. */
-    bool first_chunk_recorded;         /**< True if first non-empty chunk has been observed. */
+    bool        first_chunk_recorded;  /**< True if first non-empty chunk has been observed. */
+    chat_req_t* q;                     /**< Request context for OpenTelemetry span tracking. */
+    int         chunk_count;           /**< Number of streaming chunks observed. */
+    size_t      total_bytes;           /**< Total chunk bytes observed. */
 } stream_feed_wrapper_t;
 
 static int
 stream_feed_wrapper_fn(void* ctx, const void* chunk, size_t len)
 {
     stream_feed_wrapper_t* w = (stream_feed_wrapper_t*)ctx;
+    if (len > 0) {
+        w->chunk_count++;
+        w->total_bytes += len;
+    }
     /* Step 1: Detect the first non-empty token chunk in the response stream */
     if (!w->first_chunk_recorded && len > 0) {
         w->first_chunk_recorded = true;
@@ -703,6 +827,17 @@ stream_feed_wrapper_fn(void* ctx, const void* chunk, size_t len)
         /* Step 3: Record TTFT sample in latency tracker for adaptive routing and P95 scoring */
         if (w->lt != NULL && ttft_ns > 0) {
             latency_tracker_record(w->lt, w->model, w->endpoint, ttft_ns);
+        }
+        if (w->q != NULL) {
+            char ttft_str[32];
+            snprintf(ttft_str, sizeof(ttft_str), "%.2f", (double)ttft_ns / 1000000.0);
+            tracer_span_set_attr(
+                &w->q->trace_ctx, "upstream_ttft", "aigate.latency.ttft_ms", ttft_str);
+            tracer_span_end(&w->q->trace_ctx, "upstream_ttft", SPAN_STATUS_OK, NULL);
+            tracer_span_start(&w->q->trace_ctx,
+                              "upstream_streaming",
+                              SPAN_KIND_CLIENT,
+                              w->q->trace_ctx.root_span_id);
         }
     }
     /* Step 4: Transparently forward chunk to underlying stream bridge without delay */
@@ -734,7 +869,7 @@ handle_chat_stream(chat_req_t* q)
         char        url[1024];
         char*       merged = NULL;
         size_t      mlen = 0;
-        const char* extra_hdrs[4][2] = {{0}};
+        const char* extra_hdrs[8][2] = {{0}};
         int         n_extra_hdrs = 0;
 
         if (adapter->build_chat(&cur_route,
@@ -747,6 +882,17 @@ handle_chat_stream(chat_req_t* q)
                                 &mlen) != 0) {
             free(merged);
             continue;
+        }
+
+        int s_idx = tracer_span_start(
+            &q->trace_ctx, "upstream_ttft", SPAN_KIND_CLIENT, q->trace_ctx.root_span_id);
+        char        tp_hdr[64];
+        const char* cid = (s_idx >= 0) ? q->trace_ctx.spans[s_idx].span_id : NULL;
+        tracer_format_traceparent(&q->trace_ctx, cid, tp_hdr, sizeof(tp_hdr));
+        if (n_extra_hdrs < 8) {
+            extra_hdrs[n_extra_hdrs][0] = "traceparent";
+            extra_hdrs[n_extra_hdrs][1] = tp_hdr;
+            n_extra_hdrs++;
         }
 
         stream_cache_acc_t acc;
@@ -780,6 +926,9 @@ handle_chat_stream(chat_req_t* q)
             .endpoint = target->endpoint,
             .t0 = t0,
             .first_chunk_recorded = false,
+            .q = q,
+            .chunk_count = 0,
+            .total_bytes = 0,
         };
 
         int  urc = upstream_stream_call(url,
@@ -819,6 +968,28 @@ handle_chat_stream(chat_req_t* q)
         }
         uint64_t lat = mono_ns() - t0;
         total_lat += lat;
+
+        if (!feed_wrapper.first_chunk_recorded) {
+            tracer_span_set_attr_int(&q->trace_ctx, "upstream_ttft", "http.status_code", status);
+            tracer_span_end(&q->trace_ctx,
+                            "upstream_ttft",
+                            (status >= 400 || urc != 0) ? SPAN_STATUS_ERROR : SPAN_STATUS_OK,
+                            (urc != 0) ? "stream failed before first chunk" : NULL);
+        } else {
+            tracer_span_set_attr_int(&q->trace_ctx,
+                                     "upstream_streaming",
+                                     "aigate.stream.chunk_count",
+                                     feed_wrapper.chunk_count);
+            tracer_span_set_attr_int(&q->trace_ctx,
+                                     "upstream_streaming",
+                                     "aigate.stream.bytes_received",
+                                     feed_wrapper.total_bytes);
+            tracer_span_end(&q->trace_ctx,
+                            "upstream_streaming",
+                            (urc != 0) ? SPAN_STATUS_ERROR : SPAN_STATUS_OK,
+                            (urc != 0) ? "stream interrupted" : NULL);
+        }
+
         if (q->ac->lt != NULL && lat > 0) {
             latency_tracker_record(q->ac->lt, q->model, target->endpoint, lat);
         }
@@ -853,6 +1024,8 @@ handle_chat_stream(chat_req_t* q)
 
         long ptok = 0, ctok = 0, cached_tok = 0;
         adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
+        tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ptok);
+        tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ctok);
 
         if (urc != 0) {
             const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"

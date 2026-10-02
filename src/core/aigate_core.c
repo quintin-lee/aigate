@@ -154,7 +154,17 @@ aigate_core_init(aigate_core*   ac,
                  int            flush_interval_s)
 {
     memset(ac, 0, sizeof *ac);
+    ac->tracer_cfg.enabled = true;
+    ac->tracer_cfg.sample_rate = 1.0;
+    ac->tracer_cfg.slow_threshold_ms = 2000;
+    ac->tracer_cfg.otlp_endpoint[0] = '\0';
+    ac->trace_rb = trace_ring_buffer_create(TRACE_RING_BUFFER_DEFAULT_CAPACITY);
+
     if (auth_key_init(&ac->keys, ps) != 0) {
+        if (ac->trace_rb != NULL) {
+            trace_ring_buffer_destroy(ac->trace_rb);
+            ac->trace_rb = NULL;
+        }
         return -1;
     }
     ac->rl = ratelimit_new();
@@ -187,6 +197,10 @@ aigate_core_init(aigate_core*   ac,
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
         /* Roll back any partially built sub-objects; the router teardown
          * also cleanses its master-key copy. */
+        if (ac->trace_rb != NULL) {
+            trace_ring_buffer_destroy(ac->trace_rb);
+            ac->trace_rb = NULL;
+        }
         if (ac->lt != NULL) {
             latency_tracker_destroy(ac->lt);
         }
@@ -227,6 +241,13 @@ aigate_core_init(aigate_core*   ac,
 void
 aigate_core_shutdown(aigate_core* ac)
 {
+    if (ac == NULL) {
+        return;
+    }
+    if (ac->trace_rb != NULL) {
+        trace_ring_buffer_destroy(ac->trace_rb);
+        ac->trace_rb = NULL;
+    }
     if (ac->lt != NULL) {
         latency_tracker_destroy(ac->lt);
         ac->lt = NULL;
@@ -349,6 +370,38 @@ aigate_write_gemini_error(aigate_response_ctx* rc,
 void
 chat_req_cleanup(chat_req_t* q)
 {
+    if (q == NULL) {
+        return;
+    }
+
+    if (q->trace_ctx.trace_id[0] != '\0') {
+        int           status_code = (q->rc != NULL && q->rc->status != 0) ? q->rc->status : 200;
+        span_status_t span_status = (status_code >= 400) ? SPAN_STATUS_ERROR : SPAN_STATUS_OK;
+        tracer_span_end(
+            &q->trace_ctx, "root", span_status, (status_code >= 400) ? "request error" : NULL);
+
+        uint64_t elapsed_ms = 0;
+        for (int i = 0; i < q->trace_ctx.span_count; i++) {
+            if (strcmp(q->trace_ctx.spans[i].name, "root") == 0) {
+                if (q->trace_ctx.spans[i].end_time_ns >= q->trace_ctx.spans[i].start_time_ns) {
+                    elapsed_ms =
+                        (q->trace_ctx.spans[i].end_time_ns - q->trace_ctx.spans[i].start_time_ns) /
+                        1000000ULL;
+                }
+                break;
+            }
+        }
+
+        if (q->ac != NULL) {
+            bool sampled =
+                tracer_should_sample(&q->trace_ctx, &q->ac->tracer_cfg, status_code, elapsed_ms);
+            if (sampled && q->ac->trace_rb != NULL) {
+                trace_ring_buffer_push(q->ac->trace_rb, &q->trace_ctx);
+            }
+        }
+        tracer_context_cleanup(&q->trace_ctx);
+    }
+
     if (q->jbody != NULL) {
         json_decref(q->jbody);
         q->jbody = NULL;
@@ -368,9 +421,13 @@ gate_request(chat_req_t* q)
     aigate_request_ctx*  rq = q->rq;
     aigate_response_ctx* rc = q->rc;
 
+    tracer_span_start(
+        &q->trace_ctx, "auth_and_limits", SPAN_KIND_INTERNAL, q->trace_ctx.root_span_id);
+
     /* --- auth --- */
     int arc = auth_key_resolve(&ac->keys, rq->bearer, &q->krec);
     if (arc != 0) {
+        tracer_span_end(&q->trace_ctx, "auth_and_limits", SPAN_STATUS_ERROR, "invalid api key");
         aigate_write_error(rc, PIPE_AUTH, "auth_error", "invalid api key");
         return -1;
     }
@@ -382,6 +439,10 @@ gate_request(chat_req_t* q)
     if (rrc != 0) {
         if (retry_ms == -1) {
             /* Redis fail-closed sentinel: distributed state unavailable → 503 */
+            tracer_span_end(&q->trace_ctx,
+                            "auth_and_limits",
+                            SPAN_STATUS_ERROR,
+                            "distributed_state_unavailable");
             aigate_write_error(rc, 503, "server_error", "distributed_state_unavailable");
             return -1;
         }
@@ -392,6 +453,7 @@ gate_request(chat_req_t* q)
         char ra[32];
         snprintf(ra, sizeof ra, "%ld", ra_s);
         rc->set_header(rc->impl, "Retry-After", ra);
+        tracer_span_end(&q->trace_ctx, "auth_and_limits", SPAN_STATUS_ERROR, "rate limit exceeded");
         aigate_write_error(rc, PIPE_RATE, "rate_limit", "rate limit exceeded");
         return -1;
     }
@@ -401,6 +463,10 @@ gate_request(chat_req_t* q)
         long rem = rl_remaining_daily(ac->rl, q->krec.key_id, q->krec.daily_token_quota);
         if (rem == LONG_MIN) {
             /* Redis fail-closed sentinel: distributed state unavailable → 503 */
+            tracer_span_end(&q->trace_ctx,
+                            "auth_and_limits",
+                            SPAN_STATUS_ERROR,
+                            "distributed_state_unavailable");
             aigate_write_error(rc, 503, "server_error", "distributed_state_unavailable");
             return -1;
         }
@@ -410,6 +476,8 @@ gate_request(chat_req_t* q)
             char   ra[32];
             snprintf(ra, sizeof ra, "%ld", (long)(next - now));
             rc->set_header(rc->impl, "Retry-After", ra);
+            tracer_span_end(
+                &q->trace_ctx, "auth_and_limits", SPAN_STATUS_ERROR, "daily token quota exceeded");
             aigate_write_error(rc, PIPE_RATE, "daily_quota_exceeded", "daily token quota exceeded");
             return -1;
         }
@@ -426,6 +494,10 @@ gate_request(chat_req_t* q)
                                  0.0,
                                  b_err,
                                  sizeof b_err) != 0) {
+            tracer_span_end(&q->trace_ctx,
+                            "auth_and_limits",
+                            SPAN_STATUS_ERROR,
+                            b_err[0] ? b_err : "budget exceeded");
             aigate_write_error(rc,
                                PIPE_RATE,
                                "budget_exceeded",
@@ -433,6 +505,8 @@ gate_request(chat_req_t* q)
             return -1;
         }
     }
+    tracer_span_set_attr_int(&q->trace_ctx, "root", "aigate.client.key_id", q->krec.key_id);
+    tracer_span_end(&q->trace_ctx, "auth_and_limits", SPAN_STATUS_OK, NULL);
     return 0;
 }
 
@@ -463,8 +537,12 @@ resolve_chat_target(chat_req_t* q)
         return -1;
     }
 
+    tracer_span_start(
+        &q->trace_ctx, "router_and_hedge", SPAN_KIND_INTERNAL, q->trace_ctx.root_span_id);
+
     /* --- route --- */
     if (model_router_resolve(ac->router, q->model, &q->route) != 0) {
+        tracer_span_end(&q->trace_ctx, "router_and_hedge", SPAN_STATUS_ERROR, "model not found");
         aigate_write_error(rc, PIPE_MODEL, "model_not_found", "model not found");
         return -1;
     }
@@ -479,10 +557,21 @@ resolve_chat_target(chat_req_t* q)
                                                 MAX_TARGETS_PER_MODEL,
                                                 &q->n_candidates) != 0 ||
         q->n_candidates == 0) {
+        tracer_span_end(&q->trace_ctx,
+                        "router_and_hedge",
+                        SPAN_STATUS_ERROR,
+                        "no upstream targets available for model");
         aigate_write_error(
             rc, PIPE_MODEL, "no_healthy_upstream", "no upstream targets available for model");
         return -1;
     }
+
+    tracer_span_set_attr(&q->trace_ctx,
+                         "router_and_hedge",
+                         "aigate.router.selected_upstream",
+                         q->candidates[0].endpoint);
+    tracer_span_set_attr(&q->trace_ctx, "root", "gen_ai.request.model", q->model);
+    tracer_span_end(&q->trace_ctx, "router_and_hedge", SPAN_STATUS_OK, NULL);
 
     /* Initialize effective body pointers (will be processed by filter_chain) */
     q->sanitized_body = NULL;
@@ -1045,6 +1134,12 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
     chatq.ac = ac;
     chatq.rq = rq;
     chatq.rc = rc;
+
+    tracer_context_init(
+        &chatq.trace_ctx, rq->traceparent, ac != NULL && ac->tracer_cfg.sample_rate >= 1.0);
+    tracer_span_start(&chatq.trace_ctx, "root", SPAN_KIND_SERVER, NULL);
+    tracer_span_set_attr(&chatq.trace_ctx, "root", "gen_ai.system", "openai");
+
     if (gate_request(&chatq) != 0) {
         chat_req_cleanup(&chatq);
         return 0;
@@ -1063,10 +1158,23 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return 0;
     }
 
+    tracer_span_start(
+        &chatq.trace_ctx, "guardrails_inbound", SPAN_KIND_INTERNAL, chatq.trace_ctx.root_span_id);
     if (filter_chain_execute_inbound(&chatq) != FILTER_CONTINUE) {
+        tracer_span_set_attr_int(
+            &chatq.trace_ctx, "guardrails_inbound", "aigate.guardrails.blocked", 1);
+        tracer_span_end(
+            &chatq.trace_ctx, "guardrails_inbound", SPAN_STATUS_ERROR, "blocked by guardrails");
         chat_req_cleanup(&chatq);
         return 0;
     }
+    tracer_span_set_attr_int(&chatq.trace_ctx,
+                             "guardrails_inbound",
+                             "aigate.guardrails.pii_masked",
+                             chatq.pii_map.count);
+    tracer_span_set_attr_int(
+        &chatq.trace_ctx, "guardrails_inbound", "aigate.guardrails.blocked", 0);
+    tracer_span_end(&chatq.trace_ctx, "guardrails_inbound", SPAN_STATUS_OK, NULL);
 
     /* --- handle /v1/embeddings --- */
     if (rq->path != NULL && strcmp(rq->path, "/v1/embeddings") == 0) {
