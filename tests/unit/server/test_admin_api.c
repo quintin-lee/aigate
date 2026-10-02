@@ -50,27 +50,33 @@ struct fake_compressor_rule {
     compressor_rule_t r;
 };
 
+struct fake_cache_optimizer_rule {
+    int                    in_use;
+    cache_optimizer_rule_t r;
+};
+
 struct fake_db {
-    struct fake_key             keys[FAKE_CAP];
-    model_rec_t                 models[FAKE_CAP];
-    int                         n_models;
-    int                         fail_create_model; /* when nonzero, create_model fails */
-    struct fake_provider        providers[FAKE_CAP];
-    long                        next_provider_id;
-    struct fake_group           groups[FAKE_CAP];
-    long                        next_group_id;
-    struct fake_rule            rules[FAKE_CAP];
-    long                        next_rule_id;
-    struct fake_shadow_rule     shadow_rules[FAKE_CAP];
-    long                        next_shadow_rule_id;
-    struct fake_compressor_rule compressor_rules[FAKE_CAP];
-    usage_row_t                 usage[FAKE_CAP];
-    int                         n_usage;
-    long                        next_key_id;
-    usage_request_row_t         reqs[FAKE_CAP];
-    int                         n_reqs;
-    cost_row_t                  cost_rows[FAKE_CAP];
-    int                         n_cost_rows;
+    struct fake_key                  keys[FAKE_CAP];
+    model_rec_t                      models[FAKE_CAP];
+    int                              n_models;
+    int                              fail_create_model; /* when nonzero, create_model fails */
+    struct fake_provider             providers[FAKE_CAP];
+    long                             next_provider_id;
+    struct fake_group                groups[FAKE_CAP];
+    long                             next_group_id;
+    struct fake_rule                 rules[FAKE_CAP];
+    long                             next_rule_id;
+    struct fake_shadow_rule          shadow_rules[FAKE_CAP];
+    long                             next_shadow_rule_id;
+    struct fake_compressor_rule      compressor_rules[FAKE_CAP];
+    struct fake_cache_optimizer_rule cache_optimizer_rules[FAKE_CAP];
+    usage_row_t                      usage[FAKE_CAP];
+    int                              n_usage;
+    long                             next_key_id;
+    usage_request_row_t              reqs[FAKE_CAP];
+    int                              n_reqs;
+    cost_row_t                       cost_rows[FAKE_CAP];
+    int                              n_cost_rows;
 };
 
 /** @brief Deep-copy a key record (including dynamic arrays). */
@@ -916,6 +922,58 @@ fake_delete_compressor_rule(void* ctx, const char* id)
     return 1;
 }
 
+/** @brief Fake cache-optimizer-rule listing. */
+static int
+fake_list_cache_optimizer_rules(void* ctx, cache_optimizer_rule_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        if (db->cache_optimizer_rules[i].in_use) {
+            out[(*n)++] = db->cache_optimizer_rules[i].r;
+        }
+    }
+    return 0;
+}
+
+/** @brief Fake cache-optimizer-rule upsert. */
+static int
+fake_upsert_cache_optimizer_rule(void* ctx, const cache_optimizer_rule_t* rule)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_cache_optimizer_rule* fr = &db->cache_optimizer_rules[i];
+        if (fr->in_use && strcmp(fr->r.id, rule->id) == 0) {
+            fr->r = *rule;
+            return 0;
+        }
+    }
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_cache_optimizer_rule* fr = &db->cache_optimizer_rules[i];
+        if (!fr->in_use) {
+            fr->in_use = 1;
+            fr->r = *rule;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/** @brief Fake cache-optimizer-rule delete. */
+static int
+fake_delete_cache_optimizer_rule(void* ctx, const char* id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_cache_optimizer_rule* fr = &db->cache_optimizer_rules[i];
+        if (fr->in_use && strcmp(fr->r.id, id) == 0) {
+            fr->in_use = 0;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /** @brief Assemble the pg_ops vtable for admin_api tests. */
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
@@ -960,6 +1018,9 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->list_compressor_rules = fake_list_compressor_rules;
     ops->upsert_compressor_rule = fake_upsert_compressor_rule;
     ops->delete_compressor_rule = fake_delete_compressor_rule;
+    ops->list_cache_optimizer_rules = fake_list_cache_optimizer_rules;
+    ops->upsert_cache_optimizer_rule = fake_upsert_cache_optimizer_rule;
+    ops->delete_cache_optimizer_rule = fake_delete_cache_optimizer_rule;
 }
 
 /** @brief Set up the admin test fixture: in-memory store + core + admin context. */
@@ -4187,6 +4248,184 @@ TEST_CASE(test_admin_compressor_endpoints)
     TEST_ASSERT(status == 200, "GET /admin/v1/compressor/rules returns 200");
     TEST_ASSERT(body != NULL && strstr(body, "\"rules\":[]") != NULL,
                 "compressor rules empty after delete");
+    free(body);
+    body = NULL;
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_cache_optimizer_endpoints)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps = NULL;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. GET /admin/v1/cache-optimizer/rules -> initially empty */
+    admin_dispatch(&adm,
+                   "/admin/v1/cache-optimizer/rules",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/cache-optimizer/rules returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"rules\":[]") != NULL,
+                "cache optimizer rules list initially empty");
+    free(body);
+    body = NULL;
+
+    /* 2. POST /admin/v1/cache-optimizer/rules with missing model_pattern -> 400 */
+    const char* bad_payload = "{\"sort_tools\":true}";
+    admin_dispatch(&adm,
+                   "/admin/v1/cache-optimizer/rules",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   bad_payload,
+                   strlen(bad_payload),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 400, "POST without model_pattern returns 400");
+    free(body);
+    body = NULL;
+
+    /* 3. POST /admin/v1/cache-optimizer/rules -> create rule */
+    const char* r1_payload =
+        "{\"id\":\"rule-opt-1\",\"model_pattern\":\"claude-*\",\"enabled\":true,"
+        "\"sort_tools\":true,\"sink_dynamic_system\":true,"
+        "\"inject_anthropic_breakpoints\":true,\"min_tokens_threshold\":1024}";
+    admin_dispatch(&adm,
+                   "/admin/v1/cache-optimizer/rules",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   r1_payload,
+                   strlen(r1_payload),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "POST /admin/v1/cache-optimizer/rules returns 201");
+    TEST_ASSERT(body != NULL, "body not NULL");
+    TEST_ASSERT(strstr(body, "\"id\":\"rule-opt-1\"") != NULL, "rule id is rule-opt-1");
+    TEST_ASSERT(strstr(body, "\"model_pattern\":\"claude-*\"") != NULL, "model_pattern matches");
+    TEST_ASSERT(strstr(body, "\"min_tokens_threshold\":1024") != NULL,
+                "min_tokens_threshold matches");
+    free(body);
+    body = NULL;
+
+    /* 4. PUT /admin/v1/cache-optimizer/rules/rule-opt-1 -> update rule */
+    const char* r1_update = "{\"min_tokens_threshold\":2048,\"sort_tools\":false}";
+    admin_dispatch(&adm,
+                   "/admin/v1/cache-optimizer/rules/rule-opt-1",
+                   "PUT",
+                   NULL,
+                   "admin-secret-token",
+                   r1_update,
+                   strlen(r1_update),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "PUT /admin/v1/cache-optimizer/rules/rule-opt-1 returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"min_tokens_threshold\":2048") != NULL,
+                "min_tokens_threshold updated to 2048");
+    TEST_ASSERT(strstr(body, "\"sort_tools\":false") != NULL, "sort_tools updated to false");
+    free(body);
+    body = NULL;
+
+    /* 5. GET /admin/v1/cache-optimizer/snapshots -> returns snapshots array */
+    cache_optimizer_snapshot_t snap;
+    memset(&snap, 0, sizeof(snap));
+    snprintf(snap.req_id, sizeof(snap.req_id), "snap-opt-1");
+    snprintf(snap.model, sizeof(snap.model), "claude-3-5-sonnet");
+    snap.timestamp = time(NULL);
+    snap.upstream_cache_hit = true;
+    snap.prompt_tokens = 4096;
+    snap.cached_tokens = 3072;
+    snap.cost_savings_usd = 0.0092;
+    snap.latency_us = 120;
+    snap.breakpoints_count = 2;
+    snap.dynamic_sunk = true;
+    snap.tools_sorted = true;
+    cache_optimizer_cache_record(core.cache_opt_cache, &snap);
+
+    admin_dispatch(&adm,
+                   "/admin/v1/cache-optimizer/snapshots",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/cache-optimizer/snapshots returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"snapshots\"") != NULL, "contains snapshots array");
+    TEST_ASSERT(strstr(body, "snap-opt-1") != NULL, "snapshot req_id found");
+    free(body);
+    body = NULL;
+
+    /* 6. GET /admin/v1/cache-optimizer/stats -> returns stats */
+    admin_dispatch(&adm,
+                   "/admin/v1/cache-optimizer/stats",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/cache-optimizer/stats returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"total_optimized_requests\"") != NULL,
+                "contains total_optimized_requests");
+    TEST_ASSERT(strstr(body, "\"total_cached_tokens\"") != NULL, "contains total_cached_tokens");
+    TEST_ASSERT(strstr(body, "\"total_savings_usd\"") != NULL, "contains total_savings_usd");
+    TEST_ASSERT(strstr(body, "\"cache_hit_rate\"") != NULL, "contains cache_hit_rate");
+    free(body);
+    body = NULL;
+
+    /* 7. DELETE /admin/v1/cache-optimizer/rules/rule-opt-1 -> delete rule */
+    admin_dispatch(&adm,
+                   "/admin/v1/cache-optimizer/rules/rule-opt-1",
+                   "DELETE",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "DELETE /admin/v1/cache-optimizer/rules/rule-opt-1 returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"deleted\":true") != NULL, "deleted is true");
+    free(body);
+    body = NULL;
+
+    /* 8. GET /admin/v1/cache-optimizer/rules -> empty */
+    admin_dispatch(&adm,
+                   "/admin/v1/cache-optimizer/rules",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/cache-optimizer/rules returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"rules\":[]") != NULL,
+                "cache optimizer rules empty after delete");
     free(body);
     body = NULL;
 

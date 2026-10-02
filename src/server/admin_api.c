@@ -29,6 +29,7 @@
 #include "observe/tracer.h"
 #include "policy/shadow.h"
 #include "policy/prompt_compressor.h"
+#include "policy/cache_optimizer.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -4586,6 +4587,351 @@ admin_compressor_stats_get(admin_ctx_t* adm, int* status, char** body, size_t* l
     return finish_json(status, body, len, 200, out);
 }
 
+/**
+ * @brief Convert cache_optimizer_rule_t to json_t object representation.
+ * @param[in] rule Pointer to cache optimizer rule structure.
+ * @return Allocated json_t object reference.
+ */
+static json_t*
+cache_optimizer_rule_to_json(const cache_optimizer_rule_t* rule)
+{
+    json_t* o = json_object();
+    json_object_set_new(o, "id", json_string(rule->id));
+    json_object_set_new(o, "model_pattern", json_string(rule->model_pattern));
+    json_object_set_new(o, "enabled", rule->enabled ? json_true() : json_false());
+    json_object_set_new(o, "sort_tools", rule->sort_tools ? json_true() : json_false());
+    json_object_set_new(
+        o, "sink_dynamic_system", rule->sink_dynamic_system ? json_true() : json_false());
+    json_object_set_new(o,
+                        "inject_anthropic_breakpoints",
+                        rule->inject_anthropic_breakpoints ? json_true() : json_false());
+    json_object_set_new(
+        o, "min_tokens_threshold", json_integer((json_int_t)rule->min_tokens_threshold));
+    json_object_set_new(o, "created_at", json_integer((json_int_t)rule->created_at));
+    json_object_set_new(o, "updated_at", json_integer((json_int_t)rule->updated_at));
+    return o;
+}
+
+/**
+ * @brief GET /admin/v1/cache-optimizer/rules: list all prompt cache optimizer rules.
+ * @param[in]  adm    Admin context pointer.
+ * @param[out] status Pointer to store HTTP response status.
+ * @param[out] body   Pointer to store response body string.
+ * @param[out] len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_cache_optimizer_rules_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    const pg_ops_t*        ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    cache_optimizer_rule_t rules[64];
+    int                    n = 0;
+    if (ops != NULL && ops->list_cache_optimizer_rules != NULL) {
+        if (ops->list_cache_optimizer_rules(ops->ctx, rules, 64, &n) != 0) {
+            return finish_error(
+                status, body, len, 500, "internal_error", "failed to list cache optimizer rules");
+        }
+    }
+    json_t* arr = json_array();
+    for (int i = 0; i < n; i++) {
+        json_array_append_new(arr, cache_optimizer_rule_to_json(&rules[i]));
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "rules", arr);
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief POST /admin/v1/cache-optimizer/rules: create a new prompt cache optimizer rule.
+ * @param[in]  adm      Admin context pointer.
+ * @param[out] status   Pointer to store HTTP response status.
+ * @param[out] body     Pointer to store response body string.
+ * @param[out] len      Pointer to store response body length.
+ * @param[in]  req_body Raw request payload buffer.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_cache_optimizer_rules_create(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* pat = jstring(jbody, "model_pattern", NULL);
+    if (pat == NULL || pat[0] == '\0') {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "model_pattern is required");
+    }
+
+    cache_optimizer_rule_t rule;
+    memset(&rule, 0, sizeof(rule));
+
+    const char* id_in = jstring(jbody, "id", NULL);
+    if (id_in != NULL && id_in[0] != '\0') {
+        snprintf(rule.id, sizeof(rule.id), "%s", id_in);
+    } else {
+        snprintf(rule.id,
+                 sizeof(rule.id),
+                 "rule-%08x%04x",
+                 (uint32_t)rand(),
+                 (uint32_t)(rand() & 0xffff));
+    }
+
+    snprintf(rule.model_pattern, sizeof(rule.model_pattern), "%s", pat);
+
+    rule.enabled = true;
+    json_t* jen = json_object_get(jbody, "enabled");
+    if (jen != NULL && json_is_boolean(jen)) {
+        rule.enabled = json_is_true(jen);
+    }
+
+    rule.sort_tools = true;
+    json_t* jsort = json_object_get(jbody, "sort_tools");
+    if (jsort != NULL && json_is_boolean(jsort)) {
+        rule.sort_tools = json_is_true(jsort);
+    }
+
+    rule.sink_dynamic_system = true;
+    json_t* jsink = json_object_get(jbody, "sink_dynamic_system");
+    if (jsink != NULL && json_is_boolean(jsink)) {
+        rule.sink_dynamic_system = json_is_true(jsink);
+    }
+
+    rule.inject_anthropic_breakpoints = true;
+    json_t* jbp = json_object_get(jbody, "inject_anthropic_breakpoints");
+    if (jbp != NULL && json_is_boolean(jbp)) {
+        rule.inject_anthropic_breakpoints = json_is_true(jbp);
+    }
+
+    rule.min_tokens_threshold = 1024;
+    json_t* jmin = json_object_get(jbody, "min_tokens_threshold");
+    if (jmin != NULL && json_is_integer(jmin)) {
+        rule.min_tokens_threshold = (uint32_t)json_integer_value(jmin);
+    }
+
+    rule.created_at = (int64_t)time(NULL);
+    rule.updated_at = rule.created_at;
+
+    json_decref(jbody);
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->upsert_cache_optimizer_rule == NULL) {
+        return finish_error(
+            status, body, len, 503, "service_unavailable", "database store not available");
+    }
+    if (ops->upsert_cache_optimizer_rule(ops->ctx, &rule) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to create cache optimizer rule");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_cache_optimizer_rules(adm->ac);
+    }
+
+    return finish_json(status, body, len, 201, cache_optimizer_rule_to_json(&rule));
+}
+
+/**
+ * @brief PUT/PATCH /admin/v1/cache-optimizer/rules/:id: update an existing cache optimizer rule.
+ * @param[in]  adm      Admin context pointer.
+ * @param[out] status   Pointer to store HTTP response status.
+ * @param[out] body     Pointer to store response body string.
+ * @param[out] len      Pointer to store response body length.
+ * @param[in]  rest     Rule ID extracted from URI.
+ * @param[in]  req_body Raw request payload buffer.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_cache_optimizer_rules_update(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
+{
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->list_cache_optimizer_rules == NULL ||
+        ops->upsert_cache_optimizer_rule == NULL) {
+        return finish_error(
+            status, body, len, 503, "service_unavailable", "database store not available");
+    }
+
+    cache_optimizer_rule_t rules[64];
+    int                    n = 0;
+    if (ops->list_cache_optimizer_rules(ops->ctx, rules, 64, &n) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to list cache optimizer rules");
+    }
+
+    cache_optimizer_rule_t* target = NULL;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(rules[i].id, rest) == 0) {
+            target = &rules[i];
+            break;
+        }
+    }
+    if (target == NULL) {
+        return finish_error(
+            status, body, len, 404, "rule_not_found", "cache optimizer rule not found");
+    }
+
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* pat = jstring(jbody, "model_pattern", NULL);
+    if (pat != NULL && pat[0] != '\0') {
+        snprintf(target->model_pattern, sizeof(target->model_pattern), "%s", pat);
+    }
+
+    json_t* jen = json_object_get(jbody, "enabled");
+    if (jen != NULL && json_is_boolean(jen)) {
+        target->enabled = json_is_true(jen);
+    }
+
+    json_t* jsort = json_object_get(jbody, "sort_tools");
+    if (jsort != NULL && json_is_boolean(jsort)) {
+        target->sort_tools = json_is_true(jsort);
+    }
+
+    json_t* jsink = json_object_get(jbody, "sink_dynamic_system");
+    if (jsink != NULL && json_is_boolean(jsink)) {
+        target->sink_dynamic_system = json_is_true(jsink);
+    }
+
+    json_t* jbp = json_object_get(jbody, "inject_anthropic_breakpoints");
+    if (jbp != NULL && json_is_boolean(jbp)) {
+        target->inject_anthropic_breakpoints = json_is_true(jbp);
+    }
+
+    json_t* jmin = json_object_get(jbody, "min_tokens_threshold");
+    if (jmin != NULL && json_is_integer(jmin)) {
+        target->min_tokens_threshold = (uint32_t)json_integer_value(jmin);
+    }
+
+    target->updated_at = (int64_t)time(NULL);
+    json_decref(jbody);
+
+    if (ops->upsert_cache_optimizer_rule(ops->ctx, target) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to update cache optimizer rule");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_cache_optimizer_rules(adm->ac);
+    }
+
+    return finish_json(status, body, len, 200, cache_optimizer_rule_to_json(target));
+}
+
+/**
+ * @brief DELETE /admin/v1/cache-optimizer/rules/:id: delete a prompt cache optimizer rule.
+ * @param[in]  adm    Admin context pointer.
+ * @param[out] status Pointer to store HTTP response status.
+ * @param[out] body   Pointer to store response body string.
+ * @param[out] len    Pointer to store response body length.
+ * @param[in]  rest   Rule ID extracted from URI.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_cache_optimizer_rules_delete(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
+{
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->delete_cache_optimizer_rule == NULL) {
+        return finish_error(
+            status, body, len, 503, "service_unavailable", "database store not available");
+    }
+
+    if (ops->delete_cache_optimizer_rule(ops->ctx, rest) != 0) {
+        return finish_error(
+            status, body, len, 404, "rule_not_found", "cache optimizer rule not found");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_cache_optimizer_rules(adm->ac);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "deleted", json_true());
+    json_object_set_new(out, "id", json_string(rest));
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief GET /admin/v1/cache-optimizer/snapshots: list recent prompt cache optimizer snapshots.
+ * @param[in]  adm    Admin context pointer.
+ * @param[out] status Pointer to store HTTP response status.
+ * @param[out] body   Pointer to store response body string.
+ * @param[out] len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_cache_optimizer_snapshots_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    json_t* arr = json_array();
+    if (adm->ac != NULL && adm->ac->cache_opt_cache != NULL) {
+        cache_optimizer_snapshot_t snaps[200];
+        size_t count = cache_optimizer_cache_get_snapshots(adm->ac->cache_opt_cache, snaps, 200);
+        for (size_t i = 0; i < count; i++) {
+            const cache_optimizer_snapshot_t* s = &snaps[i];
+            json_t*                           o = json_object();
+            json_object_set_new(o, "req_id", json_string(s->req_id));
+            json_object_set_new(o, "model", json_string(s->model));
+            json_object_set_new(o, "timestamp", json_integer((json_int_t)s->timestamp));
+            json_object_set_new(
+                o, "upstream_cache_hit", s->upstream_cache_hit ? json_true() : json_false());
+            json_object_set_new(o, "prompt_tokens", json_integer((json_int_t)s->prompt_tokens));
+            json_object_set_new(o, "cached_tokens", json_integer((json_int_t)s->cached_tokens));
+            json_object_set_new(o, "cost_savings_usd", json_real(s->cost_savings_usd));
+            json_object_set_new(o, "latency_us", json_integer((json_int_t)s->latency_us));
+            json_object_set_new(
+                o, "breakpoints_count", json_integer((json_int_t)s->breakpoints_count));
+            json_object_set_new(o, "dynamic_sunk", s->dynamic_sunk ? json_true() : json_false());
+            json_object_set_new(o, "tools_sorted", s->tools_sorted ? json_true() : json_false());
+            json_array_append_new(arr, o);
+        }
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "snapshots", arr);
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief GET /admin/v1/cache-optimizer/stats: retrieve aggregate prompt cache optimizer metrics.
+ * @param[in]  adm    Admin context pointer.
+ * @param[out] status Pointer to store HTTP response status.
+ * @param[out] body   Pointer to store response body string.
+ * @param[out] len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_cache_optimizer_stats_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    cache_optimizer_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+    if (adm->ac != NULL && adm->ac->cache_opt_cache != NULL) {
+        cache_optimizer_cache_get_stats(adm->ac->cache_opt_cache, &stats);
+    }
+    json_t* out = json_object();
+    json_object_set_new(
+        out, "total_optimized_requests", json_integer((json_int_t)stats.total_optimized_requests));
+    json_object_set_new(out,
+                        "upstream_cache_hit_requests",
+                        json_integer((json_int_t)stats.upstream_cache_hit_requests));
+    json_object_set_new(
+        out, "total_prompt_tokens", json_integer((json_int_t)stats.total_prompt_tokens));
+    json_object_set_new(
+        out, "total_cached_tokens", json_integer((json_int_t)stats.total_cached_tokens));
+    json_object_set_new(out, "total_savings_usd", json_real(stats.total_savings_usd));
+    json_object_set_new(out, "avg_latency_us", json_integer((json_int_t)stats.avg_latency_us));
+    double hit_rate =
+        (stats.total_optimized_requests > 0)
+            ? (double)stats.upstream_cache_hit_requests / (double)stats.total_optimized_requests
+            : 0.0;
+    json_object_set_new(out, "cache_hit_rate", json_real(hit_rate));
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -4767,7 +5113,7 @@ admin_dispatch(admin_ctx_t* adm,
                 return guardrails_rule_delete(adm, out_status, out_body, out_len, rest + 11);
             }
         }
-    } else if (strncmp(rest, "cache", 5) == 0) {
+    } else if (strncmp(rest, "cache/", 6) == 0) {
         if (strcmp(rest, "cache/stats") == 0 && strcmp(method, "GET") == 0) {
             return cache_stats_get(adm, out_status, out_body, out_len);
         }
@@ -4837,6 +5183,32 @@ admin_dispatch(admin_ctx_t* adm,
         }
         if (strcmp(rest, "compressor/stats") == 0 && strcmp(method, "GET") == 0) {
             return admin_compressor_stats_get(adm, out_status, out_body, out_len);
+        }
+    } else if (strncmp(rest, "cache-optimizer", 15) == 0) {
+        if (strcmp(rest, "cache-optimizer/rules") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                return admin_cache_optimizer_rules_list(adm, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "POST") == 0) {
+                return admin_cache_optimizer_rules_create(adm, out_status, out_body, out_len, body);
+            }
+        }
+        if (strncmp(rest, "cache-optimizer/rules/", 22) == 0) {
+            const char* id_str = rest + 22;
+            if (strcmp(method, "PUT") == 0 || strcmp(method, "PATCH") == 0) {
+                return admin_cache_optimizer_rules_update(
+                    adm, out_status, out_body, out_len, id_str, body);
+            }
+            if (strcmp(method, "DELETE") == 0) {
+                return admin_cache_optimizer_rules_delete(
+                    adm, out_status, out_body, out_len, id_str);
+            }
+        }
+        if (strcmp(rest, "cache-optimizer/snapshots") == 0 && strcmp(method, "GET") == 0) {
+            return admin_cache_optimizer_snapshots_list(adm, out_status, out_body, out_len);
+        }
+        if (strcmp(rest, "cache-optimizer/stats") == 0 && strcmp(method, "GET") == 0) {
+            return admin_cache_optimizer_stats_get(adm, out_status, out_body, out_len);
         }
     }
 

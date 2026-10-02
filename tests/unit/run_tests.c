@@ -581,6 +581,9 @@ main(void)
     extern void test_admin_compressor_endpoints(void);
     test_register("admin_compressor_endpoints", test_admin_compressor_endpoints);
 
+    extern void test_admin_cache_optimizer_endpoints(void);
+    test_register("admin_cache_optimizer_endpoints", test_admin_cache_optimizer_endpoints);
+
     extern void test_cache_optimizer_sort_tools(void);
     test_register("cache_optimizer_sort_tools", test_cache_optimizer_sort_tools);
 
