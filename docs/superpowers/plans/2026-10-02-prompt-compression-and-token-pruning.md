@@ -23,7 +23,7 @@
 - Modify: `CMakeLists.txt`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写失败的单元测试 (测试 Token 估算与空白去噪)**
+- [x] **Step 1: 编写失败的单元测试 (测试 Token 估算与空白去噪)**
 
 在 `tests/unit/policy/test_prompt_compressor.c` 中：
 ```c
@@ -57,14 +57,14 @@ TEST_CASE(compressor_whitespace_sanitization)
 }
 ```
 
-- [ ] **Step 2: 注册测试并运行验证失败**
+- [x] **Step 2: 注册测试并运行验证失败**
 
 在 `tests/unit/run_tests.c` 中注册 `compressor_fast_token_estimate` 与 `compressor_whitespace_sanitization`。
 在 `CMakeLists.txt` 中添加 `src/policy/prompt_compressor.c` 与 `tests/unit/policy/test_prompt_compressor.c`。
 执行：`cmake --build build -j`
 预期：编译失败，提示 `compressor_estimate_tokens` 和 `compressor_sanitize_whitespace` 未定义。
 
-- [ ] **Step 3: 实现 `src/policy/prompt_compressor.h` 与 `src/policy/prompt_compressor.c`**
+- [x] **Step 3: 实现 `src/policy/prompt_compressor.h` 与 `src/policy/prompt_compressor.c`**
 
 在 `src/policy/prompt_compressor.h` 中定义数据结构：
 `compressor_level_t`, `compressor_rule_t`, `compressor_result_t`, `compressor_snapshot_t`, `compressor_stats_t`，以及函数原型：
@@ -79,12 +79,12 @@ TEST_CASE(compressor_whitespace_sanitization)
   - 在代码块内原样写入字符；
   - 在代码块外将连续超过 2 个换行 `\n\n\n+` 折叠为 `\n\n`，将单行连续空格/Tab 压缩为单个空格。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：2 个新测试与之前 229 个测试全部 PASS（共 231 个通过）。
 
-- [ ] **Step 5: 检查 Doxygen 文档规范并提交**
+- [x] **Step 5: 检查 Doxygen 文档规范并提交**
 
 执行：`doxygen Doxyfile 2>&1 | grep -i warning || true`（确保 0 警告）。
 执行：`git add src/policy/prompt_compressor.h src/policy/prompt_compressor.c tests/unit/policy/test_prompt_compressor.c tests/unit/run_tests.c CMakeLists.txt && git commit -m "feat(compressor): implement token estimation and whitespace sanitizer with code block protection"`
@@ -98,7 +98,7 @@ TEST_CASE(compressor_whitespace_sanitization)
 - Modify: `src/policy/prompt_compressor.c`
 - Modify: `tests/unit/policy/test_prompt_compressor.c`
 
-- [ ] **Step 1: 编写失败的单元测试 (测试历史滑动保留与沙箱安全)**
+- [x] **Step 1: 编写失败的单元测试 (测试历史滑动保留与沙箱安全)**
 
 在 `tests/unit/policy/test_prompt_compressor.c` 中添加：
 ```c
@@ -150,12 +150,12 @@ TEST_CASE(compressor_history_windowing_and_safety)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：编译失败，提示 `prompt_compressor_process_payload` 与 `prompt_compressor_result_cleanup` 未声明。
 
-- [ ] **Step 3: 实现多轮历史折叠与 Payload 重构**
+- [x] **Step 3: 实现多轮历史折叠与 Payload 重构**
 
 在 `src/policy/prompt_compressor.h` 中声明：
 - `bool prompt_compressor_process_payload(const char* payload, size_t payload_len, const compressor_rule_t* rule, compressor_result_t* out_result);`
@@ -171,12 +171,12 @@ TEST_CASE(compressor_history_windowing_and_safety)
 - 重新序列化 JSON 并对比长度与 Token，如果有效缩短则生成 `res->compressed_payload` 并计算节约指标；
 - 若出现任何 JSON 解析或分配失败，安全回退并返回 `res->compressed = false`。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS（232/232 通过）。
 
-- [ ] **Step 5: 提交 Task 2 代码**
+- [x] **Step 5: 提交 Task 2 代码**
 
 执行：`git add src/policy/prompt_compressor.h src/policy/prompt_compressor.c tests/unit/policy/test_prompt_compressor.c && git commit -m "feat(compressor): implement multi-turn history windowing and payload reconstruction"`
 
@@ -189,7 +189,7 @@ TEST_CASE(compressor_history_windowing_and_safety)
 - Modify: `src/policy/prompt_compressor.c`
 - Modify: `tests/unit/policy/test_prompt_compressor.c`
 
-- [ ] **Step 1: 编写失败的单元测试 (测试激进模式句子剪枝与快照缓存)**
+- [x] **Step 1: 编写失败的单元测试 (测试激进模式句子剪枝与快照缓存)**
 
 在 `tests/unit/policy/test_prompt_compressor.c` 中添加：
 ```c
@@ -232,12 +232,12 @@ TEST_CASE(compressor_sentence_density_pruning_and_cache)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：编译失败，提示 `compressor_prune_sentence_density`、`compressor_cache_*` 未定义。
 
-- [ ] **Step 3: 实现句子密度剪枝算法与环形快照缓存**
+- [x] **Step 3: 实现句子密度剪枝算法与环形快照缓存**
 
 在 `src/policy/prompt_compressor.h` 与 `.c` 中：
 - 实现 `compressor_prune_sentence_density`：
@@ -252,12 +252,12 @@ TEST_CASE(compressor_sentence_density_pruning_and_cache)
   - `compressor_cache_get_snapshots`：导出最近快照供 API 序列化；
   - `compressor_cache_get_stats`：计算并返回平均压缩比与预估节省金额。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS（233/233 通过）。
 
-- [ ] **Step 5: 提交 Task 3 代码**
+- [x] **Step 5: 提交 Task 3 代码**
 
 执行：`git add src/policy/prompt_compressor.h src/policy/prompt_compressor.c tests/unit/policy/test_prompt_compressor.c && git commit -m "feat(compressor): implement sentence density pruning and snapshot circular cache"`
 
@@ -272,7 +272,7 @@ TEST_CASE(compressor_sentence_density_pruning_and_cache)
 - Modify: `src/store/pg_store.c`
 - Modify: `tests/unit/policy/test_prompt_compressor.c`
 
-- [ ] **Step 1: 编写数据库 CRUD 失败的单元测试**
+- [x] **Step 1: 编写数据库 CRUD 失败的单元测试**
 
 在 `tests/unit/policy/test_prompt_compressor.c` 中添加规则结构序列化与存储测试：
 ```c
@@ -298,12 +298,12 @@ TEST_CASE(compressor_rule_serialization_and_match)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：编译失败，缺少 `compressor_rule_match`。
 
-- [ ] **Step 3: 更新 SQL Schema 与 pg_store**
+- [x] **Step 3: 更新 SQL Schema 与 pg_store**
 
 在 `schema/schema.sql` 与 `src/store/schema_sql.h` 中追加：
 ```sql
@@ -330,12 +330,12 @@ CREATE INDEX IF NOT EXISTS idx_compressor_rules_model ON compressor_rules(model_
 - `bool pg_store_compressor_rule_delete(pg_store_t* store, const char* rule_id);`
 - 在 `src/policy/prompt_compressor.c` 中实现通配符与阈值匹配函数 `compressor_rule_match`。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS（234/234 通过）。
 
-- [ ] **Step 5: 提交 Task 4 代码**
+- [x] **Step 5: 提交 Task 4 代码**
 
 执行：`git add schema/schema.sql src/store/schema_sql.h src/store/pg_store.h src/store/pg_store.c src/policy/prompt_compressor.c tests/unit/policy/test_prompt_compressor.c && git commit -m "feat(store): implement compressor rules schema and postgres persistence"`
 
@@ -350,7 +350,7 @@ CREATE INDEX IF NOT EXISTS idx_compressor_rules_model ON compressor_rules(model_
 - Modify: `src/core/pipeline_chat.c`
 - Modify: `tests/unit/core/test_aigate_core.c`
 
-- [ ] **Step 1: 编写流水线压缩与响应头注入的单元测试**
+- [x] **Step 1: 编写流水线压缩与响应头注入的单元测试**
 
 在 `tests/unit/core/test_aigate_core.c` 中添加集成测试：
 ```c
@@ -362,12 +362,12 @@ TEST_CASE(pipeline_prompt_compression_and_headers)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：编译失败，缺少上下文字段与流水线 Hook。
 
-- [ ] **Step 3: 流水线挂载与生命周期集成**
+- [x] **Step 3: 流水线挂载与生命周期集成**
 
 1. 在 `src/core/aigate_core_internal.h` 中：
    - 包含 `policy/prompt_compressor.h`；
@@ -387,12 +387,12 @@ TEST_CASE(pipeline_prompt_compression_and_headers)
      - 记录快照至 `ac->comp_cache`；
    - 在响应发送或流式起始时注入 `X-Aigate-Compression-*` 响应头。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS（235/235 全部通过）。
 
-- [ ] **Step 5: 提交 Task 5 代码**
+- [x] **Step 5: 提交 Task 5 代码**
 
 执行：`git add src/core/aigate_core_internal.h src/core/aigate_core.h src/core/aigate_core.c src/core/pipeline_chat.c tests/unit/core/test_aigate_core.c && git commit -m "feat(core): integrate prompt compressor into chat pipeline with headers and tracing"`
 
@@ -404,7 +404,7 @@ TEST_CASE(pipeline_prompt_compression_and_headers)
 - Modify: `src/server/admin_api.c`
 - Modify: `tests/unit/server/test_admin_api.c`
 
-- [ ] **Step 1: 编写 Admin API 单元测试**
+- [x] **Step 1: 编写 Admin API 单元测试**
 
 在 `tests/unit/server/test_admin_api.c` 中添加端点测试：
 ```c
@@ -420,12 +420,12 @@ TEST_CASE(admin_compressor_endpoints)
 }
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j`
 预期：测试失败，返回 404 Not Found。
 
-- [ ] **Step 3: 实现 Admin API 路由与处理器**
+- [x] **Step 3: 实现 Admin API 路由与处理器**
 
 在 `src/server/admin_api.c` 中注册并实现：
 - `GET /admin/v1/compressor/rules`：返回规则 JSON 数组；
@@ -435,12 +435,12 @@ TEST_CASE(admin_compressor_endpoints)
 - `GET /admin/v1/compressor/snapshots`：返回最近 200 条请求快照；
 - `GET /admin/v1/compressor/stats`：返回全局聚合统计。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS（236/236 全部通过）。
 
-- [ ] **Step 5: 提交 Task 6 代码**
+- [x] **Step 5: 提交 Task 6 代码**
 
 执行：`git add src/server/admin_api.c tests/unit/server/test_admin_api.c && git commit -m "feat(admin): implement REST endpoints for compressor rules, snapshots, and stats"`
 
@@ -452,7 +452,7 @@ TEST_CASE(admin_compressor_endpoints)
 - Modify: `tests/unit/server/test_admin_ui.c`
 - Modify: `web/admin.html`
 
-- [ ] **Step 1: 编写 Web UI 结构断言测试**
+- [x] **Step 1: 编写 Web UI 结构断言测试**
 
 在 `tests/unit/server/test_admin_ui.c` 中添加：
 ```c
@@ -466,12 +466,12 @@ TEST_ASSERT(strstr(html, "id=\"compressorRuleModal\"") != NULL, "missing compres
 TEST_ASSERT(strstr(html, "id=\"compressorDiffModal\"") != NULL, "missing compressorDiffModal");
 ```
 
-- [ ] **Step 2: 运行测试验证失败**
+- [x] **Step 2: 运行测试验证失败**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：FAIL，缺少 `tab-compressor` 及其元素。
 
-- [ ] **Step 3: 更新 `web/admin.html` 实现看板与 Diff 抽屉**
+- [x] **Step 3: 更新 `web/admin.html` 实现看板与 Diff 抽屉**
 
 1. 侧边栏添加 `🗜️ 提示词压缩` 导航按钮 (`data-tab="compressor"`)；
 2. 添加 `#tab-compressor` 主面板：
@@ -485,12 +485,12 @@ TEST_ASSERT(strstr(html, "id=\"compressorDiffModal\"") != NULL, "missing compres
 4. 编写原生 JavaScript 交互函数：
    - `loadCompressorTab()`, `renderCompressorStats()`, `renderCompressorRules()`, `renderCompressorSnapshots()`, `openCompressorRuleModal()`, `openCompressorDiffModal()`。
 
-- [ ] **Step 4: 编译并运行单元测试验证通过**
+- [x] **Step 4: 编译并运行单元测试验证通过**
 
 执行：`cmake --build build -j && ./build/tests/aigate_unit_tests`
 预期：PASS（236/236 全部通过）。
 
-- [ ] **Step 5: 提交 Task 7 代码**
+- [x] **Step 5: 提交 Task 7 代码**
 
 执行：`git add web/admin.html tests/unit/server/test_admin_ui.c && git commit -m "feat(ui): add prompt compressor console with side-by-side diff modal"`
 
@@ -501,23 +501,23 @@ TEST_ASSERT(strstr(html, "id=\"compressorDiffModal\"") != NULL, "missing compres
 **Files:**
 - Modify: `docs/superpowers/specs/2026-10-02-prompt-compression-and-token-pruning-design.md`
 
-- [ ] **Step 1: 运行全量 CTest 套件与并发压测**
+- [x] **Step 1: 运行全量 CTest 套件与并发压测**
 
 执行：`ctest --test-dir build --output-on-failure`
 预期：6/6 全部通过（100%）。
 
-- [ ] **Step 2: 执行 Doxygen 静态文档扫描**
+- [x] **Step 2: 执行 Doxygen 静态文档扫描**
 
 执行：`doxygen Doxyfile 2>&1 | grep -i warning || true`
 预期：严格 0 Warnings。
 
-- [ ] **Step 3: 更新设计规范验收状态**
+- [x] **Step 3: 更新设计规范验收状态**
 
 在 `docs/superpowers/specs/2026-10-02-prompt-compression-and-token-pruning-design.md` 中：
 - 将状态更新为 `已实现并通过验证 (Implemented & Verified)`；
 - 勾选所有验收标准复选框 `[x]`。
 
-- [ ] **Step 4: 提交规范更新并合并至 master**
+- [x] **Step 4: 提交规范更新并合并至 master**
 
 执行：
 ```bash

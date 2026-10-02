@@ -1,6 +1,6 @@
 # 提示词自适应压缩与 Token 瘦身引擎 (Prompt Compression & Token Pruning Engine) 设计规范
 
-- **状态**: 草案 (Draft / Pending Implementation)
+- **状态**: 已实现并通过验证 (Implemented & Verified)
 - **创建日期**: 2026-10-02
 - **责任模块**: `src/policy/prompt_compressor.h`, `src/policy/prompt_compressor.c`, `src/core/pipeline_chat.c`, `src/core/aigate_core.c`, `src/server/admin_api.c`, `src/store/pg_store.c`, `web/admin.html`
 - **目标**: 构建纯 C17 高性能提示词自适应压缩与 Token 瘦身引擎，支持微秒级执行开销、多轮历史自适应滑动折叠、结构化格式去噪与句子密度重要度剪枝，在 100% 确保代码块、Tool Calls 与最新用户提问安全的前提下，实现 30%~60% 的 Token 成本节约与首字时延优化。
@@ -251,23 +251,23 @@ CREATE INDEX IF NOT EXISTS idx_compressor_rules_model ON compressor_rules(model_
 
 ## 4. 验证与验收标准 (Acceptance Criteria)
 
-- [ ] 规则管理与解析：
+- [x] 规则管理与解析：
   - 支持 `COMPRESS_LEVEL_MODERATE`（温和）与 `COMPRESS_LEVEL_AGGRESSIVE`（激进）模式配置与动态热生效；
   - 触发阈值 `min_tokens` 与入向控制头 `X-Aigate-Compress` 解析准确。
-- [ ] 剪枝算法与安全沙箱执行：
+- [x] 剪枝算法与安全沙箱执行：
   - 纯 C17 原生实现，执行开销稳定 `< 500μs`；
   - Markdown 代码块（```...```）缩进、换行 100% 保护无损；
   - PII 掩码占位符 `{{PII_*}}` 100% 完整保留；
   - Tool Calls 与最新一轮 User 提问绝对完整保留；
   - 压缩结果语法校验失败时自动回退原 Payload，服务成功率 100% 稳定。
-- [ ] 响应头与链路追踪：
+- [x] 响应头与链路追踪：
   - 命中压缩的请求自动注入 `X-Aigate-Compression-*` 响应头；
   - OpenTelemetry Span `prompt_compression` 正确记录耗时与 Token 指标。
-- [ ] 控制台看板与对比：
+- [x] 控制台看板与对比：
   - 内存环形队列维护最近 200 条压缩条目；
   - Admin REST API 正确返回快照与聚合统计；
   - Web 控制台提供直观的 4 张 KPI 卡片、规则配置面板与左右双栏对比模态框。
-- [ ] 构建与质量门禁：
+- [x] 构建与质量门禁：
   - 单元测试与 CTest 全量通过率 100%；
   - Doxygen 保持严格 0 Warning；
   - 纯 C17 标准实现，无任何外部 C++ 依赖。
