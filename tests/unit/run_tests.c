@@ -553,6 +553,9 @@ main(void)
     test_register("pipeline_traffic_shadowing_cloning_and_pairing",
                   test_pipeline_traffic_shadowing_cloning_and_pairing);
 
+    extern void test_admin_shadow_endpoints(void);
+    test_register("admin_shadow_endpoints", test_admin_shadow_endpoints);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

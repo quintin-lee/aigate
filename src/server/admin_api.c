@@ -27,6 +27,7 @@
 #include "event_bus.h"
 #include "response_cache.h"
 #include "observe/tracer.h"
+#include "policy/shadow.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -3815,6 +3816,388 @@ admin_traces_list_recent(admin_ctx_t* adm, int* status, char** body, size_t* len
     return finish_json(status, body, len, 200, out);
 }
 
+/**
+ * @brief Convert shadow_rule_t to a JSON object.
+ * @param r Pointer to shadow rule.
+ * @return Newly allocated JSON object.
+ */
+static json_t*
+shadow_rule_to_json(const shadow_rule_t* r)
+{
+    json_t* o = json_object();
+    json_object_set_new(o, "id", json_integer((json_int_t)r->id));
+    json_object_set_new(o, "source_model", json_string(r->source_model));
+    json_object_set_new(o, "target_model", json_string(r->target_model));
+    json_object_set_new(o, "target_provider", json_string(r->target_provider));
+    json_object_set_new(
+        o, "mode", json_string(r->mode == TRAFFIC_MODE_CANARY ? "CANARY" : "SHADOW"));
+    json_object_set_new(o, "sample_rate", json_real(r->sample_rate));
+    json_object_set_new(o, "header_match", json_string(r->header_match));
+    json_object_set_new(o, "enabled", json_boolean(r->enabled));
+    json_object_set_new(o, "timeout_ms", json_integer((json_int_t)r->timeout_ms));
+    return o;
+}
+
+/**
+ * @brief GET /admin/v1/shadow/rules: list all traffic shadow and canary rules.
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_shadow_rules_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    shadow_rule_t   rules[128];
+    int             n = 0;
+    if (ops != NULL && ops->list_shadow_rules != NULL) {
+        if (ops->list_shadow_rules(ops->ctx, rules, 128, &n) != 0) {
+            return finish_error(
+                status, body, len, 500, "internal_error", "failed to list shadow rules");
+        }
+    }
+    json_t* arr = json_array();
+    for (int i = 0; i < n; i++) {
+        json_array_append_new(arr, shadow_rule_to_json(&rules[i]));
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "rules", arr);
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief POST /admin/v1/shadow/rules: create a new shadow or canary rule.
+ * @param adm      Admin context pointer.
+ * @param status   Pointer to store HTTP response status.
+ * @param body     Pointer to store response body string.
+ * @param len      Pointer to store response body length.
+ * @param req_body Raw request payload buffer.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_shadow_rules_create(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* src_m = jstring(jbody, "source_model", NULL);
+    const char* tgt_m = jstring(jbody, "target_model", NULL);
+    if (src_m == NULL || src_m[0] == '\0' || tgt_m == NULL || tgt_m[0] == '\0') {
+        json_decref(jbody);
+        return finish_error(
+            status, body, len, 400, "bad_request", "source_model and target_model are required");
+    }
+
+    shadow_rule_t rule;
+    memset(&rule, 0, sizeof(rule));
+    snprintf(rule.source_model, sizeof(rule.source_model), "%s", src_m);
+    snprintf(rule.target_model, sizeof(rule.target_model), "%s", tgt_m);
+
+    const char* tgt_prov = jstring(jbody, "target_provider", "openai");
+    snprintf(rule.target_provider,
+             sizeof(rule.target_provider),
+             "%s",
+             tgt_prov[0] ? tgt_prov : "openai");
+
+    const char* mode_str = jstring(jbody, "mode", "SHADOW");
+    if (strcasecmp(mode_str, "CANARY") == 0) {
+        rule.mode = TRAFFIC_MODE_CANARY;
+    } else {
+        json_t* jm = json_object_get(jbody, "mode");
+        if (jm != NULL && json_is_integer(jm) && json_integer_value(jm) == 1) {
+            rule.mode = TRAFFIC_MODE_CANARY;
+        } else {
+            rule.mode = TRAFFIC_MODE_SHADOW;
+        }
+    }
+
+    rule.sample_rate = 1.0;
+    json_t* jsr = json_object_get(jbody, "sample_rate");
+    if (jsr != NULL) {
+        if (json_is_real(jsr)) {
+            rule.sample_rate = json_real_value(jsr);
+        } else if (json_is_integer(jsr)) {
+            rule.sample_rate = (double)json_integer_value(jsr);
+        }
+    }
+    if (rule.sample_rate < 0.0) {
+        rule.sample_rate = 0.0;
+    }
+    if (rule.sample_rate > 1.0) {
+        rule.sample_rate = 1.0;
+    }
+
+    const char* hm = jstring(jbody, "header_match", "");
+    snprintf(rule.header_match, sizeof(rule.header_match), "%s", hm);
+
+    rule.enabled = true;
+    json_t* jen = json_object_get(jbody, "enabled");
+    if (jen != NULL && json_is_boolean(jen)) {
+        rule.enabled = json_is_true(jen);
+    }
+
+    rule.timeout_ms = 30000;
+    json_t* jto = json_object_get(jbody, "timeout_ms");
+    if (jto != NULL && json_is_integer(jto)) {
+        rule.timeout_ms = (uint32_t)json_integer_value(jto);
+    }
+
+    json_decref(jbody);
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->create_shadow_rule == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "store ops unavailable");
+    }
+    long out_id = 0;
+    if (ops->create_shadow_rule(ops->ctx, &rule, &out_id) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to create shadow rule");
+    }
+    rule.id = out_id;
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_shadow_rules(adm->ac);
+    }
+
+    return finish_json(status, body, len, 201, shadow_rule_to_json(&rule));
+}
+
+/**
+ * @brief PUT/PATCH /admin/v1/shadow/rules/:id: update an existing shadow or canary rule.
+ * @param adm      Admin context pointer.
+ * @param status   Pointer to store HTTP response status.
+ * @param body     Pointer to store response body string.
+ * @param len      Pointer to store response body length.
+ * @param rest     Target rule ID string.
+ * @param req_body Raw request payload buffer.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_shadow_rules_update(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
+{
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid rule id");
+    }
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->list_shadow_rules == NULL || ops->update_shadow_rule == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "store ops unavailable");
+    }
+
+    shadow_rule_t rules[128];
+    int           n = 0;
+    if (ops->list_shadow_rules(ops->ctx, rules, 128, &n) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to list shadow rules");
+    }
+
+    shadow_rule_t* target = NULL;
+    for (int i = 0; i < n; i++) {
+        if (rules[i].id == id) {
+            target = &rules[i];
+            break;
+        }
+    }
+    if (target == NULL) {
+        return finish_error(status, body, len, 404, "rule_not_found", "shadow rule not found");
+    }
+
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* src_m = jstring(jbody, "source_model", NULL);
+    if (src_m != NULL && src_m[0] != '\0') {
+        snprintf(target->source_model, sizeof(target->source_model), "%s", src_m);
+    }
+    const char* tgt_m = jstring(jbody, "target_model", NULL);
+    if (tgt_m != NULL && tgt_m[0] != '\0') {
+        snprintf(target->target_model, sizeof(target->target_model), "%s", tgt_m);
+    }
+    const char* tgt_prov = jstring(jbody, "target_provider", NULL);
+    if (tgt_prov != NULL && tgt_prov[0] != '\0') {
+        snprintf(target->target_provider, sizeof(target->target_provider), "%s", tgt_prov);
+    }
+
+    const char* mode_str = jstring(jbody, "mode", NULL);
+    if (mode_str != NULL) {
+        if (strcasecmp(mode_str, "CANARY") == 0) {
+            target->mode = TRAFFIC_MODE_CANARY;
+        } else {
+            target->mode = TRAFFIC_MODE_SHADOW;
+        }
+    } else {
+        json_t* jm = json_object_get(jbody, "mode");
+        if (jm != NULL && json_is_integer(jm)) {
+            target->mode = json_integer_value(jm) == 1 ? TRAFFIC_MODE_CANARY : TRAFFIC_MODE_SHADOW;
+        }
+    }
+
+    json_t* jsr = json_object_get(jbody, "sample_rate");
+    if (jsr != NULL) {
+        if (json_is_real(jsr)) {
+            target->sample_rate = json_real_value(jsr);
+        } else if (json_is_integer(jsr)) {
+            target->sample_rate = (double)json_integer_value(jsr);
+        }
+        if (target->sample_rate < 0.0) {
+            target->sample_rate = 0.0;
+        }
+        if (target->sample_rate > 1.0) {
+            target->sample_rate = 1.0;
+        }
+    }
+
+    const char* hm = jstring(jbody, "header_match", NULL);
+    if (hm != NULL) {
+        snprintf(target->header_match, sizeof(target->header_match), "%s", hm);
+    }
+
+    json_t* jen = json_object_get(jbody, "enabled");
+    if (jen != NULL && json_is_boolean(jen)) {
+        target->enabled = json_is_true(jen);
+    }
+
+    json_t* jto = json_object_get(jbody, "timeout_ms");
+    if (jto != NULL && json_is_integer(jto)) {
+        target->timeout_ms = (uint32_t)json_integer_value(jto);
+    }
+
+    json_decref(jbody);
+
+    if (ops->update_shadow_rule(ops->ctx, target) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to update shadow rule");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_shadow_rules(adm->ac);
+    }
+
+    return finish_json(status, body, len, 200, shadow_rule_to_json(target));
+}
+
+/**
+ * @brief DELETE /admin/v1/shadow/rules/:id: delete a shadow or canary rule.
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @param rest   Target rule ID string.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_shadow_rules_delete(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
+{
+    long id = atol(rest);
+    if (id <= 0) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid rule id");
+    }
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->delete_shadow_rule == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "store ops unavailable");
+    }
+
+    if (ops->delete_shadow_rule(ops->ctx, id) != 0) {
+        return finish_error(status, body, len, 404, "rule_not_found", "shadow rule not found");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_shadow_rules(adm->ac);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "deleted", json_true());
+    json_object_set_new(out, "id", json_integer((json_int_t)id));
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief GET /admin/v1/shadow/evaluations: list recent dual-track evaluation snapshots.
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_shadow_evaluations_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    json_t* arr = json_array();
+    if (adm->ac != NULL && adm->ac->shadow_eng != NULL) {
+        shadow_eval_item_t items[100];
+        int                count = shadow_engine_get_recent_evals(adm->ac->shadow_eng, items, 100);
+        for (int i = 0; i < count; i++) {
+            const shadow_eval_item_t* it = &items[i];
+            json_t*                   o = json_object();
+            json_object_set_new(o, "eval_id", json_string(it->eval_id));
+            json_object_set_new(o, "trace_id", json_string(it->trace_id));
+            json_object_set_new(o, "source_model", json_string(it->source_model));
+            json_object_set_new(o, "target_model", json_string(it->target_model));
+            json_object_set_new(
+                o, "mode", json_string(it->mode == TRAFFIC_MODE_CANARY ? "CANARY" : "SHADOW"));
+            json_object_set_new(o, "primary_latency_ms", json_real(it->primary_latency_ms));
+            json_object_set_new(o, "shadow_latency_ms", json_real(it->shadow_latency_ms));
+            json_object_set_new(o, "primary_ttft_ms", json_real(it->primary_ttft_ms));
+            json_object_set_new(o, "shadow_ttft_ms", json_real(it->shadow_ttft_ms));
+            json_object_set_new(o, "primary_http_status", json_integer(it->primary_http_status));
+            json_object_set_new(o, "shadow_http_status", json_integer(it->shadow_http_status));
+            json_object_set_new(o, "primary_tokens", json_integer((json_int_t)it->primary_tokens));
+            json_object_set_new(o, "shadow_tokens", json_integer((json_int_t)it->shadow_tokens));
+            json_object_set_new(o, "primary_cost_usd", json_real(it->primary_cost_usd));
+            json_object_set_new(o, "shadow_cost_usd", json_real(it->shadow_cost_usd));
+            json_object_set_new(o, "prompt_preview", json_string(it->prompt_preview));
+            json_object_set_new(o, "primary_resp_snippet", json_string(it->primary_resp_snippet));
+            json_object_set_new(o, "shadow_resp_snippet", json_string(it->shadow_resp_snippet));
+            json_object_set_new(o, "timestamp_us", json_integer((json_int_t)it->timestamp_us));
+            json_array_append_new(arr, o);
+        }
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "evaluations", arr);
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief GET /admin/v1/shadow/stats: retrieve aggregate evaluation metrics.
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_shadow_stats_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    shadow_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+    if (adm->ac != NULL && adm->ac->shadow_eng != NULL) {
+        shadow_engine_get_stats(adm->ac->shadow_eng, &stats);
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "total_evaluated", json_integer((json_int_t)stats.total_evaluated));
+    json_object_set_new(
+        out, "successful_shadow", json_integer((json_int_t)stats.successful_shadow));
+    json_object_set_new(out, "failed_shadow", json_integer((json_int_t)stats.failed_shadow));
+    json_object_set_new(out, "primary_cost_usd", json_real(stats.primary_cost_usd));
+    json_object_set_new(out, "shadow_cost_usd", json_real(stats.shadow_cost_usd));
+    json_object_set_new(out, "cost_saved_usd", json_real(stats.cost_saved_usd));
+    json_object_set_new(out, "avg_primary_lat_ms", json_real(stats.avg_primary_lat_ms));
+    json_object_set_new(out, "avg_shadow_lat_ms", json_real(stats.avg_shadow_lat_ms));
+    json_object_set_new(
+        out, "dropped_shadow_requests", json_integer((json_int_t)stats.dropped_shadow_requests));
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -4017,6 +4400,30 @@ admin_dispatch(admin_ctx_t* adm,
         }
         if (rest[6] == '/' && strcmp(method, "GET") == 0) {
             return admin_trace_get_by_id(adm, out_status, out_body, out_len, rest + 7);
+        }
+    } else if (strncmp(rest, "shadow", 6) == 0) {
+        if (strcmp(rest, "shadow/rules") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                return admin_shadow_rules_list(adm, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "POST") == 0) {
+                return admin_shadow_rules_create(adm, out_status, out_body, out_len, body);
+            }
+        }
+        if (strncmp(rest, "shadow/rules/", 13) == 0) {
+            const char* id_str = rest + 13;
+            if (strcmp(method, "PUT") == 0 || strcmp(method, "PATCH") == 0) {
+                return admin_shadow_rules_update(adm, out_status, out_body, out_len, id_str, body);
+            }
+            if (strcmp(method, "DELETE") == 0) {
+                return admin_shadow_rules_delete(adm, out_status, out_body, out_len, id_str);
+            }
+        }
+        if (strcmp(rest, "shadow/evaluations") == 0 && strcmp(method, "GET") == 0) {
+            return admin_shadow_evaluations_list(adm, out_status, out_body, out_len);
+        }
+        if (strcmp(rest, "shadow/stats") == 0 && strcmp(method, "GET") == 0) {
+            return admin_shadow_stats_get(adm, out_status, out_body, out_len);
         }
     }
 
