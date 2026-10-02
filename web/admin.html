@@ -299,6 +299,10 @@
         <span class="text-base">🧪</span>
         <span>流量镜像/金丝雀</span>
       </button>
+      <button data-tab="compressor" onclick="switchTab('compressor')" class="side-link" id="nav-compressor-side">
+        <span class="text-base">🗜️</span>
+        <span>提示词压缩</span>
+      </button>
     </nav>
 
     <!-- Sidebar bottom status -->
@@ -385,6 +389,8 @@
       <button data-tab="audit" onclick="switchTab('audit')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">📋 审计</button>
       <button data-tab="playground" onclick="switchTab('playground')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">⚡ 调试场</button>
       <button data-tab="metrics" onclick="switchTab('metrics')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🛠️ 指标</button>
+      <button data-tab="shadow" onclick="switchTab('shadow')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🧪 镜像/金丝雀</button>
+      <button data-tab="compressor" onclick="switchTab('compressor')" class="nav-tab-m text-xs px-3 py-1.5 rounded-lg text-slate-400 hover:text-slate-200 font-medium whitespace-nowrap">🗜️ 压缩瘦身</button>
     </div>
 
     <!-- TOAST NOTIFICATIONS -->
@@ -2511,6 +2517,160 @@
       </div>
     </div>
 
+    <!-- ==================== Tab 14: Prompt Compression & Token Pruning ==================== -->
+    <div id="tab-compressor" class="tab-content tab-pane hidden space-y-6">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+            <span>🗜️</span>
+            <span>长上下文提示词自适应压缩与 Token 瘦身 (Prompt Compressor & Token Pruning Engine)</span>
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">三级混合剪枝（历史轮次折叠 • 格式去噪 • 句子密度提纯）• 严格安全沙箱保护 • &lt; 500μs 极速处理 • Side-by-Side 左右双栏 Diff</p>
+        </div>
+        <div class="flex items-center space-x-3">
+          <button onclick="loadCompressorTab()" class="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 hover:text-white hover:border-slate-700 transition flex items-center space-x-1.5">
+            <span>🔄</span>
+            <span>刷新数据</span>
+          </button>
+          <button onclick="openCompressorRuleModal()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/20 transition flex items-center space-x-1.5">
+            <span>➕</span>
+            <span>新建压缩规则</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- 4 Core KPI cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <!-- 1. Saved Tokens -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">累计节省 Token</div>
+            <span class="stat-ico em">📉</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="compressorKpiSavedTokens" class="text-3xl font-extrabold text-emerald-400 font-mono">0</div>
+            <div class="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono">瘦身收益</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">已压缩提示词节省的 Token 总量</div>
+        </div>
+
+        <!-- 2. Cost Savings -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">预估节约费用</div>
+            <span class="stat-ico" style="background: rgba(245, 158, 11, 0.15); color: #f59e0b;">💰</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="compressorKpiSavings" class="text-3xl font-extrabold text-amber-400 font-mono">$0.0000</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">按模型计费折算累计降低的 API 支出</div>
+        </div>
+
+        <!-- 3. Compression Ratio -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">平均保留率 / 压缩比</div>
+            <span class="stat-ico cy">🎚️</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="compressorKpiRatio" class="text-3xl font-extrabold text-cyan-400 font-mono">100.0%</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">平均压缩后 Payload 占原始体积比例</div>
+        </div>
+
+        <!-- 4. Execution Latency -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden border border-slate-800 hover:border-slate-700 transition">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">平均剪枝耗时</div>
+            <span class="stat-ico" style="background: rgba(168, 85, 247, 0.15); color: #a855f7;">⚡</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="compressorKpiLatency" class="text-3xl font-extrabold text-purple-400 font-mono">0μs</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400">纯 C17 高性能单遍流式扫描执行耗时</div>
+        </div>
+      </div>
+
+      <!-- Compressor Rules Table -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>⚙️</span>
+              <span>自适应压缩规则库 (Compression Rules)</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">按模型模式、Token 触发阈值、保留历史轮次与剪枝力度精准匹配</p>
+          </div>
+          <button onclick="openCompressorRuleModal()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-brand-600/80 hover:bg-brand-500 text-white transition flex items-center gap-1.5">
+            <span>➕ 新建规则</span>
+          </button>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll rounded-xl border border-slate-800/80">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/90 text-slate-400 uppercase font-semibold border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3 whitespace-nowrap">ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">模型匹配 (Pattern)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">剪枝力度</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">触发门槛 (Min Tokens)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">保留历史轮次</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">目标保留比</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">安全沙箱策略</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">状态</th>
+                <th class="py-2.5 px-3 whitespace-nowrap text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="compressorRulesTbody" class="divide-y divide-slate-800/50 text-[11px]">
+              <tr>
+                <td colspan="9" class="py-8 text-center text-xs text-slate-500">
+                  正在加载压缩规则列表...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Real-time Compression Snapshot Stream Table -->
+      <div class="glass-panel p-5 rounded-2xl border border-slate-800 space-y-3">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span>🔀</span>
+              <span>实时瘦身与优化记录数据流 (Compression Snapshots)</span>
+            </h3>
+            <p class="text-xs text-slate-400 mt-0.5">轻量环形快照缓存（最近 200 条），实时查看提示词瘦身前后 Token、压缩比与 Side-by-Side 详细 Diff</p>
+          </div>
+          <span class="text-xs px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono" id="compressorSnapshotsCountBadge">最近 200 条</span>
+        </div>
+
+        <div class="overflow-x-auto custom-scroll rounded-xl border border-slate-800/80">
+          <table class="w-full text-left text-xs">
+            <thead class="bg-slate-900/90 text-slate-400 uppercase font-semibold border-b border-slate-800">
+              <tr>
+                <th class="py-2.5 px-3 whitespace-nowrap">请求 ID</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">模型</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">原始 / 压缩 Token</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">节省 Token</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">压缩比</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">耗时 (Latency)</th>
+                <th class="py-2.5 px-3 whitespace-nowrap">Prompt 摘要</th>
+                <th class="py-2.5 px-3 whitespace-nowrap text-right">操作</th>
+              </tr>
+            </thead>
+            <tbody id="compressorSnapshotsTbody" class="divide-y divide-slate-800/50 text-[11px]">
+              <tr>
+                <td colspan="8" class="py-8 text-center text-xs text-slate-500">
+                  暂无压缩记录
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </main>
 
   <!-- Page footer -->
@@ -2680,6 +2840,137 @@
           <div>成本差异: <span id="diffCostDelta" class="font-mono font-bold text-amber-400">$0.0000</span></div>
         </div>
         <button onclick="closeShadowDiffModal()" class="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-white transition">关闭对比</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Compressor Rule Modal -->
+  <div id="compressorRuleModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-lg w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-lg font-bold text-white flex items-center space-x-2">
+          <span>🗜️</span>
+          <span id="compressorRuleModalTitle">添加提示词压缩规则</span>
+        </h3>
+        <button onclick="closeCompressorRuleModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+      <div class="space-y-3 text-xs">
+        <input type="hidden" id="compressorRuleId">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">模型匹配模式 (Pattern)</label>
+            <input type="text" id="compressorRuleModelPattern" placeholder="例如 gpt-4o, *, claude-*" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">压缩力度级别</label>
+            <select id="compressorRuleLevel" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500">
+              <option value="1">1: Moderate (温和模式 - 历史折叠+去噪)</option>
+              <option value="2">2: Aggressive (激进模式 - 句子密度提纯)</option>
+            </select>
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">触发阈值 (Min Tokens)</label>
+            <input type="number" id="compressorRuleMinTokens" value="2048" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">保留历史轮次 (Turns)</label>
+            <input type="number" id="compressorRuleMaxHistoryTurns" value="6" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+          </div>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">目标保留比例 (Target Ratio: 0.10 ~ 0.90)</label>
+          <div class="flex items-center gap-3">
+            <input type="range" id="compressorRuleTargetRatioSlider" min="0.10" max="0.90" step="0.05" value="0.60" class="flex-1 accent-indigo-500" oninput="document.getElementById('compressorRuleTargetRatio').value = this.value">
+            <input type="number" id="compressorRuleTargetRatio" min="0.10" max="0.90" step="0.01" value="0.60" class="w-20 px-2 py-1 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500" oninput="document.getElementById('compressorRuleTargetRatioSlider').value = this.value">
+          </div>
+        </div>
+        <div class="space-y-1.5 pt-1">
+          <label class="block font-semibold text-slate-300">安全沙箱策略保护 (Strict Safety Sandbox)</label>
+          <div class="grid grid-cols-3 gap-2">
+            <label class="flex items-center gap-1.5 text-slate-300 text-[11px] cursor-pointer">
+              <input type="checkbox" id="compressorRulePreserveSystem" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+              <span>保留 System</span>
+            </label>
+            <label class="flex items-center gap-1.5 text-slate-300 text-[11px] cursor-pointer">
+              <input type="checkbox" id="compressorRulePreserveCode" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+              <span>保留代码块</span>
+            </label>
+            <label class="flex items-center gap-1.5 text-slate-300 text-[11px] cursor-pointer">
+              <input type="checkbox" id="compressorRulePreserveTools" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+              <span>保留 Tool 调用</span>
+            </label>
+          </div>
+        </div>
+        <div class="flex items-center gap-2 pt-1">
+          <input type="checkbox" id="compressorRuleEnabled" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+          <label for="compressorRuleEnabled" class="text-xs text-slate-300 select-none">立即启用此规则</label>
+        </div>
+      </div>
+      <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
+        <button onclick="closeCompressorRuleModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition">取消</button>
+        <button onclick="saveCompressorRule()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">保存规则</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Side-by-Side Prompt Diff Modal -->
+  <div id="compressorDiffModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+    <div class="glass-panel max-w-5xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] flex flex-col">
+      <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div>
+          <h3 class="text-lg font-bold text-white flex items-center space-x-2">
+            <span>🔍</span>
+            <span>Side-by-Side 提示词瘦身优化对比 (Prompt Diff)</span>
+          </h3>
+          <p class="text-xs text-slate-400 mt-0.5">
+            请求 ID: <span id="diffCompReqId" class="font-mono text-cyan-400"></span> • 
+            模型: <span id="diffCompModel" class="font-mono text-indigo-400"></span>
+          </p>
+        </div>
+        <button onclick="closeCompressorDiffModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      </div>
+
+      <!-- Top Stats Badges -->
+      <div class="grid grid-cols-4 gap-3 text-center">
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="text-[10px] text-slate-400 uppercase">原始 Token 数</div>
+          <div id="diffCompOrigTokens" class="text-base font-bold text-white font-mono">0</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="text-[10px] text-slate-400 uppercase">瘦身后 Token 数</div>
+          <div id="diffCompNewTokens" class="text-base font-bold text-cyan-400 font-mono">0</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="text-[10px] text-slate-400 uppercase">节约 Token / 压缩比</div>
+          <div id="diffCompSavedRatio" class="text-base font-bold text-emerald-400 font-mono">0 (0.0%)</div>
+        </div>
+        <div class="p-2.5 rounded-xl bg-slate-900 border border-slate-800">
+          <div class="text-[10px] text-slate-400 uppercase">执行耗时</div>
+          <div id="diffCompElapsed" class="text-base font-bold text-purple-400 font-mono">0μs</div>
+        </div>
+      </div>
+
+      <!-- Side-by-side 2-column Diff view -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4 flex-1 overflow-hidden min-h-0">
+        <!-- Left Column: Original Messages -->
+        <div class="glass-panel p-4 rounded-xl border border-slate-800 flex flex-col space-y-2 bg-slate-900/40">
+          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <span class="text-xs font-bold text-rose-400 px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20">ORIGINAL (原始提示词)</span>
+            <span class="text-[10px] text-slate-500">包含冗余历史/未修剪空白</span>
+          </div>
+          <div id="diffCompOrigPreview" class="flex-1 p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] font-mono text-slate-300 overflow-y-auto custom-scroll whitespace-pre-wrap leading-relaxed"></div>
+        </div>
+
+        <!-- Right Column: Compressed Messages -->
+        <div class="glass-panel p-4 rounded-xl border border-slate-800 flex flex-col space-y-2 bg-slate-900/40">
+          <div class="flex items-center justify-between border-b border-slate-800/80 pb-2">
+            <span class="text-xs font-bold text-emerald-400 px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">COMPRESSED (瘦身优化后)</span>
+            <span class="text-[10px] text-emerald-400/80">保留指令/代码块/最新提问</span>
+          </div>
+          <div id="diffCompNewPreview" class="flex-1 p-3 rounded-xl bg-slate-950/70 border border-slate-800 text-[11px] font-mono text-emerald-200/90 overflow-y-auto custom-scroll whitespace-pre-wrap leading-relaxed"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -3653,7 +3944,8 @@
         audit: "请求审计日志流",
         playground: "调试场",
         metrics: "监控指标",
-        shadow: "流量镜像与金丝雀"
+        shadow: "流量镜像与金丝雀",
+        compressor: "提示词自适应压缩与 Token 瘦身"
       };
       const titleEl = document.getElementById("currentTabTitle");
       if (titleEl && tabTitles[tabId]) {
@@ -3700,6 +3992,8 @@
         if (typeof fetchTraceConfig === "function") fetchTraceConfig();
       } else if (state.activeTab === "shadow") {
         if (typeof loadShadowTab === "function") loadShadowTab();
+      } else if (state.activeTab === "compressor") {
+        if (typeof loadCompressorTab === "function") loadCompressorTab();
       }
     }
 
@@ -9081,6 +9375,257 @@
 
     function closeShadowDiffModal() {
       document.getElementById("shadowDiffModal").classList.add("hidden");
+    }
+
+    // ==================== Prompt Compressor & Token Pruning Logic ====================
+    let compressorRecentSnapshots = [];
+
+    async function loadCompressorTab() {
+      await Promise.all([
+        renderCompressorStats(),
+        renderCompressorRules(),
+        renderCompressorSnapshots()
+      ]);
+    }
+
+    async function renderCompressorStats() {
+      try {
+        const resp = await apiCall("/admin/v1/compressor/stats");
+        if (!resp || !resp.ok) return;
+        const stats = await resp.json();
+
+        const savedTokensEl = document.getElementById("compressorKpiSavedTokens");
+        const savingsEl = document.getElementById("compressorKpiSavings");
+        const ratioEl = document.getElementById("compressorKpiRatio");
+        const latencyEl = document.getElementById("compressorKpiLatency");
+
+        if (savedTokensEl) savedTokensEl.textContent = (stats.total_saved_tokens || 0).toLocaleString();
+        if (savingsEl) savingsEl.textContent = `$${(stats.estimated_cost_saved || 0).toFixed(4)}`;
+        if (ratioEl) ratioEl.textContent = `${((stats.avg_compression_ratio || 1.0) * 100).toFixed(1)}%`;
+        if (latencyEl) {
+          const avgUs = stats.total_compressed > 0 ? Math.round(stats.total_duration_us / stats.total_compressed) : 0;
+          latencyEl.textContent = `${avgUs}μs`;
+        }
+      } catch (err) {
+        console.error("Failed to load compressor stats", err);
+      }
+    }
+
+    async function renderCompressorRules() {
+      const tbody = document.getElementById("compressorRulesTbody");
+      if (!tbody) return;
+      try {
+        const resp = await apiCall("/admin/v1/compressor/rules");
+        if (!resp || !resp.ok) {
+          tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-xs text-rose-400 font-sans">加载规则列表失败</td></tr>`;
+          return;
+        }
+        const data = await resp.json();
+        const rules = data && data.rules ? data.rules : [];
+        if (rules.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-xs text-slate-500 font-sans">暂无提示词压缩规则，请点击上方按钮新建规则</td></tr>`;
+          return;
+        }
+        tbody.innerHTML = rules.map(r => {
+          const levelBadge = r.level === 2
+            ? `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">激进 (Aggressive)</span>`
+            : `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">温和 (Moderate)</span>`;
+          const statusBadge = r.enabled
+            ? `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>启用中</span>`
+            : `<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700"><span class="w-1.5 h-1.5 rounded-full bg-slate-500"></span>已暂停</span>`;
+
+          const sandboxList = [];
+          if (r.preserve_system) sandboxList.push("System");
+          if (r.preserve_code) sandboxList.push("Code");
+          if (r.preserve_tools) sandboxList.push("Tools");
+          const sandboxStr = sandboxList.join(", ") || "无";
+
+          return `
+            <tr class="hover:bg-slate-900/40 transition">
+              <td class="py-2.5 px-3 font-mono text-[10px] text-cyan-400">${escapeHtml(r.id)}</td>
+              <td class="py-2.5 px-3 font-mono font-bold text-white">${escapeHtml(r.model_pattern)}</td>
+              <td class="py-2.5 px-3">${levelBadge}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">&ge; ${r.min_tokens} Tokens</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${r.max_history_turns} 轮</td>
+              <td class="py-2.5 px-3 font-mono text-emerald-400">${(r.target_ratio * 100).toFixed(0)}%</td>
+              <td class="py-2.5 px-3 text-slate-400 text-[10px]">${sandboxStr}</td>
+              <td class="py-2.5 px-3">${statusBadge}</td>
+              <td class="py-2.5 px-3 text-right whitespace-nowrap space-x-1.5">
+                <button onclick="toggleCompressorRule('${r.id}', ${r.enabled})" class="px-2 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] transition">${r.enabled ? '暂停' : '启用'}</button>
+                <button onclick="deleteCompressorRule('${r.id}')" class="px-2 py-1 rounded bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 text-[10px] transition">删除</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="9" class="py-8 text-center text-xs text-rose-400 font-sans">加载规则列表失败: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    async function renderCompressorSnapshots() {
+      const tbody = document.getElementById("compressorSnapshotsTbody");
+      if (!tbody) return;
+      try {
+        const resp = await apiCall("/admin/v1/compressor/snapshots");
+        if (!resp || !resp.ok) {
+          tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-rose-400 font-sans">加载压缩快照失败</td></tr>`;
+          return;
+        }
+        const data = await resp.json();
+        const snaps = data && data.snapshots ? data.snapshots : [];
+        compressorRecentSnapshots = snaps;
+        const countBadge = document.getElementById("compressorSnapshotsCountBadge");
+        if (countBadge) countBadge.textContent = `共 ${snaps.length} 条记录`;
+
+        if (snaps.length === 0) {
+          tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-slate-500 font-sans">暂无提示词压缩记录，等待流量进入...</td></tr>`;
+          return;
+        }
+
+        tbody.innerHTML = snaps.map((s, idx) => {
+          const ratioPct = (s.compression_ratio * 100).toFixed(1);
+          const promptPreview = escapeHtml(s.prompt_preview || s.orig_preview || "（空）");
+
+          return `
+            <tr class="hover:bg-slate-900/40 transition">
+              <td class="py-2.5 px-3 font-mono text-[10px] text-cyan-400">${s.req_id ? s.req_id.substring(0, 8) : ''}...</td>
+              <td class="py-2.5 px-3 font-mono font-bold text-white">${escapeHtml(s.model)}</td>
+              <td class="py-2.5 px-3 font-mono text-slate-300">${s.original_tokens} ➔ <span class="text-cyan-400">${s.compressed_tokens}</span></td>
+              <td class="py-2.5 px-3 font-mono font-bold text-emerald-400">-${s.saved_tokens}</td>
+              <td class="py-2.5 px-3 font-mono text-emerald-400">${ratioPct}%</td>
+              <td class="py-2.5 px-3 font-mono text-purple-400">${s.elapsed_us}μs</td>
+              <td class="py-2.5 px-3 text-slate-400 max-w-[200px] truncate" title="${promptPreview}">${promptPreview}</td>
+              <td class="py-2.5 px-3 text-right whitespace-nowrap space-x-1.5">
+                <button onclick="openCompressorDiffModal(${idx})" class="px-2 py-1 rounded bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-300 border border-indigo-500/20 text-[10px] transition font-medium">🔍 查看 Diff</button>
+              </td>
+            </tr>
+          `;
+        }).join("");
+      } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="8" class="py-8 text-center text-xs text-rose-400 font-sans">加载快照失败: ${escapeHtml(err.message)}</td></tr>`;
+      }
+    }
+
+    function openCompressorRuleModal() {
+      document.getElementById("compressorRuleId").value = "";
+      document.getElementById("compressorRuleModelPattern").value = "";
+      document.getElementById("compressorRuleLevel").value = "1";
+      document.getElementById("compressorRuleMinTokens").value = "2048";
+      document.getElementById("compressorRuleMaxHistoryTurns").value = "6";
+      document.getElementById("compressorRuleTargetRatio").value = "0.60";
+      document.getElementById("compressorRuleTargetRatioSlider").value = "0.60";
+      document.getElementById("compressorRulePreserveSystem").checked = true;
+      document.getElementById("compressorRulePreserveCode").checked = true;
+      document.getElementById("compressorRulePreserveTools").checked = true;
+      document.getElementById("compressorRuleEnabled").checked = true;
+      document.getElementById("compressorRuleModal").classList.remove("hidden");
+    }
+
+    function closeCompressorRuleModal() {
+      document.getElementById("compressorRuleModal").classList.add("hidden");
+    }
+
+    async function saveCompressorRule() {
+      const pat = document.getElementById("compressorRuleModelPattern").value.trim();
+      if (!pat) {
+        showToast("模型匹配模式为必填项", "error");
+        return;
+      }
+      const level = parseInt(document.getElementById("compressorRuleLevel").value, 10) || 1;
+      const minTokens = parseInt(document.getElementById("compressorRuleMinTokens").value, 10) || 0;
+      const maxHistoryTurns = parseInt(document.getElementById("compressorRuleMaxHistoryTurns").value, 10) || 6;
+      const targetRatio = parseFloat(document.getElementById("compressorRuleTargetRatio").value) || 0.60;
+      const preserveSystem = document.getElementById("compressorRulePreserveSystem").checked;
+      const preserveCode = document.getElementById("compressorRulePreserveCode").checked;
+      const preserveTools = document.getElementById("compressorRulePreserveTools").checked;
+      const enabled = document.getElementById("compressorRuleEnabled").checked;
+
+      const payload = {
+        model_pattern: pat,
+        level: level,
+        min_tokens: minTokens,
+        max_history_turns: maxHistoryTurns,
+        target_ratio: targetRatio,
+        preserve_system: preserveSystem,
+        preserve_code: preserveCode,
+        preserve_tools: preserveTools,
+        enabled: enabled
+      };
+
+      try {
+        const resp = await apiCall("/admin/v1/compressor/rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+        if (resp && resp.ok) {
+          showToast("压缩规则已成功创建", "success");
+          closeCompressorRuleModal();
+          loadCompressorTab();
+        } else {
+          showToast("创建规则失败", "error");
+        }
+      } catch (err) {
+        showToast(`创建规则失败: ${err.message}`, "error");
+      }
+    }
+
+    async function toggleCompressorRule(id, currentEnabled) {
+      try {
+        const resp = await apiCall(`/admin/v1/compressor/rules/${id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ enabled: !currentEnabled })
+        });
+        if (resp && resp.ok) {
+          showToast(`规则状态已更新`, "success");
+          renderCompressorRules();
+        } else {
+          showToast("更新失败", "error");
+        }
+      } catch (err) {
+        showToast(`更新失败: ${err.message}`, "error");
+      }
+    }
+
+    async function deleteCompressorRule(id) {
+      if (!confirm(`确定要删除压缩规则 ${id} 吗？`)) return;
+      try {
+        const resp = await apiCall(`/admin/v1/compressor/rules/${id}`, {
+          method: "DELETE"
+        });
+        if (resp && resp.ok) {
+          showToast("规则已成功删除", "success");
+          renderCompressorRules();
+        } else {
+          showToast("删除失败", "error");
+        }
+      } catch (err) {
+        showToast(`删除失败: ${err.message}`, "error");
+      }
+    }
+
+    function openCompressorDiffModal(idx) {
+      const s = compressorRecentSnapshots[idx];
+      if (!s) {
+        showToast("未找到快照记录", "error");
+        return;
+      }
+      document.getElementById("diffCompReqId").textContent = s.req_id || "（未知）";
+      document.getElementById("diffCompModel").textContent = s.model || "（未知）";
+      document.getElementById("diffCompOrigTokens").textContent = s.original_tokens;
+      document.getElementById("diffCompNewTokens").textContent = s.compressed_tokens;
+      document.getElementById("diffCompSavedRatio").textContent = `${s.saved_tokens} (${(s.compression_ratio * 100).toFixed(1)}%)`;
+      document.getElementById("diffCompElapsed").textContent = `${s.elapsed_us}μs`;
+
+      document.getElementById("diffCompOrigPreview").textContent = s.orig_preview || "（空）";
+      document.getElementById("diffCompNewPreview").textContent = s.comp_preview || "（空）";
+
+      document.getElementById("compressorDiffModal").classList.remove("hidden");
+    }
+
+    function closeCompressorDiffModal() {
+      document.getElementById("compressorDiffModal").classList.add("hidden");
     }
   </script>
 </body>

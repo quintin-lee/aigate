@@ -32,4 +32,15 @@ TEST_CASE(admin_ui_content)
     TEST_ASSERT(strstr(html, "id=\"shadowKpiHealth\"") != NULL, "missing shadowKpiHealth");
     TEST_ASSERT(strstr(html, "id=\"shadowRuleModal\"") != NULL, "missing shadowRuleModal");
     TEST_ASSERT(strstr(html, "id=\"shadowDiffModal\"") != NULL, "missing shadowDiffModal");
+    TEST_ASSERT(strstr(html, "data-tab=\"compressor\"") != NULL, "missing compressor nav button");
+    TEST_ASSERT(strstr(html, "id=\"tab-compressor\"") != NULL, "missing tab-compressor pane");
+    TEST_ASSERT(strstr(html, "id=\"compressorKpiSavedTokens\"") != NULL,
+                "missing compressorKpiSavedTokens");
+    TEST_ASSERT(strstr(html, "id=\"compressorKpiSavings\"") != NULL,
+                "missing compressorKpiSavings");
+    TEST_ASSERT(strstr(html, "id=\"compressorKpiRatio\"") != NULL, "missing compressorKpiRatio");
+    TEST_ASSERT(strstr(html, "id=\"compressorKpiLatency\"") != NULL,
+                "missing compressorKpiLatency");
+    TEST_ASSERT(strstr(html, "id=\"compressorRuleModal\"") != NULL, "missing compressorRuleModal");
+    TEST_ASSERT(strstr(html, "id=\"compressorDiffModal\"") != NULL, "missing compressorDiffModal");
 }
