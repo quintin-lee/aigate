@@ -1495,6 +1495,7 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
                     memset(&snap, 0, sizeof(snap));
                     snprintf(snap.req_id, sizeof(snap.req_id), "%s", chatq.trace_ctx.trace_id);
                     snprintf(snap.model, sizeof(snap.model), "%s", chatq.model);
+                    snap.timestamp = (int64_t)time(NULL);
                     snap.original_tokens = chatq.comp_result.original_tokens;
                     snap.compressed_tokens = chatq.comp_result.compressed_tokens;
                     snap.saved_tokens = chatq.comp_result.saved_tokens;

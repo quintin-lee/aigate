@@ -28,6 +28,7 @@
 #include "response_cache.h"
 #include "observe/tracer.h"
 #include "policy/shadow.h"
+#include "policy/prompt_compressor.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -4198,6 +4199,393 @@ admin_shadow_stats_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
     return finish_json(status, body, len, 200, out);
 }
 
+/**
+ * @brief Convert compressor_rule_t to json_t object representation.
+ * @param rule Pointer to compressor rule structure.
+ * @return Allocated json_t object reference.
+ */
+static json_t*
+compressor_rule_to_json(const compressor_rule_t* rule)
+{
+    json_t* o = json_object();
+    json_object_set_new(o, "id", json_string(rule->id));
+    json_object_set_new(o, "model_pattern", json_string(rule->model_pattern));
+    json_object_set_new(o, "enabled", rule->enabled ? json_true() : json_false());
+    json_object_set_new(o, "level", json_integer((json_int_t)rule->level));
+    json_object_set_new(o, "min_tokens", json_integer((json_int_t)rule->min_tokens));
+    json_object_set_new(o, "max_history_turns", json_integer((json_int_t)rule->max_history_turns));
+    json_object_set_new(o, "target_ratio", json_real(rule->target_ratio));
+    json_object_set_new(o, "preserve_system", rule->preserve_system ? json_true() : json_false());
+    json_object_set_new(o, "preserve_code", rule->preserve_code ? json_true() : json_false());
+    json_object_set_new(o, "preserve_tools", rule->preserve_tools ? json_true() : json_false());
+    json_object_set_new(o, "created_at", json_integer((json_int_t)rule->created_at));
+    json_object_set_new(o, "updated_at", json_integer((json_int_t)rule->updated_at));
+    return o;
+}
+
+/**
+ * @brief GET /admin/v1/compressor/rules: list all prompt compressor rules.
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_compressor_rules_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    const pg_ops_t*   ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    compressor_rule_t rules[64];
+    int               n = 0;
+    if (ops != NULL && ops->list_compressor_rules != NULL) {
+        if (ops->list_compressor_rules(ops->ctx, rules, 64, &n) != 0) {
+            return finish_error(
+                status, body, len, 500, "internal_error", "failed to list compressor rules");
+        }
+    }
+    json_t* arr = json_array();
+    for (int i = 0; i < n; i++) {
+        json_array_append_new(arr, compressor_rule_to_json(&rules[i]));
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "rules", arr);
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief POST /admin/v1/compressor/rules: create a new prompt compressor rule.
+ * @param adm      Admin context pointer.
+ * @param status   Pointer to store HTTP response status.
+ * @param body     Pointer to store response body string.
+ * @param len      Pointer to store response body length.
+ * @param req_body Raw request payload buffer.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_compressor_rules_create(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* pat = jstring(jbody, "model_pattern", NULL);
+    if (pat == NULL || pat[0] == '\0') {
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "model_pattern is required");
+    }
+
+    compressor_rule_t rule;
+    memset(&rule, 0, sizeof(rule));
+
+    const char* id_in = jstring(jbody, "id", NULL);
+    if (id_in != NULL && id_in[0] != '\0') {
+        snprintf(rule.id, sizeof(rule.id), "%s", id_in);
+    } else {
+        snprintf(rule.id,
+                 sizeof(rule.id),
+                 "rule-%08x%04x",
+                 (uint32_t)rand(),
+                 (uint32_t)(rand() & 0xffff));
+    }
+
+    snprintf(rule.model_pattern, sizeof(rule.model_pattern), "%s", pat);
+
+    rule.enabled = true;
+    json_t* jen = json_object_get(jbody, "enabled");
+    if (jen != NULL && json_is_boolean(jen)) {
+        rule.enabled = json_is_true(jen);
+    }
+
+    rule.level = COMPRESS_LEVEL_MODERATE;
+    json_t* jlvl = json_object_get(jbody, "level");
+    if (jlvl != NULL && json_is_integer(jlvl)) {
+        rule.level = (compressor_level_t)json_integer_value(jlvl);
+    }
+
+    rule.min_tokens = 2048;
+    json_t* jmin = json_object_get(jbody, "min_tokens");
+    if (jmin != NULL && json_is_integer(jmin)) {
+        rule.min_tokens = (uint32_t)json_integer_value(jmin);
+    }
+
+    rule.max_history_turns = 6;
+    json_t* jmht = json_object_get(jbody, "max_history_turns");
+    if (jmht != NULL && json_is_integer(jmht)) {
+        rule.max_history_turns = (uint32_t)json_integer_value(jmht);
+    }
+
+    rule.target_ratio = 0.60;
+    json_t* jtr = json_object_get(jbody, "target_ratio");
+    if (jtr != NULL) {
+        if (json_is_real(jtr)) {
+            rule.target_ratio = json_real_value(jtr);
+        } else if (json_is_integer(jtr)) {
+            rule.target_ratio = (double)json_integer_value(jtr);
+        }
+    }
+
+    rule.preserve_system = true;
+    json_t* jps = json_object_get(jbody, "preserve_system");
+    if (jps != NULL && json_is_boolean(jps)) {
+        rule.preserve_system = json_is_true(jps);
+    }
+
+    rule.preserve_code = true;
+    json_t* jpc = json_object_get(jbody, "preserve_code");
+    if (jpc != NULL && json_is_boolean(jpc)) {
+        rule.preserve_code = json_is_true(jpc);
+    }
+
+    rule.preserve_tools = true;
+    json_t* jpt = json_object_get(jbody, "preserve_tools");
+    if (jpt != NULL && json_is_boolean(jpt)) {
+        rule.preserve_tools = json_is_true(jpt);
+    }
+
+    time_t now = time(NULL);
+    rule.created_at = (int64_t)now;
+    rule.updated_at = (int64_t)now;
+
+    json_decref(jbody);
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->upsert_compressor_rule == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "store ops unavailable");
+    }
+    if (ops->upsert_compressor_rule(ops->ctx, &rule) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to create compressor rule");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_compressor_rules(adm->ac);
+    }
+
+    return finish_json(status, body, len, 201, compressor_rule_to_json(&rule));
+}
+
+/**
+ * @brief PUT/PATCH /admin/v1/compressor/rules/:id: update an existing compressor rule.
+ * @param adm      Admin context pointer.
+ * @param status   Pointer to store HTTP response status.
+ * @param body     Pointer to store response body string.
+ * @param len      Pointer to store response body length.
+ * @param rest     Target rule ID string.
+ * @param req_body Raw request payload buffer.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_compressor_rules_update(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest, const void* req_body)
+{
+    if (rest == NULL || rest[0] == '\0') {
+        return finish_error(status, body, len, 400, "bad_request", "invalid rule id");
+    }
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->list_compressor_rules == NULL || ops->upsert_compressor_rule == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "store ops unavailable");
+    }
+
+    compressor_rule_t rules[64];
+    int               n = 0;
+    if (ops->list_compressor_rules(ops->ctx, rules, 64, &n) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to list compressor rules");
+    }
+
+    compressor_rule_t* target = NULL;
+    for (int i = 0; i < n; i++) {
+        if (strcmp(rules[i].id, rest) == 0) {
+            target = &rules[i];
+            break;
+        }
+    }
+    if (target == NULL) {
+        return finish_error(status, body, len, 404, "rule_not_found", "compressor rule not found");
+    }
+
+    json_t* jbody = parse_body(req_body, 0);
+    if (jbody == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid json body");
+    }
+
+    const char* pat = jstring(jbody, "model_pattern", NULL);
+    if (pat != NULL && pat[0] != '\0') {
+        snprintf(target->model_pattern, sizeof(target->model_pattern), "%s", pat);
+    }
+
+    json_t* jen = json_object_get(jbody, "enabled");
+    if (jen != NULL && json_is_boolean(jen)) {
+        target->enabled = json_is_true(jen);
+    }
+
+    json_t* jlvl = json_object_get(jbody, "level");
+    if (jlvl != NULL && json_is_integer(jlvl)) {
+        target->level = (compressor_level_t)json_integer_value(jlvl);
+    }
+
+    json_t* jmin = json_object_get(jbody, "min_tokens");
+    if (jmin != NULL && json_is_integer(jmin)) {
+        target->min_tokens = (uint32_t)json_integer_value(jmin);
+    }
+
+    json_t* jmht = json_object_get(jbody, "max_history_turns");
+    if (jmht != NULL && json_is_integer(jmht)) {
+        target->max_history_turns = (uint32_t)json_integer_value(jmht);
+    }
+
+    json_t* jtr = json_object_get(jbody, "target_ratio");
+    if (jtr != NULL) {
+        if (json_is_real(jtr)) {
+            target->target_ratio = json_real_value(jtr);
+        } else if (json_is_integer(jtr)) {
+            target->target_ratio = (double)json_integer_value(jtr);
+        }
+    }
+
+    json_t* jps = json_object_get(jbody, "preserve_system");
+    if (jps != NULL && json_is_boolean(jps)) {
+        target->preserve_system = json_is_true(jps);
+    }
+
+    json_t* jpc = json_object_get(jbody, "preserve_code");
+    if (jpc != NULL && json_is_boolean(jpc)) {
+        target->preserve_code = json_is_true(jpc);
+    }
+
+    json_t* jpt = json_object_get(jbody, "preserve_tools");
+    if (jpt != NULL && json_is_boolean(jpt)) {
+        target->preserve_tools = json_is_true(jpt);
+    }
+
+    target->updated_at = (int64_t)time(NULL);
+
+    json_decref(jbody);
+
+    if (ops->upsert_compressor_rule(ops->ctx, target) != 0) {
+        return finish_error(
+            status, body, len, 500, "internal_error", "failed to update compressor rule");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_compressor_rules(adm->ac);
+    }
+
+    return finish_json(status, body, len, 200, compressor_rule_to_json(target));
+}
+
+/**
+ * @brief DELETE /admin/v1/compressor/rules/:id: delete a prompt compressor rule.
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @param rest   Target rule ID string.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_compressor_rules_delete(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* rest)
+{
+    if (rest == NULL || rest[0] == '\0') {
+        return finish_error(status, body, len, 400, "bad_request", "invalid rule id");
+    }
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->delete_compressor_rule == NULL) {
+        return finish_error(status, body, len, 500, "internal_error", "store ops unavailable");
+    }
+
+    if (ops->delete_compressor_rule(ops->ctx, rest) != 0) {
+        return finish_error(status, body, len, 404, "rule_not_found", "compressor rule not found");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_compressor_rules(adm->ac);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "deleted", json_true());
+    json_object_set_new(out, "id", json_string(rest));
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief GET /admin/v1/compressor/snapshots: list recent prompt compression snapshots.
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_compressor_snapshots_list(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    json_t* arr = json_array();
+    if (adm->ac != NULL && adm->ac->comp_cache != NULL) {
+        compressor_snapshot_t snaps[200];
+        size_t count = compressor_cache_get_snapshots(adm->ac->comp_cache, snaps, 200);
+        for (size_t i = 0; i < count; i++) {
+            const compressor_snapshot_t* s = &snaps[i];
+            json_t*                      o = json_object();
+            json_object_set_new(o, "req_id", json_string(s->req_id));
+            json_object_set_new(o, "model", json_string(s->model));
+            json_object_set_new(o, "timestamp", json_integer((json_int_t)s->timestamp));
+            json_object_set_new(o, "original_tokens", json_integer((json_int_t)s->original_tokens));
+            json_object_set_new(
+                o, "compressed_tokens", json_integer((json_int_t)s->compressed_tokens));
+            json_object_set_new(o, "saved_tokens", json_integer((json_int_t)s->saved_tokens));
+            json_object_set_new(o, "compression_ratio", json_real(s->compression_ratio));
+            json_object_set_new(o, "elapsed_us", json_integer((json_int_t)s->elapsed_us));
+            json_object_set_new(o, "prompt_preview", json_string(s->prompt_preview));
+            json_object_set_new(o, "orig_preview", json_string(s->orig_preview));
+            json_object_set_new(o, "comp_preview", json_string(s->comp_preview));
+            json_array_append_new(arr, o);
+        }
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "snapshots", arr);
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief GET /admin/v1/compressor/stats: retrieve aggregate prompt compression metrics.
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @return 0 on success, negative on internal error.
+ */
+static int
+admin_compressor_stats_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    compressor_stats_t stats;
+    memset(&stats, 0, sizeof(stats));
+    if (adm->ac != NULL && adm->ac->comp_cache != NULL) {
+        compressor_cache_get_stats(adm->ac->comp_cache, &stats);
+    }
+    json_t* out = json_object();
+    json_object_set_new(out, "total_evaluated", json_integer((json_int_t)stats.total_evaluated));
+    json_object_set_new(out, "total_compressed", json_integer((json_int_t)stats.total_compressed));
+    json_object_set_new(
+        out, "total_orig_tokens", json_integer((json_int_t)stats.total_orig_tokens));
+    json_object_set_new(
+        out, "total_comp_tokens", json_integer((json_int_t)stats.total_comp_tokens));
+    json_object_set_new(
+        out, "total_saved_tokens", json_integer((json_int_t)stats.total_saved_tokens));
+    json_object_set_new(
+        out, "total_duration_us", json_integer((json_int_t)stats.total_duration_us));
+    json_object_set_new(out, "estimated_cost_saved", json_real(stats.estimated_cost_saved));
+    double avg_ratio = (stats.total_orig_tokens > 0)
+                           ? (double)stats.total_comp_tokens / (double)stats.total_orig_tokens
+                           : 1.0;
+    json_object_set_new(out, "avg_compression_ratio", json_real(avg_ratio));
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -4424,6 +4812,31 @@ admin_dispatch(admin_ctx_t* adm,
         }
         if (strcmp(rest, "shadow/stats") == 0 && strcmp(method, "GET") == 0) {
             return admin_shadow_stats_get(adm, out_status, out_body, out_len);
+        }
+    } else if (strncmp(rest, "compressor", 10) == 0) {
+        if (strcmp(rest, "compressor/rules") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                return admin_compressor_rules_list(adm, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "POST") == 0) {
+                return admin_compressor_rules_create(adm, out_status, out_body, out_len, body);
+            }
+        }
+        if (strncmp(rest, "compressor/rules/", 17) == 0) {
+            const char* id_str = rest + 17;
+            if (strcmp(method, "PUT") == 0 || strcmp(method, "PATCH") == 0) {
+                return admin_compressor_rules_update(
+                    adm, out_status, out_body, out_len, id_str, body);
+            }
+            if (strcmp(method, "DELETE") == 0) {
+                return admin_compressor_rules_delete(adm, out_status, out_body, out_len, id_str);
+            }
+        }
+        if (strcmp(rest, "compressor/snapshots") == 0 && strcmp(method, "GET") == 0) {
+            return admin_compressor_snapshots_list(adm, out_status, out_body, out_len);
+        }
+        if (strcmp(rest, "compressor/stats") == 0 && strcmp(method, "GET") == 0) {
+            return admin_compressor_stats_get(adm, out_status, out_body, out_len);
         }
     }
 

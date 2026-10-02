@@ -578,6 +578,9 @@ main(void)
     test_register("pipeline_prompt_compression_and_headers",
                   test_pipeline_prompt_compression_and_headers);
 
+    extern void test_admin_compressor_endpoints(void);
+    test_register("admin_compressor_endpoints", test_admin_compressor_endpoints);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
