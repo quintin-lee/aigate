@@ -9,6 +9,7 @@
 #include "mock_upstream.h"
 #include "health_prober.h"
 #include "response_cache.h"
+#include "observe/tracer.h"
 
 #include <jansson.h>
 #include <math.h>
@@ -3592,5 +3593,129 @@ test_admin_pii_endpoints(void)
     TEST_ASSERT(strstr(body, "\"detected_entities\"") != NULL, "contains detected_entities");
     free(body);
 
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_traces_endpoints)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. GET /admin/v1/traces/config */
+    admin_dispatch(&adm,
+                   "/admin/v1/traces/config",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/traces/config returns 200");
+    TEST_ASSERT(body != NULL, "config body is not NULL");
+    TEST_ASSERT(strstr(body, "\"enabled\":true") != NULL, "tracing enabled default true");
+    TEST_ASSERT(strstr(body, "\"sample_rate\":1.0") != NULL, "sample_rate default 1.0");
+    TEST_ASSERT(strstr(body, "\"slow_threshold_ms\":2000") != NULL,
+                "slow_threshold_ms default 2000");
+    TEST_ASSERT(strstr(body, "\"buffered_count\"") != NULL, "contains buffered_count");
+    TEST_ASSERT(strstr(body, "\"dropped_count\"") != NULL, "contains dropped_count");
+    free(body);
+    body = NULL;
+
+    /* 2. PUT /admin/v1/traces/config */
+    const char* put_cfg =
+        "{\"enabled\":true,\"sample_rate\":0.25,\"slow_threshold_ms\":1500,\"otlp_endpoint\":"
+        "\"http://collector:4318/v1/traces\"}";
+    admin_dispatch(&adm,
+                   "/admin/v1/traces/config",
+                   "PUT",
+                   NULL,
+                   "admin-secret-token",
+                   put_cfg,
+                   strlen(put_cfg),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "PUT /admin/v1/traces/config returns 200");
+    TEST_ASSERT(body != NULL, "updated config body not NULL");
+    TEST_ASSERT(strstr(body, "\"sample_rate\":0.25") != NULL, "sample_rate updated");
+    TEST_ASSERT(strstr(body, "\"slow_threshold_ms\":1500") != NULL, "slow_threshold_ms updated");
+    TEST_ASSERT(strstr(body, "http://collector:4318/v1/traces") != NULL, "otlp_endpoint updated");
+    free(body);
+    body = NULL;
+
+    /* 3. GET /admin/v1/traces/non_existent_trace_id -> 404 */
+    admin_dispatch(&adm,
+                   "/admin/v1/traces/00000000000000000000000000000000",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 404, "GET non-existent trace returns 404");
+    TEST_ASSERT(body != NULL && strstr(body, "trace_not_found") != NULL,
+                "returns trace_not_found error");
+    free(body);
+    body = NULL;
+
+    /* 4. Add a sample trace to cache and query it via GET /admin/v1/traces/:trace_id */
+    trace_context_t sample_ctx;
+    tracer_context_init(
+        &sample_ctx, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01", true);
+    tracer_span_start(&sample_ctx, "root", SPAN_KIND_SERVER, NULL);
+    tracer_span_set_attr(&sample_ctx, "root", "gen_ai.system", "openai");
+    tracer_span_set_attr(&sample_ctx, "root", "gen_ai.request.model", "gpt-4o");
+
+    tracer_span_start(&sample_ctx, "upstream_ttft", SPAN_KIND_CLIENT, sample_ctx.spans[0].span_id);
+    tracer_span_set_attr_int(&sample_ctx, "upstream_ttft", "aigate.latency.ttft_ms", 125);
+    tracer_span_end(&sample_ctx, "upstream_ttft", SPAN_STATUS_OK, NULL);
+
+    tracer_span_end(&sample_ctx, "root", SPAN_STATUS_OK, NULL);
+    tracer_cache_add(&sample_ctx);
+
+    admin_dispatch(&adm,
+                   "/admin/v1/traces/4bf92f3577b34da6a3ce929d0e0e4736",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/traces/:trace_id returns 200");
+    TEST_ASSERT(body != NULL, "trace body not NULL");
+    TEST_ASSERT(strstr(body, "\"trace_id\":\"4bf92f3577b34da6a3ce929d0e0e4736\"") != NULL,
+                "trace_id matches");
+    TEST_ASSERT(strstr(body, "\"is_sampled\":true") != NULL, "is_sampled true");
+    TEST_ASSERT(strstr(body, "\"spans\"") != NULL, "spans array present");
+    TEST_ASSERT(strstr(body, "\"upstream_ttft\"") != NULL, "upstream_ttft span present");
+    TEST_ASSERT(strstr(body, "\"aigate.latency.ttft_ms\":125") != NULL, "attribute present");
+    free(body);
+    body = NULL;
+
+    /* 5. GET /admin/v1/traces (recent traces list) */
+    admin_dispatch(
+        &adm, "/admin/v1/traces", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/traces returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"traces\"") != NULL, "contains traces array");
+    TEST_ASSERT(strstr(body, "4bf92f3577b34da6a3ce929d0e0e4736") != NULL, "contains trace_id");
+    free(body);
+    body = NULL;
+
+    tracer_cache_clear();
     teardown_admin(ps, &core, &db);
 }

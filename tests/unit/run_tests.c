@@ -497,6 +497,30 @@ main(void)
     extern void test_upstream_hedged_suite(void);
     test_register("upstream_hedged_suite", test_upstream_hedged_suite);
 
+    extern void test_w3c_traceparent_parsing(void);
+    test_register("w3c_traceparent_parsing", test_w3c_traceparent_parsing);
+
+    extern void test_span_lifecycle_and_timing(void);
+    test_register("span_lifecycle_and_timing", test_span_lifecycle_and_timing);
+
+    extern void test_trace_tail_sampling_decision(void);
+    test_register("trace_tail_sampling_decision", test_trace_tail_sampling_decision);
+
+    extern void test_trace_ring_buffer_operations(void);
+    test_register("trace_ring_buffer_operations", test_trace_ring_buffer_operations);
+
+    extern void test_otlp_json_serialization(void);
+    test_register("otlp_json_serialization", test_otlp_json_serialization);
+
+    extern void test_tracer_recent_cache(void);
+    test_register("tracer_recent_cache", test_tracer_recent_cache);
+
+    extern void test_tracer_manager_lifecycle(void);
+    test_register("tracer_manager_lifecycle", test_tracer_manager_lifecycle);
+
+    extern void test_admin_traces_endpoints(void);
+    test_register("admin_traces_endpoints", test_admin_traces_endpoints);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

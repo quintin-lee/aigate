@@ -25,6 +25,7 @@
 #include "model_router.h"
 #include "ratelimit.h"
 #include "usage_meter.h"
+#include "observe/tracer.h"
 
 /** @brief Normalized inbound request (transport fills, pipeline reads). */
 typedef struct aigate_request_ctx {
@@ -37,6 +38,7 @@ typedef struct aigate_request_ctx {
     const char* cache_control; /**< Client Cache-Control header, may be NULL */
     const char*
         target_provider; /**< Client X-Aigate-Target-Provider header for channel debugging, may be NULL */
+    const char* traceparent; /**< Inbound W3C traceparent header, may be NULL */
 } aigate_request_ctx;
 
 /** @brief Outbound response sink (transport implements callbacks). */
@@ -74,7 +76,15 @@ typedef struct aigate_core {
     struct event_bus*       eb;                 /**< Event bus, may be NULL */
     struct response_cache*  rc;                 /**< Response cache, may be NULL (disabled) */
     struct latency_tracker* lt;                 /**< Latency tracker & hedge budget, may be NULL */
+    tracer_config_t         tracer_cfg; /**< OpenTelemetry distributed tracing configuration */
+    trace_ring_buffer_t*    trace_rb;   /**< Trace export ring buffer, may be NULL (disabled) */
+    tracer_manager_t*       tm; /**< Background tracer manager and OTLP exporter, may be NULL */
 } aigate_core;
+
+/** @brief Type alias for gateway pipeline context. */
+typedef struct aigate_core aigate_ctx;
+/** @brief Type alias for gateway pipeline context with _t suffix. */
+typedef struct aigate_core aigate_ctx_t;
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */
 int aigate_core_init(aigate_core*   ac,

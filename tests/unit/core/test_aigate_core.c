@@ -383,6 +383,16 @@ TEST_CASE(test_core_pipeline)
     TEST_ASSERT(strstr(mock_upstream_last_path(mu), "/chat/completions") != NULL,
                 "upstream path /chat/completions");
 
+    /* OpenTelemetry distributed tracing assertions */
+    const char* up_hdrs = mock_upstream_last_headers(mu);
+    TEST_ASSERT(up_hdrs != NULL && strstr(up_hdrs, "traceparent: 00-") != NULL,
+                "upstream request received W3C traceparent header");
+    TEST_ASSERT(trace_ring_buffer_count(ac.trace_rb) >= 1, "trace was pushed to ring buffer");
+    trace_context_t pop_ctx;
+    TEST_ASSERT(trace_ring_buffer_pop(ac.trace_rb, &pop_ctx, 100) == true,
+                "popped trace from buffer");
+    TEST_ASSERT(pop_ctx.span_count >= 4, "contains spans (got %d)", pop_ctx.span_count);
+
     /* 2. unknown key → 401 */
     struct cap c2;
     memset(&c2, 0, sizeof c2);

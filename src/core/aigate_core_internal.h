@@ -9,6 +9,7 @@
 #include "aigate_log.h"
 #include "guardrails.h"
 #include "response_cache.h"
+#include "observe/tracer.h"
 #include <jansson.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -46,7 +47,7 @@ typedef struct stream_cache_acc {
  * Encapsulates the lifecycle of a request as it passes through admission control,
  * guardrails inspection, upstream selection, cache checks, and dispatch.
  */
-typedef struct {
+typedef struct chat_req {
     aigate_core*         ac;    /**< Reference to core gateway engine instance. */
     aigate_request_ctx*  rq;    /**< Inbound client request context (headers, path, method). */
     aigate_response_ctx* rc;    /**< Outbound client response sink. */
@@ -66,6 +67,7 @@ typedef struct {
     bool        bypass_cache;  /**< True if cache lookup should be bypassed by policy or header. */
     bool        no_store;      /**< True if response should not be cached. */
     pii_session_map_t pii_map; /**< Request-bound PII de-anonymization session map. */
+    trace_context_t   trace_ctx; /**< OpenTelemetry trace context and recorded spans. */
 } chat_req_t;
 
 /**
