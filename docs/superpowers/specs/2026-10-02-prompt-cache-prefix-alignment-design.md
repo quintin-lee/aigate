@@ -1,6 +1,6 @@
 # 提示词前缀对齐与 KV/Prompt Cache 命中优化引擎设计规范
 
-- **状态**: 草案 (Draft / Pending Implementation)
+- **状态**: 已实现并通过验证 (Implemented & Verified)
 - **创建日期**: 2026-10-02
 - **责任模块**: `src/policy/cache_optimizer.h`, `src/policy/cache_optimizer.c`, `src/core/pipeline_chat.c`, `src/core/aigate_core.c`, `src/server/admin_api.c`, `src/store/pg_store.c`, `web/admin.html`
 - **目标**: 构建纯 C17 高性能提示词前缀对齐与 KV/Prompt Cache 命中优化引擎，在微秒级执行开销（$< 300\mu\text{s}$）内实现 Tools 字典序稳定排序、易变动态时戳与 UUID 智能下沉、Anthropic Claude 智能分块加权打点（至多 4 处 `cache_control: {"type": "ephemeral"}`）以及多协议响应 Usage 归一化解析，为公有云与私有化部署（vLLM / SGLang RadixAttention）带来 50%~90% 的上游计算成本缩减与高达 80% 的首字时延优化。
@@ -242,24 +242,24 @@ CREATE INDEX IF NOT EXISTS idx_cache_optimizer_rules_model ON cache_optimizer_ru
 
 ## 6. 验证与验收标准 (Acceptance Criteria)
 
-- [ ] 规则管理与解析：
+- [x] 规则管理与解析：
   - 支持 Tools 排序、时戳下沉、Claude 打点三项独立开关及 `min_tokens_threshold` 阈值配置；
   - 客户端入向控制头 `X-Aigate-Prompt-Cache: auto|on|off` 解析准确并生效。
-- [ ] 算法与沙箱执行：
+- [x] 算法与沙箱执行：
   - 纯 C17 原生实现，执行开销稳定 $< 300\mu\text{s}$；
   - Tools 数组按名称 100% 稳定字典序排序；
   - System 消息中的动态日期/UUID 准确下沉至末尾，头部核心指令 100% 保持前缀对齐；
   - Anthropic 格式下加权注入至多 4 处 `cache_control: {"type": "ephemeral"}`，且单项 Token 必须 $\ge 1024$；
   - 优化结果若校验失败自动无损回退原 Payload。
-- [ ] 响应解析与度量追踪：
+- [x] 响应解析与度量追踪：
   - 正确解析 OpenAI `prompt_tokens_details.cached_tokens` 与 Claude `cache_read_input_tokens`；
   - 自动向出向响应注入 `X-Aigate-Prompt-Cache-*` 头；
   - OpenTelemetry 属性中记录 `gen_ai.usage.prompt_tokens_cached`。
-- [ ] 控制台看板与审查：
+- [x] 控制台看板与审查：
   - 内存环形队列维护最近 200 条优化快照；
   - Admin REST API 准确返回快照与聚合效益统计；
   - Web 控制台提供 4 张 KPI 卡片、规则配置面板与断点审查模态框。
-- [ ] 构建与质量门禁：
+- [x] 构建与质量门禁：
   - 单元测试与 CTest 全量通过率 100%；
   - Doxygen 保持严格 0 Warning；
   - 纯 C17 标准实现，无任何外部 C++ 依赖。
