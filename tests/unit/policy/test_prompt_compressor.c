@@ -25,8 +25,8 @@ TEST_CASE(test_compressor_whitespace_sanitization)
 {
     const char* raw = "Line 1\n\n\n\nLine 2   with   extra   spaces\n```python\ndef foo():\n    # "
                       "indented code\n\n\n    return 42\n```\nAfter code\n\n\nEnd";
-    char   out_buf[1024];
-    size_t out_len =
+    char        out_buf[1024];
+    size_t      out_len =
         compressor_sanitize_whitespace(raw, strlen(raw), out_buf, sizeof(out_buf), true);
     TEST_ASSERT(out_len > 0, "Sanitization failed");
 
@@ -37,4 +37,56 @@ TEST_CASE(test_compressor_whitespace_sanitization)
     TEST_ASSERT(strstr(out_buf, "    # indented code\n\n\n    return 42") != NULL,
                 "Code block corrupted");
     TEST_ASSERT(strstr(out_buf, "After code\n\nEnd") != NULL, "Trailing newlines not collapsed");
+}
+
+TEST_CASE(test_compressor_history_windowing_and_safety)
+{
+    const char* mock_payload =
+        "{\n"
+        "  \"model\": \"gpt-4o\",\n"
+        "  \"messages\": [\n"
+        "    {\"role\": \"system\", \"content\": \"You are a helpful assistant. Output in JSON "
+        "format.\"},\n"
+        "    {\"role\": \"user\", \"content\": \"My email is {{PII_EMAIL_1}} and turn 1.\"},\n"
+        "    {\"role\": \"assistant\", \"content\": \"Turn 1 answer.\"},\n"
+        "    {\"role\": \"user\", \"content\": \"Turn 2 question.\"},\n"
+        "    {\"role\": \"assistant\", \"content\": \"Turn 2 answer.\"},\n"
+        "    {\"role\": \"user\", \"content\": \"Turn 3 question.\"},\n"
+        "    {\"role\": \"assistant\", \"content\": \"Turn 3 answer.\"},\n"
+        "    {\"role\": \"user\", \"content\": \"Turn 4 question: show me python code.\"},\n"
+        "    {\"role\": \"assistant\", \"content\": \"```python\\nprint('hello')\\n```\"},\n"
+        "    {\"role\": \"user\", \"content\": \"Final user question: what is my email?\"}\n"
+        "  ]\n"
+        "}";
+
+    compressor_rule_t rule;
+    memset(&rule, 0, sizeof(rule));
+    rule.enabled = true;
+    rule.level = COMPRESS_LEVEL_MODERATE;
+    rule.min_tokens = 10;
+    rule.max_history_turns = 2; /* Only keep last 2 turns + system + final user */
+    rule.preserve_system = true;
+    rule.preserve_code = true;
+    rule.preserve_tools = true;
+
+    compressor_result_t res;
+    memset(&res, 0, sizeof(res));
+    bool ok = prompt_compressor_process_payload(mock_payload, strlen(mock_payload), &rule, &res);
+    TEST_ASSERT(ok, "compressor process payload failed");
+    TEST_ASSERT(res.compressed, "expected compression to occur");
+    TEST_ASSERT(res.compressed_payload != NULL, "compressed payload is null");
+    TEST_ASSERT(res.saved_tokens > 0, "expected tokens saved");
+
+    /* System prompt preserved */
+    TEST_ASSERT(strstr(res.compressed_payload, "Output in JSON format") != NULL,
+                "System prompt lost");
+    /* Final user question strictly preserved */
+    TEST_ASSERT(strstr(res.compressed_payload, "Final user question: what is my email?") != NULL,
+                "Final question lost");
+    /* Python code block preserved */
+    TEST_ASSERT(strstr(res.compressed_payload, "```python") != NULL, "Code block lost");
+    /* Older turn 1 question dropped or folded */
+    TEST_ASSERT(strstr(res.compressed_payload, "turn 1.") == NULL, "Turn 1 should be pruned");
+
+    prompt_compressor_result_cleanup(&res);
 }

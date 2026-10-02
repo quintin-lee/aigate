@@ -109,6 +109,27 @@ uint32_t compressor_estimate_tokens(const char* text, size_t len);
 size_t compressor_sanitize_whitespace(
     const char* src, size_t src_len, char* dst, size_t dst_cap, bool preserve_code);
 
+/**
+ * @brief Processes an incoming chat completion JSON payload through the multi-tier compression pipeline.
+ *
+ * @param payload Raw JSON request string.
+ * @param payload_len Byte length of raw JSON string.
+ * @param rule Active compression rule configuration.
+ * @param out_result Output struct populated with execution metrics and compressed payload.
+ * @return true if processing succeeded (regardless of whether compression was applied), false on parsing error.
+ */
+bool prompt_compressor_process_payload(const char*              payload,
+                                       size_t                   payload_len,
+                                       const compressor_rule_t* rule,
+                                       compressor_result_t*     out_result);
+
+/**
+ * @brief Releases heap memory allocated inside a compressor_result_t.
+ *
+ * @param res Pointer to result struct.
+ */
+void prompt_compressor_result_cleanup(compressor_result_t* res);
+
 #ifdef __cplusplus
 }
 #endif

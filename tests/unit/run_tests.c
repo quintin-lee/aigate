@@ -562,6 +562,10 @@ main(void)
     extern void test_compressor_whitespace_sanitization(void);
     test_register("compressor_whitespace_sanitization", test_compressor_whitespace_sanitization);
 
+    extern void test_compressor_history_windowing_and_safety(void);
+    test_register("compressor_history_windowing_and_safety",
+                  test_compressor_history_windowing_and_safety);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
