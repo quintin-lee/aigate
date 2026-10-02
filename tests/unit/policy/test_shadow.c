@@ -119,3 +119,108 @@ TEST_CASE(test_shadow_eval_cache_circular_and_stats)
 
     shadow_eval_cache_destroy(cache);
 }
+
+TEST_CASE(test_shadow_pairing_primary_first)
+{
+    shadow_engine_t* eng = shadow_engine_create(NULL, 10, 10);
+    TEST_ASSERT(eng != NULL, "shadow engine created");
+
+    const char* eval_id = "eval-pair-001";
+    const char* trace_id = "4bf92f3577b34da6a3ce929d0e0e4736";
+
+    /* Initialize slot */
+    TEST_ASSERT(shadow_engine_start_pairing(eng,
+                                            eval_id,
+                                            trace_id,
+                                            "gpt-4o",
+                                            "deepseek-chat",
+                                            TRAFFIC_MODE_SHADOW,
+                                            "Hello world") == true,
+                "start pairing slot ok");
+
+    /* Primary finishes first */
+    TEST_ASSERT(shadow_engine_record_primary(
+                    eng, eval_id, 120.0, 45.0, 200, 150, 0.005, "Primary answer") == true,
+                "record primary ok");
+
+    /* Cache should not have complete item yet */
+    TEST_ASSERT(shadow_engine_eval_count(eng) == 0, "not in cache before shadow finishes");
+
+    /* Shadow finishes */
+    TEST_ASSERT(shadow_engine_record_shadow(
+                    eng, eval_id, 65.0, 20.0, 200, 140, 0.0008, "Shadow answer") == true,
+                "record shadow ok");
+
+    /* Now merged into cache */
+    TEST_ASSERT(shadow_engine_eval_count(eng) == 1, "merged into cache");
+    shadow_eval_item_t item;
+    TEST_ASSERT(shadow_engine_get_recent_evals(eng, &item, 1) == 1, "retrieved item");
+    TEST_ASSERT(strcmp(item.eval_id, eval_id) == 0, "eval_id matches");
+    TEST_ASSERT(strcmp(item.primary_resp_snippet, "Primary answer") == 0,
+                "primary snippet matches");
+    TEST_ASSERT(strcmp(item.shadow_resp_snippet, "Shadow answer") == 0, "shadow snippet matches");
+    TEST_ASSERT(item.primary_latency_ms == 120.0, "primary latency matches");
+    TEST_ASSERT(item.shadow_latency_ms == 65.0, "shadow latency matches");
+
+    shadow_engine_destroy(eng);
+}
+
+TEST_CASE(test_shadow_pairing_shadow_first)
+{
+    shadow_engine_t* eng = shadow_engine_create(NULL, 10, 10);
+    TEST_ASSERT(eng != NULL, "shadow engine created");
+    const char* eval_id = "eval-pair-002";
+
+    /* Initialize slot */
+    TEST_ASSERT(shadow_engine_start_pairing(eng,
+                                            eval_id,
+                                            "trace-002",
+                                            "gpt-4o",
+                                            "deepseek-chat",
+                                            TRAFFIC_MODE_SHADOW,
+                                            "Prompt text") == true,
+                "start pairing ok");
+
+    /* Shadow finishes first */
+    TEST_ASSERT(shadow_engine_record_shadow(
+                    eng, eval_id, 50.0, 15.0, 200, 120, 0.0006, "Shadow answer fast") == true,
+                "record shadow first ok");
+    TEST_ASSERT(shadow_engine_eval_count(eng) == 0, "not in cache yet");
+
+    /* Primary finishes later */
+    TEST_ASSERT(shadow_engine_record_primary(
+                    eng, eval_id, 150.0, 60.0, 200, 130, 0.004, "Primary answer slow") == true,
+                "record primary second ok");
+    TEST_ASSERT(shadow_engine_eval_count(eng) == 1, "merged into cache");
+
+    shadow_eval_item_t item;
+    TEST_ASSERT(shadow_engine_get_recent_evals(eng, &item, 1) == 1, "retrieved item");
+    TEST_ASSERT(strcmp(item.eval_id, eval_id) == 0, "eval_id matches");
+    TEST_ASSERT(strcmp(item.shadow_resp_snippet, "Shadow answer fast") == 0, "snippet matches");
+
+    shadow_engine_destroy(eng);
+}
+
+TEST_CASE(test_shadow_engine_lifecycle_and_task_submission)
+{
+    shadow_engine_t* eng = shadow_engine_create(NULL, 16, 16);
+    TEST_ASSERT(eng != NULL, "shadow engine created");
+
+    TEST_ASSERT(shadow_engine_start(eng) == 0, "engine started");
+
+    shadow_task_t task;
+    memset(&task, 0, sizeof(task));
+    strncpy(task.eval_id, "eval-worker-001", sizeof(task.eval_id) - 1);
+    task.body_copy =
+        strdup("{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
+    task.body_len = strlen(task.body_copy);
+
+    TEST_ASSERT(shadow_engine_submit_task(eng, &task) == true, "submit task ok");
+
+    shadow_stats_t stats;
+    shadow_engine_get_stats(eng, &stats);
+    TEST_ASSERT(stats.dropped_shadow_requests == 0, "0 dropped");
+
+    shadow_engine_stop(eng);
+    shadow_engine_destroy(eng);
+}

@@ -531,6 +531,16 @@ main(void)
     test_register("shadow_eval_cache_circular_and_stats",
                   test_shadow_eval_cache_circular_and_stats);
 
+    extern void test_shadow_pairing_primary_first(void);
+    test_register("shadow_pairing_primary_first", test_shadow_pairing_primary_first);
+
+    extern void test_shadow_pairing_shadow_first(void);
+    test_register("shadow_pairing_shadow_first", test_shadow_pairing_shadow_first);
+
+    extern void test_shadow_engine_lifecycle_and_task_submission(void);
+    test_register("shadow_engine_lifecycle_and_task_submission",
+                  test_shadow_engine_lifecycle_and_task_submission);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
