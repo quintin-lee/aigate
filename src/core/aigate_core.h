@@ -26,6 +26,7 @@
 #include "ratelimit.h"
 #include "usage_meter.h"
 #include "observe/tracer.h"
+#include "policy/prompt_compressor.h"
 
 /** @brief Normalized inbound request (transport fills, pipeline reads). */
 typedef struct aigate_request_ctx {
@@ -39,6 +40,8 @@ typedef struct aigate_request_ctx {
     const char*
         target_provider; /**< Client X-Aigate-Target-Provider header for channel debugging, may be NULL */
     const char* traceparent; /**< Inbound W3C traceparent header, may be NULL */
+    const char*
+        compress_control; /**< Inbound X-Aigate-Compress override ("off", "none", "moderate", "aggressive"), may be NULL */
 } aigate_request_ctx;
 
 /** @brief Outbound response sink (transport implements callbacks). */
@@ -83,12 +86,23 @@ typedef struct aigate_core {
     shadow_rule_t           shadow_rules[128]; /**< Cached shadow and canary rules */
     int                     n_shadow_rules;    /**< Number of active shadow rules */
     pthread_mutex_t         shadow_rules_lock; /**< Mutex protecting shadow_rules */
+    compressor_cache_t*     comp_cache;        /**< Prompt compression snapshot cache and stats */
+    compressor_rule_t       comp_rules[64];    /**< Cached prompt compression rules */
+    int                     n_comp_rules;      /**< Number of active compressor rules */
+    pthread_mutex_t         comp_rules_lock;   /**< Mutex protecting comp_rules */
 } aigate_core;
 
 /** @brief Type alias for gateway pipeline context. */
 typedef struct aigate_core aigate_ctx;
 /** @brief Type alias for gateway pipeline context with _t suffix. */
 typedef struct aigate_core aigate_ctx_t;
+
+/**
+ * @brief Reload prompt compressor rules from backing storage.
+ * @param ac Core context.
+ * @return 0 on success, -1 on error.
+ */
+int aigate_core_reload_compressor_rules(aigate_core* ac);
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */
 int aigate_core_init(aigate_core*   ac,

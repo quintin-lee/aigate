@@ -574,6 +574,10 @@ main(void)
     test_register("compressor_rule_serialization_and_match",
                   test_compressor_rule_serialization_and_match);
 
+    extern void test_pipeline_prompt_compression_and_headers(void);
+    test_register("pipeline_prompt_compression_and_headers",
+                  test_pipeline_prompt_compression_and_headers);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
