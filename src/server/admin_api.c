@@ -26,6 +26,7 @@
 #include "health_prober.h"
 #include "event_bus.h"
 #include "response_cache.h"
+#include "observe/tracer.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -3525,6 +3526,295 @@ cache_purge_trigger(admin_ctx_t* adm, int* status, char** body, size_t* len, con
     return finish_json(status, body, len, 200, out);
 }
 
+/* ------------------------------------------------------------ distributed tracing */
+
+/**
+ * @brief GET /admin/v1/traces/config: retrieve current tracing configuration and buffer stats.
+ *
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @return 0 on success, negative on fatal allocation error.
+ */
+static int
+admin_traces_config_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    tracer_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    size_t   buffered = 0;
+    uint64_t dropped = 0;
+
+    if (adm != NULL && adm->ac != NULL) {
+        if (adm->ac->tm != NULL) {
+            cfg = tracer_manager_get_config(adm->ac->tm);
+        } else {
+            cfg = adm->ac->tracer_cfg;
+        }
+        if (adm->ac->trace_rb != NULL) {
+            buffered = trace_ring_buffer_count(adm->ac->trace_rb);
+            dropped = trace_ring_buffer_dropped(adm->ac->trace_rb);
+        }
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "enabled", json_boolean(cfg.enabled));
+    json_object_set_new(out, "sample_rate", json_real(cfg.sample_rate));
+    json_object_set_new(out, "slow_threshold_ms", json_integer((json_int_t)cfg.slow_threshold_ms));
+    json_object_set_new(out, "otlp_endpoint", json_string(cfg.otlp_endpoint));
+    json_object_set_new(out, "buffered_count", json_integer((json_int_t)buffered));
+    json_object_set_new(out, "dropped_count", json_integer((json_int_t)dropped));
+
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief PUT /admin/v1/traces/config: dynamically update tracing configuration.
+ *
+ * @param adm      Admin context pointer.
+ * @param status   Pointer to store HTTP response status.
+ * @param body     Pointer to store response body string.
+ * @param len      Pointer to store response body length.
+ * @param req_body JSON payload containing configuration options.
+ * @return 0 on success, negative on fatal allocation error.
+ */
+static int
+admin_traces_config_put(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* req_body)
+{
+    if (req_body == NULL || req_body[0] == '\0') {
+        return finish_error(status, body, len, 400, "invalid_request", "empty request body");
+    }
+
+    json_error_t err;
+    json_t*      root = json_loads(req_body, 0, &err);
+    if (root == NULL || !json_is_object(root)) {
+        return finish_error(status, body, len, 400, "invalid_json", "failed to parse json payload");
+    }
+
+    if (adm == NULL || adm->ac == NULL) {
+        json_decref(root);
+        return finish_error(status, body, len, 503, "unavailable", "core not initialized");
+    }
+
+    tracer_config_t cfg;
+    if (adm->ac->tm != NULL) {
+        cfg = tracer_manager_get_config(adm->ac->tm);
+    } else {
+        cfg = adm->ac->tracer_cfg;
+    }
+
+    json_t* j_en = json_object_get(root, "enabled");
+    if (j_en != NULL && json_is_boolean(j_en)) {
+        cfg.enabled = json_is_true(j_en);
+    }
+
+    json_t* j_sr = json_object_get(root, "sample_rate");
+    if (j_sr != NULL && json_is_number(j_sr)) {
+        double sr = json_number_value(j_sr);
+        if (sr < 0.0) {
+            sr = 0.0;
+        }
+        if (sr > 1.0) {
+            sr = 1.0;
+        }
+        cfg.sample_rate = sr;
+    }
+
+    json_t* j_st = json_object_get(root, "slow_threshold_ms");
+    if (j_st != NULL && json_is_integer(j_st)) {
+        json_int_t st = json_integer_value(j_st);
+        if (st >= 0) {
+            cfg.slow_threshold_ms = (uint32_t)st;
+        }
+    }
+
+    json_t* j_ep = json_object_get(root, "otlp_endpoint");
+    if (j_ep != NULL && json_is_string(j_ep)) {
+        const char* ep = json_string_value(j_ep);
+        strncpy(cfg.otlp_endpoint, ep, sizeof(cfg.otlp_endpoint) - 1);
+        cfg.otlp_endpoint[sizeof(cfg.otlp_endpoint) - 1] = '\0';
+    }
+
+    json_decref(root);
+
+    adm->ac->tracer_cfg = cfg;
+    if (adm->ac->tm != NULL) {
+        tracer_manager_update_config(adm->ac->tm, &cfg);
+    }
+
+    return admin_traces_config_get(adm, status, body, len);
+}
+
+/**
+ * @brief GET /admin/v1/traces/:trace_id: retrieve full trace timeline, spans, and attributes.
+ *
+ * @param adm      Admin context pointer.
+ * @param status   Pointer to store HTTP response status.
+ * @param body     Pointer to store response body string.
+ * @param len      Pointer to store response body length.
+ * @param trace_id 32-hex trace ID to look up.
+ * @return 0 on success, negative on fatal allocation error.
+ */
+static int
+admin_trace_get_by_id(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* trace_id)
+{
+    (void)adm;
+    if (trace_id == NULL || trace_id[0] == '\0') {
+        return finish_error(
+            status, body, len, 400, "invalid_trace_id", "trace id must not be empty");
+    }
+
+    trace_context_t ctx;
+    if (!tracer_cache_get(trace_id, &ctx)) {
+        return finish_error(
+            status, body, len, 404, "trace_not_found", "trace id not found in recent traces cache");
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "trace_id", json_string(ctx.trace_id));
+    json_object_set_new(out, "root_span_id", json_string(ctx.root_span_id));
+    json_object_set_new(out, "is_sampled", json_boolean(ctx.is_sampled));
+
+    uint64_t root_start_ns = 0;
+    uint64_t root_end_ns = 0;
+    for (int i = 0; i < ctx.span_count; i++) {
+        if (strcmp(ctx.spans[i].name, "root") == 0) {
+            root_start_ns = ctx.spans[i].start_time_ns;
+            root_end_ns = ctx.spans[i].end_time_ns;
+            break;
+        }
+    }
+    if (root_start_ns == 0 && ctx.span_count > 0) {
+        root_start_ns = ctx.spans[0].start_time_ns;
+        root_end_ns = ctx.spans[0].end_time_ns;
+    }
+
+    double total_duration_ms = 0.0;
+    if (root_end_ns >= root_start_ns && root_start_ns > 0) {
+        total_duration_ms = (double)(root_end_ns - root_start_ns) / 1e6;
+    }
+    json_object_set_new(out, "total_duration_ms", json_real(total_duration_ms));
+
+    json_t* j_spans = json_array();
+    for (int i = 0; i < ctx.span_count; i++) {
+        const trace_span_t* sp = &ctx.spans[i];
+        json_t*             j_sp = json_object();
+        json_object_set_new(j_sp, "span_id", json_string(sp->span_id));
+        json_object_set_new(j_sp, "parent_span_id", json_string(sp->parent_span_id));
+        json_object_set_new(j_sp, "name", json_string(sp->name));
+
+        const char* kind_str = "internal";
+        if (sp->kind == SPAN_KIND_SERVER) {
+            kind_str = "server";
+        } else if (sp->kind == SPAN_KIND_CLIENT) {
+            kind_str = "client";
+        }
+        json_object_set_new(j_sp, "kind", json_string(kind_str));
+
+        double offset_ms = 0.0;
+        if (sp->start_time_ns >= root_start_ns && root_start_ns > 0) {
+            offset_ms = (double)(sp->start_time_ns - root_start_ns) / 1e6;
+        }
+        json_object_set_new(j_sp, "start_offset_ms", json_real(offset_ms));
+
+        double dur_ms = 0.0;
+        if (sp->end_time_ns >= sp->start_time_ns && sp->start_time_ns > 0) {
+            dur_ms = (double)(sp->end_time_ns - sp->start_time_ns) / 1e6;
+        }
+        json_object_set_new(j_sp, "duration_ms", json_real(dur_ms));
+
+        const char* status_str = "unset";
+        if (sp->status == SPAN_STATUS_OK) {
+            status_str = "ok";
+        } else if (sp->status == SPAN_STATUS_ERROR) {
+            status_str = "error";
+        }
+        json_object_set_new(j_sp, "status", json_string(status_str));
+
+        if (sp->status_desc[0] != '\0') {
+            json_object_set_new(j_sp, "status_desc", json_string(sp->status_desc));
+        }
+
+        json_t* attrs = json_object();
+        for (int a = 0; a < sp->attr_count; a++) {
+            const char* v = sp->attributes[a].value;
+            if (strcmp(v, "true") == 0) {
+                json_object_set_new(attrs, sp->attributes[a].key, json_true());
+            } else if (strcmp(v, "false") == 0) {
+                json_object_set_new(attrs, sp->attributes[a].key, json_false());
+            } else {
+                char*     endptr = NULL;
+                long long iv = strtoll(v, &endptr, 10);
+                if (*endptr == '\0' && endptr != v) {
+                    json_object_set_new(attrs, sp->attributes[a].key, json_integer((json_int_t)iv));
+                } else {
+                    double dv = strtod(v, &endptr);
+                    if (*endptr == '\0' && endptr != v && strchr(v, '.') != NULL) {
+                        json_object_set_new(attrs, sp->attributes[a].key, json_real(dv));
+                    } else {
+                        json_object_set_new(attrs, sp->attributes[a].key, json_string(v));
+                    }
+                }
+            }
+        }
+        json_object_set_new(j_sp, "attributes", attrs);
+        json_array_append_new(j_spans, j_sp);
+    }
+    json_object_set_new(out, "spans", j_spans);
+
+    return finish_json(status, body, len, 200, out);
+}
+
+/**
+ * @brief GET /admin/v1/traces: list recently recorded traces.
+ *
+ * @param adm    Admin context pointer.
+ * @param status Pointer to store HTTP response status.
+ * @param body   Pointer to store response body string.
+ * @param len    Pointer to store response body length.
+ * @return 0 on success, negative on fatal allocation error.
+ */
+static int
+admin_traces_list_recent(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    (void)adm;
+    trace_context_t list[100];
+    size_t          count = tracer_cache_list_recent(list, 100);
+
+    json_t* arr = json_array();
+    for (size_t i = 0; i < count; i++) {
+        const trace_context_t* ctx = &list[i];
+        json_t*                item = json_object();
+        json_object_set_new(item, "trace_id", json_string(ctx->trace_id));
+        json_object_set_new(item, "root_span_id", json_string(ctx->root_span_id));
+        json_object_set_new(item, "is_sampled", json_boolean(ctx->is_sampled));
+        json_object_set_new(item, "span_count", json_integer(ctx->span_count));
+
+        uint64_t root_start_ns = 0;
+        uint64_t root_end_ns = 0;
+        for (int s = 0; s < ctx->span_count; s++) {
+            if (strcmp(ctx->spans[s].name, "root") == 0) {
+                root_start_ns = ctx->spans[s].start_time_ns;
+                root_end_ns = ctx->spans[s].end_time_ns;
+                break;
+            }
+        }
+        double total_ms = 0.0;
+        if (root_end_ns >= root_start_ns && root_start_ns > 0) {
+            total_ms = (double)(root_end_ns - root_start_ns) / 1e6;
+        }
+        json_object_set_new(item, "total_duration_ms", json_real(total_ms));
+        json_object_set_new(
+            item, "timestamp_us", json_integer((json_int_t)ctx->req_start_realtime_us));
+        json_array_append_new(arr, item);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "traces", arr);
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -3712,6 +4002,21 @@ admin_dispatch(admin_ctx_t* adm,
         }
         if (strcmp(rest, "cache/purge") == 0 && strcmp(method, "POST") == 0) {
             return cache_purge_trigger(adm, out_status, out_body, out_len, body);
+        }
+    } else if (strncmp(rest, "traces", 6) == 0) {
+        if (strcmp(rest, "traces") == 0 && strcmp(method, "GET") == 0) {
+            return admin_traces_list_recent(adm, out_status, out_body, out_len);
+        }
+        if (strcmp(rest, "traces/config") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                return admin_traces_config_get(adm, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "PUT") == 0) {
+                return admin_traces_config_put(adm, out_status, out_body, out_len, body);
+            }
+        }
+        if (rest[6] == '/' && strcmp(method, "GET") == 0) {
+            return admin_trace_get_by_id(adm, out_status, out_body, out_len, rest + 7);
         }
     }
 

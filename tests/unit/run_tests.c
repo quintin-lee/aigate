@@ -518,6 +518,9 @@ main(void)
     extern void test_tracer_manager_lifecycle(void);
     test_register("tracer_manager_lifecycle", test_tracer_manager_lifecycle);
 
+    extern void test_admin_traces_endpoints(void);
+    test_register("admin_traces_endpoints", test_admin_traces_endpoints);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;
