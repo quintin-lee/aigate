@@ -1,6 +1,6 @@
 # OpenTelemetry 分布式追踪与全链路耗时瀑布图 (Distributed Tracing & Waterfall Profiling) 设计规范
 
-- **状态**: 草案 (Draft / Pending Approval)
+- **状态**: 已实现并全量验证通过 (Implemented & Verified)
 - **创建日期**: 2026-10-01
 - **责任模块**: `src/observe/tracer.h`, `src/observe/tracer.c`, `src/core/pipeline_chat.c`, `src/server/admin_api.c`, `web/admin.html`
 - **目标**: 构建符合 W3C TraceContext 与 OpenTelemetry GenAI Semantic Conventions 标准的全链路分布式追踪系统，支持毫秒级低开销异步批处理导出与控制台内置交互式耗时瀑布图。
@@ -171,19 +171,19 @@ typedef struct {
 
 ## 4. 验证与验收标准 (Acceptance Criteria)
 
-- [ ] W3C 上下文透传与生成：
+- [x] W3C 上下文透传与生成：
   - 合法 `traceparent` 正确继承 `trace_id` 与父 `span_id`；
   - 缺失或非法 `traceparent` 时自动补全生成合规随机 ID；
   - 向上游发送请求时成功注入更新后的 `traceparent`。
-- [ ] 智能尾部采样：
+- [x] 智能尾部采样：
   - 常规请求受配置比例约束；
   - HTTP 4xx/5xx、风控拦截、慢请求（>2000ms）100% 捕获。
-- [ ] OTLP/HTTP 批处理导出：
+- [x] OTLP/HTTP 批处理导出：
   - 生成格式符合 OpenTelemetry 标准 OTLP/HTTP JSON schema；
   - 远端失败时安全退避，环形队列满时丢弃不阻塞。
-- [ ] Web 控制台与管理端点：
+- [x] Web 控制台与管理端点：
   - `/admin/v1/traces/:trace_id` 正确输出各阶段 Span 与耗时；
   - `web/admin.html` 审计日志中点击可弹出耗时瀑布图抽屉。
-- [ ] 构建与质量门禁：
+- [x] 构建与质量门禁：
   - CTest 全量通过率 100%；
   - Doxygen 保持严格 0 warnings。
