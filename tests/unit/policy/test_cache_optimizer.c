@@ -159,3 +159,25 @@ TEST_CASE(test_cache_optimizer_cache_and_stats)
 
     cache_optimizer_cache_destroy(cache);
 }
+
+TEST_CASE(test_cache_optimizer_rule_match)
+{
+    cache_optimizer_rule_t rule;
+    memset(&rule, 0, sizeof(rule));
+    strncpy(rule.id, "r-1", sizeof(rule.id) - 1);
+    strncpy(rule.model_pattern, "claude-*", sizeof(rule.model_pattern) - 1);
+    rule.enabled = true;
+    rule.sort_tools = true;
+    rule.sink_dynamic_system = true;
+    rule.inject_anthropic_breakpoints = true;
+    rule.min_tokens_threshold = 1024;
+
+    TEST_ASSERT(cache_optimizer_rule_matches(&rule, "claude-3-5-sonnet") == true,
+                "Expected pattern claude-* to match claude-3-5-sonnet");
+    TEST_ASSERT(cache_optimizer_rule_matches(&rule, "gpt-4o") == false,
+                "Expected pattern claude-* to NOT match gpt-4o");
+
+    rule.enabled = false;
+    TEST_ASSERT(cache_optimizer_rule_matches(&rule, "claude-3-5-sonnet") == false,
+                "Disabled rule should not match");
+}
