@@ -67,7 +67,13 @@ typedef struct chat_req {
     bool        bypass_cache;  /**< True if cache lookup should be bypassed by policy or header. */
     bool        no_store;      /**< True if response should not be cached. */
     pii_session_map_t pii_map; /**< Request-bound PII de-anonymization session map. */
-    trace_context_t   trace_ctx; /**< OpenTelemetry trace context and recorded spans. */
+    trace_context_t   trace_ctx;        /**< OpenTelemetry trace context and recorded spans. */
+    bool              is_canary;        /**< True if canary routing was applied. */
+    char              canary_model[64]; /**< Storage buffer for rewritten canary model name. */
+    long              canary_rule_id;   /**< Rule ID of active canary route. */
+    bool              has_shadow;       /**< True if request is being shadowed asynchronously. */
+    shadow_rule_t     shadow_rule;      /**< Active shadow rule snapshot. */
+    char              eval_id[33];      /**< Unique evaluation ID for shadow/canary pairing. */
 } chat_req_t;
 
 /**

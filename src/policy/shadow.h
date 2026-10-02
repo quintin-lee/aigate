@@ -342,6 +342,13 @@ void shadow_engine_get_stats(shadow_engine_t* eng, shadow_stats_t* out_stats);
  */
 bool shadow_engine_submit_task(shadow_engine_t* eng, const shadow_task_t* task);
 
+/**
+ * @brief Generate a random 32-character hexadecimal evaluation identifier.
+ * @param out    Destination buffer (must be at least 33 bytes).
+ * @param out_sz Capacity of destination buffer.
+ */
+void shadow_generate_eval_id(char* out, size_t out_sz);
+
 #ifdef __cplusplus
 }
 #endif

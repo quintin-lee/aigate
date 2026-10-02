@@ -545,6 +545,14 @@ main(void)
     test_register("canary_routing_and_circuit_breaker_rollback",
                   test_canary_routing_and_circuit_breaker_rollback);
 
+    extern void test_pipeline_canary_routing_header_injection(void);
+    test_register("pipeline_canary_routing_header_injection",
+                  test_pipeline_canary_routing_header_injection);
+
+    extern void test_pipeline_traffic_shadowing_cloning_and_pairing(void);
+    test_register("pipeline_traffic_shadowing_cloning_and_pairing",
+                  test_pipeline_traffic_shadowing_cloning_and_pairing);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

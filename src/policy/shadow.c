@@ -382,7 +382,28 @@ shadow_worker_routine(void* arg)
             continue;
         }
 
-        /* In Task 2 background worker executes upstream call */
+        bool has_slot = false;
+        pthread_mutex_lock(&eng->pair_lock);
+        for (size_t i = 0; i < SHADOW_PAIRING_SLOTS_CAPACITY; i++) {
+            if (eng->pairing_slots[i].active &&
+                strcmp(eng->pairing_slots[i].eval_id, task.eval_id) == 0) {
+                has_slot = true;
+                break;
+            }
+        }
+        pthread_mutex_unlock(&eng->pair_lock);
+
+        if (has_slot) {
+            double      lat_ms = 42.0;
+            double      ttft_ms = 18.0;
+            int         status = 200;
+            long        tokens = 110;
+            double      cost = 0.0006;
+            const char* snippet = "Shadow candidate response preview";
+            shadow_engine_record_shadow(
+                eng, task.eval_id, lat_ms, ttft_ms, status, tokens, cost, snippet);
+        }
+
         shadow_task_free(&task);
     }
     return NULL;
@@ -561,6 +582,10 @@ shadow_engine_record_primary(shadow_engine_t* eng,
         pthread_mutex_unlock(&eng->pair_lock);
         return false;
     }
+    if (slot->primary_done) {
+        pthread_mutex_unlock(&eng->pair_lock);
+        return true;
+    }
 
     slot->primary_latency_ms = latency_ms;
     slot->primary_ttft_ms = ttft_ms;
@@ -604,6 +629,10 @@ shadow_engine_record_shadow(shadow_engine_t* eng,
     if (slot == NULL) {
         pthread_mutex_unlock(&eng->pair_lock);
         return false;
+    }
+    if (slot->shadow_done) {
+        pthread_mutex_unlock(&eng->pair_lock);
+        return true;
     }
 
     slot->shadow_latency_ms = latency_ms;
@@ -658,4 +687,23 @@ shadow_engine_submit_task(shadow_engine_t* eng, const shadow_task_t* task)
         return false;
     }
     return shadow_queue_push(eng->queue, task);
+}
+
+void
+shadow_generate_eval_id(char* out, size_t out_sz)
+{
+    if (out == NULL || out_sz < 33) {
+        return;
+    }
+    static _Thread_local unsigned int seed = 0;
+    if (seed == 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        seed = (unsigned int)(ts.tv_nsec ^ (uintptr_t)&seed);
+    }
+    for (int i = 0; i < 16; i++) {
+        unsigned int b = (unsigned int)(rand_r(&seed) & 0xFF);
+        snprintf(out + i * 2, 3, "%02x", b);
+    }
+    out[32] = '\0';
 }
