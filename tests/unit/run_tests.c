@@ -521,6 +521,41 @@ main(void)
     extern void test_admin_traces_endpoints(void);
     test_register("admin_traces_endpoints", test_admin_traces_endpoints);
 
+    extern void test_shadow_rule_matching_and_sampling(void);
+    test_register("shadow_rule_matching_and_sampling", test_shadow_rule_matching_and_sampling);
+
+    extern void test_shadow_queue_push_pop_overflow(void);
+    test_register("shadow_queue_push_pop_overflow", test_shadow_queue_push_pop_overflow);
+
+    extern void test_shadow_eval_cache_circular_and_stats(void);
+    test_register("shadow_eval_cache_circular_and_stats",
+                  test_shadow_eval_cache_circular_and_stats);
+
+    extern void test_shadow_pairing_primary_first(void);
+    test_register("shadow_pairing_primary_first", test_shadow_pairing_primary_first);
+
+    extern void test_shadow_pairing_shadow_first(void);
+    test_register("shadow_pairing_shadow_first", test_shadow_pairing_shadow_first);
+
+    extern void test_shadow_engine_lifecycle_and_task_submission(void);
+    test_register("shadow_engine_lifecycle_and_task_submission",
+                  test_shadow_engine_lifecycle_and_task_submission);
+
+    extern void test_canary_routing_and_circuit_breaker_rollback(void);
+    test_register("canary_routing_and_circuit_breaker_rollback",
+                  test_canary_routing_and_circuit_breaker_rollback);
+
+    extern void test_pipeline_canary_routing_header_injection(void);
+    test_register("pipeline_canary_routing_header_injection",
+                  test_pipeline_canary_routing_header_injection);
+
+    extern void test_pipeline_traffic_shadowing_cloning_and_pairing(void);
+    test_register("pipeline_traffic_shadowing_cloning_and_pairing",
+                  test_pipeline_traffic_shadowing_cloning_and_pairing);
+
+    extern void test_admin_shadow_endpoints(void);
+    test_register("admin_shadow_endpoints", test_admin_shadow_endpoints);
+
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
         g_failures = 0;

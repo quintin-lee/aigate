@@ -142,5 +142,50 @@ ALTER TABLE usage_requests
 
 INSERT INTO schema_migrations(version) VALUES (9) ON CONFLICT (version) DO NOTHING;
 
+-- Migration v10: prompt templates and modes for models and api_keys
+ALTER TABLE models
+  ADD COLUMN IF NOT EXISTS system_prompt TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS prompt_mode INT NOT NULL DEFAULT 0;
+
+ALTER TABLE api_keys
+  ADD COLUMN IF NOT EXISTS system_prompt TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS prompt_mode INT NOT NULL DEFAULT 0;
+
+INSERT INTO schema_migrations(version) VALUES (10) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v11: external webhook moderation plugin support
+ALTER TABLE guardrails_rules
+  ADD COLUMN IF NOT EXISTS webhook_secret TEXT DEFAULT NULL,
+  ADD COLUMN IF NOT EXISTS timeout_ms INT NOT NULL DEFAULT 500,
+  ADD COLUMN IF NOT EXISTS fail_mode VARCHAR(16) NOT NULL DEFAULT 'open',
+  ADD COLUMN IF NOT EXISTS phase VARCHAR(16) NOT NULL DEFAULT 'inbound';
+
+INSERT INTO schema_migrations(version) VALUES (11) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v12: adaptive latency routing & hedged requests support
+ALTER TABLE models
+  ADD COLUMN IF NOT EXISTS hedged_delay_ms INT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS hedge_budget_pct INT NOT NULL DEFAULT 15,
+  ADD COLUMN IF NOT EXISTS hedged_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+
+INSERT INTO schema_migrations(version) VALUES (12) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v13: traffic shadowing and canary A/B testing rules
+CREATE TABLE IF NOT EXISTS shadow_rules (
+  id              BIGSERIAL PRIMARY KEY,
+  source_model    TEXT NOT NULL,
+  target_model    TEXT NOT NULL,
+  target_provider TEXT NOT NULL DEFAULT '',
+  mode            VARCHAR(16) NOT NULL DEFAULT 'shadow',
+  sample_rate     DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+  header_match    TEXT NOT NULL DEFAULT '',
+  enabled         BOOLEAN NOT NULL DEFAULT true,
+  timeout_ms      INT NOT NULL DEFAULT 10000,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_shadow_rules_enabled ON shadow_rules(enabled, source_model);
+INSERT INTO schema_migrations(version) VALUES (13) ON CONFLICT (version) DO NOTHING;
+
+
 
 

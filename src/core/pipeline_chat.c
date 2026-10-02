@@ -654,6 +654,22 @@ handle_chat_sync(chat_req_t* q)
             }
             rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
 
+            if (q->has_shadow && q->ac != NULL && q->ac->shadow_eng != NULL) {
+                char snippet[512] = {0};
+                if (parsed_body != NULL) {
+                    snprintf(snippet, sizeof(snippet), "%s", parsed_body);
+                }
+                double lat_ms = (double)total_lat / 1000000.0;
+                shadow_engine_record_primary(q->ac->shadow_eng,
+                                             q->eval_id,
+                                             lat_ms,
+                                             lat_ms,
+                                             parsed_status,
+                                             ptok + ctok,
+                                             req_cost,
+                                             snippet);
+            }
+
             if (q->ac->rc != NULL && q->cache_key[0] != '\0' && parsed_status == 200 &&
                 parsed_body != NULL && !q->no_store && parsed_len <= 1048576) {
                 response_cache_set(q->ac->rc,
@@ -1073,6 +1089,22 @@ handle_chat_stream(chat_req_t* q)
                 q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
         }
         rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
+
+        if (q->has_shadow && q->ac != NULL && q->ac->shadow_eng != NULL) {
+            char snippet[512] = {0};
+            if (acc.accum_content != NULL) {
+                snprintf(snippet, sizeof(snippet), "%s", acc.accum_content);
+            }
+            double lat_ms = (double)total_lat / 1000000.0;
+            shadow_engine_record_primary(q->ac->shadow_eng,
+                                         q->eval_id,
+                                         lat_ms,
+                                         lat_ms,
+                                         status > 0 ? status : 200,
+                                         ptok + ctok,
+                                         req_cost,
+                                         snippet);
+        }
 
         cache_store_stream(q, &acc, ptok, ctok, status, req_cost);
         if (acc.accum_content != NULL) {

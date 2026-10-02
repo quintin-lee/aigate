@@ -83,4 +83,28 @@ int model_router_select_candidates_targeted(circuit_breaker_t* cb,
                                             int                cap,
                                             int*               out_count);
 
+/** @brief Apply canary routing rules to a request.
+ *  @param mr                  Model router (borrowed).
+ *  @param cb                  Circuit breaker to verify candidate health (can be NULL).
+ *  @param rules               Array of shadow/canary rules.
+ *  @param num_rules           Number of rules in @p rules.
+ *  @param source_model        Source model requested by client.
+ *  @param header_str          Header string to match against rules.
+ *  @param out_effective_model Buffer to receive effective model name.
+ *  @param out_model_sz        Capacity of out_effective_model buffer.
+ *  @param out_is_canary       Receives true if canary routing was applied.
+ *  @param out_canary_rule_id  Receives rule ID if canary routing was applied.
+ *  @return 0 on success, negative on error.
+ */
+int model_router_apply_canary(model_router_t*      mr,
+                              circuit_breaker_t*   cb,
+                              const shadow_rule_t* rules,
+                              int                  num_rules,
+                              const char*          source_model,
+                              const char*          header_str,
+                              char*                out_effective_model,
+                              size_t               out_model_sz,
+                              bool*                out_is_canary,
+                              long*                out_canary_rule_id);
+
 #endif /* AIGATE_MODEL_ROUTER_H */

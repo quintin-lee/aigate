@@ -79,6 +79,10 @@ typedef struct aigate_core {
     tracer_config_t         tracer_cfg; /**< OpenTelemetry distributed tracing configuration */
     trace_ring_buffer_t*    trace_rb;   /**< Trace export ring buffer, may be NULL (disabled) */
     tracer_manager_t*       tm; /**< Background tracer manager and OTLP exporter, may be NULL */
+    shadow_engine_t*        shadow_eng;        /**< Traffic shadow and canary evaluation engine */
+    shadow_rule_t           shadow_rules[128]; /**< Cached shadow and canary rules */
+    int                     n_shadow_rules;    /**< Number of active shadow rules */
+    pthread_mutex_t         shadow_rules_lock; /**< Mutex protecting shadow_rules */
 } aigate_core;
 
 /** @brief Type alias for gateway pipeline context. */
@@ -98,6 +102,9 @@ void aigate_core_shutdown(aigate_core* ac);
 
 /** @brief Reload guardrails rules from DB into memory. */
 int aigate_core_reload_guardrails(aigate_core* ac);
+
+/** @brief Reload traffic shadowing and canary rules from DB into memory. */
+int aigate_core_reload_shadow_rules(aigate_core* ac);
 
 /** @brief Run the full pipeline. @return 0 when a response body (success
  *  or error) has been written. */

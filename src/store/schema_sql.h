@@ -176,6 +176,22 @@ ALTER TABLE models
   ADD COLUMN IF NOT EXISTS hedged_enabled BOOLEAN NOT NULL DEFAULT FALSE;
 
 INSERT INTO schema_migrations(version) VALUES (12) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v13: traffic shadowing and canary A/B testing rules
+CREATE TABLE IF NOT EXISTS shadow_rules (
+  id              BIGSERIAL PRIMARY KEY,
+  source_model    TEXT NOT NULL,
+  target_model    TEXT NOT NULL,
+  target_provider TEXT NOT NULL DEFAULT '',
+  mode            VARCHAR(16) NOT NULL DEFAULT 'shadow',
+  sample_rate     DOUBLE PRECISION NOT NULL DEFAULT 1.0,
+  header_match    TEXT NOT NULL DEFAULT '',
+  enabled         BOOLEAN NOT NULL DEFAULT true,
+  timeout_ms      INT NOT NULL DEFAULT 10000,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_shadow_rules_enabled ON shadow_rules(enabled, source_model);
+INSERT INTO schema_migrations(version) VALUES (13) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

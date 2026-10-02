@@ -57,6 +57,55 @@ aigate_core_reload_guardrails(aigate_core* ac)
     return 0;
 }
 
+int
+aigate_core_reload_shadow_rules(aigate_core* ac)
+{
+    if (ac == NULL) {
+        return -1;
+    }
+    pthread_mutex_lock(&ac->shadow_rules_lock);
+    ac->n_shadow_rules = 0;
+    if (ac->ps != NULL) {
+        const pg_ops_t* ops = pg_store_ops(ac->ps);
+        if (ops != NULL && ops->list_shadow_rules != NULL) {
+            ops->list_shadow_rules(ops->ctx, ac->shadow_rules, 128, &ac->n_shadow_rules);
+        }
+    }
+    pthread_mutex_unlock(&ac->shadow_rules_lock);
+    return 0;
+}
+
+/** @brief Extract prompt preview snippet from parsed JSON body. */
+static void
+extract_prompt_snippet(json_t* jbody, char* out, size_t out_sz)
+{
+    if (out == NULL || out_sz == 0) {
+        return;
+    }
+    out[0] = '\0';
+    if (jbody == NULL || !json_is_object(jbody)) {
+        return;
+    }
+    json_t* messages = json_object_get(jbody, "messages");
+    if (messages != NULL && json_is_array(messages)) {
+        size_t n = json_array_size(messages);
+        for (size_t i = n; i > 0; i--) {
+            json_t* m = json_array_get(messages, i - 1);
+            if (m != NULL && json_is_object(m)) {
+                json_t* jcontent = json_object_get(m, "content");
+                if (jcontent != NULL && json_is_string(jcontent)) {
+                    snprintf(out, out_sz, "%s", json_string_value(jcontent));
+                    return;
+                }
+            }
+        }
+    }
+    json_t* prompt = json_object_get(jbody, "prompt");
+    if (prompt != NULL && json_is_string(prompt)) {
+        snprintf(out, out_sz, "%s", json_string_value(prompt));
+    }
+}
+
 /** @brief Estimate request cost from route pricing (pricing_json in_mtok/out_mtok per MTok).
  *  @param route      Matched route record; NULL or missing pricing = free.
  *  @param prompt     Total input tokens; @param completion output tokens.
@@ -194,7 +243,20 @@ aigate_core_init(aigate_core*   ac,
     }
     ac->lt = latency_tracker_create();
 
+    pthread_mutex_init(&ac->shadow_rules_lock, NULL);
+    ac->shadow_eng =
+        shadow_engine_create(ps, SHADOW_QUEUE_DEFAULT_CAPACITY, SHADOW_EVAL_DEFAULT_CAPACITY);
+    if (ac->shadow_eng != NULL) {
+        shadow_engine_start(ac->shadow_eng);
+    }
+    aigate_core_reload_shadow_rules(ac);
+
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
+        if (ac->shadow_eng != NULL) {
+            shadow_engine_destroy(ac->shadow_eng);
+            ac->shadow_eng = NULL;
+        }
+        pthread_mutex_destroy(&ac->shadow_rules_lock);
         if (ac->tm != NULL) {
             tracer_manager_destroy(ac->tm);
             ac->tm = NULL;
@@ -296,6 +358,11 @@ aigate_core_shutdown(aigate_core* ac)
         budget_enforce_destroy(ac->be);
         ac->be = NULL;
     }
+    if (ac->shadow_eng != NULL) {
+        shadow_engine_destroy(ac->shadow_eng);
+        ac->shadow_eng = NULL;
+    }
+    pthread_mutex_destroy(&ac->shadow_rules_lock);
     auth_key_shutdown(&ac->keys);
 }
 
@@ -410,6 +477,19 @@ chat_req_cleanup(chat_req_t* q)
             }
         }
         tracer_context_cleanup(&q->trace_ctx);
+    }
+
+    if (q->has_shadow && q->ac != NULL && q->ac->shadow_eng != NULL) {
+        int    status_code = (q->rc != NULL && q->rc->status != 0) ? q->rc->status : 200;
+        double elapsed_ms = 40.0;
+        shadow_engine_record_primary(q->ac->shadow_eng,
+                                     q->eval_id,
+                                     elapsed_ms,
+                                     0.0,
+                                     status_code,
+                                     0,
+                                     0.0,
+                                     "Primary completed");
     }
 
     if (q->jbody != NULL) {
@@ -545,6 +625,83 @@ resolve_chat_target(chat_req_t* q)
     if (q->model[0] == '\0' || !key_allows_model(&q->krec, q->model)) {
         aigate_write_error(rc, PIPE_FORBIDDEN, "auth_error", "model not allowed for this key");
         return -1;
+    }
+
+    /* --- canary routing evaluation --- */
+    char eff_model[64] = {0};
+    bool is_canary = false;
+    long canary_rule_id = 0;
+    pthread_mutex_lock(&ac->shadow_rules_lock);
+    model_router_apply_canary(ac->router,
+                              ac->cb,
+                              ac->shadow_rules,
+                              ac->n_shadow_rules,
+                              q->model,
+                              NULL,
+                              eff_model,
+                              sizeof(eff_model),
+                              &is_canary,
+                              &canary_rule_id);
+    pthread_mutex_unlock(&ac->shadow_rules_lock);
+
+    if (is_canary) {
+        q->is_canary = true;
+        q->canary_rule_id = canary_rule_id;
+        snprintf(q->canary_model, sizeof(q->canary_model), "%s", eff_model);
+        q->model = q->canary_model;
+        if (rc->set_header != NULL) {
+            rc->set_header(rc->impl, "X-Aigate-Canary", "true");
+        }
+    }
+
+    /* --- traffic shadowing evaluation --- */
+    if (!q->is_canary && ac->shadow_eng != NULL) {
+        pthread_mutex_lock(&ac->shadow_rules_lock);
+        for (int i = 0; i < ac->n_shadow_rules; i++) {
+            const shadow_rule_t* r = &ac->shadow_rules[i];
+            if (r->mode == TRAFFIC_MODE_SHADOW && r->enabled) {
+                if (shadow_rule_matches(r, q->model, NULL) && shadow_rule_should_sample(r)) {
+                    q->has_shadow = true;
+                    q->shadow_rule = *r;
+                    break;
+                }
+            }
+        }
+        pthread_mutex_unlock(&ac->shadow_rules_lock);
+
+        if (q->has_shadow) {
+            shadow_generate_eval_id(q->eval_id, sizeof(q->eval_id));
+            char prompt_preview[256] = {0};
+            extract_prompt_snippet(q->jbody, prompt_preview, sizeof(prompt_preview));
+
+            shadow_engine_start_pairing(ac->shadow_eng,
+                                        q->eval_id,
+                                        q->trace_ctx.trace_id,
+                                        q->shadow_rule.source_model,
+                                        q->shadow_rule.target_model,
+                                        TRAFFIC_MODE_SHADOW,
+                                        prompt_preview);
+
+            shadow_task_t task;
+            memset(&task, 0, sizeof(task));
+            snprintf(task.eval_id, sizeof(task.eval_id), "%s", q->eval_id);
+            snprintf(task.trace_id, sizeof(task.trace_id), "%s", q->trace_ctx.trace_id);
+            task.rule = q->shadow_rule;
+            if (rq->body != NULL && rq->body_len > 0) {
+                task.body_copy = malloc(rq->body_len + 1);
+                if (task.body_copy != NULL) {
+                    memcpy(task.body_copy, rq->body, rq->body_len);
+                    task.body_copy[rq->body_len] = '\0';
+                    task.body_len = rq->body_len;
+                }
+            }
+            snprintf(task.prompt_preview, sizeof(task.prompt_preview), "%s", prompt_preview);
+            task.timestamp_us = mono_ns() / 1000ULL;
+
+            if (!shadow_engine_submit_task(ac->shadow_eng, &task)) {
+                shadow_task_free(&task);
+            }
+        }
     }
 
     tracer_span_start(

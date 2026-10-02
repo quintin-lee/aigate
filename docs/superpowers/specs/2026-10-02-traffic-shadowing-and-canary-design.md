@@ -1,6 +1,6 @@
 # 流量镜像与金丝雀灰度分流评估引擎 (Traffic Shadowing & Canary A/B Testing Engine) 设计规范
 
-- **状态**: 草案 (Draft / Pending Approval)
+- **状态**: 已实现并通过验证 (Implemented & Verified)
 - **创建日期**: 2026-10-02
 - **责任模块**: `src/policy/shadow.h`, `src/policy/shadow.c`, `src/core/model_router.c`, `src/core/pipeline_chat.c`, `src/server/admin_api.c`, `web/admin.html`
 - **目标**: 构建纯 C17 高性能流量镜像与金丝雀灰度分流评估引擎，支持毫秒级异步零风险流量复制、真实生产流量比例灰度切流、多维模型回答 Side-by-Side 对比与时延/成本效益评估看板。
@@ -250,21 +250,21 @@ typedef struct shadow_engine shadow_engine_t;
 
 ## 4. 验证与验收标准 (Acceptance Criteria)
 
-- [ ] 规则管理与解析：
+- [x] 规则管理与解析：
   - 支持 `SHADOW`（纯镜像）与 `CANARY`（真实分流）模式配置与动态热生效；
   - 采样率与过滤头（`sample_rate`, `header_match`）判定准确。
-- [ ] 异步流量镜像执行：
+- [x] 异步流量镜像执行：
   - 生产主请求耗时不受后台镜像影响，入队耗时 `< 10μs`；
   - 队列满载时丢弃且不阻塞主请求，丢弃指标正常累计；
   - 影子请求具备独立的超时保护与独立连接管理。
-- [ ] 金丝雀灰度分流与自愈：
+- [x] 金丝雀灰度分流与自愈：
   - 命中金丝雀请求正确注入 `X-Aigate-Canary: true` 响应头；
   - 上游候选模型连续报错时自动熔断回滚至主稳定模型。
-- [ ] 评测对齐与看板：
+- [x] 评测对齐与看板：
   - 内存环形队列维护最近 200 条双路对比条目；
   - Admin REST API 正确返回对比快照与聚合统计；
   - Web 控制台提供直观的 KPI 卡片、规则配置面板与左右双栏对比模态框。
-- [ ] 构建与质量门禁：
+- [x] 构建与质量门禁：
   - CTest 全量通过率 100%；
   - Doxygen 保持严格 0 Warning；
   - 纯 C17 标准实现。

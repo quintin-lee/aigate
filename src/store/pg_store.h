@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <time.h>
+#include "policy/shadow.h"
 
 /** @brief Client API key record (api_keys row; allowed_models is a copy). */
 typedef struct key_rec {
@@ -312,6 +313,17 @@ typedef struct pg_ops {
         const guardrail_rule_t* rule);       /**< Full-field update of a guardrails rule by id. */
     int (*delete_guardrails_rule)(void* ctx,
                                   long  id); /**< Delete a guardrails rule by numeric id. */
+
+    int (*list_shadow_rules)(void*          ctx,
+                             shadow_rule_t* out,
+                             int            cap,
+                             int*           n); /**< List traffic shadow/canary rules. */
+    int (*create_shadow_rule)(void*                ctx,
+                              const shadow_rule_t* rule,
+                              long* out_id); /**< Create shadow rule, out_id returns primary key. */
+    int (*update_shadow_rule)(
+        void* ctx, const shadow_rule_t* rule);     /**< Full-field update of shadow rule by id. */
+    int (*delete_shadow_rule)(void* ctx, long id); /**< Delete shadow rule by numeric id. */
 } pg_ops_t;
 
 /** @brief Storage handle (opaque; holder of a libpq connection or a fake context). */
@@ -364,5 +376,32 @@ int pg_store_update_guardrails_rule(const pg_store_t* ps, const guardrail_rule_t
 /** @brief Delete a guardrails rule by id.
  *  @return 0 on success; -1 on storage error. */
 int pg_store_delete_guardrails_rule(const pg_store_t* ps, long id);
+
+/** @brief List traffic shadow/canary rules.
+ *  @param ps   Storage handle.
+ *  @param out  Output array.
+ *  @param cap  Maximum entries.
+ *  @param n    Receives written count.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_list_shadow_rules(const pg_store_t* ps, shadow_rule_t* out, int cap, int* n);
+
+/** @brief Create traffic shadow/canary rule.
+ *  @param ps     Storage handle.
+ *  @param rule   Rule content.
+ *  @param out_id Receives new rule ID.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_create_shadow_rule(const pg_store_t* ps, const shadow_rule_t* rule, long* out_id);
+
+/** @brief Update traffic shadow/canary rule.
+ *  @param ps   Storage handle.
+ *  @param rule Rule content.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_update_shadow_rule(const pg_store_t* ps, const shadow_rule_t* rule);
+
+/** @brief Delete traffic shadow/canary rule.
+ *  @param ps Storage handle.
+ *  @param id Rule ID.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_delete_shadow_rule(const pg_store_t* ps, long id);
 
 #endif /* AIGATE_PG_STORE_H */

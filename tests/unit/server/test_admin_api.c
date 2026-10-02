@@ -10,6 +10,7 @@
 #include "health_prober.h"
 #include "response_cache.h"
 #include "observe/tracer.h"
+#include "policy/shadow.h"
 
 #include <jansson.h>
 #include <math.h>
@@ -39,24 +40,31 @@ struct fake_rule {
     guardrail_rule_t r;
 };
 
+struct fake_shadow_rule {
+    int           in_use;
+    shadow_rule_t r;
+};
+
 struct fake_db {
-    struct fake_key      keys[FAKE_CAP];
-    model_rec_t          models[FAKE_CAP];
-    int                  n_models;
-    int                  fail_create_model; /* when nonzero, create_model fails */
-    struct fake_provider providers[FAKE_CAP];
-    long                 next_provider_id;
-    struct fake_group    groups[FAKE_CAP];
-    long                 next_group_id;
-    struct fake_rule     rules[FAKE_CAP];
-    long                 next_rule_id;
-    usage_row_t          usage[FAKE_CAP];
-    int                  n_usage;
-    long                 next_key_id;
-    usage_request_row_t  reqs[FAKE_CAP];
-    int                  n_reqs;
-    cost_row_t           cost_rows[FAKE_CAP];
-    int                  n_cost_rows;
+    struct fake_key         keys[FAKE_CAP];
+    model_rec_t             models[FAKE_CAP];
+    int                     n_models;
+    int                     fail_create_model; /* when nonzero, create_model fails */
+    struct fake_provider    providers[FAKE_CAP];
+    long                    next_provider_id;
+    struct fake_group       groups[FAKE_CAP];
+    long                    next_group_id;
+    struct fake_rule        rules[FAKE_CAP];
+    long                    next_rule_id;
+    struct fake_shadow_rule shadow_rules[FAKE_CAP];
+    long                    next_shadow_rule_id;
+    usage_row_t             usage[FAKE_CAP];
+    int                     n_usage;
+    long                    next_key_id;
+    usage_request_row_t     reqs[FAKE_CAP];
+    int                     n_reqs;
+    cost_row_t              cost_rows[FAKE_CAP];
+    int                     n_cost_rows;
 };
 
 /** @brief Deep-copy a key record (including dynamic arrays). */
@@ -786,6 +794,68 @@ fake_delete_guardrails_rule(void* ctx, long id)
     return 1;
 }
 
+/** @brief Fake shadow-rule listing. */
+static int
+fake_list_shadow_rules(void* ctx, shadow_rule_t* out, int cap, int* n)
+{
+    struct fake_db* db = ctx;
+    *n = 0;
+    for (int i = 0; i < FAKE_CAP && *n < cap; i++) {
+        if (db->shadow_rules[i].in_use) {
+            out[(*n)++] = db->shadow_rules[i].r;
+        }
+    }
+    return 0;
+}
+
+/** @brief Fake shadow-rule creation. */
+static int
+fake_create_shadow_rule(void* ctx, const shadow_rule_t* rule, long* out_id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_shadow_rule* fr = &db->shadow_rules[i];
+        if (!fr->in_use) {
+            fr->in_use = 1;
+            fr->r = *rule;
+            fr->r.id = ++db->next_shadow_rule_id;
+            *out_id = fr->r.id;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+/** @brief Fake shadow-rule update. */
+static int
+fake_update_shadow_rule(void* ctx, const shadow_rule_t* rule)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_shadow_rule* fr = &db->shadow_rules[i];
+        if (fr->in_use && fr->r.id == rule->id) {
+            fr->r = *rule;
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/** @brief Fake shadow-rule deletion. */
+static int
+fake_delete_shadow_rule(void* ctx, long id)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        struct fake_shadow_rule* fr = &db->shadow_rules[i];
+        if (fr->in_use && fr->r.id == id) {
+            fr->in_use = 0;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /** @brief Assemble the pg_ops vtable for admin_api tests. */
 static void
 build_fake_ops(struct fake_db* db, pg_ops_t* ops)
@@ -823,6 +893,10 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->create_guardrails_rule = fake_create_guardrails_rule;
     ops->update_guardrails_rule = fake_update_guardrails_rule;
     ops->delete_guardrails_rule = fake_delete_guardrails_rule;
+    ops->list_shadow_rules = fake_list_shadow_rules;
+    ops->create_shadow_rule = fake_create_shadow_rule;
+    ops->update_shadow_rule = fake_update_shadow_rule;
+    ops->delete_shadow_rule = fake_delete_shadow_rule;
 }
 
 /** @brief Set up the admin test fixture: in-memory store + core + admin context. */
@@ -3717,5 +3791,166 @@ TEST_CASE(test_admin_traces_endpoints)
     body = NULL;
 
     tracer_cache_clear();
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_shadow_endpoints)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps = NULL;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. GET /admin/v1/shadow/rules -> initially empty */
+    admin_dispatch(&adm,
+                   "/admin/v1/shadow/rules",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/shadow/rules returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"rules\":[]") != NULL, "rules list initially empty");
+    free(body);
+    body = NULL;
+
+    /* 2. POST /admin/v1/shadow/rules -> create SHADOW rule */
+    const char* r1_payload = "{\"source_model\":\"gpt-4o\",\"target_model\":\"deepseek-chat\","
+                             "\"mode\":\"SHADOW\",\"sample_rate\":0.5,\"enabled\":true}";
+    admin_dispatch(&adm,
+                   "/admin/v1/shadow/rules",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   r1_payload,
+                   strlen(r1_payload),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "POST /admin/v1/shadow/rules returns 201");
+    TEST_ASSERT(body != NULL, "body not NULL");
+    TEST_ASSERT(strstr(body, "\"id\":1") != NULL, "created rule id is 1");
+    TEST_ASSERT(strstr(body, "\"mode\":\"SHADOW\"") != NULL, "mode is SHADOW");
+    TEST_ASSERT(strstr(body, "\"source_model\":\"gpt-4o\"") != NULL, "source_model matches");
+    free(body);
+    body = NULL;
+
+    /* 3. POST /admin/v1/shadow/rules -> create CANARY rule */
+    const char* r2_payload = "{\"source_model\":\"gpt-4o\",\"target_model\":\"gpt-4o-mini\","
+                             "\"mode\":\"CANARY\",\"sample_rate\":0.1,\"enabled\":true}";
+    admin_dispatch(&adm,
+                   "/admin/v1/shadow/rules",
+                   "POST",
+                   NULL,
+                   "admin-secret-token",
+                   r2_payload,
+                   strlen(r2_payload),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 201, "POST /admin/v1/shadow/rules returns 201");
+    TEST_ASSERT(body != NULL, "body not NULL");
+    TEST_ASSERT(strstr(body, "\"id\":2") != NULL, "created rule id is 2");
+    TEST_ASSERT(strstr(body, "\"mode\":\"CANARY\"") != NULL, "mode is CANARY");
+    free(body);
+    body = NULL;
+
+    /* 4. PUT /admin/v1/shadow/rules/1 -> update rule 1 */
+    const char* r1_update = "{\"sample_rate\":0.8,\"enabled\":false}";
+    admin_dispatch(&adm,
+                   "/admin/v1/shadow/rules/1",
+                   "PUT",
+                   NULL,
+                   "admin-secret-token",
+                   r1_update,
+                   strlen(r1_update),
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "PUT /admin/v1/shadow/rules/1 returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"sample_rate\":0.8") != NULL,
+                "sample_rate updated to 0.8");
+    TEST_ASSERT(strstr(body, "\"enabled\":false") != NULL, "enabled updated to false");
+    free(body);
+    body = NULL;
+
+    /* 5. GET /admin/v1/shadow/evaluations -> returns recent evaluation snapshots */
+    admin_dispatch(&adm,
+                   "/admin/v1/shadow/evaluations",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/shadow/evaluations returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"evaluations\"") != NULL,
+                "contains evaluations array");
+    free(body);
+    body = NULL;
+
+    /* 6. GET /admin/v1/shadow/stats -> returns stats */
+    admin_dispatch(&adm,
+                   "/admin/v1/shadow/stats",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/shadow/stats returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"total_evaluated\"") != NULL,
+                "contains total_evaluated");
+    TEST_ASSERT(strstr(body, "\"cost_saved_usd\"") != NULL, "contains cost_saved_usd");
+    free(body);
+    body = NULL;
+
+    /* 7. DELETE /admin/v1/shadow/rules/1 -> delete rule 1 */
+    admin_dispatch(&adm,
+                   "/admin/v1/shadow/rules/1",
+                   "DELETE",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "DELETE /admin/v1/shadow/rules/1 returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"deleted\":true") != NULL, "deleted is true");
+    free(body);
+    body = NULL;
+
+    /* 8. GET /admin/v1/shadow/rules -> 1 rule remains */
+    admin_dispatch(&adm,
+                   "/admin/v1/shadow/rules",
+                   "GET",
+                   NULL,
+                   "admin-secret-token",
+                   NULL,
+                   0,
+                   &status,
+                   &body,
+                   &len);
+    TEST_ASSERT(status == 200, "GET /admin/v1/shadow/rules returns 200");
+    TEST_ASSERT(body != NULL && strstr(body, "\"id\":2") != NULL, "rule 2 remains");
+    TEST_ASSERT(strstr(body, "\"id\":1") == NULL, "rule 1 no longer present");
+    free(body);
+    body = NULL;
+
     teardown_admin(ps, &core, &db);
 }

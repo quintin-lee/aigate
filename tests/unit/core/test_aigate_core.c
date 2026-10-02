@@ -47,6 +47,8 @@ struct fdb {
     int              flush_calls;
     guardrail_rule_t guardrails[8];
     int              n_guardrails;
+    shadow_rule_t    shadow_rules[8];
+    int              n_shadow_rules;
 };
 
 /** @brief Fake allowlist: copy the whole key record. */
@@ -165,6 +167,22 @@ f_list_guardrails(void* ctx, guardrail_rule_t* out, int cap, int* n)
     return 0;
 }
 
+/** @brief Fake shadow-rule listing: copy the in-memory table to the output. */
+static int
+f_list_shadow_rules(void* ctx, shadow_rule_t* out, int cap, int* n)
+{
+    struct fdb* db = ctx;
+    int         cnt = db->n_shadow_rules;
+    if (cnt > cap) {
+        cnt = cap;
+    }
+    for (int i = 0; i < cnt; i++) {
+        out[i] = db->shadow_rules[i];
+    }
+    *n = cnt;
+    return 0;
+}
+
 /** @brief Assemble the fake pg_ops vtable with ctx pointing at the in-memory store. */
 static void
 fbuild_ops(struct fdb* db, pg_ops_t* ops)
@@ -175,6 +193,7 @@ fbuild_ops(struct fdb* db, pg_ops_t* ops)
     ops->get_model = fget_model;
     ops->list_models = f_list_models;
     ops->list_guardrails_rules = f_list_guardrails;
+    ops->list_shadow_rules = f_list_shadow_rules;
     ops->flush_usage = f_flush_rows;
     ops->flush_usage_requests = (int (*)(void*, const usage_request_row_t*, int))f_req_stub;
     ops->query_usage_requests =
@@ -1228,6 +1247,119 @@ TEST_CASE(test_core_monthly_budget_cost_limit)
     run(&ac, "test-key", "gpt-4o", &c2);
     TEST_ASSERT(c2.status == 429, "status 429 over budget, got %d", c2.status);
     TEST_ASSERT(strstr(c2.body, "budget_exceeded") != NULL, "has budget_exceeded error type");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_pipeline_canary_routing_header_injection)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    /* Model 0: gpt-4o */
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+
+    /* Model 1: gpt-4o-mini */
+    snprintf(db.models[1].name, sizeof db.models[1].name, "%s", "gpt-4o-mini");
+    snprintf(db.models[1].provider, sizeof db.models[1].provider, "%s", "openai");
+    snprintf(db.models[1].endpoint, sizeof db.models[1].endpoint, "%s", mock_upstream_base(mu));
+    db.models[1].enabled = 1;
+    db.n_models = 2;
+
+    /* Canary rule: gpt-4o -> gpt-4o-mini 100% */
+    db.shadow_rules[0].id = 1;
+    snprintf(
+        db.shadow_rules[0].source_model, sizeof(db.shadow_rules[0].source_model), "%s", "gpt-4o");
+    snprintf(db.shadow_rules[0].target_model,
+             sizeof(db.shadow_rules[0].target_model),
+             "%s",
+             "gpt-4o-mini");
+    db.shadow_rules[0].mode = TRAFFIC_MODE_CANARY;
+    db.shadow_rules[0].sample_rate = 1.0;
+    db.shadow_rules[0].enabled = true;
+    db.n_shadow_rules = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c1;
+    memset(&c1, 0, sizeof c1);
+    run(&ac, "test-key", "gpt-4o", &c1);
+    TEST_ASSERT(c1.status == 200, "status 200, got %d", c1.status);
+    TEST_ASSERT(cap_has_header(&c1, "X-Aigate-Canary: true"), "has X-Aigate-Canary header");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_pipeline_traffic_shadowing_cloning_and_pairing)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock started");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "test-key", 0, 0, NULL);
+
+    /* Model 0: gpt-4o */
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gpt-4o");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.n_models = 1;
+
+    /* Shadow rule: gpt-4o -> deepseek-chat 100% */
+    db.shadow_rules[0].id = 2;
+    snprintf(
+        db.shadow_rules[0].source_model, sizeof(db.shadow_rules[0].source_model), "%s", "gpt-4o");
+    snprintf(db.shadow_rules[0].target_model,
+             sizeof(db.shadow_rules[0].target_model),
+             "%s",
+             "deepseek-chat");
+    db.shadow_rules[0].mode = TRAFFIC_MODE_SHADOW;
+    db.shadow_rules[0].sample_rate = 1.0;
+    db.shadow_rules[0].enabled = true;
+    db.n_shadow_rules = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    struct cap c1;
+    memset(&c1, 0, sizeof c1);
+    run(&ac, "test-key", "gpt-4o", &c1);
+    TEST_ASSERT(c1.status == 200, "status 200, got %d", c1.status);
+    TEST_ASSERT(!cap_has_header(&c1, "X-Aigate-Canary: true"),
+                "shadow request does not have canary header");
+
+    /* Give background shadow worker a brief moment to process */
+    struct timespec sl = {0, 60 * 1000000}; /* 60ms */
+    nanosleep(&sl, NULL);
+
+    shadow_stats_t stats;
+    shadow_engine_get_stats(ac.shadow_eng, &stats);
+    TEST_ASSERT(stats.total_evaluated >= 1, "at least 1 evaluation recorded in shadow engine");
 
     aigate_core_shutdown(&ac);
     pg_store_close(ps);

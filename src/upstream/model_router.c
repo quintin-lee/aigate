@@ -534,3 +534,85 @@ model_router_select_candidates(circuit_breaker_t* cb,
     return model_router_select_candidates_targeted(
         cb, lt, model, NULL, out_candidates, cap, out_count);
 }
+
+int
+model_router_apply_canary(model_router_t*      mr,
+                          circuit_breaker_t*   cb,
+                          const shadow_rule_t* rules,
+                          int                  num_rules,
+                          const char*          source_model,
+                          const char*          header_str,
+                          char*                out_effective_model,
+                          size_t               out_model_sz,
+                          bool*                out_is_canary,
+                          long*                out_canary_rule_id)
+{
+    if (out_effective_model == NULL || out_model_sz == 0) {
+        return -1;
+    }
+    if (source_model != NULL) {
+        snprintf(out_effective_model, out_model_sz, "%s", source_model);
+    } else {
+        out_effective_model[0] = '\0';
+    }
+    if (out_is_canary != NULL) {
+        *out_is_canary = false;
+    }
+    if (out_canary_rule_id != NULL) {
+        *out_canary_rule_id = 0;
+    }
+    if (mr == NULL || rules == NULL || num_rules <= 0 || source_model == NULL) {
+        return 0;
+    }
+
+    for (int i = 0; i < num_rules; i++) {
+        const shadow_rule_t* r = &rules[i];
+        if (r->mode != TRAFFIC_MODE_CANARY || !r->enabled) {
+            continue;
+        }
+        if (!shadow_rule_matches(r, source_model, header_str)) {
+            continue;
+        }
+        if (!shadow_rule_should_sample(r)) {
+            continue;
+        }
+
+        /* Check candidate model route resolution */
+        model_rec_t candidate_route;
+        if (model_router_resolve(mr, r->target_model, &candidate_route) != 0) {
+            /* Candidate model not resolvable, skip */
+            continue;
+        }
+
+        /* Circuit breaker check for candidate model targets */
+        if (cb != NULL && candidate_route.n_targets > 0) {
+            bool has_healthy = false;
+            for (int ti = 0; ti < candidate_route.n_targets; ti++) {
+                if (cb_get_state(cb, candidate_route.name, candidate_route.targets[ti].endpoint) !=
+                    CB_OPEN) {
+                    has_healthy = true;
+                    break;
+                }
+            }
+            if (!has_healthy) {
+                AIGATE_LOG_WARN("canary candidate %s circuit tripped; auto-rollback to %s",
+                                r->target_model,
+                                source_model);
+                /* Auto-rollback: stay on source model, do not apply canary */
+                return 0;
+            }
+        }
+
+        /* Canary applied! */
+        snprintf(out_effective_model, out_model_sz, "%s", r->target_model);
+        if (out_is_canary != NULL) {
+            *out_is_canary = true;
+        }
+        if (out_canary_rule_id != NULL) {
+            *out_canary_rule_id = r->id;
+        }
+        return 0;
+    }
+
+    return 0;
+}
