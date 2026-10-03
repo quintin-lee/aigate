@@ -4,6 +4,8 @@
 #ifndef AIGATE_SCHEMA_SQL_H
 #define AIGATE_SCHEMA_SQL_H
 
+#define AIGATE_SCHEMA_VERSION 15
+
 static const char SCHEMA_SQL[] =
     R"SQL(-- aigate schema (version 1); applied by pg_store_migrate() in one transaction.
 -- Idempotent: safe to re-run; schema_migrations tracks applied versions.

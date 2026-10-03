@@ -8,13 +8,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /src
 COPY CMakeLists.txt ./
+COPY cmake/ cmake/
 COPY third_party/ third_party/
 COPY scripts/ scripts/
 COPY web/ web/
 COPY src/ src/
 COPY tests/ tests/
 
-RUN cmake -B build -DCMAKE_BUILD_TYPE=Release \
+RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DAIGATE_FORMAT_ON_BUILD=OFF \
     && cmake --build build -j"$(nproc)" --target aigate
 
 # ── Stage 2: Runtime ────────────────────────────────────────────

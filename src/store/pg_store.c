@@ -2718,6 +2718,29 @@ pg_store_migrate(pg_store_t* ps)
         }
         PQclear(lock_res);
 
+        /* Fast path: if schema is already up to date, skip running DDL to prevent
+         * table-level AccessExclusiveLock contention and deadlocks on multi-replica startup. */
+        PGresult* v_res = PQexec(px->db,
+            "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_migrations'");
+        bool table_exists = (v_res != NULL && PQresultStatus(v_res) == PGRES_TUPLES_OK && PQntuples(v_res) > 0);
+        PQclear(v_res);
+
+        if (table_exists) {
+            PGresult* cur_v = PQexec(px->db, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations");
+            if (cur_v != NULL && PQresultStatus(cur_v) == PGRES_TUPLES_OK && PQntuples(cur_v) > 0) {
+                int max_ver = atoi(PQgetvalue(cur_v, 0, 0));
+                PQclear(cur_v);
+                if (max_ver >= AIGATE_SCHEMA_VERSION) {
+                    PGresult* unlock_res = PQexec(px->db, "SELECT pg_advisory_unlock(7192847291)");
+                    PQclear(unlock_res);
+                    pq_unlock(px);
+                    return 0;
+                }
+            } else {
+                PQclear(cur_v);
+            }
+        }
+
         PGresult* begin = PQexec(px->db, "BEGIN");
         PGresult* body = begin != NULL ? PQexec(px->db, SCHEMA_SQL) : NULL;
         /* On any failure the transaction is aborted; COMMIT would be a

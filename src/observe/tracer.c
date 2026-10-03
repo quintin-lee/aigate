@@ -249,22 +249,22 @@ tracer_span_start(trace_context_t* ctx, const char* name, span_kind_t kind, cons
     memset(s, 0, sizeof(*s));
 
     if (strcmp(name, "root") == 0 && ctx->root_span_id[0] != '\0') {
-        strncpy(s->span_id, ctx->root_span_id, sizeof(s->span_id) - 1);
+        snprintf(s->span_id, sizeof(s->span_id), "%s", ctx->root_span_id);
     } else {
         generate_hex_id(s->span_id, 16);
     }
 
     if (parent_id && parent_id[0] != '\0') {
-        strncpy(s->parent_span_id, parent_id, sizeof(s->parent_span_id) - 1);
+        snprintf(s->parent_span_id, sizeof(s->parent_span_id), "%s", parent_id);
     } else if (strcmp(name, "root") == 0) {
         if (ctx->inbound_parent_id[0] != '\0') {
-            strncpy(s->parent_span_id, ctx->inbound_parent_id, sizeof(s->parent_span_id) - 1);
+            snprintf(s->parent_span_id, sizeof(s->parent_span_id), "%s", ctx->inbound_parent_id);
         }
     } else if (ctx->root_span_id[0] != '\0') {
-        strncpy(s->parent_span_id, ctx->root_span_id, sizeof(s->parent_span_id) - 1);
+        snprintf(s->parent_span_id, sizeof(s->parent_span_id), "%s", ctx->root_span_id);
     }
 
-    strncpy(s->name, name, sizeof(s->name) - 1);
+    snprintf(s->name, sizeof(s->name), "%s", name);
     s->kind = kind;
     s->status = SPAN_STATUS_UNSET;
 
