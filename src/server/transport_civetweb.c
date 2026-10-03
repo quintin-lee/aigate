@@ -12,6 +12,7 @@
 #include "event_bus.h"
 
 #include <civetweb.h>
+#include <signal.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,13 +21,17 @@
 
 /** @brief CivetWeb transport instance state. */
 struct transport_civetweb {
-    struct mg_context* ctx;                  /**< CivetWeb context handle */
-    aigate_core*       ac;                   /**< pipeline core (borrowed) */
-    pg_store_t*        ps;                   /**< backing store (borrowed) */
-    char               admin_token_hash[65]; /**< SHA-256 hex of admin token + NUL */
-    char               metrics_acl[256];     /**< /metrics IP allowlist text */
-    admin_ctx_t        adm;                  /**< admin plane state */
-    long               max_body_bytes;       /**< max /v1 request body in bytes */
+    struct mg_context*    ctx;                  /**< CivetWeb context handle */
+    aigate_core*          ac;                   /**< pipeline core (borrowed) */
+    pg_store_t*           ps;                   /**< backing store (borrowed) */
+    char                  admin_token_hash[65]; /**< SHA-256 hex of admin token + NUL */
+    char                  metrics_acl[256];     /**< /metrics IP allowlist text */
+    char                  trusted_proxies[256]; /**< AIGATE_TRUSTED_PROXIES list / CIDRs */
+    admin_ctx_t           adm;                  /**< admin plane state */
+    long                  max_body_bytes;       /**< max /v1 request body in bytes */
+    int                   worker_threads;       /**< worker threads count */
+    int                   request_timeout_ms;   /**< request timeout ms */
+    volatile sig_atomic_t draining;             /**< 1 when node is draining */
 };
 
 /** @brief Per-request response state for the CivetWeb adapter. */
@@ -126,6 +131,84 @@ extract_bearer(struct mg_connection* conn)
     return extract_credential_from_headers(auth, x_api_key, x_goog_key, qs);
 }
 
+/** @brief Extract safe client IP from peer address, evaluating X-Forwarded-For and X-Real-IP against trusted proxies. */
+const char*
+transport_civetweb_extract_client_ip(struct mg_connection* conn,
+                                     const char*           remote_addr,
+                                     const char*           trusted_proxies,
+                                     char*                 out_buf,
+                                     size_t                out_cap)
+{
+    if (out_buf == NULL || out_cap == 0) {
+        return remote_addr != NULL ? remote_addr : "127.0.0.1";
+    }
+    if (remote_addr == NULL || remote_addr[0] == '\0') {
+        snprintf(out_buf, out_cap, "127.0.0.1");
+        return out_buf;
+    }
+    if (trusted_proxies == NULL || trusted_proxies[0] == '\0' ||
+        !metrics_acl_allows(remote_addr, trusted_proxies)) {
+        snprintf(out_buf, out_cap, "%s", remote_addr);
+        return out_buf;
+    }
+
+    const char* xff = mg_get_header(conn, "X-Forwarded-For");
+    if (xff != NULL && xff[0] != '\0') {
+        char  xff_copy[512];
+        char* tokens[16];
+        int   ntok = 0;
+        char* saveptr = NULL;
+
+        snprintf(xff_copy, sizeof(xff_copy), "%s", xff);
+        char* token = strtok_r(xff_copy, ",", &saveptr);
+        while (token != NULL && ntok < 16) {
+            while (*token == ' ' || *token == '\t') {
+                token++;
+            }
+            char* end = token + strlen(token) - 1;
+            while (end > token && (*end == ' ' || *end == '\t')) {
+                *end = '\0';
+                end--;
+            }
+            if (*token != '\0') {
+                tokens[ntok++] = token;
+            }
+            token = strtok_r(NULL, ",", &saveptr);
+        }
+
+        if (ntok > 0) {
+            int chosen = 0;
+            for (int i = ntok - 1; i >= 0; i--) {
+                if (!metrics_acl_allows(tokens[i], trusted_proxies)) {
+                    chosen = i;
+                    break;
+                }
+            }
+            snprintf(out_buf, out_cap, "%s", tokens[chosen]);
+            return out_buf;
+        }
+    }
+
+    const char* xrip = mg_get_header(conn, "X-Real-IP");
+    if (xrip != NULL && xrip[0] != '\0') {
+        while (*xrip == ' ' || *xrip == '\t') {
+            xrip++;
+        }
+        snprintf(out_buf, out_cap, "%s", xrip);
+        char* end = out_buf + strlen(out_buf) - 1;
+        while (end > out_buf && (*end == ' ' || *end == '\t')) {
+            *end = '\0';
+            end--;
+        }
+        if (out_buf[0] != '\0') {
+            return out_buf;
+        }
+    }
+
+    snprintf(out_buf, out_cap, "%s", remote_addr);
+    return out_buf;
+}
+
 /* Content-Length based body reader. Transfer-Encoding: chunked requests
  * (content_length == 0) are treated as empty and answered 400 (P3-12):
  * no mg_read fallback, by design — a JSON body without a declared length
@@ -217,7 +300,10 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     rq.method = ri->request_method;
     rq.path = ri->local_uri;
     rq.bearer = extract_bearer(conn);
-    rq.client_ip = ri->remote_addr;
+    char client_ip[64];
+    transport_civetweb_extract_client_ip(
+        conn, ri->remote_addr, cw->trusted_proxies, client_ip, sizeof(client_ip));
+    rq.client_ip = client_ip;
     rq.body = body;
     rq.body_len = body_len;
     const char* cc = mg_get_header(conn, "Cache-Control");
@@ -344,10 +430,14 @@ handle_admin(struct mg_connection* conn, void* cbdata)
     char*       out_body = NULL;
     size_t      out_len = 0;
 
+    char client_ip[64];
+    transport_civetweb_extract_client_ip(
+        conn, ri->remote_addr, cw->trusted_proxies, client_ip, sizeof(client_ip));
+
     admin_dispatch(&cw->adm,
                    full_uri,
                    ri->request_method,
-                   ri->remote_addr,
+                   client_ip,
                    bearer,
                    body,
                    body_len,
@@ -448,13 +538,60 @@ handle_root(struct mg_connection* conn, void* cbdata)
     return 0;
 }
 
+/** @brief /healthz and /live endpoint: lightweight process liveness check. Always returns 200 OK. */
+static int
+handle_healthz(struct mg_connection* conn, void* cbdata)
+{
+    (void)cbdata;
+    const char* body = "{\"status\":\"ok\"}";
+    size_t      len = strlen(body);
+    mg_printf(conn,
+              "HTTP/1.1 200 OK\r\n"
+              "Content-Type: application/json\r\n"
+              "Content-Length: %zu\r\n\r\n",
+              len);
+    mg_write(conn, body, len);
+    return 1;
+}
+
+/** @brief /ready endpoint: readiness check. Returns 503 if draining, 200 if ready. */
+static int
+handle_ready(struct mg_connection* conn, void* cbdata)
+{
+    transport_civetweb_t* cw = (transport_civetweb_t*)cbdata;
+    if (cw != NULL && cw->draining) {
+        const char* body = "{\"status\":\"draining\",\"message\":\"node is shutting down\"}";
+        size_t      len = strlen(body);
+        mg_printf(conn,
+                  "HTTP/1.1 503 Service Unavailable\r\n"
+                  "Content-Type: application/json\r\n"
+                  "Content-Length: %zu\r\n\r\n",
+                  len);
+        mg_write(conn, body, len);
+        return 1;
+    }
+
+    const char* body = "{\"status\":\"ready\"}";
+    size_t      len = strlen(body);
+    mg_printf(conn,
+              "HTTP/1.1 200 OK\r\n"
+              "Content-Type: application/json\r\n"
+              "Content-Length: %zu\r\n\r\n",
+              len);
+    mg_write(conn, body, len);
+    return 1;
+}
+
 transport_civetweb_t*
 transport_civetweb_start(aigate_core* ac,
                          pg_store_t*  ps,
                          const char*  admin_token_hash,
                          const char*  listen_addr,
                          const char*  metrics_acl,
-                         long         max_body_bytes)
+                         long         max_body_bytes,
+                         int          worker_threads,
+                         int          request_timeout_ms,
+                         const char*  trusted_proxies)
 {
     transport_civetweb_t* cw = calloc(1, sizeof *cw);
     if (cw == NULL) {
@@ -463,11 +600,18 @@ transport_civetweb_start(aigate_core* ac,
     cw->ac = ac;
     cw->ps = ps;
     cw->max_body_bytes = max_body_bytes;
+    cw->worker_threads = worker_threads > 0 ? worker_threads : 64;
+    cw->request_timeout_ms = request_timeout_ms > 0 ? request_timeout_ms : 300000;
     if (admin_token_hash != NULL) {
         snprintf(cw->admin_token_hash, sizeof cw->admin_token_hash, "%s", admin_token_hash);
     }
     if (metrics_acl != NULL) {
         snprintf(cw->metrics_acl, sizeof cw->metrics_acl, "%s", metrics_acl);
+    }
+    if (trusted_proxies != NULL && trusted_proxies[0] != '\0') {
+        snprintf(cw->trusted_proxies, sizeof cw->trusted_proxies, "%s", trusted_proxies);
+    } else {
+        snprintf(cw->trusted_proxies, sizeof cw->trusted_proxies, "127.0.0.1");
     }
 
     cw->adm.ac = ac;
@@ -493,11 +637,18 @@ transport_civetweb_start(aigate_core* ac,
         port_spec = port_spec + 1;
     }
 
+    char threads_str[16];
+    char timeout_str[16];
+    snprintf(threads_str, sizeof(threads_str), "%d", cw->worker_threads);
+    snprintf(timeout_str, sizeof(timeout_str), "%d", cw->request_timeout_ms);
+
     const char* options[] = {
         "listening_ports",
         port_spec,
         "num_threads",
-        "16",
+        threads_str,
+        "request_timeout_ms",
+        timeout_str,
         NULL,
     };
 
@@ -513,10 +664,30 @@ transport_civetweb_start(aigate_core* ac,
     mg_set_request_handler(cw->ctx, "/admin/v1", handle_admin, cw);
     mg_set_request_handler(cw->ctx, "/admin", handle_admin_ui, cw);
     mg_set_request_handler(cw->ctx, "/metrics", handle_metrics, cw);
+    mg_set_request_handler(cw->ctx, "/healthz", handle_healthz, cw);
+    mg_set_request_handler(cw->ctx, "/live", handle_healthz, cw);
+    mg_set_request_handler(cw->ctx, "/ready", handle_ready, cw);
     mg_set_request_handler(cw->ctx, "/$", handle_root, cw);
 
-    AIGATE_LOG_INFO("transport_civetweb: listening on %s", port_spec);
+    AIGATE_LOG_INFO("transport_civetweb: listening on %s (threads: %d, timeout: %dms)",
+                    port_spec,
+                    cw->worker_threads,
+                    cw->request_timeout_ms);
     return cw;
+}
+
+void
+transport_civetweb_set_draining(transport_civetweb_t* cw, int draining)
+{
+    if (cw != NULL) {
+        cw->draining = draining;
+    }
+}
+
+int
+transport_civetweb_is_draining(const transport_civetweb_t* cw)
+{
+    return (cw != NULL) ? cw->draining : 0;
 }
 
 void

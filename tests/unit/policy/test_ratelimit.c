@@ -4,6 +4,7 @@
 #include "ratelimit.h"
 #include "redis_pool.h"
 #include <pthread.h>
+#include <string.h>
 #include <unistd.h>
 
 TEST_CASE(test_rl_qps_boundary)
@@ -125,24 +126,85 @@ TEST_CASE(test_rl_redis_fail_closed)
 {
     ratelimit_t* rl = ratelimit_new();
     TEST_ASSERT(rl != NULL, "new");
+    ratelimit_set_fail_open(rl, 0);
 
-    /* Create pool with invalid/offline endpoint */
-    redis_pool_t* pool = redis_pool_create("redis://127.0.0.1:65530", 2, 50);
-    if (pool != NULL) {
-        ratelimit_set_redis_pool(rl, pool);
+    struct mock_redis_pool {
+        char            url[512];
+        int             capacity;
+        int             timeout_ms;
+        int             count;
+        int             idle_count;
+        void**          stack;
+        pthread_mutex_t lock;
+        pthread_cond_t  cond;
+    } mock_pool;
+    memset(&mock_pool, 0, sizeof(mock_pool));
+    pthread_mutex_init(&mock_pool.lock, NULL);
+    pthread_cond_init(&mock_pool.cond, NULL);
+    mock_pool.capacity = 1;
+    mock_pool.count = 1;
+    mock_pool.idle_count = 0;
+    mock_pool.timeout_ms = 1;
 
-        long retry = 0;
-        int  rc = rl_allow_request(rl, 1, 10, &retry);
-        TEST_ASSERT(rc == -1, "rl_allow_request fail-closed on redis down");
-        TEST_ASSERT(retry == -1, "retry_ms is -1 on redis error");
+    ratelimit_set_redis_pool(rl, (redis_pool_t*)&mock_pool);
 
-        long rem = rl_remaining_daily(rl, 1, 100);
-        TEST_ASSERT(rem == LONG_MIN, "rl_remaining_daily returns LONG_MIN on redis down");
+    long retry = 0;
+    int  rc = rl_allow_request(rl, 1, 10, &retry);
+    TEST_ASSERT(rc == -1, "rl_allow_request fail-closed on redis down");
+    TEST_ASSERT(retry == -1, "retry_ms is -1 on redis error");
 
-        int res = rl_reserve_tokens(rl, 1, 100, 10);
-        TEST_ASSERT(res == -1, "rl_reserve_tokens returns -1 on redis down");
+    long rem = rl_remaining_daily(rl, 1, 100);
+    TEST_ASSERT(rem == LONG_MIN, "rl_remaining_daily returns LONG_MIN on redis down");
 
-        redis_pool_destroy(pool);
-    }
+    int res = rl_reserve_tokens(rl, 1, 100, 10);
+    TEST_ASSERT(res == -1, "rl_reserve_tokens returns -1 on redis down");
+
+    ratelimit_set_redis_pool(rl, NULL);
+    pthread_mutex_destroy(&mock_pool.lock);
+    pthread_cond_destroy(&mock_pool.cond);
+    ratelimit_free(rl);
+}
+
+TEST_CASE(test_rl_redis_fail_open)
+{
+    ratelimit_t* rl = ratelimit_new();
+    TEST_ASSERT(rl != NULL, "new");
+    ratelimit_set_fail_open(rl, 1);
+
+    struct mock_redis_pool {
+        char            url[512];
+        int             capacity;
+        int             timeout_ms;
+        int             count;
+        int             idle_count;
+        void**          stack;
+        pthread_mutex_t lock;
+        pthread_cond_t  cond;
+    } mock_pool;
+    memset(&mock_pool, 0, sizeof(mock_pool));
+    pthread_mutex_init(&mock_pool.lock, NULL);
+    pthread_cond_init(&mock_pool.cond, NULL);
+    mock_pool.capacity = 1;
+    mock_pool.count = 1;
+    mock_pool.idle_count = 0;
+    mock_pool.timeout_ms = 1;
+
+    ratelimit_set_redis_pool(rl, (redis_pool_t*)&mock_pool);
+
+    /* Should fallback to local in-memory token bucket and admit request */
+    long retry = 0;
+    int  rc = rl_allow_request(rl, 1, 10, &retry);
+    TEST_ASSERT(rc == 0, "rl_allow_request fail-open fallback to local admits");
+
+    /* Should fallback to local daily quota */
+    int res = rl_reserve_tokens(rl, 1, 100, 10);
+    TEST_ASSERT(res == 0, "rl_reserve_tokens fail-open fallback to local succeeds");
+
+    long rem = rl_remaining_daily(rl, 1, 100);
+    TEST_ASSERT(rem == 90, "rl_remaining_daily fail-open fallback reports 90, got %ld", rem);
+
+    ratelimit_set_redis_pool(rl, NULL);
+    pthread_mutex_destroy(&mock_pool.lock);
+    pthread_cond_destroy(&mock_pool.cond);
     ratelimit_free(rl);
 }

@@ -22,6 +22,9 @@ ratelimit_t* ratelimit_new(void);
 /** @brief Configure shared Redis connection pool (enables distributed rate limiting). */
 void ratelimit_set_redis_pool(ratelimit_t* rl, struct redis_pool* pool);
 
+/** @brief Configure fail-open mode when Redis is unavailable (1 = local fallback, 0 = fail closed). Default 1. */
+void ratelimit_set_fail_open(ratelimit_t* rl, int fail_open);
+
 /** @brief Free the limiter and all buckets. */
 void ratelimit_free(ratelimit_t* rl);
 

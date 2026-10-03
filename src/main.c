@@ -93,6 +93,13 @@ main(void)
         health_prober_start(core.hp);
     }
 
+    if (core.rl != NULL) {
+        ratelimit_set_fail_open(core.rl, cfg.redis_fail_open);
+    }
+    if (core.cb != NULL) {
+        cb_set_fail_open(core.cb, cfg.redis_fail_open);
+    }
+
     /* 4b. Optional Redis clustering: inject shared pool into rate limiter,
      *     circuit breaker, and admin lockout subsystems. */
     redis_pool_t* redis_pool = NULL;
@@ -102,8 +109,10 @@ main(void)
             ratelimit_set_redis_pool(core.rl, redis_pool);
             cb_set_redis_pool(core.cb, redis_pool);
             admin_lockout_set_pool(redis_pool);
-            AIGATE_LOG_INFO(
-                "main: Redis clustering enabled (%s, pool=%d)", cfg.redis_url, cfg.redis_pool_size);
+            AIGATE_LOG_INFO("main: Redis clustering enabled (%s, pool=%d, fail_open=%d)",
+                            cfg.redis_url,
+                            cfg.redis_pool_size,
+                            cfg.redis_fail_open);
         } else {
             AIGATE_LOG_WARN("main: AIGATE_REDIS_URL set but Redis pool creation failed "
                             "— running in standalone mode");
@@ -111,8 +120,15 @@ main(void)
     }
 
     /* 5. Start CivetWeb transport */
-    transport_civetweb_t* cw = transport_civetweb_start(
-        &core, ps, cfg.admin_token_hash, cfg.listen, cfg.metrics_acl, cfg.max_body_bytes);
+    transport_civetweb_t* cw = transport_civetweb_start(&core,
+                                                        ps,
+                                                        cfg.admin_token_hash,
+                                                        cfg.listen,
+                                                        cfg.metrics_acl,
+                                                        cfg.max_body_bytes,
+                                                        cfg.worker_threads,
+                                                        cfg.request_timeout_ms,
+                                                        cfg.trusted_proxies);
     if (cw == NULL) {
         AIGATE_LOG_ERROR("main: failed to start HTTP transport on %s", cfg.listen);
         aigate_core_shutdown(&core);
@@ -137,7 +153,17 @@ main(void)
         nanosleep(&ts, NULL);
     }
 
-    /* 8. Graceful shutdown */
+    /* 8. Graceful shutdown: draining phase first */
+    if (cfg.drain_timeout_s > 0) {
+        AIGATE_LOG_INFO("aigate received shutdown signal, draining traffic for %d seconds...",
+                        cfg.drain_timeout_s);
+        transport_civetweb_set_draining(cw, 1);
+        for (int i = 0; i < cfg.drain_timeout_s * 10; i++) {
+            struct timespec ts = {0, 100 * 1000000}; /* 100ms */
+            nanosleep(&ts, NULL);
+        }
+    }
+
     AIGATE_LOG_INFO("aigate shutting down gracefully...");
     transport_civetweb_stop(cw);
     aigate_core_shutdown(&core);

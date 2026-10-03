@@ -50,6 +50,8 @@ void cb_set_time_fn(circuit_breaker_t* cb, cb_time_fn fn);
 void cb_set_redis_pool(circuit_breaker_t* cb, struct redis_pool* pool);
 /** @brief Attach event bus for publishing circuit state transition events. */
 void cb_set_event_bus(circuit_breaker_t* cb, struct event_bus* eb);
+/** @brief Configure fail-open mode when Redis is unavailable (1 = local fallback, 0 = fail closed). Default 1. */
+void cb_set_fail_open(circuit_breaker_t* cb, int fail_open);
 
 /** @brief Get current circuit state for a model endpoint ("closed", "open", "half_open"). */
 cb_state_t cb_get_state(circuit_breaker_t* cb, const char* model, const char* endpoint);

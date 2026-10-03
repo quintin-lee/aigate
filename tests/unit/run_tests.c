@@ -42,6 +42,7 @@ main(void)
     extern void test_config_defaults(void);
     extern void test_config_missing_required(void);
     extern void test_config_bad_master_key(void);
+    extern void test_config_worker_threads_and_p0(void);
     extern void test_lru_eviction_order(void);
     extern void test_lru_recency_refresh(void);
     extern void test_lru_replace_and_invalidate(void);
@@ -90,6 +91,7 @@ main(void)
     extern void test_rl_reset_day(void);
     extern void test_rl_concurrent_smoke(void);
     extern void test_rl_redis_fail_closed(void);
+    extern void test_rl_redis_fail_open(void);
     extern void test_model_router_env_key(void);
     extern void test_model_router_missing_env_key(void);
     extern void test_model_router_multi_target_keys(void);
@@ -126,6 +128,7 @@ main(void)
     test_register("config_defaults", test_config_defaults);
     test_register("config_missing_required", test_config_missing_required);
     test_register("config_bad_master_key", test_config_bad_master_key);
+    test_register("config_worker_threads_and_p0", test_config_worker_threads_and_p0);
     test_register("lru_eviction_order", test_lru_eviction_order);
     test_register("lru_recency_refresh", test_lru_recency_refresh);
     test_register("lru_replace_and_invalidate", test_lru_replace_and_invalidate);
@@ -174,6 +177,7 @@ main(void)
     test_register("rl_reset_day", test_rl_reset_day);
     test_register("rl_concurrent", test_rl_concurrent_smoke);
     test_register("rl_redis_fail_closed", test_rl_redis_fail_closed);
+    test_register("rl_redis_fail_open", test_rl_redis_fail_open);
     test_register("model_router_env", test_model_router_env_key);
     test_register("model_router_missing", test_model_router_missing_env_key);
     test_register("model_router_multi_target_keys", test_model_router_multi_target_keys);
@@ -436,12 +440,14 @@ main(void)
     extern void test_cb_probe_failure_trips_back_to_open(void);
     extern void test_cb_open_failures_do_not_refresh_cooloff(void);
     extern void test_cb_concurrency_stress(void);
+    extern void test_cb_redis_fail_open(void);
     test_register("cb_normal_traffic", test_cb_normal_traffic);
     test_register("cb_tripping", test_cb_tripping_on_consecutive_failures);
     test_register("cb_cooloff_and_probe_success", test_cb_cooloff_and_half_open_probe_success);
     test_register("cb_probe_failure_trips_back", test_cb_probe_failure_trips_back_to_open);
     test_register("cb_open_no_refresh", test_cb_open_failures_do_not_refresh_cooloff);
     test_register("cb_concurrency_stress", test_cb_concurrency_stress);
+    test_register("cb_redis_fail_open", test_cb_redis_fail_open);
 
     extern void test_failover_on_500_to_backup(void);
     extern void test_failover_on_429_to_backup(void);
@@ -607,6 +613,12 @@ main(void)
     extern void test_pipeline_cache_optimizer_and_headers(void);
     test_register("pipeline_cache_optimizer_and_headers",
                   test_pipeline_cache_optimizer_and_headers);
+
+    extern void test_transport_healthz_and_ready(void);
+    test_register("transport_healthz_and_ready", test_transport_healthz_and_ready);
+
+    extern void test_transport_client_ip_resolution(void);
+    test_register("transport_client_ip_resolution", test_transport_client_ip_resolution);
 
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

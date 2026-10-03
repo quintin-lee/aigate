@@ -105,5 +105,34 @@ aigate_config_load(aigate_config* out)
         out->redis_pool_size = 32;
     }
 
+    env_str("AIGATE_WORKER_THREADS", "64", raw_key, sizeof raw_key);
+    out->worker_threads = atoi(raw_key);
+    if (out->worker_threads < 4 || out->worker_threads > 4096) {
+        AIGATE_LOG_ERROR("AIGATE_WORKER_THREADS must be in [4, 4096], got %d", out->worker_threads);
+        return -1;
+    }
+
+    env_str("AIGATE_REQUEST_TIMEOUT_MS", "300000", raw_key, sizeof raw_key);
+    out->request_timeout_ms = atoi(raw_key);
+    if (out->request_timeout_ms < 1000 || out->request_timeout_ms > 3600000) {
+        AIGATE_LOG_ERROR("AIGATE_REQUEST_TIMEOUT_MS must be in [1000, 3600000], got %d",
+                         out->request_timeout_ms);
+        return -1;
+    }
+
+    env_str(
+        "AIGATE_TRUSTED_PROXIES", "127.0.0.1", out->trusted_proxies, sizeof out->trusted_proxies);
+
+    env_str("AIGATE_DRAIN_TIMEOUT_S", "15", raw_key, sizeof raw_key);
+    out->drain_timeout_s = atoi(raw_key);
+    if (out->drain_timeout_s < 0 || out->drain_timeout_s > 120) {
+        AIGATE_LOG_ERROR("AIGATE_DRAIN_TIMEOUT_S must be in [0, 120], got %d",
+                         out->drain_timeout_s);
+        return -1;
+    }
+
+    env_str("AIGATE_REDIS_FAIL_OPEN", "1", raw_key, sizeof raw_key);
+    out->redis_fail_open = (atoi(raw_key) != 0) ? 1 : 0;
+
     return 0;
 }

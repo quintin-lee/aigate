@@ -38,6 +38,7 @@ struct circuit_breaker {
     redis_pool_t*   pool;                /**< Shared Redis pool (distributed breaking, nullable). */
     char            sha_cb[48];          /**< Redis Lua script SHA cache. */
     event_bus_t*    eb;                  /**< Event bus (state transition events, nullable). */
+    int             fail_open;           /**< Fallback to local breaker on Redis error. */
     cb_entry_t*     buckets[CB_BUCKETS]; /**< Endpoint state shard buckets. */
 };
 
@@ -151,6 +152,7 @@ cb_create(void)
     cb->cooloff_sec = CB_DEFAULT_COOLOFF_SEC;
     cb->time_fn = NULL;
     cb->eb = NULL;
+    cb->fail_open = 1;
     return cb;
 }
 
@@ -226,6 +228,17 @@ cb_set_redis_pool(circuit_breaker_t* cb, redis_pool_t* pool)
             redis_pool_release(pool, c);
         }
     }
+    pthread_mutex_unlock(&cb->mtx);
+}
+
+void
+cb_set_fail_open(circuit_breaker_t* cb, int fail_open)
+{
+    if (cb == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&cb->mtx);
+    cb->fail_open = fail_open ? 1 : 0;
     pthread_mutex_unlock(&cb->mtx);
 }
 
@@ -333,14 +346,23 @@ cb_allow_request(circuit_breaker_t* cb, const char* model, const char* endpoint)
         cb_redis_key(model, endpoint, redis_key, sizeof(redis_key));
         redisReply* reply = redis_cb_call(cb, "allow", redis_key);
         if (reply == NULL) {
-            /* Fail-Closed: Redis unavailable → deny to prevent broken routing */
-            AIGATE_LOG_WARN(
-                "circuit breaker redis error for %s:%s (allow), fail-closed deny", model, endpoint);
-            return false;
+            if (cb->fail_open) {
+                AIGATE_LOG_WARN(
+                    "circuit breaker redis error for %s:%s (allow), fallback to local breaker",
+                    model,
+                    endpoint);
+            } else {
+                /* Fail-Closed: Redis unavailable → deny to prevent broken routing */
+                AIGATE_LOG_WARN("circuit breaker redis error for %s:%s (allow), fail-closed deny",
+                                model,
+                                endpoint);
+                return false;
+            }
+        } else {
+            bool allowed = (reply->element[0]->integer == 1);
+            freeReplyObject(reply);
+            return allowed;
         }
-        bool allowed = (reply->element[0]->integer == 1);
-        freeReplyObject(reply);
-        return allowed;
     }
 
     pthread_mutex_lock(&cb->mtx);

@@ -5,6 +5,7 @@
  *  with linear probing, sized to a power of two.
  */
 #include "ratelimit.h"
+#include "aigate_log.h"
 #include "redis_client.h"
 #include "redis_pool.h"
 #include "redis_scripts.h"
@@ -36,6 +37,7 @@ struct ratelimit {
     redis_pool_t*   pool;          /**< Shared Redis pool (distributed limiting, nullable). */
     char            sha_qps[48];   /**< QPS Lua script SHA cache. */
     char            sha_quota[48]; /**< Quota Lua script SHA cache. */
+    int             fail_open;     /**< Fallback to local rate limiting if Redis fails. */
 };
 
 /** @brief Monotonic clock in nanoseconds (time base for token bucket/QPS, immune to wall clock jumps). */
@@ -94,6 +96,7 @@ ratelimit_new(void)
         free(rl);
         return NULL;
     }
+    rl->fail_open = 1;
     return rl;
 }
 
@@ -124,6 +127,17 @@ ratelimit_set_redis_pool(ratelimit_t* rl, redis_pool_t* pool)
             redis_pool_release(pool, c);
         }
     }
+    pthread_mutex_unlock(&rl->mtx);
+}
+
+void
+ratelimit_set_fail_open(ratelimit_t* rl, int fail_open)
+{
+    if (rl == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&rl->mtx);
+    rl->fail_open = fail_open ? 1 : 0;
     pthread_mutex_unlock(&rl->mtx);
 }
 
@@ -173,72 +187,9 @@ find_or_make(ratelimit_t* rl, long key_id)
     }
 }
 
-int
-rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms)
+static int
+rl_allow_request_local(ratelimit_t* rl, long key_id, int qps, long* retry_ms)
 {
-    if (rl == NULL) {
-        if (retry_ms != NULL) {
-            *retry_ms = -1;
-        }
-        return -1;
-    }
-
-    if (rl->pool != NULL) {
-        if (qps <= 0) {
-            return 0;
-        }
-        redisContext* c = redis_pool_acquire(rl->pool);
-        if (c == NULL) {
-            if (retry_ms != NULL) {
-                *retry_ms = -1;
-            }
-            return -1;
-        }
-
-        struct timespec ts;
-        clock_gettime(CLOCK_REALTIME, &ts);
-        uint64_t now_ms = (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
-
-        char key_buf[64];
-        snprintf(key_buf, sizeof(key_buf), "aigate:rl:qps:%ld", key_id);
-        const char* keys[1] = {key_buf};
-
-        char now_buf[32], qps_buf[32], cap_buf[32], ttl_buf[16];
-        snprintf(now_buf, sizeof(now_buf), "%llu", (unsigned long long)now_ms);
-        snprintf(qps_buf, sizeof(qps_buf), "%d", qps);
-        snprintf(cap_buf, sizeof(cap_buf), "%d", qps);
-        snprintf(ttl_buf, sizeof(ttl_buf), "3");
-
-        const char* argv[4] = {now_buf, qps_buf, cap_buf, ttl_buf};
-        redisReply* reply =
-            redis_eval_sha(c, rl->sha_qps, SCRIPT_QPS_TOKEN_BUCKET, 1, keys, argv, 4);
-        if (reply == NULL || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||
-            reply->element[0]->type != REDIS_REPLY_INTEGER ||
-            reply->element[1]->type != REDIS_REPLY_INTEGER) {
-            if (reply != NULL) {
-                freeReplyObject(reply);
-            }
-            redis_pool_release(rl->pool, c);
-            if (retry_ms != NULL) {
-                *retry_ms = -1;
-            }
-            return -1;
-        }
-
-        long status = reply->element[0]->integer;
-        long wait_ms = reply->element[1]->integer;
-        freeReplyObject(reply);
-        redis_pool_release(rl->pool, c);
-
-        if (status == 1) {
-            return 0;
-        }
-        if (retry_ms != NULL) {
-            *retry_ms = wait_ms;
-        }
-        return -1;
-    }
-
     struct bucket* bt;
     pthread_mutex_lock(&rl->mtx);
     bt = find_or_make(rl, key_id);
@@ -284,6 +235,103 @@ rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms)
 }
 
 int
+rl_allow_request(ratelimit_t* rl, long key_id, int qps, long* retry_ms)
+{
+    if (rl == NULL) {
+        if (retry_ms != NULL) {
+            *retry_ms = -1;
+        }
+        return -1;
+    }
+
+    if (rl->pool != NULL) {
+        if (qps <= 0) {
+            return 0;
+        }
+        redisContext* c = redis_pool_acquire(rl->pool);
+        if (c == NULL) {
+            if (rl->fail_open) {
+                AIGATE_LOG_WARN(
+                    "ratelimit: redis acquire failed in allow_request, fallback to local");
+                return rl_allow_request_local(rl, key_id, qps, retry_ms);
+            }
+            if (retry_ms != NULL) {
+                *retry_ms = -1;
+            }
+            return -1;
+        }
+
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        uint64_t now_ms = (uint64_t)ts.tv_sec * 1000ull + (uint64_t)ts.tv_nsec / 1000000ull;
+
+        char key_buf[64];
+        snprintf(key_buf, sizeof(key_buf), "aigate:rl:qps:%ld", key_id);
+        const char* keys[1] = {key_buf};
+
+        char now_buf[32], qps_buf[32], cap_buf[32], ttl_buf[16];
+        snprintf(now_buf, sizeof(now_buf), "%llu", (unsigned long long)now_ms);
+        snprintf(qps_buf, sizeof(qps_buf), "%d", qps);
+        snprintf(cap_buf, sizeof(cap_buf), "%d", qps);
+        snprintf(ttl_buf, sizeof(ttl_buf), "3");
+
+        const char* argv[4] = {now_buf, qps_buf, cap_buf, ttl_buf};
+        redisReply* reply =
+            redis_eval_sha(c, rl->sha_qps, SCRIPT_QPS_TOKEN_BUCKET, 1, keys, argv, 4);
+        if (reply == NULL || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||
+            reply->element[0]->type != REDIS_REPLY_INTEGER ||
+            reply->element[1]->type != REDIS_REPLY_INTEGER) {
+            if (reply != NULL) {
+                freeReplyObject(reply);
+            }
+            redis_pool_release(rl->pool, c);
+            if (rl->fail_open) {
+                AIGATE_LOG_WARN("ratelimit: redis eval failed in allow_request, fallback to local");
+                return rl_allow_request_local(rl, key_id, qps, retry_ms);
+            }
+            if (retry_ms != NULL) {
+                *retry_ms = -1;
+            }
+            return -1;
+        }
+
+        long status = reply->element[0]->integer;
+        long wait_ms = reply->element[1]->integer;
+        freeReplyObject(reply);
+        redis_pool_release(rl->pool, c);
+
+        if (status == 1) {
+            return 0;
+        }
+        if (retry_ms != NULL) {
+            *retry_ms = wait_ms;
+        }
+        return -1;
+    }
+
+    return rl_allow_request_local(rl, key_id, qps, retry_ms);
+}
+
+static int
+rl_reserve_tokens_local(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
+{
+    struct bucket* bt;
+    int            rc = 0;
+    pthread_mutex_lock(&rl->mtx);
+    bt = find_or_make(rl, key_id);
+    if (bt == NULL) {
+        rc = -1;
+    } else {
+        /* Record-first: the tokens are always accounted; -1 merely
+         * reports that the daily quota is (now) exceeded. */
+        bt->daily_used += tokens;
+        rc = (daily_quota > 0 && bt->daily_used > daily_quota) ? -1 : 0;
+    }
+    pthread_mutex_unlock(&rl->mtx);
+    return rc;
+}
+
+int
 rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
 {
     if (rl == NULL) {
@@ -296,6 +344,11 @@ rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
         }
         redisContext* c = redis_pool_acquire(rl->pool);
         if (c == NULL) {
+            if (rl->fail_open) {
+                AIGATE_LOG_WARN(
+                    "ratelimit: redis acquire failed in reserve_tokens, fallback to local");
+                return rl_reserve_tokens_local(rl, key_id, daily_quota, tokens);
+            }
             return -1;
         }
 
@@ -321,6 +374,11 @@ rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
                 freeReplyObject(reply);
             }
             redis_pool_release(rl->pool, c);
+            if (rl->fail_open) {
+                AIGATE_LOG_WARN(
+                    "ratelimit: redis eval failed in reserve_tokens, fallback to local");
+                return rl_reserve_tokens_local(rl, key_id, daily_quota, tokens);
+            }
             return -1;
         }
 
@@ -330,20 +388,23 @@ rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
         return (status == 0) ? 0 : -1;
     }
 
+    return rl_reserve_tokens_local(rl, key_id, daily_quota, tokens);
+}
+
+static long
+rl_remaining_daily_local(ratelimit_t* rl, long key_id, long daily_quota)
+{
     struct bucket* bt;
-    int            rc = 0;
+    long           rem;
     pthread_mutex_lock(&rl->mtx);
     bt = find_or_make(rl, key_id);
-    if (bt == NULL) {
-        rc = -1;
+    if (bt == NULL || daily_quota <= 0) {
+        rem = LONG_MAX;
     } else {
-        /* Record-first: the tokens are always accounted; -1 merely
-         * reports that the daily quota is (now) exceeded. */
-        bt->daily_used += tokens;
-        rc = (daily_quota > 0 && bt->daily_used > daily_quota) ? -1 : 0;
+        rem = daily_quota - bt->daily_used;
     }
     pthread_mutex_unlock(&rl->mtx);
-    return rc;
+    return rem;
 }
 
 long
@@ -359,6 +420,9 @@ rl_remaining_daily(ratelimit_t* rl, long key_id, long daily_quota)
         }
         redisContext* c = redis_pool_acquire(rl->pool);
         if (c == NULL) {
+            if (rl->fail_open) {
+                return rl_remaining_daily_local(rl, key_id, daily_quota);
+            }
             return LONG_MIN;
         }
 
@@ -375,6 +439,9 @@ rl_remaining_daily(ratelimit_t* rl, long key_id, long daily_quota)
                 freeReplyObject(reply);
             }
             redis_pool_release(rl->pool, c);
+            if (rl->fail_open) {
+                return rl_remaining_daily_local(rl, key_id, daily_quota);
+            }
             return LONG_MIN;
         }
 
@@ -388,17 +455,7 @@ rl_remaining_daily(ratelimit_t* rl, long key_id, long daily_quota)
         return rem;
     }
 
-    struct bucket* bt;
-    long           rem;
-    pthread_mutex_lock(&rl->mtx);
-    bt = find_or_make(rl, key_id);
-    if (bt == NULL || daily_quota <= 0) {
-        rem = LONG_MAX;
-    } else {
-        rem = daily_quota - bt->daily_used;
-    }
-    pthread_mutex_unlock(&rl->mtx);
-    return rem;
+    return rl_remaining_daily_local(rl, key_id, daily_quota);
 }
 
 void

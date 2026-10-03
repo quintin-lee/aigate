@@ -29,11 +29,13 @@ struct pg_store {
     int      owns_ctx; /**< Whether ctx is owned (freed on free). */
 };
 
-/** @brief libpq connection context: single connection + serialized mutex. */
+/** @brief libpq connection context: read connection + flush connection with independent mutexes. */
 struct pq_ctx {
-    PGconn*         db;        /**< libpq connection. */
+    PGconn*         db;        /**< Primary libpq connection (read/admin/key checks). */
+    PGconn*         db_flush;  /**< Dedicated libpq connection for background batch flushes. */
     char            dsn[1024]; /**< Connection string (for reconnect). */
-    pthread_mutex_t mtx;       /**< Connection serialization lock. */
+    pthread_mutex_t mtx;       /**< Primary connection serialization lock. */
+    pthread_mutex_t mtx_flush; /**< Flush connection serialization lock. */
 };
 
 /* ------------------------------------------------------------ helpers */
@@ -204,22 +206,25 @@ join_model_list(const key_rec_t* k, char* buf, size_t cap)
 
 /* ------------------------------------------------------------ libpq ops */
 
-/** @brief Reconnect on disconnect (caller must hold the lock; reconnection failure is only logged, never asserted). */
+/** @brief Reconnect primary conn on disconnect (caller must hold mtx). */
 static void
 pq_ensure_conn(struct pq_ctx* px)
 {
-    if (PQstatus(px->db) == CONNECTION_OK) {
+    if (px->db != NULL && PQstatus(px->db) == CONNECTION_OK) {
         return;
     }
     AIGATE_LOG_WARN("pg: connection lost, reconnecting");
-    PQfinish(px->db);
+    if (px->db != NULL) {
+        PQfinish(px->db);
+        px->db = NULL;
+    }
     px->db = PQconnectdb(px->dsn);
     if (PQstatus(px->db) != CONNECTION_OK) {
         AIGATE_LOG_ERROR("pg: reconnect failed: %s", PQerrorMessage(px->db));
     }
 }
 
-/** @brief Take the connection mutex and make sure the connection is usable along the way. */
+/** @brief Take the primary connection mutex and make sure the connection is usable along the way. */
 static void
 pq_lock(struct pq_ctx* px)
 {
@@ -227,11 +232,44 @@ pq_lock(struct pq_ctx* px)
     pq_ensure_conn(px);
 }
 
-/** @brief Release the connection mutex. */
+/** @brief Release the primary connection mutex. */
 static void
 pq_unlock(struct pq_ctx* px)
 {
     pthread_mutex_unlock(&px->mtx);
+}
+
+/** @brief Reconnect flush conn on disconnect (caller must hold mtx_flush). */
+static void
+pq_ensure_conn_flush(struct pq_ctx* px)
+{
+    if (px->db_flush != NULL && PQstatus(px->db_flush) == CONNECTION_OK) {
+        return;
+    }
+    AIGATE_LOG_WARN("pg flush: connection lost, reconnecting");
+    if (px->db_flush != NULL) {
+        PQfinish(px->db_flush);
+        px->db_flush = NULL;
+    }
+    px->db_flush = PQconnectdb(px->dsn);
+    if (PQstatus(px->db_flush) != CONNECTION_OK) {
+        AIGATE_LOG_ERROR("pg flush: reconnect failed: %s", PQerrorMessage(px->db_flush));
+    }
+}
+
+/** @brief Take the flush connection mutex and make sure the connection is usable. */
+static void
+pq_lock_flush(struct pq_ctx* px)
+{
+    pthread_mutex_lock(&px->mtx_flush);
+    pq_ensure_conn_flush(px);
+}
+
+/** @brief Release the flush connection mutex. */
+static void
+pq_unlock_flush(struct pq_ctx* px)
+{
+    pthread_mutex_unlock(&px->mtx_flush);
 }
 
 /** @brief libpq implementation of pg_ops.get_key_by_hash: 0 hit, 1 definite miss, -1 storage error. */
@@ -1365,8 +1403,12 @@ pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
     char        sql[8192];
     int         rc = 0;
 
-    pq_lock(px);
-    PQclear(PQexec(px->db, "BEGIN"));
+    pq_lock_flush(px);
+    if (px->db_flush == NULL || PQstatus(px->db_flush) != CONNECTION_OK) {
+        pq_unlock_flush(px);
+        return -1;
+    }
+    PQclear(PQexec(px->db_flush, "BEGIN"));
 
     for (int off = 0; off < n; off += FLUSH_USAGE_CHUNK) {
         int chunk_n = n - off;
@@ -1418,7 +1460,7 @@ pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
             sql_off += w;
         }
         if (rc != 0) {
-            PQclear(PQexec(px->db, "ROLLBACK"));
+            PQclear(PQexec(px->db_flush, "ROLLBACK"));
             break;
         }
 
@@ -1432,17 +1474,17 @@ pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
             "EXCLUDED.cached_prompt_tokens";
         int w = snprintf(sql + sql_off, sizeof sql - (size_t)sql_off, "%s", on_conflict);
         if (w < 0 || (size_t)w >= sizeof sql - (size_t)sql_off) {
-            PQclear(PQexec(px->db, "ROLLBACK"));
+            PQclear(PQexec(px->db_flush, "ROLLBACK"));
             rc = -1;
             break;
         }
 
-        PGresult* res = PQexecParams(px->db, sql, chunk_n * 8, NULL, vals, NULL, NULL, 0);
+        PGresult* res = PQexecParams(px->db_flush, sql, chunk_n * 8, NULL, vals, NULL, NULL, 0);
         if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
             AIGATE_LOG_ERROR("pg flush_usage batch: %s",
-                             res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+                             res != NULL ? PQerrorMessage(px->db_flush) : "query alloc failed");
             PQclear(res);
-            PQclear(PQexec(px->db, "ROLLBACK"));
+            PQclear(PQexec(px->db_flush, "ROLLBACK"));
             rc = -1;
             break;
         }
@@ -1450,9 +1492,9 @@ pq_flush_usage(void* vctx, const usage_row_t* rows, int n)
     }
 
     if (rc == 0) {
-        PQclear(PQexec(px->db, "COMMIT"));
+        PQclear(PQexec(px->db_flush, "COMMIT"));
     }
-    pq_unlock(px);
+    pq_unlock_flush(px);
     return rc;
 }
 
@@ -1539,8 +1581,12 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
     char        sql[8192];
     int         rc = 0;
 
-    pq_lock(px);
-    PQclear(PQexec(px->db, "BEGIN"));
+    pq_lock_flush(px);
+    if (px->db_flush == NULL || PQstatus(px->db_flush) != CONNECTION_OK) {
+        pq_unlock_flush(px);
+        return -1;
+    }
+    PQclear(PQexec(px->db_flush, "BEGIN"));
 
     for (int off = 0; off < n; off += FLUSH_REQ_CHUNK) {
         int chunk_n = n - off;
@@ -1600,16 +1646,16 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
             sql_off += w;
         }
         if (rc != 0) {
-            PQclear(PQexec(px->db, "ROLLBACK"));
+            PQclear(PQexec(px->db_flush, "ROLLBACK"));
             break;
         }
 
-        PGresult* res = PQexecParams(px->db, sql, chunk_n * 11, NULL, vals, NULL, NULL, 0);
+        PGresult* res = PQexecParams(px->db_flush, sql, chunk_n * 11, NULL, vals, NULL, NULL, 0);
         if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
             AIGATE_LOG_ERROR("pg flush_requests batch: %s",
-                             res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+                             res != NULL ? PQerrorMessage(px->db_flush) : "query alloc failed");
             PQclear(res);
-            PQclear(PQexec(px->db, "ROLLBACK"));
+            PQclear(PQexec(px->db_flush, "ROLLBACK"));
             rc = -1;
             break;
         }
@@ -1617,9 +1663,9 @@ pq_flush_requests(void* vctx, const usage_request_row_t* rows, int n)
     }
 
     if (rc == 0) {
-        PQclear(PQexec(px->db, "COMMIT"));
+        PQclear(PQexec(px->db_flush, "COMMIT"));
     }
-    pq_unlock(px);
+    pq_unlock_flush(px);
     return rc;
 }
 
@@ -2565,7 +2611,13 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
         free(ps);
         return NULL;
     }
+    px->db_flush = PQconnectdb(px->dsn);
+    if (PQstatus(px->db_flush) != CONNECTION_OK) {
+        AIGATE_LOG_WARN("pg_store_open: db_flush connection failed (%s), will retry on flush",
+                        PQerrorMessage(px->db_flush));
+    }
     pthread_mutex_init(&px->mtx, NULL);
+    pthread_mutex_init(&px->mtx_flush, NULL);
 
     ps->ops.get_key_by_hash = pq_get_key_by_hash;
     ps->ops.list_keys = pq_list_keys;
@@ -2622,7 +2674,15 @@ pg_store_close(pg_store_t* ps)
     }
     if (ps->owns_ctx) {
         struct pq_ctx* px = ps->ctx;
-        PQfinish(px->db);
+        if (px->db_flush != NULL) {
+            PQfinish(px->db_flush);
+            px->db_flush = NULL;
+        }
+        if (px->db != NULL) {
+            PQfinish(px->db);
+            px->db = NULL;
+        }
+        pthread_mutex_destroy(&px->mtx_flush);
         pthread_mutex_destroy(&px->mtx);
         free(px);
     }
@@ -2648,6 +2708,16 @@ pg_store_migrate(pg_store_t* ps)
      * ALTERs even though version 1 is already recorded. */
     pq_lock(px);
     {
+        /* Acquire PostgreSQL advisory lock to serialize concurrent migrations across replicas */
+        PGresult* lock_res = PQexec(px->db, "SELECT pg_advisory_lock(7192847291)");
+        if (lock_res == NULL || PQresultStatus(lock_res) != PGRES_TUPLES_OK) {
+            AIGATE_LOG_ERROR("pg migrate: advisory lock failed: %s", PQerrorMessage(px->db));
+            PQclear(lock_res);
+            pq_unlock(px);
+            return -1;
+        }
+        PQclear(lock_res);
+
         PGresult* begin = PQexec(px->db, "BEGIN");
         PGresult* body = begin != NULL ? PQexec(px->db, SCHEMA_SQL) : NULL;
         /* On any failure the transaction is aborted; COMMIT would be a
@@ -2669,6 +2739,9 @@ pg_store_migrate(pg_store_t* ps)
         PQclear(begin);
         PQclear(body);
         PQclear(end);
+
+        PGresult* unlock_res = PQexec(px->db, "SELECT pg_advisory_unlock(7192847291)");
+        PQclear(unlock_res);
     }
     pq_unlock(px);
     return rc;

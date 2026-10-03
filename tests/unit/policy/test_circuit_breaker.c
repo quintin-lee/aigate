@@ -219,3 +219,44 @@ TEST_CASE(test_cb_concurrency_stress)
 
     cb_destroy(cb);
 }
+
+TEST_CASE(test_cb_redis_fail_open)
+{
+    circuit_breaker_t* cb = cb_create();
+    TEST_ASSERT(cb != NULL, "cb_create");
+
+    struct mock_redis_pool {
+        char            url[512];
+        int             capacity;
+        int             timeout_ms;
+        int             count;
+        int             idle_count;
+        void**          stack;
+        pthread_mutex_t lock;
+        pthread_cond_t  cond;
+    } mock_pool;
+    memset(&mock_pool, 0, sizeof(mock_pool));
+    pthread_mutex_init(&mock_pool.lock, NULL);
+    pthread_cond_init(&mock_pool.cond, NULL);
+    mock_pool.capacity = 1;
+    mock_pool.count = 1;
+    mock_pool.idle_count = 0;
+    mock_pool.timeout_ms = 1;
+
+    cb_set_redis_pool(cb, (struct redis_pool*)&mock_pool);
+
+    /* Test 1: fail-closed (fail_open = 0) */
+    cb_set_fail_open(cb, 0);
+    TEST_ASSERT(cb_allow_request(cb, "test-m", "http://test-ep") == false,
+                "cb_allow_request denied under fail-closed when redis down");
+
+    /* Test 2: fail-open (fail_open = 1) */
+    cb_set_fail_open(cb, 1);
+    TEST_ASSERT(cb_allow_request(cb, "test-m", "http://test-ep") == true,
+                "cb_allow_request admitted under fail-open local fallback");
+
+    cb_set_redis_pool(cb, NULL);
+    pthread_mutex_destroy(&mock_pool.lock);
+    pthread_cond_destroy(&mock_pool.cond);
+    cb_destroy(cb);
+}

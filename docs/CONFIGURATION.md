@@ -5,7 +5,7 @@
 >
 > 约定：空字符串视同未设置（回默认值）；"启动失败"指进程打日志直接退出。
 
-## 网关变量（共 14 个）
+## 网关变量（共 19 个）
 
 | 变量 | 必填 | 默认 | 越界行为 | 说明 |
 |---|---|---|---|---|
@@ -20,6 +20,11 @@
 | `AIGATE_REDIS_URL` | 否 | 空（禁用） | — | 如 `redis://127.0.0.1:6379`；为空则禁用 Redis |
 | `AIGATE_REDIS_TIMEOUT_MS` | 否 | `100` | 静默回 `100` | 范围 `[1, 60000]`，越界不报错、直接回默认 |
 | `AIGATE_REDIS_POOL_SIZE` | 否 | `32` | 静默回 `32` | 范围 `[1, 512]`，越界不报错、直接回默认 |
+| `AIGATE_WORKER_THREADS` | 否 | `64` | 启动失败 | CivetWeb 工作线程池并发数，范围 `[4, 4096]` |
+| `AIGATE_REQUEST_TIMEOUT_MS` | 否 | `300000` | 启动失败 | CivetWeb 请求/长连接超时（毫秒），范围 `[1000, 3600000]` |
+| `AIGATE_TRUSTED_PROXIES` | 否 | `127.0.0.1` | — | 逗号分隔的受信反代 IP/CIDR，安全提取真实客户端 IP |
+| `AIGATE_DRAIN_TIMEOUT_S` | 否 | `15` | 启动失败 | 优雅下线排空等待时间（秒），范围 `[0, 120]`；期间 `/ready` 返回 503 |
+| `AIGATE_REDIS_FAIL_OPEN` | 否 | `1` | — | Redis 宕机降级模式：`1` 平滑回退单机限流，`0` 严格拒绝 |
 | `AIGATE_ALLOW_PLAINTEXT_KEYS` | 否 | `0` | — | 仅 `=1` 时允许上游密钥明文落库 |
 | `AIGATE_LOCKOUT_MAX_FAILS` | 否 | `10` | 越界保默认 | Admin 连续输错锁定阈值 |
 | `AIGATE_LOCKOUT_WINDOW_S` | 否 | `300` | 越界保默认 | 锁定窗口（秒） |
