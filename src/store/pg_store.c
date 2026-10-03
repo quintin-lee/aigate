@@ -2721,12 +2721,15 @@ pg_store_migrate(pg_store_t* ps)
         /* Fast path: if schema is already up to date, skip running DDL to prevent
          * table-level AccessExclusiveLock contention and deadlocks on multi-replica startup. */
         PGresult* v_res = PQexec(px->db,
-            "SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'schema_migrations'");
-        bool table_exists = (v_res != NULL && PQresultStatus(v_res) == PGRES_TUPLES_OK && PQntuples(v_res) > 0);
+                                 "SELECT 1 FROM information_schema.tables WHERE table_schema = "
+                                 "'public' AND table_name = 'schema_migrations'");
+        bool      table_exists =
+            (v_res != NULL && PQresultStatus(v_res) == PGRES_TUPLES_OK && PQntuples(v_res) > 0);
         PQclear(v_res);
 
         if (table_exists) {
-            PGresult* cur_v = PQexec(px->db, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations");
+            PGresult* cur_v =
+                PQexec(px->db, "SELECT COALESCE(MAX(version), 0) FROM schema_migrations");
             if (cur_v != NULL && PQresultStatus(cur_v) == PGRES_TUPLES_OK && PQntuples(cur_v) > 0) {
                 int max_ver = atoi(PQgetvalue(cur_v, 0, 0));
                 PQclear(cur_v);
