@@ -10,8 +10,14 @@
 
 #include <stdio.h>
 
+/** @brief Configure logging output format and minimum level.
+ *  @param format "text" (default) or "json"
+ *  @param level  "debug", "info" (default), "warn", or "error"
+ */
+void aigate_log_init(const char* format, const char* level);
+
 /** @brief Emit a leveled log line to stderr.
- * @param level "INFO", "WARN", or "ERROR"
+ * @param level "DEBUG", "INFO", "WARN", or "ERROR"
  * @param file  __FILE__ of the call site (passed by the macros)
  * @param line  __LINE__ of the call site (passed by the macros)
  * @param fmt   printf-style format; must not be NULL
@@ -19,6 +25,8 @@
 void aigate_log(const char* level, const char* file, int line, const char* fmt, ...)
     __attribute__((format(printf, 4, 5)));
 
+/** @brief DEBUG level log macro, auto-includes __FILE__/__LINE__. */
+#define AIGATE_LOG_DEBUG(...) aigate_log("DEBUG", __FILE__, __LINE__, __VA_ARGS__)
 /** @brief INFO level log macro, auto-includes __FILE__/__LINE__. */
 #define AIGATE_LOG_INFO(...) aigate_log("INFO", __FILE__, __LINE__, __VA_ARGS__)
 /** @brief WARN level log macro, auto-includes __FILE__/__LINE__. */

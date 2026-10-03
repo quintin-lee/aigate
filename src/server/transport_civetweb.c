@@ -21,27 +21,29 @@
 
 /** @brief CivetWeb transport instance state. */
 struct transport_civetweb {
-    struct mg_context*    ctx;                  /**< CivetWeb context handle */
-    aigate_core*          ac;                   /**< pipeline core (borrowed) */
-    pg_store_t*           ps;                   /**< backing store (borrowed) */
-    char                  admin_token_hash[65]; /**< SHA-256 hex of admin token + NUL */
-    char                  metrics_acl[256];     /**< /metrics IP allowlist text */
-    char                  trusted_proxies[256]; /**< AIGATE_TRUSTED_PROXIES list / CIDRs */
-    admin_ctx_t           adm;                  /**< admin plane state */
-    long                  max_body_bytes;       /**< max /v1 request body in bytes */
-    int                   worker_threads;       /**< worker threads count */
-    int                   request_timeout_ms;   /**< request timeout ms */
-    volatile sig_atomic_t draining;             /**< 1 when node is draining */
+    struct mg_context*    ctx;                    /**< CivetWeb context handle */
+    aigate_core*          ac;                     /**< pipeline core (borrowed) */
+    pg_store_t*           ps;                     /**< backing store (borrowed) */
+    char                  admin_token_hash[65];   /**< SHA-256 hex of admin token + NUL */
+    char                  metrics_acl[256];       /**< /metrics IP allowlist text */
+    char                  trusted_proxies[256];   /**< AIGATE_TRUSTED_PROXIES list / CIDRs */
+    char                  cors_allow_origin[128]; /**< AIGATE_CORS_ALLOW_ORIGIN */
+    admin_ctx_t           adm;                    /**< admin plane state */
+    long                  max_body_bytes;         /**< max /v1 request body in bytes */
+    int                   worker_threads;         /**< worker threads count */
+    int                   request_timeout_ms;     /**< request timeout ms */
+    volatile sig_atomic_t draining;               /**< 1 when node is draining */
 };
 
 /** @brief Per-request response state for the CivetWeb adapter. */
 struct cw_response_state {
-    struct mg_connection* conn;             /**< active CivetWeb connection */
-    int                   status;           /**< HTTP status staged for flush */
-    bool                  headers_sent;     /**< status line already flushed */
-    char                  header_buf[4096]; /**< accumulated header block */
-    size_t                header_len;       /**< bytes used in header_buf */
-    aigate_response_ctx*  rc;               /**< pipeline response context */
+    struct mg_connection* conn;              /**< active CivetWeb connection */
+    int                   status;            /**< HTTP status staged for flush */
+    bool                  headers_sent;      /**< status line already flushed */
+    char                  header_buf[4096];  /**< accumulated header block */
+    size_t                header_len;        /**< bytes used in header_buf */
+    aigate_response_ctx*  rc;                /**< pipeline response context */
+    const char*           cors_allow_origin; /**< CORS allow origin header value */
 };
 
 /** @brief Map an HTTP status code to its reason phrase; unlisted codes return "Response". */
@@ -104,9 +106,20 @@ cw_write(void* impl, const void* buf, size_t len, bool fin)
     (void)fin;
     struct cw_response_state* st = impl;
     if (!st->headers_sent) {
-        int status = (st->rc != NULL && st->rc->status != 0) ? st->rc->status : st->status;
-        mg_printf(
-            st->conn, "HTTP/1.1 %d %s\r\n%s\r\n", status, http_reason(status), st->header_buf);
+        int         status = (st->rc != NULL && st->rc->status != 0) ? st->rc->status : st->status;
+        const char* origin =
+            (st->cors_allow_origin && st->cors_allow_origin[0]) ? st->cors_allow_origin : "*";
+        mg_printf(st->conn,
+                  "HTTP/1.1 %d %s\r\n"
+                  "Access-Control-Allow-Origin: %s\r\n"
+                  "X-Content-Type-Options: nosniff\r\n"
+                  "X-Frame-Options: DENY\r\n"
+                  "Referrer-Policy: strict-origin-when-cross-origin\r\n"
+                  "%s\r\n",
+                  status,
+                  http_reason(status),
+                  origin,
+                  st->header_buf);
         st->headers_sent = true;
     }
     if (len > 0 && buf != NULL) {
@@ -240,15 +253,22 @@ read_body(struct mg_connection* conn, long long cl, size_t* out_len)
 /** @brief Write a JSON error response directly (with Content-Length, Connection: close).
  *  @return Always 1 (CivetWeb handled marker). */
 static int
-send_http_error_json(struct mg_connection* conn, int status, const char* body, size_t len)
+send_http_error_json(
+    struct mg_connection* conn, int status, const char* body, size_t len, const char* cors_origin)
 {
+    const char* origin = (cors_origin != NULL && cors_origin[0] != '\0') ? cors_origin : "*";
     mg_printf(conn,
               "HTTP/1.1 %d %s\r\n"
               "Content-Type: application/json; charset=utf-8\r\n"
+              "Access-Control-Allow-Origin: %s\r\n"
+              "X-Content-Type-Options: nosniff\r\n"
+              "X-Frame-Options: DENY\r\n"
+              "Referrer-Policy: strict-origin-when-cross-origin\r\n"
               "Content-Length: %zu\r\n"
               "Connection: close\r\n\r\n",
               status,
               http_reason(status),
+              origin,
               len);
     if (len > 0) {
         mg_write(conn, body, len);
@@ -267,6 +287,26 @@ handle_v1(struct mg_connection* conn, void* cbdata)
         return 0;
     }
 
+    /* Intercept CORS preflight OPTIONS early */
+    if (strcmp(ri->request_method, "OPTIONS") == 0) {
+        mg_printf(
+            conn,
+            "HTTP/1.1 204 No Content\r\n"
+            "Access-Control-Allow-Origin: %s\r\n"
+            "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, HEAD\r\n"
+            "Access-Control-Allow-Headers: Authorization, Content-Type, Cache-Control, "
+            "X-Aigate-Target-Provider, X-Aigate-Compress, X-Aigate-Prompt-Cache, "
+            "traceparent, x-api-key, x-goog-api-key, x-skip-cache, X-Requested-With, Accept\r\n"
+            "Access-Control-Max-Age: 86400\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "X-Frame-Options: DENY\r\n"
+            "Referrer-Policy: strict-origin-when-cross-origin\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: keep-alive\r\n\r\n",
+            cw->cors_allow_origin);
+        return 1;
+    }
+
     /* Enforce body size cap */
     if (ri->content_length > cw->max_body_bytes) {
         AIGATE_LOG_WARN("request body too large (%lld bytes, cap %ld) from %s",
@@ -275,7 +315,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
                         ri->remote_addr);
         const char* err413 = "{\"error\":{\"message\":\"request body too "
                              "large\",\"type\":\"payload_too_large\",\"code\":413}}";
-        send_http_error_json(conn, 413, err413, (size_t)strlen(err413));
+        send_http_error_json(conn, 413, err413, (size_t)strlen(err413), cw->cors_allow_origin);
         return 1;
     }
     size_t body_len = 0;
@@ -285,6 +325,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     memset(&resp_state, 0, sizeof resp_state);
     resp_state.conn = conn;
     resp_state.status = 200;
+    resp_state.cors_allow_origin = cw->cors_allow_origin;
 
     aigate_response_ctx rc;
     memset(&rc, 0, sizeof rc);
@@ -333,6 +374,26 @@ handle_admin(struct mg_connection* conn, void* cbdata)
         return 0;
     }
 
+    /* Intercept CORS preflight OPTIONS early */
+    if (strcmp(ri->request_method, "OPTIONS") == 0) {
+        mg_printf(
+            conn,
+            "HTTP/1.1 204 No Content\r\n"
+            "Access-Control-Allow-Origin: %s\r\n"
+            "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS, HEAD\r\n"
+            "Access-Control-Allow-Headers: Authorization, Content-Type, Cache-Control, "
+            "X-Aigate-Target-Provider, X-Aigate-Compress, X-Aigate-Prompt-Cache, "
+            "traceparent, x-api-key, x-goog-api-key, x-skip-cache, X-Requested-With, Accept\r\n"
+            "Access-Control-Max-Age: 86400\r\n"
+            "X-Content-Type-Options: nosniff\r\n"
+            "X-Frame-Options: DENY\r\n"
+            "Referrer-Policy: strict-origin-when-cross-origin\r\n"
+            "Content-Length: 0\r\n"
+            "Connection: keep-alive\r\n\r\n",
+            cw->cors_allow_origin);
+        return 1;
+    }
+
     if (strcmp(ri->local_uri, "/admin/v1/events") == 0) {
         if (strcmp(ri->request_method, "GET") != 0 && strcmp(ri->request_method, "HEAD") != 0) {
             mg_send_http_error(conn, 405, "Method Not Allowed");
@@ -359,7 +420,11 @@ handle_admin(struct mg_connection* conn, void* cbdata)
                   "Cache-Control: no-cache, no-transform\r\n"
                   "Connection: keep-alive\r\n"
                   "Transfer-Encoding: chunked\r\n"
-                  "Access-Control-Allow-Origin: *\r\n\r\n");
+                  "Access-Control-Allow-Origin: %s\r\n"
+                  "X-Content-Type-Options: nosniff\r\n"
+                  "X-Frame-Options: DENY\r\n"
+                  "Referrer-Policy: strict-origin-when-cross-origin\r\n\r\n",
+                  cw->cors_allow_origin);
 
         if (strcmp(ri->request_method, "HEAD") == 0) {
             event_bus_unsubscribe(cw->adm.eb, sub_id);
@@ -412,7 +477,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
                         ri->remote_addr);
         const char* err413 = "{\"error\":{\"message\":\"request body too "
                              "large\",\"type\":\"payload_too_large\",\"code\":413}}";
-        send_http_error_json(conn, 413, err413, (size_t)strlen(err413));
+        send_http_error_json(conn, 413, err413, (size_t)strlen(err413), cw->cors_allow_origin);
         return 1;
     }
     size_t body_len = 0;
@@ -451,9 +516,14 @@ handle_admin(struct mg_connection* conn, void* cbdata)
         mg_printf(conn,
                   "HTTP/1.1 %d %s\r\n"
                   "Content-Type: application/json\r\n"
+                  "Access-Control-Allow-Origin: %s\r\n"
+                  "X-Content-Type-Options: nosniff\r\n"
+                  "X-Frame-Options: DENY\r\n"
+                  "Referrer-Policy: strict-origin-when-cross-origin\r\n"
                   "Content-Length: %zu\r\n\r\n",
                   out_status,
                   http_reason(out_status),
+                  cw->cors_allow_origin,
                   out_len);
         mg_write(conn, out_body, out_len);
         free(out_body);
@@ -548,6 +618,10 @@ handle_healthz(struct mg_connection* conn, void* cbdata)
     mg_printf(conn,
               "HTTP/1.1 200 OK\r\n"
               "Content-Type: application/json\r\n"
+              "Access-Control-Allow-Origin: *\r\n"
+              "X-Content-Type-Options: nosniff\r\n"
+              "X-Frame-Options: DENY\r\n"
+              "Referrer-Policy: strict-origin-when-cross-origin\r\n"
               "Content-Length: %zu\r\n\r\n",
               len);
     mg_write(conn, body, len);
@@ -565,6 +639,10 @@ handle_ready(struct mg_connection* conn, void* cbdata)
         mg_printf(conn,
                   "HTTP/1.1 503 Service Unavailable\r\n"
                   "Content-Type: application/json\r\n"
+                  "Access-Control-Allow-Origin: *\r\n"
+                  "X-Content-Type-Options: nosniff\r\n"
+                  "X-Frame-Options: DENY\r\n"
+                  "Referrer-Policy: strict-origin-when-cross-origin\r\n"
                   "Content-Length: %zu\r\n\r\n",
                   len);
         mg_write(conn, body, len);
@@ -576,6 +654,10 @@ handle_ready(struct mg_connection* conn, void* cbdata)
     mg_printf(conn,
               "HTTP/1.1 200 OK\r\n"
               "Content-Type: application/json\r\n"
+              "Access-Control-Allow-Origin: *\r\n"
+              "X-Content-Type-Options: nosniff\r\n"
+              "X-Frame-Options: DENY\r\n"
+              "Referrer-Policy: strict-origin-when-cross-origin\r\n"
               "Content-Length: %zu\r\n\r\n",
               len);
     mg_write(conn, body, len);
@@ -591,7 +673,8 @@ transport_civetweb_start(aigate_core* ac,
                          long         max_body_bytes,
                          int          worker_threads,
                          int          request_timeout_ms,
-                         const char*  trusted_proxies)
+                         const char*  trusted_proxies,
+                         const char*  cors_allow_origin)
 {
     transport_civetweb_t* cw = calloc(1, sizeof *cw);
     if (cw == NULL) {
@@ -612,6 +695,11 @@ transport_civetweb_start(aigate_core* ac,
         snprintf(cw->trusted_proxies, sizeof cw->trusted_proxies, "%s", trusted_proxies);
     } else {
         snprintf(cw->trusted_proxies, sizeof cw->trusted_proxies, "127.0.0.1");
+    }
+    if (cors_allow_origin != NULL && cors_allow_origin[0] != '\0') {
+        snprintf(cw->cors_allow_origin, sizeof cw->cors_allow_origin, "%s", cors_allow_origin);
+    } else {
+        snprintf(cw->cors_allow_origin, sizeof cw->cors_allow_origin, "*");
     }
 
     cw->adm.ac = ac;
@@ -649,6 +737,12 @@ transport_civetweb_start(aigate_core* ac,
         threads_str,
         "request_timeout_ms",
         timeout_str,
+        "access_control_allow_methods",
+        "",
+        "access_control_allow_origin",
+        "",
+        "access_control_allow_headers",
+        "",
         NULL,
     };
 

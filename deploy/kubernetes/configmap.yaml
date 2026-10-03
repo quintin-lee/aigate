@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aigate-config
+  namespace: aigate
+  labels:
+    app.kubernetes.io/name: aigate
+    app.kubernetes.io/part-of: aigate
+data:
+  AIGATE_LISTEN: ":8080"
+  AIGATE_WORKER_THREADS: "64"
+  AIGATE_REQUEST_TIMEOUT_MS: "300000"
+  AIGATE_UPSTREAM_TIMEOUT_MS: "60000"
+  AIGATE_METRICS_ACL: "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  AIGATE_TRUSTED_PROXIES: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  AIGATE_DRAIN_TIMEOUT_S: "15"
+  AIGATE_REDIS_FAIL_OPEN: "1"
+  AIGATE_CORS_ALLOW_ORIGIN: "*"
+  AIGATE_LOG_FORMAT: "json"
+  AIGATE_LOG_LEVEL: "info"
+  AIGATE_REDIS_POOL_SIZE: "16"
+  AIGATE_REDIS_TIMEOUT_MS: "200"

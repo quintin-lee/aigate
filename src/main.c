@@ -53,6 +53,7 @@ main(void)
         AIGATE_LOG_ERROR("main: config load failed, exiting");
         return 1;
     }
+    aigate_log_init(cfg.log_format, cfg.log_level);
 
     /* 2. Database connection & schema migration */
     pg_store_t* ps = pg_store_open(cfg.pg_dsn, NULL);
@@ -128,7 +129,8 @@ main(void)
                                                         cfg.max_body_bytes,
                                                         cfg.worker_threads,
                                                         cfg.request_timeout_ms,
-                                                        cfg.trusted_proxies);
+                                                        cfg.trusted_proxies,
+                                                        cfg.cors_allow_origin);
     if (cw == NULL) {
         AIGATE_LOG_ERROR("main: failed to start HTTP transport on %s", cfg.listen);
         aigate_core_shutdown(&core);

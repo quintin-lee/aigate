@@ -42,7 +42,8 @@ transport_civetweb_t* transport_civetweb_start(aigate_core* ac,
                                                long         max_body_bytes,
                                                int          worker_threads,
                                                int          request_timeout_ms,
-                                               const char*  trusted_proxies);
+                                               const char*  trusted_proxies,
+                                               const char*  cors_allow_origin);
 
 /**
  * @brief Mark transport as entering/exiting draining state before graceful exit.

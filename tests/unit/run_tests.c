@@ -7,6 +7,7 @@
  */
 #include "run_tests.h"
 #include <stdio.h>
+#include <string.h>
 
 int g_failures = 0;
 
@@ -33,16 +34,18 @@ test_register(const char* name, test_fn fn)
 /** @brief Run all registered cases in order.
  *  @return Number of failed cases; 0 means all passed. */
 int
-main(void)
+main(int argc, char** argv)
 {
     extern void test_log_smoke(void);
     extern void test_log_concurrent(void);
+    extern void test_log_json_and_level_filtering(void);
     extern void test_sha256_kat(void);
     extern void test_sha256_equal(void);
     extern void test_config_defaults(void);
     extern void test_config_missing_required(void);
     extern void test_config_bad_master_key(void);
     extern void test_config_worker_threads_and_p0(void);
+    extern void test_config_p1_features(void);
     extern void test_lru_eviction_order(void);
     extern void test_lru_recency_refresh(void);
     extern void test_lru_replace_and_invalidate(void);
@@ -123,12 +126,14 @@ main(void)
     extern void test_provider_default_params_merge(void);
     test_register("log_smoke", test_log_smoke);
     test_register("log_concurrent", test_log_concurrent);
+    test_register("log_json_and_level_filtering", test_log_json_and_level_filtering);
     test_register("sha256_kat", test_sha256_kat);
     test_register("sha256_equal", test_sha256_equal);
     test_register("config_defaults", test_config_defaults);
     test_register("config_missing_required", test_config_missing_required);
     test_register("config_bad_master_key", test_config_bad_master_key);
     test_register("config_worker_threads_and_p0", test_config_worker_threads_and_p0);
+    test_register("config_p1_features", test_config_p1_features);
     test_register("lru_eviction_order", test_lru_eviction_order);
     test_register("lru_recency_refresh", test_lru_recency_refresh);
     test_register("lru_replace_and_invalidate", test_lru_replace_and_invalidate);
@@ -620,8 +625,16 @@ main(void)
     extern void test_transport_client_ip_resolution(void);
     test_register("transport_client_ip_resolution", test_transport_client_ip_resolution);
 
+    extern void test_transport_cors_and_security_headers(void);
+    test_register("transport_cors_and_security_headers", test_transport_cors_and_security_headers);
+
+    int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
+        if (argc > 1 && strstr(g_tests[i].name, argv[1]) == NULL) {
+            continue;
+        }
+        ran++;
         g_failures = 0;
         printf("=== TEST: %s ===\n", g_tests[i].name);
         fflush(stdout);
@@ -631,6 +644,6 @@ main(void)
             fprintf(stderr, "FAILED: %s\n", g_tests[i].name);
         }
     }
-    printf("PASS: %d/%d test(s), %d failure(s)\n", g_n_tests - failed, g_n_tests, failed);
+    printf("PASS: %d/%d test(s), %d failure(s)\n", ran - failed, ran, failed);
     return failed;
 }

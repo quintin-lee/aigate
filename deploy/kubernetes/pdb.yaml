@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: aigate-pdb
+  namespace: aigate
+  labels:
+    app.kubernetes.io/name: aigate
+    app.kubernetes.io/part-of: aigate
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: aigate

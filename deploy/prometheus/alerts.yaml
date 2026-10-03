@@ -1,0 +1,52 @@
+groups:
+  - name: aigate_alerts
+    rules:
+      - alert: AigateDown
+        expr: up{job=~".*aigate.*"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          tier: gateway
+        annotations:
+          summary: "aigate gateway instance is down"
+          description: "aigate instance {{ $labels.instance }} has been unreachable for more than 1 minute."
+
+      - alert: AigateHigh5xxRate
+        expr: (rate(aigate_errors_total[5m]) / clamp_min(rate(aigate_requests_total[5m]), 0.001)) * 100 > 1
+        for: 3m
+        labels:
+          severity: warning
+          tier: gateway
+        annotations:
+          summary: "aigate high 5xx error rate"
+          description: "Gateway 5xx error rate is {{ $value | printf \"%.2f\" }}% (> 1%) over the last 5 minutes on {{ $labels.instance }}."
+
+      - alert: AigateCritical5xxRate
+        expr: (rate(aigate_errors_total[5m]) / clamp_min(rate(aigate_requests_total[5m]), 0.001)) * 100 > 5
+        for: 2m
+        labels:
+          severity: critical
+          tier: gateway
+        annotations:
+          summary: "aigate critical 5xx error rate"
+          description: "Gateway 5xx error rate is {{ $value | printf \"%.2f\" }}% (> 5%) over the last 2 minutes on {{ $labels.instance }}."
+
+      - alert: AigateP99LatencyHigh
+        expr: histogram_quantile(0.99, sum(rate(aigate_upstream_latency_ns_ns_bucket[5m])) by (le, provider)) > 3000000000
+        for: 5m
+        labels:
+          severity: warning
+          tier: gateway
+        annotations:
+          summary: "aigate upstream P99 latency exceeded 3s"
+          description: "Provider {{ $labels.provider }} P99 latency is {{ $value | humanizeDuration }} (> 3s) for the last 5 minutes."
+
+      - alert: AigateFrequentFailover
+        expr: sum(rate(aigate_failover_total[5m])) by (model, from_provider, to_provider) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          tier: gateway
+        annotations:
+          summary: "Frequent upstream failovers detected"
+          description: "Model {{ $labels.model }} failing over from {{ $labels.from_provider }} to {{ $labels.to_provider }} at rate {{ $value }} / sec."

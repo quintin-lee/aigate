@@ -134,5 +134,23 @@ aigate_config_load(aigate_config* out)
     env_str("AIGATE_REDIS_FAIL_OPEN", "1", raw_key, sizeof raw_key);
     out->redis_fail_open = (atoi(raw_key) != 0) ? 1 : 0;
 
+    env_str("AIGATE_CORS_ALLOW_ORIGIN", "*", out->cors_allow_origin, sizeof out->cors_allow_origin);
+    if (out->cors_allow_origin[0] == '\0') {
+        snprintf(out->cors_allow_origin, sizeof out->cors_allow_origin, "*");
+    }
+
+    env_str("AIGATE_LOG_FORMAT", "text", out->log_format, sizeof out->log_format);
+    if (strcasecmp(out->log_format, "json") != 0 && strcasecmp(out->log_format, "text") != 0) {
+        AIGATE_LOG_WARN("invalid AIGATE_LOG_FORMAT '%s', defaulting to 'text'", out->log_format);
+        snprintf(out->log_format, sizeof out->log_format, "text");
+    }
+
+    env_str("AIGATE_LOG_LEVEL", "info", out->log_level, sizeof out->log_level);
+    if (strcasecmp(out->log_level, "debug") != 0 && strcasecmp(out->log_level, "info") != 0 &&
+        strcasecmp(out->log_level, "warn") != 0 && strcasecmp(out->log_level, "error") != 0) {
+        AIGATE_LOG_WARN("invalid AIGATE_LOG_LEVEL '%s', defaulting to 'info'", out->log_level);
+        snprintf(out->log_level, sizeof out->log_level, "info");
+    }
+
     return 0;
 }

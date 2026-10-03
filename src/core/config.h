@@ -19,9 +19,12 @@ typedef struct aigate_config {
     int  redis_pool_size;      /**< AIGATE_REDIS_POOL_SIZE, default 32, range [1,512] */
     int  worker_threads;       /**< AIGATE_WORKER_THREADS, default 64, range [4, 4096] */
     int request_timeout_ms; /**< AIGATE_REQUEST_TIMEOUT_MS, default 300000, range [1000, 3600000] */
-    char trusted_proxies[256]; /**< AIGATE_TRUSTED_PROXIES, default "127.0.0.1" */
-    int  drain_timeout_s;      /**< AIGATE_DRAIN_TIMEOUT_S, default 15, range [0, 120] */
-    int  redis_fail_open;      /**< AIGATE_REDIS_FAIL_OPEN, default 1 (0 or 1) */
+    char trusted_proxies[256];   /**< AIGATE_TRUSTED_PROXIES, default "127.0.0.1" */
+    int  drain_timeout_s;        /**< AIGATE_DRAIN_TIMEOUT_S, default 15, range [0, 120] */
+    int  redis_fail_open;        /**< AIGATE_REDIS_FAIL_OPEN, default 1 (0 or 1) */
+    char cors_allow_origin[128]; /**< AIGATE_CORS_ALLOW_ORIGIN, default "*" */
+    char log_format[16];         /**< AIGATE_LOG_FORMAT, "text" (default) or "json" */
+    char log_level[16]; /**< AIGATE_LOG_LEVEL, "debug", "info" (default), "warn", "error" */
 } aigate_config;
 
 /** @brief Fill @p out from environment variables.

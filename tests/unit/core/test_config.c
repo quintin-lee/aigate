@@ -19,7 +19,10 @@ clear_env(void)
                           "AIGATE_REQUEST_TIMEOUT_MS",
                           "AIGATE_TRUSTED_PROXIES",
                           "AIGATE_DRAIN_TIMEOUT_S",
-                          "AIGATE_REDIS_FAIL_OPEN"};
+                          "AIGATE_REDIS_FAIL_OPEN",
+                          "AIGATE_CORS_ALLOW_ORIGIN",
+                          "AIGATE_LOG_FORMAT",
+                          "AIGATE_LOG_LEVEL"};
     for (size_t i = 0; i < sizeof vars / sizeof vars[0]; i++) {
         unsetenv(vars[i]);
     }
@@ -43,6 +46,9 @@ TEST_CASE(test_config_defaults)
     TEST_ASSERT(strcmp(c.trusted_proxies, "127.0.0.1") == 0, "default trusted proxies");
     TEST_ASSERT(c.drain_timeout_s == 15, "default drain timeout 15s");
     TEST_ASSERT(c.redis_fail_open == 1, "default redis fail open 1");
+    TEST_ASSERT(strcmp(c.cors_allow_origin, "*") == 0, "default cors allow origin *");
+    TEST_ASSERT(strcmp(c.log_format, "text") == 0, "default log format text");
+    TEST_ASSERT(strcmp(c.log_level, "info") == 0, "default log level info");
     clear_env();
 }
 
@@ -107,6 +113,32 @@ TEST_CASE(test_config_worker_threads_and_p0)
     setenv("AIGATE_REQUEST_TIMEOUT_MS", "300000", 1);
     setenv("AIGATE_DRAIN_TIMEOUT_S", "200", 1);
     TEST_ASSERT(aigate_config_load(&c) == -1, "drain timeout > 120 rejected");
+
+    clear_env();
+}
+
+TEST_CASE(test_config_p1_features)
+{
+    aigate_config c;
+    clear_env();
+    setenv("AIGATE_PG_DSN", "dbname=x", 1);
+    setenv("AIGATE_ADMIN_TOKEN", "t", 1);
+
+    setenv("AIGATE_CORS_ALLOW_ORIGIN", "https://app.example.com", 1);
+    setenv("AIGATE_LOG_FORMAT", "json", 1);
+    setenv("AIGATE_LOG_LEVEL", "debug", 1);
+
+    TEST_ASSERT(aigate_config_load(&c) == 0, "load custom P1 configs");
+    TEST_ASSERT(strcmp(c.cors_allow_origin, "https://app.example.com") == 0, "custom cors origin");
+    TEST_ASSERT(strcmp(c.log_format, "json") == 0, "custom log format json");
+    TEST_ASSERT(strcmp(c.log_level, "debug") == 0, "custom log level debug");
+
+    /* Invalid log format and log level fallback to defaults with warning */
+    setenv("AIGATE_LOG_FORMAT", "xml", 1);
+    setenv("AIGATE_LOG_LEVEL", "verbose", 1);
+    TEST_ASSERT(aigate_config_load(&c) == 0, "load with fallback for invalid log format/level");
+    TEST_ASSERT(strcmp(c.log_format, "text") == 0, "fallback log format text");
+    TEST_ASSERT(strcmp(c.log_level, "info") == 0, "fallback log level info");
 
     clear_env();
 }
