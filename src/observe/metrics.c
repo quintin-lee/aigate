@@ -476,8 +476,17 @@ metrics_acl_allows(const char* ip, const char* acl)
     if (acl == NULL || acl[0] == '\0') {
         return 1;
     }
+    if (ip == NULL || ip[0] == '\0') {
+        return 0;
+    }
+    const char* clean_ip = ip;
+    if (strcmp(clean_ip, "::1") == 0 || strcmp(clean_ip, "0:0:0:0:0:0:0:1") == 0) {
+        clean_ip = "127.0.0.1";
+    } else if (strncmp(clean_ip, "::ffff:", 7) == 0) {
+        clean_ip += 7;
+    }
     struct in_addr addr;
-    if (inet_pton(AF_INET, ip, &addr) != 1) {
+    if (inet_pton(AF_INET, clean_ip, &addr) != 1) {
         return 0;
     }
     const char* p = acl;

@@ -9,16 +9,20 @@ const streamChunkCounter = new Counter('llm_chunks_received');
 const streamSuccessRate = new Rate('llm_stream_success_rate');
 const rateLimitCounter = new Counter('llm_rate_limited_429');
 
+const SCALE = parseFloat(__ENV.SCALE || '1');      // time scale: 0.2 => 5x shorter
+const PEAK = parseInt(__ENV.PEAK_VUS || '100', 10); // peak virtual users
+const d = (s) => `${Math.max(1, Math.round(s * SCALE))}s`;
+
 export const options = {
   scenarios: {
     chat_stream_load: {
       executor: 'ramping-vus',
       startVUs: 1,
       stages: [
-        { duration: '30s', target: 20 },  // Ramp up
-        { duration: '1m', target: 50 },   // Steady state
-        { duration: '30s', target: 100 }, // Peak burst
-        { duration: '30s', target: 0 },   // Ramp down
+        { duration: d(30), target: Math.round(PEAK * 0.2) }, // Ramp up
+        { duration: d(60), target: Math.round(PEAK * 0.5) }, // Steady state
+        { duration: d(30), target: PEAK },                   // Peak burst
+        { duration: d(30), target: 0 },                      // Ramp down
       ],
       gracefulRampDown: '10s',
     },
@@ -40,7 +44,7 @@ export default function () {
     model: MODEL,
     messages: [
       { role: 'system', content: 'You are a concise, helpful assistant.' },
-      { role: 'user', content: 'Explain the benefits of streaming Server-Sent Events in 3 short bullet points.' }
+      { role: 'user', content: `Explain the benefits of streaming Server-Sent Events in 3 short bullet points. [req ${__VU}-${__ITER}-${Date.now()}]` }
     ],
     temperature: 0.7,
     max_tokens: 150,

@@ -562,7 +562,10 @@ handle_metrics(struct mg_connection* conn, void* cbdata)
         return 0;
     }
 
-    if (!metrics_acl_allows(ri->remote_addr, cw->metrics_acl)) {
+    char client_ip[64];
+    transport_civetweb_extract_client_ip(
+        conn, ri->remote_addr, cw->trusted_proxies, client_ip, sizeof client_ip);
+    if (!metrics_acl_allows(client_ip, cw->metrics_acl)) {
         mg_send_http_error(conn, 403, "Forbidden: IP not allowed for /metrics");
         return 1;
     }

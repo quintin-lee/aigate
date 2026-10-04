@@ -107,3 +107,38 @@ k6 run \
 ```
 
 Observe TTFT (`llm_ttft_ms`), total stream duration, and chunk delivery stability in real-time.
+
+Shorter demo run: `-e SCALE=0.2 -e PEAK_VUS=50`.
+
+---
+
+## 7. Offline Benchmark (no k6 / no Docker Hub required)
+
+```bash
+# 1. Mock OpenAI-compatible upstream (50ms TTFT, 7 content chunks @ 20ms)
+python3 deploy/bench/mock_llm.py &          # listens on :9099
+
+# 2. Register model pointing at the mock (docker bridge gateway IP shown) and create a key
+curl -X POST localhost:8080/admin/v1/models -H "Authorization: Bearer $ADMIN" \
+  -d '{"name":"gpt-4o","provider":"openai","endpoint":"http://172.39.4.1:9099",
+       "targets":[{"provider":"openai","endpoint":"http://172.39.4.1:9099","max_concurrent":100}]}'
+
+# 3. Zero-dependency SSE load generator
+python3 deploy/bench/stream_bench.py --key aig_xxx --concurrency 100 --requests 3000
+```
+
+### Reference results (single gateway container, local dev box, mock upstream)
+
+| Scenario | Requests | Success | Throughput | TTFT p50 / p95 / p99 | Stream p99 |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| 100 concurrent streams | 3000 | 100% | ~300 req/s | 178 / 232 / 249 ms | 403 ms |
+| `max_concurrent=10`, 50 concurrent | 500 | 30×200, 470×429 | fail-fast | — | — |
+
+Ideal (zero-overhead) stream time against the mock is ~190ms. At 50 concurrent streams
+TTFT p50 is ~54ms (≈ ideal); at 100 it rises to ~178ms. The load generator, the
+GIL-bound Python mock and the gateway all share one host, so this run does not isolate
+gateway overhead — use a native upstream mock on a separate host for real capacity numbers.
+
+> [!NOTE]
+> Requests over the `max_concurrent` limit get an immediate `429` +
+> `Retry-After: 1` (`{"error":{"type":"rate_limit_error",...}}`) instead of queuing.
