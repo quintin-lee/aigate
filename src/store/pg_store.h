@@ -368,6 +368,19 @@ int pg_store_migrate(pg_store_t* ps);
 /** @brief Access the live ops table (real or fake). */
 const pg_ops_t* pg_store_ops(const pg_store_t* ps);
 
+/**
+ * @brief Rotate master encryption key for all upstream model/provider keys in the database.
+ * @param ps store context
+ * @param old_master 32-byte old master key
+ * @param new_master 32-byte new master key
+ * @param out_rotated_count output count of rotated keys (models + providers)
+ * @return 0 on success, -1 on failure
+ */
+int pg_store_rotate_master_key(pg_store_t*   ps,
+                               const uint8_t old_master[32],
+                               const uint8_t new_master[32],
+                               int*          out_rotated_count);
+
 /** @brief Free a key_rec_t populated by get_key_by_hash (frees allowed_models). */
 void key_rec_free(key_rec_t* k);
 

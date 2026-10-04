@@ -390,3 +390,71 @@ TEST_CASE(test_transport_cors_and_security_headers)
     aigate_core_shutdown(&core);
     pg_store_close(ps);
 }
+
+TEST_CASE(test_transport_dynamic_config_reload)
+{
+    pg_ops_t ops;
+    memset(&ops, 0, sizeof ops);
+    ops.list_guardrails_rules = (int (*)(void*, guardrail_rule_t*, int, int*))stub_zero;
+    ops.list_shadow_rules = (int (*)(void*, shadow_rule_t*, int, int*))stub_zero;
+    ops.list_compressor_rules = (int (*)(void*, compressor_rule_t*, int, int*))stub_zero;
+    ops.list_cache_optimizer_rules = (int (*)(void*, cache_optimizer_rule_t*, int, int*))stub_zero;
+    ops.list_models = (int (*)(void*, model_rec_t*, int, int*))stub_zero;
+    ops.get_key_by_hash = (int (*)(void*, const char*, key_rec_t*))stub_one;
+
+    pg_store_t* ps = pg_store_open("unused", &ops);
+    aigate_core core;
+    aigate_core_init(&core, ps, NULL, 60000, 5);
+
+    /* Start transport with initial origin https://old.example.com on port 18098 */
+    transport_civetweb_t* cw = transport_civetweb_start(&core,
+                                                        ps,
+                                                        "dummy_hash",
+                                                        "127.0.0.1:18098",
+                                                        "127.0.0.1",
+                                                        1048576,
+                                                        16,
+                                                        5000,
+                                                        "127.0.0.1",
+                                                        "https://old.example.com");
+    TEST_ASSERT(cw != NULL, "transport started on port 18098");
+
+    char headers[2048];
+
+    /* 1. Preflight with initial CORS configuration */
+    long status = do_http_options("http://127.0.0.1:18098/v1/chat/completions",
+                                  "https://old.example.com",
+                                  headers,
+                                  sizeof(headers));
+    TEST_ASSERT(status == 204, "OPTIONS returns 204");
+    TEST_ASSERT(strstr(headers, "Access-Control-Allow-Origin: https://old.example.com") != NULL,
+                "initial CORS origin returned");
+
+    /* 2. Dynamically reload CORS origin to https://new.example.com (simulating SIGHUP) */
+    transport_civetweb_update_cors(cw, "https://new.example.com");
+
+    status = do_http_options("http://127.0.0.1:18098/v1/chat/completions",
+                             "https://new.example.com",
+                             headers,
+                             sizeof(headers));
+    TEST_ASSERT(status == 204, "OPTIONS returns 204 after update");
+    TEST_ASSERT(strstr(headers, "Access-Control-Allow-Origin: https://new.example.com") != NULL,
+                "updated CORS origin returned without restart");
+
+    /* 3. Dynamically update trusted proxies */
+    transport_civetweb_update_trusted_proxies(cw, "10.0.0.0/8,172.16.0.0/12");
+
+    /* 4. Reset CORS origin with NULL to default "*" */
+    transport_civetweb_update_cors(cw, NULL);
+    status = do_http_options("http://127.0.0.1:18098/v1/chat/completions",
+                             "https://any.example.com",
+                             headers,
+                             sizeof(headers));
+    TEST_ASSERT(status == 204, "OPTIONS returns 204 after reset");
+    TEST_ASSERT(strstr(headers, "Access-Control-Allow-Origin: *") != NULL,
+                "default wildcard CORS origin returned");
+
+    transport_civetweb_stop(cw);
+    aigate_core_shutdown(&core);
+    pg_store_close(ps);
+}

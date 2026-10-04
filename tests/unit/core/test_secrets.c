@@ -62,3 +62,36 @@ TEST_CASE(test_secret_hex_to_bytes)
         hex_to_bytes32("zzzz2233445566778899aabbccddeeff00112233445566778899aabbccddeeff", b) == -1,
         "bad hex rejected");
 }
+
+TEST_CASE(test_secret_rotate)
+{
+    uint8_t old_m[32], new_m[32], wrong_m[32];
+    make_master(old_m);
+    for (int i = 0; i < 32; i++) {
+        new_m[i] = (uint8_t)(i + 10);
+        wrong_m[i] = (uint8_t)(i + 99);
+    }
+
+    const char* secret_val = "sk-super-secret-api-token";
+    char        blob_old[4096], blob_new[4096], plain[2048];
+    size_t      out_len = 0;
+
+    TEST_ASSERT(secret_encrypt(old_m, secret_val, strlen(secret_val), blob_old, sizeof blob_old) ==
+                    0,
+                "encrypt with old_m ok");
+
+    /* Rotate with wrong old key should fail */
+    TEST_ASSERT(secret_rotate(wrong_m, new_m, blob_old, blob_new, sizeof blob_new) != 0,
+                "rotate with wrong old key rejected");
+
+    /* Rotate with correct keys */
+    TEST_ASSERT(secret_rotate(old_m, new_m, blob_old, blob_new, sizeof blob_new) == 0, "rotate ok");
+
+    /* Verify blob_new decrypts with new_m and NOT with old_m */
+    TEST_ASSERT(secret_decrypt(old_m, blob_new, plain, sizeof plain, NULL) != 0,
+                "blob_new cannot decrypt with old_m");
+    TEST_ASSERT(secret_decrypt(new_m, blob_new, plain, sizeof plain, &out_len) == 0,
+                "blob_new decrypts with new_m");
+    TEST_ASSERT(out_len == strlen(secret_val) && strcmp(plain, secret_val) == 0,
+                "decrypted plaintext matches original");
+}

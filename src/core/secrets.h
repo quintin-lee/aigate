@@ -35,4 +35,17 @@ int secret_decrypt(
 /** @brief Decode a 64-char hex string into 32 bytes. @return 0 ok, -1 on bad length/char. */
 int hex_to_bytes32(const char* hex64, uint8_t out[32]);
 
+/** @brief Rotate an encrypted secret from old master key to new master key.
+ * @param old_master 32-byte old master key
+ * @param new_master 32-byte new master key
+ * @param in_blob    input hex blob
+ * @param out_blob   output hex buffer
+ * @param out_cap    capacity of out_blob
+ * @return 0 on success, -1 on decrypt or encrypt failure. */
+int secret_rotate(const uint8_t old_master[32],
+                  const uint8_t new_master[32],
+                  const char*   in_blob,
+                  char*         out_blob,
+                  size_t        out_cap);
+
 #endif /* AIGATE_SECRETS_H */

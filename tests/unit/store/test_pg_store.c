@@ -6,6 +6,7 @@
  */
 #include "run_tests.h"
 #include "pg_store.h"
+#include "secrets.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -1597,6 +1598,89 @@ TEST_CASE(test_pg_fake_prompt_template)
                 "updated key system_prompt");
     TEST_ASSERT(k_out.prompt_mode == 1, "updated key prompt_mode");
     key_rec_free(&k_out);
+
+    pg_store_close(ps);
+}
+
+TEST_CASE(test_pg_store_rotate_master_key)
+{
+    struct fake_db db;
+    memset(&db, 0, sizeof db);
+    pg_ops_t ops;
+    build_fake_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open("fake://", &ops);
+    TEST_ASSERT(ps != NULL, "store open");
+
+    uint8_t old_m[32], new_m[32], wrong_m[32];
+    for (int i = 0; i < 32; i++) {
+        old_m[i] = (uint8_t)i;
+        new_m[i] = (uint8_t)(i + 15);
+        wrong_m[i] = (uint8_t)(i + 99);
+    }
+
+    /* 1. Add model with pg: encrypted upstream_key_ref */
+    char        enc_blob[1024];
+    const char* raw_secret = "sk-upstream-secret-12345";
+    TEST_ASSERT(secret_encrypt(old_m, raw_secret, strlen(raw_secret), enc_blob, sizeof enc_blob) ==
+                    0,
+                "encrypt raw_secret ok");
+
+    model_rec_t m;
+    memset(&m, 0, sizeof m);
+    strcpy(m.name, "gpt-encrypted");
+    strcpy(m.provider, "openai");
+    strcpy(m.endpoint, "https://api.openai.com");
+    snprintf(m.upstream_key_ref, sizeof m.upstream_key_ref, "pg:%s", enc_blob);
+    m.enabled = 1;
+    TEST_ASSERT(ops.create_model(&db, &m) == 0, "create encrypted model");
+
+    /* 2. Add provider with pg: encrypted api_key */
+    provider_rec_t p;
+    memset(&p, 0, sizeof p);
+    strcpy(p.name, "openai-provider");
+    strcpy(p.provider_type, "openai");
+    strcpy(p.endpoint, "https://api.openai.com");
+    snprintf(p.api_key, sizeof p.api_key, "pg:%s", enc_blob);
+    p.enabled = 1;
+    long pid = 0;
+    TEST_ASSERT(ops.create_provider(&db, &p, &pid) == 0, "create encrypted provider");
+
+    /* 3. Rotate with wrong old key should fail */
+    int rotated = 0;
+    TEST_ASSERT(pg_store_rotate_master_key(ps, wrong_m, new_m, &rotated) != 0,
+                "rotate with wrong key fails");
+
+    /* 4. Rotate with valid old_m -> new_m */
+    TEST_ASSERT(pg_store_rotate_master_key(ps, old_m, new_m, &rotated) == 0,
+                "rotate with valid keys succeeds");
+    TEST_ASSERT(rotated == 2, "rotated 2 entities (1 model + 1 provider)");
+
+    /* 5. Verify rotated keys decrypt cleanly with new_m and NOT with old_m */
+    model_rec_t m_rot;
+    memset(&m_rot, 0, sizeof m_rot);
+    TEST_ASSERT(ops.get_model(&db, "gpt-encrypted", &m_rot) == 0, "get rotated model");
+    TEST_ASSERT(strncmp(m_rot.upstream_key_ref, "pg:", 3) == 0, "model key has pg: prefix");
+    char   plain[256];
+    size_t plain_len = 0;
+    TEST_ASSERT(secret_decrypt(old_m, m_rot.upstream_key_ref + 3, plain, sizeof plain, NULL) != 0,
+                "rotated model cannot decrypt with old_m");
+    TEST_ASSERT(
+        secret_decrypt(new_m, m_rot.upstream_key_ref + 3, plain, sizeof plain, &plain_len) == 0,
+        "rotated model decrypts with new_m");
+    TEST_ASSERT(plain_len == strlen(raw_secret) && strcmp(plain, raw_secret) == 0,
+                "decrypted secret matches original");
+
+    provider_rec_t p_rot;
+    memset(&p_rot, 0, sizeof p_rot);
+    TEST_ASSERT(ops.get_provider(&db, pid, &p_rot) == 0, "get rotated provider");
+    TEST_ASSERT(strncmp(p_rot.api_key, "pg:", 3) == 0, "provider key has pg: prefix");
+    TEST_ASSERT(secret_decrypt(old_m, p_rot.api_key + 3, plain, sizeof plain, NULL) != 0,
+                "rotated provider cannot decrypt with old_m");
+    TEST_ASSERT(secret_decrypt(new_m, p_rot.api_key + 3, plain, sizeof plain, &plain_len) == 0,
+                "rotated provider decrypts with new_m");
+    TEST_ASSERT(plain_len == strlen(raw_secret) && strcmp(plain, raw_secret) == 0,
+                "decrypted provider secret matches original");
+    provider_rec_free(&p_rot);
 
     pg_store_close(ps);
 }

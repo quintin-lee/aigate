@@ -190,3 +190,23 @@ done:
     free(raw);
     return rc;
 }
+
+int
+secret_rotate(const uint8_t old_master[32],
+              const uint8_t new_master[32],
+              const char*   in_blob,
+              char*         out_blob,
+              size_t        out_cap)
+{
+    if (old_master == NULL || new_master == NULL || in_blob == NULL || out_blob == NULL) {
+        return -1;
+    }
+    char   plain[2048];
+    size_t plain_len = 0;
+    if (secret_decrypt(old_master, in_blob, plain, sizeof plain, &plain_len) != 0) {
+        return -1;
+    }
+    int rc = secret_encrypt(new_master, plain, plain_len, out_blob, out_cap);
+    OPENSSL_cleanse(plain, sizeof plain);
+    return rc;
+}

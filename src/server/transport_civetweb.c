@@ -28,6 +28,7 @@ struct transport_civetweb {
     char                  metrics_acl[256];       /**< /metrics IP allowlist text */
     char                  trusted_proxies[256];   /**< AIGATE_TRUSTED_PROXIES list / CIDRs */
     char                  cors_allow_origin[128]; /**< AIGATE_CORS_ALLOW_ORIGIN */
+    pthread_mutex_t       cfg_mtx;                /**< protects dynamic config updates */
     admin_ctx_t           adm;                    /**< admin plane state */
     long                  max_body_bytes;         /**< max /v1 request body in bytes */
     int                   worker_threads;         /**< worker threads count */
@@ -287,6 +288,13 @@ handle_v1(struct mg_connection* conn, void* cbdata)
         return 0;
     }
 
+    char cors_origin[128];
+    char proxies[256];
+    pthread_mutex_lock(&cw->cfg_mtx);
+    snprintf(cors_origin, sizeof cors_origin, "%s", cw->cors_allow_origin);
+    snprintf(proxies, sizeof proxies, "%s", cw->trusted_proxies);
+    pthread_mutex_unlock(&cw->cfg_mtx);
+
     /* Intercept CORS preflight OPTIONS early */
     if (strcmp(ri->request_method, "OPTIONS") == 0) {
         mg_printf(
@@ -303,7 +311,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
             "Referrer-Policy: strict-origin-when-cross-origin\r\n"
             "Content-Length: 0\r\n"
             "Connection: keep-alive\r\n\r\n",
-            cw->cors_allow_origin);
+            cors_origin);
         return 1;
     }
 
@@ -315,7 +323,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
                         ri->remote_addr);
         const char* err413 = "{\"error\":{\"message\":\"request body too "
                              "large\",\"type\":\"payload_too_large\",\"code\":413}}";
-        send_http_error_json(conn, 413, err413, (size_t)strlen(err413), cw->cors_allow_origin);
+        send_http_error_json(conn, 413, err413, (size_t)strlen(err413), cors_origin);
         return 1;
     }
     size_t body_len = 0;
@@ -325,7 +333,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     memset(&resp_state, 0, sizeof resp_state);
     resp_state.conn = conn;
     resp_state.status = 200;
-    resp_state.cors_allow_origin = cw->cors_allow_origin;
+    resp_state.cors_allow_origin = cors_origin;
 
     aigate_response_ctx rc;
     memset(&rc, 0, sizeof rc);
@@ -343,7 +351,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     rq.bearer = extract_bearer(conn);
     char client_ip[64];
     transport_civetweb_extract_client_ip(
-        conn, ri->remote_addr, cw->trusted_proxies, client_ip, sizeof(client_ip));
+        conn, ri->remote_addr, proxies, client_ip, sizeof(client_ip));
     rq.client_ip = client_ip;
     rq.body = body;
     rq.body_len = body_len;
@@ -374,6 +382,13 @@ handle_admin(struct mg_connection* conn, void* cbdata)
         return 0;
     }
 
+    char cors_origin[128];
+    char proxies[256];
+    pthread_mutex_lock(&cw->cfg_mtx);
+    snprintf(cors_origin, sizeof cors_origin, "%s", cw->cors_allow_origin);
+    snprintf(proxies, sizeof proxies, "%s", cw->trusted_proxies);
+    pthread_mutex_unlock(&cw->cfg_mtx);
+
     /* Intercept CORS preflight OPTIONS early */
     if (strcmp(ri->request_method, "OPTIONS") == 0) {
         mg_printf(
@@ -390,7 +405,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
             "Referrer-Policy: strict-origin-when-cross-origin\r\n"
             "Content-Length: 0\r\n"
             "Connection: keep-alive\r\n\r\n",
-            cw->cors_allow_origin);
+            cors_origin);
         return 1;
     }
 
@@ -424,7 +439,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
                   "X-Content-Type-Options: nosniff\r\n"
                   "X-Frame-Options: DENY\r\n"
                   "Referrer-Policy: strict-origin-when-cross-origin\r\n\r\n",
-                  cw->cors_allow_origin);
+                  cors_origin);
 
         if (strcmp(ri->request_method, "HEAD") == 0) {
             event_bus_unsubscribe(cw->adm.eb, sub_id);
@@ -477,7 +492,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
                         ri->remote_addr);
         const char* err413 = "{\"error\":{\"message\":\"request body too "
                              "large\",\"type\":\"payload_too_large\",\"code\":413}}";
-        send_http_error_json(conn, 413, err413, (size_t)strlen(err413), cw->cors_allow_origin);
+        send_http_error_json(conn, 413, err413, (size_t)strlen(err413), cors_origin);
         return 1;
     }
     size_t body_len = 0;
@@ -497,7 +512,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
 
     char client_ip[64];
     transport_civetweb_extract_client_ip(
-        conn, ri->remote_addr, cw->trusted_proxies, client_ip, sizeof(client_ip));
+        conn, ri->remote_addr, proxies, client_ip, sizeof(client_ip));
 
     admin_dispatch(&cw->adm,
                    full_uri,
@@ -523,7 +538,7 @@ handle_admin(struct mg_connection* conn, void* cbdata)
                   "Content-Length: %zu\r\n\r\n",
                   out_status,
                   http_reason(out_status),
-                  cw->cors_allow_origin,
+                  cors_origin,
                   out_len);
         mg_write(conn, out_body, out_len);
         free(out_body);
@@ -746,9 +761,12 @@ transport_civetweb_start(aigate_core* ac,
         NULL,
     };
 
+    pthread_mutex_init(&cw->cfg_mtx, NULL);
+
     cw->ctx = mg_start(NULL, NULL, options);
     if (cw->ctx == NULL) {
         AIGATE_LOG_ERROR("transport_civetweb: failed to bind on %s", port_spec);
+        pthread_mutex_destroy(&cw->cfg_mtx);
         free(cw);
         return NULL;
     }
@@ -768,6 +786,36 @@ transport_civetweb_start(aigate_core* ac,
                     cw->worker_threads,
                     cw->request_timeout_ms);
     return cw;
+}
+
+void
+transport_civetweb_update_cors(transport_civetweb_t* cw, const char* origin)
+{
+    if (cw == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&cw->cfg_mtx);
+    if (origin != NULL && origin[0] != '\0') {
+        snprintf(cw->cors_allow_origin, sizeof cw->cors_allow_origin, "%s", origin);
+    } else {
+        snprintf(cw->cors_allow_origin, sizeof cw->cors_allow_origin, "*");
+    }
+    pthread_mutex_unlock(&cw->cfg_mtx);
+}
+
+void
+transport_civetweb_update_trusted_proxies(transport_civetweb_t* cw, const char* proxies)
+{
+    if (cw == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&cw->cfg_mtx);
+    if (proxies != NULL && proxies[0] != '\0') {
+        snprintf(cw->trusted_proxies, sizeof cw->trusted_proxies, "%s", proxies);
+    } else {
+        snprintf(cw->trusted_proxies, sizeof cw->trusted_proxies, "127.0.0.1");
+    }
+    pthread_mutex_unlock(&cw->cfg_mtx);
 }
 
 void
@@ -794,5 +842,6 @@ transport_civetweb_stop(transport_civetweb_t* cw)
         mg_stop(cw->ctx);
         cw->ctx = NULL;
     }
+    pthread_mutex_destroy(&cw->cfg_mtx);
     free(cw);
 }

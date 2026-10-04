@@ -34,19 +34,76 @@
 
 /** Shutdown flag: the SIGINT/SIGTERM handler sets it to 1; the main loop exits for graceful shutdown. */
 static volatile sig_atomic_t g_stop = 0;
+/** Reload flag: the SIGHUP handler sets it to 1; the main loop reloads dynamic configuration. */
+static volatile sig_atomic_t g_reload = 0;
 
-/** @brief SIGINT/SIGTERM handler: set g_stop so the main loop exits for graceful shutdown (async-signal-safe operations only). */
+/** @brief Signal handler: set g_reload on SIGHUP, set g_stop on SIGINT/SIGTERM (async-signal-safe operations only). */
 static void
 sig_handler(int sig)
 {
-    (void)sig;
+    if (sig == SIGHUP) {
+        g_reload = 1;
+        return;
+    }
     g_stop = 1;
 }
 
 /** @brief Program entry: load config, init storage/routing/transport, then serve until signaled to exit. */
 int
-main(void)
+main(int argc, char** argv)
 {
+    /* 0. Offline utility commands */
+    if (argc >= 2 && strcmp(argv[1], "--rotate-master-key") == 0) {
+        if (argc < 4) {
+            fprintf(stderr,
+                    "Usage: %s --rotate-master-key <old_master_hex_64> <new_master_hex_64>\n",
+                    argv[0]);
+            return 1;
+        }
+        uint8_t old_m[32], new_m[32];
+        if (hex_to_bytes32(argv[2], old_m) != 0) {
+            fprintf(stderr, "Error: invalid old master key (expected 64 hex characters)\n");
+            return 1;
+        }
+        if (hex_to_bytes32(argv[3], new_m) != 0) {
+            fprintf(stderr, "Error: invalid new master key (expected 64 hex characters)\n");
+            OPENSSL_cleanse(old_m, sizeof old_m);
+            return 1;
+        }
+
+        aigate_config cfg;
+        if (aigate_config_load(&cfg) != 0) {
+            fprintf(stderr, "Error: failed to load database configuration\n");
+            OPENSSL_cleanse(old_m, sizeof old_m);
+            OPENSSL_cleanse(new_m, sizeof new_m);
+            return 1;
+        }
+
+        pg_store_t* ps = pg_store_open(cfg.pg_dsn, NULL);
+        if (ps == NULL) {
+            fprintf(stderr, "Error: failed to connect to database (%s)\n", cfg.pg_dsn);
+            OPENSSL_cleanse(old_m, sizeof old_m);
+            OPENSSL_cleanse(new_m, sizeof new_m);
+            return 1;
+        }
+
+        int rotated_count = 0;
+        if (pg_store_rotate_master_key(ps, old_m, new_m, &rotated_count) != 0) {
+            fprintf(stderr, "Error: master key rotation failed (transaction rolled back)\n");
+            pg_store_close(ps);
+            OPENSSL_cleanse(old_m, sizeof old_m);
+            OPENSSL_cleanse(new_m, sizeof new_m);
+            return 1;
+        }
+
+        printf("Successfully rotated %d upstream model/provider keys to new master key\n",
+               rotated_count);
+        pg_store_close(ps);
+        OPENSSL_cleanse(old_m, sizeof old_m);
+        OPENSSL_cleanse(new_m, sizeof new_m);
+        return 0;
+    }
+
     /* 1. Config loading */
     aigate_config cfg;
     if (aigate_config_load(&cfg) != 0) {
@@ -146,11 +203,30 @@ main(void)
     sigemptyset(&sa.sa_mask);
     sigaction(SIGINT, &sa, NULL);
     sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGHUP, &sa, NULL);
 
     AIGATE_LOG_INFO("aigate ready on %s (pid: %d)", cfg.listen, (int)getpid());
 
     /* 7. Run until signal */
     while (!g_stop) {
+        if (g_reload) {
+            g_reload = 0;
+            aigate_config new_cfg;
+            if (aigate_config_load(&new_cfg) == 0) {
+                aigate_log_init(new_cfg.log_format, new_cfg.log_level);
+                transport_civetweb_update_cors(cw, new_cfg.cors_allow_origin);
+                transport_civetweb_update_trusted_proxies(cw, new_cfg.trusted_proxies);
+                AIGATE_LOG_INFO(
+                    "main: configuration reloaded via SIGHUP (level=%s, format=%s, cors=%s, "
+                    "proxies=%s)",
+                    new_cfg.log_level,
+                    new_cfg.log_format,
+                    new_cfg.cors_allow_origin,
+                    new_cfg.trusted_proxies);
+            } else {
+                AIGATE_LOG_WARN("main: SIGHUP received but configuration reload failed");
+            }
+        }
         struct timespec ts = {0, 100 * 1000000}; /* 100ms */
         nanosleep(&ts, NULL);
     }

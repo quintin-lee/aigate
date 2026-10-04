@@ -79,9 +79,11 @@ main(int argc, char** argv)
     extern void test_pg_real_roundtrip(void);
     extern void test_pg_real_provider_crud(void);
     extern void test_pg_real_groups_and_cost(void);
+    extern void test_pg_store_rotate_master_key(void);
     extern void test_secret_roundtrip(void);
     extern void test_secret_tamper_and_wrong_key(void);
     extern void test_secret_hex_to_bytes(void);
+    extern void test_secret_rotate(void);
     extern void test_auth_key_resolve_normal(void);
     extern void test_auth_key_flags(void);
     extern void test_auth_key_unknown_revoked_expired(void);
@@ -168,9 +170,11 @@ main(int argc, char** argv)
     test_register("pg_real_roundtrip", test_pg_real_roundtrip);
     test_register("pg_real_provider_crud", test_pg_real_provider_crud);
     test_register("pg_real_groups_and_cost", test_pg_real_groups_and_cost);
+    test_register("pg_store_rotate_master_key", test_pg_store_rotate_master_key);
     test_register("secret_roundtrip", test_secret_roundtrip);
     test_register("secret_tamper", test_secret_tamper_and_wrong_key);
     test_register("secret_hex", test_secret_hex_to_bytes);
+    test_register("secret_rotate", test_secret_rotate);
     test_register("auth_key_resolve", test_auth_key_resolve_normal);
     test_register("auth_key_flags", test_auth_key_unknown_revoked_expired);
     test_register("auth_key_neg_cache", test_auth_key_unknown_neg_cache);
@@ -627,6 +631,9 @@ main(int argc, char** argv)
 
     extern void test_transport_cors_and_security_headers(void);
     test_register("transport_cors_and_security_headers", test_transport_cors_and_security_headers);
+
+    extern void test_transport_dynamic_config_reload(void);
+    test_register("transport_dynamic_config_reload", test_transport_dynamic_config_reload);
 
     int ran = 0;
     int failed = 0;

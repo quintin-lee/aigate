@@ -13,6 +13,7 @@
 #include "pg_store.h"
 #include "aigate_log.h"
 #include "schema_sql.h"
+#include "secrets.h"
 
 #include <jansson.h>
 #include <libpq-fe.h>
@@ -2905,4 +2906,374 @@ pg_store_delete_cache_optimizer_rule(const pg_store_t* ps, const char* id)
     return (ops != NULL && ops->delete_cache_optimizer_rule != NULL)
                ? ops->delete_cache_optimizer_rule(ops->ctx, id)
                : -1;
+}
+
+int
+pg_store_rotate_master_key(pg_store_t*   ps,
+                           const uint8_t old_master[32],
+                           const uint8_t new_master[32],
+                           int*          out_rotated_count)
+{
+    if (ps == NULL || old_master == NULL || new_master == NULL) {
+        return -1;
+    }
+    if (out_rotated_count != NULL) {
+        *out_rotated_count = 0;
+    }
+
+    /* 1. If using real libpq context (owns_ctx): do atomic rotation inside BEGIN ... COMMIT */
+    if (ps->owns_ctx && ps->ctx != NULL) {
+        struct pq_ctx* px = ps->ctx;
+        pq_lock(px);
+
+        /* Query all models */
+        PGresult* mres = PQexec(px->db, "SELECT model_name, upstream_key_ref, targets FROM models");
+        if (mres == NULL || PQresultStatus(mres) != PGRES_TUPLES_OK) {
+            AIGATE_LOG_ERROR("pg rotate_master_key: failed to read models: %s",
+                             mres != NULL ? PQerrorMessage(px->db) : "alloc failed");
+            if (mres != NULL) {
+                PQclear(mres);
+            }
+            pq_unlock(px);
+            return -1;
+        }
+
+        /* Query all providers with pg: keys */
+        PGresult* pres =
+            PQexec(px->db, "SELECT id, api_key FROM providers WHERE api_key LIKE 'pg:%'");
+        if (pres == NULL || PQresultStatus(pres) != PGRES_TUPLES_OK) {
+            AIGATE_LOG_ERROR("pg rotate_master_key: failed to read providers: %s",
+                             pres != NULL ? PQerrorMessage(px->db) : "alloc failed");
+            if (pres != NULL) {
+                PQclear(pres);
+            }
+            PQclear(mres);
+            pq_unlock(px);
+            return -1;
+        }
+
+        /* Phase 1: Pre-validate decryption of ALL keys. If any key fails to decrypt with
+         * old_master, abort BEFORE starting transaction or modifying anything. */
+        int m_tuples = PQntuples(mres);
+        for (int i = 0; i < m_tuples; i++) {
+            const char* kref = PQgetvalue(mres, i, 1);
+            if (kref != NULL && strncmp(kref, "pg:", 3) == 0) {
+                char dummy_blob[4096];
+                if (secret_rotate(
+                        old_master, new_master, kref + 3, dummy_blob, sizeof dummy_blob) != 0) {
+                    AIGATE_LOG_ERROR("pg rotate_master_key: model %s key decryption failed",
+                                     PQgetvalue(mres, i, 0));
+                    PQclear(mres);
+                    PQclear(pres);
+                    pq_unlock(px);
+                    return -1;
+                }
+            }
+            const char* targets_json = PQgetvalue(mres, i, 2);
+            if (targets_json != NULL && targets_json[0] != '\0') {
+                json_error_t jerr;
+                json_t*      root = json_loads(targets_json, 0, &jerr);
+                if (json_is_array(root)) {
+                    size_t  idx;
+                    json_t* item;
+                    json_array_foreach(root, idx, item)
+                    {
+                        json_t* jk = json_object_get(item, "upstream_key_ref");
+                        if (json_is_string(jk)) {
+                            const char* s = json_string_value(jk);
+                            if (strncmp(s, "pg:", 3) == 0) {
+                                char dummy_blob[4096];
+                                if (secret_rotate(old_master,
+                                                  new_master,
+                                                  s + 3,
+                                                  dummy_blob,
+                                                  sizeof dummy_blob) != 0) {
+                                    AIGATE_LOG_ERROR("pg rotate_master_key: model %s target %zu "
+                                                     "key decryption failed",
+                                                     PQgetvalue(mres, i, 0),
+                                                     idx);
+                                    json_decref(root);
+                                    PQclear(mres);
+                                    PQclear(pres);
+                                    pq_unlock(px);
+                                    return -1;
+                                }
+                            }
+                        }
+                    }
+                }
+                if (root != NULL) {
+                    json_decref(root);
+                }
+            }
+        }
+
+        int p_tuples = PQntuples(pres);
+        for (int i = 0; i < p_tuples; i++) {
+            const char* kref = PQgetvalue(pres, i, 1);
+            if (kref != NULL && strncmp(kref, "pg:", 3) == 0) {
+                char dummy_blob[4096];
+                if (secret_rotate(
+                        old_master, new_master, kref + 3, dummy_blob, sizeof dummy_blob) != 0) {
+                    AIGATE_LOG_ERROR("pg rotate_master_key: provider %s key decryption failed",
+                                     PQgetvalue(pres, i, 0));
+                    PQclear(mres);
+                    PQclear(pres);
+                    pq_unlock(px);
+                    return -1;
+                }
+            }
+        }
+
+        /* Phase 2: Decryption verified for all keys. Begin atomic transaction. */
+        PGresult* tx = PQexec(px->db, "BEGIN");
+        if (tx == NULL || PQresultStatus(tx) != PGRES_COMMAND_OK) {
+            AIGATE_LOG_ERROR("pg rotate_master_key: BEGIN failed: %s", PQerrorMessage(px->db));
+            if (tx != NULL) {
+                PQclear(tx);
+            }
+            PQclear(mres);
+            PQclear(pres);
+            pq_unlock(px);
+            return -1;
+        }
+        PQclear(tx);
+
+        int rotated_count = 0;
+
+        for (int i = 0; i < m_tuples; i++) {
+            const char* mname = PQgetvalue(mres, i, 0);
+            const char* kref = PQgetvalue(mres, i, 1);
+            const char* targets_json = PQgetvalue(mres, i, 2);
+            int         changed = 0;
+            char        new_kref[2048] = "";
+
+            if (kref != NULL && strncmp(kref, "pg:", 3) == 0) {
+                char new_enc[2048];
+                if (secret_rotate(old_master, new_master, kref + 3, new_enc, sizeof new_enc) == 0) {
+                    snprintf(
+                        new_kref, sizeof new_kref, "pg:%.*s", (int)(sizeof new_kref - 4), new_enc);
+                    changed = 1;
+                }
+            } else if (kref != NULL) {
+                snprintf(new_kref, sizeof new_kref, "%s", kref);
+            }
+
+            char* new_targets_str = NULL;
+            if (targets_json != NULL && targets_json[0] != '\0') {
+                json_error_t jerr;
+                json_t*      root = json_loads(targets_json, 0, &jerr);
+                if (json_is_array(root)) {
+                    size_t  idx;
+                    json_t* item;
+                    int     t_changed = 0;
+                    json_array_foreach(root, idx, item)
+                    {
+                        json_t* jk = json_object_get(item, "upstream_key_ref");
+                        if (json_is_string(jk)) {
+                            const char* s = json_string_value(jk);
+                            if (strncmp(s, "pg:", 3) == 0) {
+                                char new_enc[2048];
+                                if (secret_rotate(
+                                        old_master, new_master, s + 3, new_enc, sizeof new_enc) ==
+                                    0) {
+                                    char full_tgt_kref[2048];
+                                    snprintf(full_tgt_kref,
+                                             sizeof full_tgt_kref,
+                                             "pg:%.*s",
+                                             (int)(sizeof full_tgt_kref - 4),
+                                             new_enc);
+                                    json_object_set_new(
+                                        item, "upstream_key_ref", json_string(full_tgt_kref));
+                                    t_changed = 1;
+                                }
+                            }
+                        }
+                    }
+                    if (t_changed) {
+                        new_targets_str = json_dumps(root, JSON_COMPACT);
+                        changed = 1;
+                    }
+                }
+                if (root != NULL) {
+                    json_decref(root);
+                }
+            }
+
+            if (changed) {
+                const char* upd_sql = "UPDATE models SET upstream_key_ref = $1, targets = $2 "
+                                      "WHERE model_name = $3";
+                const char* vals[3] = {new_kref[0] != '\0' ? new_kref : NULL,
+                                       new_targets_str != NULL ? new_targets_str : targets_json,
+                                       mname};
+                PGresult*   ures = PQexecParams(px->db, upd_sql, 3, NULL, vals, NULL, NULL, 0);
+                if (ures == NULL || PQresultStatus(ures) != PGRES_COMMAND_OK) {
+                    AIGATE_LOG_ERROR("pg rotate_master_key: update model %s failed: %s",
+                                     mname,
+                                     ures != NULL ? PQerrorMessage(px->db) : "alloc failed");
+                    if (ures != NULL) {
+                        PQclear(ures);
+                    }
+                    if (new_targets_str != NULL) {
+                        free(new_targets_str);
+                    }
+                    PQclear(PQexec(px->db, "ROLLBACK"));
+                    PQclear(mres);
+                    PQclear(pres);
+                    pq_unlock(px);
+                    return -1;
+                }
+                PQclear(ures);
+                rotated_count++;
+            }
+            if (new_targets_str != NULL) {
+                free(new_targets_str);
+            }
+        }
+        PQclear(mres);
+
+        for (int i = 0; i < p_tuples; i++) {
+            const char* pid = PQgetvalue(pres, i, 0);
+            const char* kref = PQgetvalue(pres, i, 1);
+            if (kref != NULL && strncmp(kref, "pg:", 3) == 0) {
+                char new_enc[2048];
+                if (secret_rotate(old_master, new_master, kref + 3, new_enc, sizeof new_enc) == 0) {
+                    char full_pk[2048];
+                    snprintf(
+                        full_pk, sizeof full_pk, "pg:%.*s", (int)(sizeof full_pk - 4), new_enc);
+                    const char* upd_sql = "UPDATE providers SET api_key = $1 WHERE id = $2";
+                    const char* vals[2] = {full_pk, pid};
+                    PGresult*   ures = PQexecParams(px->db, upd_sql, 2, NULL, vals, NULL, NULL, 0);
+                    if (ures == NULL || PQresultStatus(ures) != PGRES_COMMAND_OK) {
+                        AIGATE_LOG_ERROR("pg rotate_master_key: update provider %s failed: %s",
+                                         pid,
+                                         ures != NULL ? PQerrorMessage(px->db) : "alloc failed");
+                        if (ures != NULL) {
+                            PQclear(ures);
+                        }
+                        PQclear(PQexec(px->db, "ROLLBACK"));
+                        PQclear(pres);
+                        pq_unlock(px);
+                        return -1;
+                    }
+                    PQclear(ures);
+                    rotated_count++;
+                }
+            }
+        }
+        PQclear(pres);
+
+        PGresult* cmt = PQexec(px->db, "COMMIT");
+        if (cmt == NULL || PQresultStatus(cmt) != PGRES_COMMAND_OK) {
+            AIGATE_LOG_ERROR("pg rotate_master_key: COMMIT failed: %s", PQerrorMessage(px->db));
+            if (cmt != NULL) {
+                PQclear(cmt);
+            }
+            PQclear(PQexec(px->db, "ROLLBACK"));
+            pq_unlock(px);
+            return -1;
+        }
+        PQclear(cmt);
+        pq_unlock(px);
+
+        if (out_rotated_count != NULL) {
+            *out_rotated_count = rotated_count;
+        }
+        return 0;
+    }
+
+    /* 2. Generic ops fallback (for test fakes or external backends) */
+    const pg_ops_t* ops = pg_store_ops(ps);
+    if (ops == NULL || ops->list_models == NULL || ops->update_model == NULL) {
+        return -1;
+    }
+    model_rec_t models[64];
+    int         n_models = 0;
+    if (ops->list_models(ops->ctx, models, 64, &n_models) != 0) {
+        return -1;
+    }
+    int rotated_count = 0;
+    for (int i = 0; i < n_models; i++) {
+        int mask = 0;
+        if (strncmp(models[i].upstream_key_ref, "pg:", 3) == 0) {
+            char new_enc[2048];
+            if (secret_rotate(old_master,
+                              new_master,
+                              models[i].upstream_key_ref + 3,
+                              new_enc,
+                              sizeof new_enc) != 0) {
+                return -1;
+            }
+            snprintf(models[i].upstream_key_ref,
+                     sizeof models[i].upstream_key_ref,
+                     "pg:%.*s",
+                     (int)(sizeof models[i].upstream_key_ref - 4),
+                     new_enc);
+            mask |= MMASK_KEYREF;
+        }
+        for (int t = 0; t < models[i].n_targets; t++) {
+            if (strncmp(models[i].targets[t].upstream_key_ref, "pg:", 3) == 0) {
+                char new_enc[2048];
+                if (secret_rotate(old_master,
+                                  new_master,
+                                  models[i].targets[t].upstream_key_ref + 3,
+                                  new_enc,
+                                  sizeof new_enc) != 0) {
+                    return -1;
+                }
+                snprintf(models[i].targets[t].upstream_key_ref,
+                         sizeof models[i].targets[t].upstream_key_ref,
+                         "pg:%.*s",
+                         (int)(sizeof models[i].targets[t].upstream_key_ref - 4),
+                         new_enc);
+                mask |= MMASK_TARGETS;
+            }
+        }
+        if (mask != 0) {
+            if (ops->update_model(ops->ctx, &models[i], mask) != 0) {
+                return -1;
+            }
+            rotated_count++;
+        }
+    }
+
+    if (ops->list_providers != NULL && ops->update_provider != NULL) {
+        provider_rec_t providers[64];
+        int            n_providers = 0;
+        if (ops->list_providers(ops->ctx, providers, 64, &n_providers) == 0) {
+            for (int i = 0; i < n_providers; i++) {
+                if (strncmp(providers[i].api_key, "pg:", 3) == 0) {
+                    char new_enc[2048];
+                    if (secret_rotate(old_master,
+                                      new_master,
+                                      providers[i].api_key + 3,
+                                      new_enc,
+                                      sizeof new_enc) != 0) {
+                        for (int j = 0; j < n_providers; j++) {
+                            provider_rec_free(&providers[j]);
+                        }
+                        return -1;
+                    }
+                    snprintf(providers[i].api_key,
+                             sizeof providers[i].api_key,
+                             "pg:%.*s",
+                             (int)(sizeof providers[i].api_key - 4),
+                             new_enc);
+                    if (ops->update_provider(ops->ctx, &providers[i], PMASK_API_KEY) != 0) {
+                        for (int j = 0; j < n_providers; j++) {
+                            provider_rec_free(&providers[j]);
+                        }
+                        return -1;
+                    }
+                    rotated_count++;
+                }
+                provider_rec_free(&providers[i]);
+            }
+        }
+    }
+
+    if (out_rotated_count != NULL) {
+        *out_rotated_count = rotated_count;
+    }
+    return 0;
 }

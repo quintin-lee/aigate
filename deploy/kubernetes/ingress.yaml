@@ -1,0 +1,40 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aigate
+  namespace: aigate
+  labels:
+    app.kubernetes.io/name: aigate
+    app.kubernetes.io/part-of: aigate
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    # Long timeouts for LLM chain-of-thought and extended generative streaming sessions
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Disable buffering so Server-Sent Events (SSE) stream tokens without lag or chunk aggregation
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Keepalive upstream optimization for high QPS LLM traffic
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Connection '';
+      chunked_transfer_encoding on;
+    # Automated TLS certificate management with cert-manager
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - aigate.example.com
+      secretName: aigate-tls-cert
+  rules:
+    - host: aigate.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aigate
+                port:
+                  number: 8080

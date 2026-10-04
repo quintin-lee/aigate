@@ -45,5 +45,28 @@
 ## 溯源
 
 - 加载与校验：`src/core/config.c`（`aigate_config_load`），字段注释见 `src/core/config.h`。
-- 明文钥匙 / 锁定策略 / 监听解析：`src/server/transport_civetweb.c:474-492`。
+- 明文钥匙 / 锁定策略 / 监听解析：`src/server/transport_civetweb.c`。
 - 改码先改此表。
+
+## 零停机配置平滑热重载 (SIGHUP)
+
+网关进程支持捕获 `SIGHUP` 信号以零停机刷新动态配置，无需重启进程或中断长流式连接：
+- **热重载支持项**：
+  - 日志级别与格式 (`AIGATE_LOG_LEVEL`、`AIGATE_LOG_FORMAT`)
+  - 跨域白名单 (`AIGATE_CORS_ALLOW_ORIGIN`)
+  - 受信反代列表 (`AIGATE_TRUSTED_PROXIES`)
+- **触发命令**：
+  ```bash
+  kill -HUP <aigate_pid>
+  # 或在 Kubernetes Pod 中:
+  kubectl exec <pod-name> -n aigate -- kill -HUP 1
+  ```
+
+## 主密钥安全离线轮换工具 (CLI)
+
+当安全合规要求轮换 `AIGATE_MASTER_KEY` 时，可通过离线子命令在单次数据库事务中将数据库内所有以 AES-256-GCM 加密存储的上游密钥（models 与 providers）平滑轮换为新主密钥：
+```bash
+./aigate --rotate-master-key <old_master_hex_64> <new_master_hex_64>
+```
+轮换执行前会预检解密有效性，任何失败直接回滚，保障零数据损坏。轮换完成后将环境变量中的 `AIGATE_MASTER_KEY` 替换为新密钥即可启动网关。
+

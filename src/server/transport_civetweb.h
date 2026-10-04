@@ -75,6 +75,20 @@ const char* transport_civetweb_extract_client_ip(struct mg_connection* conn,
                                                  size_t                out_cap);
 
 /**
+ * @brief Dynamically update CORS allowed origin on a running transport.
+ * @param cw transport context
+ * @param origin new CORS allow origin (e.g. "*" or "https://chat.example.com")
+ */
+void transport_civetweb_update_cors(transport_civetweb_t* cw, const char* origin);
+
+/**
+ * @brief Dynamically update trusted proxies list/CIDRs on a running transport.
+ * @param cw transport context
+ * @param proxies new trusted proxies list (e.g. "127.0.0.1,10.0.0.0/8")
+ */
+void transport_civetweb_update_trusted_proxies(transport_civetweb_t* cw, const char* proxies);
+
+/**
  * @brief Stop CivetWeb HTTP server and free resources.
  * @param cw transport context
  */
