@@ -38,6 +38,8 @@ FetchContent_MakeAvailable(hdr_hist_dep)
 
 set(CIVETWEB_BUILD_TESTING OFF CACHE BOOL "" FORCE)
 set(CIVETWEB_ENABLE_SERVER_EXECUTABLE OFF CACHE BOOL "" FORCE)
+set(CIVETWEB_ENABLE_SSL ON CACHE BOOL "" FORCE)
+set(CIVETWEB_ENABLE_SSL_DYNAMIC_LOADING OFF CACHE BOOL "" FORCE)
 # CivetWeb ships sanitizers baked into its Debug builds; that would leak
 # -fsanitize=undefined into the parent link line for the main executable.
 # The main executable links against the civetweb library, so any -fsanitize
@@ -89,7 +91,7 @@ target_link_libraries(libaigate PUBLIC
   ${HIREDIS_LIBRARIES}
   hdr_histogram_static
   civetweb-c-library
-  CURL::libcurl ${LIBPQ_LIBRARIES} OpenSSL::Crypto ${CMAKE_THREAD_LIBS_INIT})
+  CURL::libcurl ${LIBPQ_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto ${CMAKE_THREAD_LIBS_INIT})
 
 add_executable(aigate src/main.c)
 target_compile_options(aigate PRIVATE -Wall -Wextra -Werror)

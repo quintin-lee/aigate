@@ -46,6 +46,7 @@ main(int argc, char** argv)
     extern void test_config_bad_master_key(void);
     extern void test_config_worker_threads_and_p0(void);
     extern void test_config_p1_features(void);
+    extern void test_config_ssl(void);
     extern void test_lru_eviction_order(void);
     extern void test_lru_recency_refresh(void);
     extern void test_lru_replace_and_invalidate(void);
@@ -117,6 +118,7 @@ main(int argc, char** argv)
     extern void test_um_high_volume_drain(void);
     extern void test_metrics_acl(void);
     extern void test_metrics_failover(void);
+    extern void test_metrics_ttft(void);
     extern void test_core_pipeline(void);
     extern void test_core_models_rate_limited(void);
     extern void test_core_models_list_failure_503(void);
@@ -136,6 +138,7 @@ main(int argc, char** argv)
     test_register("config_bad_master_key", test_config_bad_master_key);
     test_register("config_worker_threads_and_p0", test_config_worker_threads_and_p0);
     test_register("config_p1_features", test_config_p1_features);
+    test_register("config_ssl", test_config_ssl);
     test_register("lru_eviction_order", test_lru_eviction_order);
     test_register("lru_recency_refresh", test_lru_recency_refresh);
     test_register("lru_replace_and_invalidate", test_lru_replace_and_invalidate);
@@ -207,6 +210,7 @@ main(int argc, char** argv)
     test_register("um_high_volume_drain", test_um_high_volume_drain);
     test_register("metrics_acl", test_metrics_acl);
     test_register("metrics_failover", test_metrics_failover);
+    test_register("metrics_ttft", test_metrics_ttft);
     test_register("core_pipeline", test_core_pipeline);
     test_register("core_models_rate_limited", test_core_models_rate_limited);
     test_register("core_models_503", test_core_models_list_failure_503);
@@ -461,9 +465,13 @@ main(int argc, char** argv)
     extern void test_failover_on_500_to_backup(void);
     extern void test_failover_on_429_to_backup(void);
     extern void test_failover_circuit_breaker_tripping(void);
+    extern void test_concurrency_semaphore(void);
+    extern void test_failover_concurrency_limiting(void);
     test_register("failover_on_500", test_failover_on_500_to_backup);
     test_register("failover_on_429", test_failover_on_429_to_backup);
     test_register("failover_cb_tripping", test_failover_circuit_breaker_tripping);
+    test_register("concurrency_semaphore", test_concurrency_semaphore);
+    test_register("failover_concurrency_limiting", test_failover_concurrency_limiting);
 
     extern void test_redis_pool_invalid_args(void);
     extern void test_redis_client_eval_and_pool_live(void);

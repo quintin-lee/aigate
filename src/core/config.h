@@ -25,6 +25,8 @@ typedef struct aigate_config {
     char cors_allow_origin[128]; /**< AIGATE_CORS_ALLOW_ORIGIN, default "*" */
     char log_format[16];         /**< AIGATE_LOG_FORMAT, "text" (default) or "json" */
     char log_level[16]; /**< AIGATE_LOG_LEVEL, "debug", "info" (default), "warn", "error" */
+    char ssl_cert[512]; /**< AIGATE_SSL_CERT, path to SSL certificate PEM */
+    char ssl_key[512];  /**< AIGATE_SSL_KEY, path to SSL private key PEM */
 } aigate_config;
 
 /** @brief Fill @p out from environment variables.

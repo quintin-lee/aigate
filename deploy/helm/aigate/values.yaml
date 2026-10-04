@@ -1,0 +1,154 @@
+# Default values for aigate.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 2
+
+image:
+  repository: aigate
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+
+securityContext:
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      proxy_set_header Connection '';
+      chunked_transfer_encoding on;
+  hosts:
+    - host: aigate.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: aigate-tls
+  #    hosts:
+  #      - aigate.local
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Gateway configuration options mapped to environment variables
+config:
+  listen: ":8080"
+  workerThreads: 64
+  requestTimeoutMs: 300000
+  upstreamTimeoutMs: 60000
+  metricsAcl: "127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  trustedProxies: "10.0.0.0/8,172.16.0.0/12,192.168.0.0/16"
+  drainTimeoutS: 15
+  redisFailOpen: 1
+  corsAllowOrigin: "*"
+  logFormat: "json"
+  logLevel: "info"
+  redisPoolSize: 16
+  redisTimeoutMs: 200
+  # Extra custom environment variables
+  extraEnv: []
+
+# Gateway secrets
+secrets:
+  # If specified, use an existing secret instead of creating one
+  existingSecret: ""
+  # Required: PostgreSQL connection string
+  pgDsn: "postgresql://aigate:aigate_password@postgres:5432/aigate?sslmode=disable"
+  # Required: Admin API bearer token
+  adminToken: "change-this-in-production-use-strong-token"
+  # Optional: 64-hex AES-256-GCM master key for encrypting provider keys
+  masterKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  # Optional: Redis connection URL for distributed rate limiting & circuit breaker
+  redisUrl: "redis://redis:6379/0"
+
+# Native TLS/HTTPS termination inside the pod
+tls:
+  enabled: false
+  secretName: ""
+  certMountPath: "/etc/ssl/certs/aigate.crt"
+  keyMountPath: "/etc/ssl/private/aigate.key"
+
+# Prometheus Operator ServiceMonitor
+serviceMonitor:
+  enabled: false
+  interval: 15s
+  path: /metrics
+  labels: {}
+
+probes:
+  startup:
+    initialDelaySeconds: 2
+    periodSeconds: 2
+    timeoutSeconds: 2
+    failureThreshold: 15
+  liveness:
+    periodSeconds: 10
+    timeoutSeconds: 2
+    failureThreshold: 3
+  readiness:
+    periodSeconds: 5
+    timeoutSeconds: 2
+    failureThreshold: 2

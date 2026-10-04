@@ -306,3 +306,129 @@ TEST_CASE(test_failover_circuit_breaker_tripping)
     mock_upstream_stop(u1);
     mock_upstream_stop(u2);
 }
+
+TEST_CASE(test_concurrency_semaphore)
+{
+    model_router_reset_concurrency();
+
+    upstream_target_t tgt;
+    memset(&tgt, 0, sizeof tgt);
+    strcpy(tgt.provider, "openai");
+    strcpy(tgt.endpoint, "http://127.0.0.1:9999/v1");
+    tgt.max_concurrent = 2;
+
+    TEST_ASSERT(model_router_get_in_flight(tgt.endpoint) == 0, "initial in-flight is 0");
+    TEST_ASSERT(model_router_acquire_target(&tgt) == 0, "acquire slot 1 ok");
+    TEST_ASSERT(model_router_get_in_flight(tgt.endpoint) == 1, "in-flight is 1");
+    TEST_ASSERT(model_router_acquire_target(&tgt) == 0, "acquire slot 2 ok");
+    TEST_ASSERT(model_router_get_in_flight(tgt.endpoint) == 2, "in-flight is 2");
+
+    /* Slot 3 should be rejected as saturated */
+    TEST_ASSERT(model_router_acquire_target(&tgt) == -1, "acquire slot 3 saturated");
+    TEST_ASSERT(model_router_get_in_flight(tgt.endpoint) == 2, "in-flight still 2");
+
+    /* Release one slot */
+    model_router_release_target(&tgt);
+    TEST_ASSERT(model_router_get_in_flight(tgt.endpoint) == 1, "in-flight down to 1");
+
+    /* Slot 3 now succeeds */
+    TEST_ASSERT(model_router_acquire_target(&tgt) == 0, "acquire slot 3 succeeded after release");
+    TEST_ASSERT(model_router_get_in_flight(tgt.endpoint) == 2, "in-flight back to 2");
+
+    /* Release remaining */
+    model_router_release_target(&tgt);
+    model_router_release_target(&tgt);
+    TEST_ASSERT(model_router_get_in_flight(tgt.endpoint) == 0, "in-flight is 0");
+
+    model_router_reset_concurrency();
+}
+
+TEST_CASE(test_failover_concurrency_limiting)
+{
+    mock_upstream_t* u1 = mock_upstream_start();
+    mock_upstream_t* u2 = mock_upstream_start();
+    TEST_ASSERT(u1 != NULL && u2 != NULL, "upstreams started");
+
+    struct failover_db db;
+    aigate_core        ac;
+    pg_store_t*        ps = NULL;
+    setup_failover_env(&db, &ac, &ps, mock_upstream_base(u1), mock_upstream_base(u2));
+
+    /* Configure max_concurrent = 1 on both targets */
+    db.model.targets[0].max_concurrent = 1;
+    db.model.targets[1].max_concurrent = 1;
+    model_router_reset_concurrency();
+
+    const char* req_json =
+        "{\"model\":\"failover-chat\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    aigate_request_ctx rq = {
+        .method = "POST",
+        .path = "/v1/chat/completions",
+        .bearer = "client-key",
+        .client_ip = "127.0.0.1",
+        .body = req_json,
+        .body_len = strlen(req_json),
+        .cache_control = "no-cache",
+    };
+
+    /* 1. Pre-saturate target 0 (primary) */
+    TEST_ASSERT(model_router_acquire_target(&db.model.targets[0]) == 0, "acquired target 0 slot");
+    TEST_ASSERT(model_router_get_in_flight(db.model.targets[0].endpoint) == 1,
+                "target 0 in-flight is 1");
+
+    /* Send request: router should failover to target 1 because target 0 is saturated */
+    struct failover_resp fr1;
+    memset(&fr1, 0, sizeof fr1);
+    aigate_response_ctx rc1 = {
+        .impl = &fr1,
+        .set_header = fresp_set_header,
+        .write = fresp_write,
+    };
+    TEST_ASSERT(aigate_handle_request(&ac, &rq, &rc1) == 0, "request 1 handled");
+    TEST_ASSERT(rc1.status == 200, "request 1 succeeded via target 2");
+    TEST_ASSERT(mock_upstream_request_count(u1) == 0, "u1 was not contacted due to saturation");
+    TEST_ASSERT(mock_upstream_request_count(u2) == 1, "u2 served request 1");
+
+    /* 2. Pre-saturate target 1 as well */
+    TEST_ASSERT(model_router_acquire_target(&db.model.targets[1]) == 0, "acquired target 1 slot");
+    TEST_ASSERT(model_router_get_in_flight(db.model.targets[1].endpoint) == 1,
+                "target 1 in-flight is 1");
+
+    /* Send request: all targets saturated -> must return HTTP 429 */
+    struct failover_resp fr2;
+    memset(&fr2, 0, sizeof fr2);
+    aigate_response_ctx rc2 = {
+        .impl = &fr2,
+        .set_header = fresp_set_header,
+        .write = fresp_write,
+    };
+    TEST_ASSERT(aigate_handle_request(&ac, &rq, &rc2) == 0, "request 2 handled");
+    TEST_ASSERT(rc2.status == 429, "returned HTTP 429 when all targets saturated");
+    TEST_ASSERT(strstr(fr2.body, "upstream concurrency limit exceeded") != NULL,
+                "error message contains concurrency limit exceeded");
+
+    /* 3. Release both slots and verify normal traffic flow recovers */
+    model_router_release_target(&db.model.targets[0]);
+    model_router_release_target(&db.model.targets[1]);
+    TEST_ASSERT(model_router_get_in_flight(db.model.targets[0].endpoint) == 0,
+                "target 0 in-flight 0");
+    TEST_ASSERT(model_router_get_in_flight(db.model.targets[1].endpoint) == 0,
+                "target 1 in-flight 0");
+
+    struct failover_resp fr3;
+    memset(&fr3, 0, sizeof fr3);
+    aigate_response_ctx rc3 = {
+        .impl = &fr3,
+        .set_header = fresp_set_header,
+        .write = fresp_write,
+    };
+    TEST_ASSERT(aigate_handle_request(&ac, &rq, &rc3) == 0, "request 3 handled");
+    TEST_ASSERT(rc3.status == 200, "recovered: succeeded with 200");
+    TEST_ASSERT(mock_upstream_request_count(u1) == 1, "u1 served request 3 after recovery");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    mock_upstream_stop(u1);
+    mock_upstream_stop(u2);
+    model_router_reset_concurrency();
+}

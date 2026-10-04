@@ -39,12 +39,18 @@ handle_embeddings(chat_req_t* q)
 
     uint64_t    total_lat = 0;
     const char* last_provider = q->route.provider;
+    int         concurrency_saturated_count = 0;
 
     for (int ci = 0; ci < q->n_candidates; ci++) {
         upstream_target_t*        target = &q->candidates[ci];
         const provider_adapter_t* adapter = provider_find(target->provider);
         if (adapter == NULL || adapter->build_embeddings == NULL ||
             adapter->parse_embeddings_response == NULL) {
+            continue;
+        }
+
+        if (model_router_acquire_target(target) != 0) {
+            concurrency_saturated_count++;
             continue;
         }
 
@@ -67,6 +73,7 @@ handle_embeddings(chat_req_t* q)
                                       &merged,
                                       &mlen) != 0) {
             free(merged);
+            model_router_release_target(target);
             continue;
         }
 
@@ -101,6 +108,7 @@ handle_embeddings(chat_req_t* q)
                                     &ubody,
                                     &ulen);
         }
+        model_router_release_target(target);
         uint64_t lat = mono_ns() - t0;
         total_lat += lat;
         free(merged);
@@ -168,6 +176,15 @@ handle_embeddings(chat_req_t* q)
                 "failover embeddings", q->model, target, &q->candidates[ci + 1], status, urc);
             continue;
         }
+    }
+
+    if (concurrency_saturated_count > 0 && concurrency_saturated_count == q->n_candidates) {
+        if (q->rc->set_header != NULL) {
+            q->rc->set_header(q->rc->impl, "Retry-After", "1");
+        }
+        aigate_write_error(q->rc, 429, "rate_limit_error", "upstream concurrency limit exceeded");
+        chat_req_cleanup(q);
+        return 0;
     }
 
     if (q->rc->set_header != NULL) {

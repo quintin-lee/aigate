@@ -276,6 +276,48 @@ TEST_CASE(test_metrics_failover)
     TEST_ASSERT(metrics_total_failovers() == 0, "reset ok");
 }
 
+TEST_CASE(test_metrics_ttft)
+{
+    metrics_reset_ttft();
+    TEST_ASSERT(metrics_get_ttft_count("openai") == 0, "initially 0 ttft count");
+
+    /* Record samples in nanoseconds */
+    /* 40ms -> <= 0.05s bucket */
+    metrics_record_upstream_ttft("openai", 40000000ULL);
+    /* 80ms -> <= 0.1s bucket */
+    metrics_record_upstream_ttft("openai", 80000000ULL);
+    /* 300ms -> <= 0.5s bucket */
+    metrics_record_upstream_ttft("openai", 300000000ULL);
+    /* 1.5s -> <= 2.5s bucket */
+    metrics_record_upstream_ttft("anthropic", 1500000000ULL);
+
+    TEST_ASSERT(metrics_get_ttft_count("openai") == 3, "openai count == 3");
+    TEST_ASSERT(metrics_get_ttft_count("anthropic") == 1, "anthropic count == 1");
+    TEST_ASSERT(metrics_get_ttft_count("unknown") == 0, "unknown count == 0");
+
+    char buf[8192];
+    TEST_ASSERT(metrics_render(NULL, buf, sizeof buf) == 0, "render ok");
+    TEST_ASSERT(
+        strstr(buf, "aigate_upstream_ttft_seconds_bucket{provider=\"openai\",le=\"0.05\"} 1") !=
+            NULL,
+        "openai 0.05s bucket count 1");
+    TEST_ASSERT(
+        strstr(buf, "aigate_upstream_ttft_seconds_bucket{provider=\"openai\",le=\"0.1\"} 2") !=
+            NULL,
+        "openai 0.1s bucket count 2");
+    TEST_ASSERT(
+        strstr(buf, "aigate_upstream_ttft_seconds_bucket{provider=\"openai\",le=\"0.5\"} 3") !=
+            NULL,
+        "openai 0.5s bucket count 3");
+    TEST_ASSERT(strstr(buf, "aigate_upstream_ttft_seconds_count{provider=\"openai\"} 3") != NULL,
+                "openai total count 3");
+    TEST_ASSERT(strstr(buf, "aigate_upstream_ttft_seconds_count{provider=\"anthropic\"} 1") != NULL,
+                "anthropic total count 1");
+
+    metrics_reset_ttft();
+    TEST_ASSERT(metrics_get_ttft_count("openai") == 0, "reset ok");
+}
+
 TEST_CASE(test_um_request_ring)
 {
     struct um_db db;

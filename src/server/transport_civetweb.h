@@ -46,6 +46,24 @@ transport_civetweb_t* transport_civetweb_start(aigate_core* ac,
                                                const char*  cors_allow_origin);
 
 /**
+ * @brief Start CivetWeb HTTP/HTTPS server with optional TLS certificate and key.
+ * @param ssl_cert Path to SSL certificate PEM (optional, can be NULL/empty)
+ * @param ssl_key  Path to SSL private key PEM (optional, can be NULL/empty)
+ */
+transport_civetweb_t* transport_civetweb_start_tls(aigate_core* ac,
+                                                   pg_store_t*  ps,
+                                                   const char*  admin_token_hash,
+                                                   const char*  listen_addr,
+                                                   const char*  metrics_acl,
+                                                   long         max_body_bytes,
+                                                   int          worker_threads,
+                                                   int          request_timeout_ms,
+                                                   const char*  trusted_proxies,
+                                                   const char*  cors_allow_origin,
+                                                   const char*  ssl_cert,
+                                                   const char*  ssl_key);
+
+/**
  * @brief Mark transport as entering/exiting draining state before graceful exit.
  * @param cw transport context
  * @param draining 1 to mark draining (causes /ready to report 503), 0 for normal

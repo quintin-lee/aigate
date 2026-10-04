@@ -107,4 +107,24 @@ int model_router_apply_canary(model_router_t*      mr,
                               bool*                out_is_canary,
                               long*                out_canary_rule_id);
 
+/** @brief Acquire an in-flight concurrency slot for @p target.
+ *  @param target Upstream target containing endpoint and max_concurrent.
+ *  @return 0 if slot acquired; -1 if saturated (in_flight >= max_concurrent > 0).
+ */
+int model_router_acquire_target(const upstream_target_t* target);
+
+/** @brief Release an in-flight concurrency slot previously acquired for @p target.
+ *  @param target Upstream target containing endpoint.
+ */
+void model_router_release_target(const upstream_target_t* target);
+
+/** @brief Return current in-flight count for @p endpoint.
+ *  @param endpoint Upstream target endpoint URL.
+ *  @return Current in-flight request count, or 0 if none.
+ */
+int model_router_get_in_flight(const char* endpoint);
+
+/** @brief Reset in-flight concurrency tracking table (for tests). */
+void model_router_reset_concurrency(void);
+
 #endif /* AIGATE_MODEL_ROUTER_H */

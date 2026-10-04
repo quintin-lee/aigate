@@ -1,0 +1,24 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "aigate.fullname" . }}-config
+  labels:
+    {{- include "aigate.labels" . | nindent 4 }}
+data:
+  AIGATE_LISTEN: {{ .Values.config.listen | quote }}
+  AIGATE_WORKER_THREADS: {{ .Values.config.workerThreads | quote }}
+  AIGATE_REQUEST_TIMEOUT_MS: {{ .Values.config.requestTimeoutMs | quote }}
+  AIGATE_UPSTREAM_TIMEOUT_MS: {{ .Values.config.upstreamTimeoutMs | quote }}
+  AIGATE_METRICS_ACL: {{ .Values.config.metricsAcl | quote }}
+  AIGATE_TRUSTED_PROXIES: {{ .Values.config.trustedProxies | quote }}
+  AIGATE_DRAIN_TIMEOUT_S: {{ .Values.config.drainTimeoutS | quote }}
+  AIGATE_REDIS_FAIL_OPEN: {{ .Values.config.redisFailOpen | quote }}
+  AIGATE_CORS_ALLOW_ORIGIN: {{ .Values.config.corsAllowOrigin | quote }}
+  AIGATE_LOG_FORMAT: {{ .Values.config.logFormat | quote }}
+  AIGATE_LOG_LEVEL: {{ .Values.config.logLevel | quote }}
+  AIGATE_REDIS_POOL_SIZE: {{ .Values.config.redisPoolSize | quote }}
+  AIGATE_REDIS_TIMEOUT_MS: {{ .Values.config.redisTimeoutMs | quote }}
+  {{- if .Values.tls.enabled }}
+  AIGATE_SSL_CERT: {{ .Values.tls.certMountPath | quote }}
+  AIGATE_SSL_KEY: {{ .Values.tls.keyMountPath | quote }}
+  {{- end }}

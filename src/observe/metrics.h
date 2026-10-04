@@ -49,6 +49,15 @@ long metrics_total_hedged_requests(void);
 /** @brief Lifetime total of all hedged won requests. */
 long metrics_total_hedged_won(void);
 
+/** @brief Record an upstream Time To First Token (TTFT) sample in nanoseconds. */
+void metrics_record_upstream_ttft(const char* provider, uint64_t ttft_ns);
+
+/** @brief Reset TTFT metrics (for tests). */
+void metrics_reset_ttft(void);
+
+/** @brief Sample count of TTFT recordings for @p provider. */
+long metrics_get_ttft_count(const char* provider);
+
 /** @brief 1 when @p ip (dotted-quad string) is contained in the comma-
  *  separated CIDR/IPv4 list @p acl ("127.0.0.1,10.0.0.0/8").
  *  @note ACL is IPv4-only by design (spec §5); empty @p acl → allow all. */

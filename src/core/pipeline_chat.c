@@ -278,7 +278,18 @@ handle_chat_sync(chat_req_t* q)
                                             &merged1,
                                             &mlen1);
 
-            if (brc0 == 0 && brc1 == 0) {
+            bool acq0 = (model_router_acquire_target(target0) == 0);
+            bool acq1 = (model_router_acquire_target(target1) == 0);
+            if (!acq0 || !acq1) {
+                if (acq0) {
+                    model_router_release_target(target0);
+                }
+                if (acq1) {
+                    model_router_release_target(target1);
+                }
+                free(merged0);
+                free(merged1);
+            } else if (brc0 == 0 && brc1 == 0) {
                 int s_idx = tracer_span_start(
                     &q->trace_ctx, "upstream_ttft", SPAN_KIND_CLIENT, q->trace_ctx.root_span_id);
                 char        tp_hdr[64];
@@ -340,8 +351,14 @@ handle_chat_sync(chat_req_t* q)
 
                 hedged_call_result_t hres;
                 int                  hrc = upstream_call_hedged(&hparams, &hres);
+                model_router_release_target(target0);
+                model_router_release_target(target1);
                 free(merged0);
                 free(merged1);
+
+                if (target0 != NULL && target0->provider[0] != '\0' && hres.latency_ns > 0) {
+                    metrics_record_upstream_ttft(target0->provider, hres.latency_ns);
+                }
 
                 char ttft_str[32];
                 snprintf(ttft_str, sizeof(ttft_str), "%.2f", (double)hres.latency_ns / 1000000.0);
@@ -521,17 +538,25 @@ handle_chat_sync(chat_req_t* q)
                 /* Both candidates 0 and 1 failed in the hedged run, fallback to candidate 2 if any */
                 start_ci = 2;
             } else {
+                model_router_release_target(target0);
+                model_router_release_target(target1);
                 free(merged0);
                 free(merged1);
             }
         }
     }
 
+    int concurrency_saturated_count = 0;
     for (int ci = start_ci; ci < q->n_candidates; ci++) {
         upstream_target_t*        target = &q->candidates[ci];
         const provider_adapter_t* adapter = provider_find(target->provider);
         if (adapter == NULL || adapter->build_chat == NULL ||
             adapter->parse_chat_response == NULL) {
+            continue;
+        }
+
+        if (model_router_acquire_target(target) != 0) {
+            concurrency_saturated_count++;
             continue;
         }
 
@@ -554,6 +579,7 @@ handle_chat_sync(chat_req_t* q)
                                 &merged,
                                 &mlen) != 0) {
             free(merged);
+            model_router_release_target(target);
             continue;
         }
 
@@ -599,8 +625,12 @@ handle_chat_sync(chat_req_t* q)
                                     &ubody,
                                     &ulen);
         }
+        model_router_release_target(target);
         uint64_t lat = mono_ns() - t0;
         total_lat += lat;
+        if (target != NULL && target->provider[0] != '\0' && lat > 0) {
+            metrics_record_upstream_ttft(target->provider, lat);
+        }
         char ttft_str[32];
         snprintf(ttft_str, sizeof(ttft_str), "%.2f", (double)lat / 1000000.0);
         tracer_span_set_attr(&q->trace_ctx, "upstream_ttft", "aigate.latency.ttft_ms", ttft_str);
@@ -773,6 +803,16 @@ handle_chat_sync(chat_req_t* q)
         }
     }
 
+    if (concurrency_saturated_count > 0 &&
+        concurrency_saturated_count == (q->n_candidates - start_ci)) {
+        if (q->rc->set_header != NULL) {
+            q->rc->set_header(q->rc->impl, "Retry-After", "1");
+        }
+        aigate_write_error(q->rc, 429, "rate_limit_error", "upstream concurrency limit exceeded");
+        chat_req_cleanup(q);
+        return 0;
+    }
+
     if (q->rc->set_header != NULL) {
         q->rc->set_header(q->rc->impl, "X-Upstream-Provider", last_provider);
     }
@@ -868,6 +908,7 @@ typedef struct stream_feed_wrapper {
     latency_tracker_t* lt;             /**< Latency tracker instance (optional). */
     const char*        model;          /**< Target model name for metrics. */
     const char*        endpoint;       /**< Target upstream endpoint address. */
+    const char*        provider;       /**< Target upstream provider name. */
     uint64_t           t0;             /**< Timestamp when request was dispatched. */
     bool        first_chunk_recorded;  /**< True if first non-empty chunk has been observed. */
     chat_req_t* q;                     /**< Request context for OpenTelemetry span tracking. */
@@ -888,9 +929,12 @@ stream_feed_wrapper_fn(void* ctx, const void* chunk, size_t len)
         w->first_chunk_recorded = true;
         /* Step 2: Calculate elapsed Time To First Token (TTFT) via monotonic clock */
         uint64_t ttft_ns = mono_ns() - w->t0;
-        /* Step 3: Record TTFT sample in latency tracker for adaptive routing and P95 scoring */
+        /* Step 3: Record TTFT sample in latency tracker and Prometheus metrics */
         if (w->lt != NULL && ttft_ns > 0) {
             latency_tracker_record(w->lt, w->model, w->endpoint, ttft_ns);
+        }
+        if (w->provider != NULL && ttft_ns > 0) {
+            metrics_record_upstream_ttft(w->provider, ttft_ns);
         }
         if (w->q != NULL) {
             char ttft_str[32];
@@ -919,10 +963,16 @@ handle_chat_stream(chat_req_t* q)
     uint64_t    total_lat = 0;
     const char* last_provider = q->route.provider;
 
+    int concurrency_saturated_count = 0;
     for (int ci = 0; ci < q->n_candidates; ci++) {
         upstream_target_t*        target = &q->candidates[ci];
         const provider_adapter_t* adapter = provider_find(target->provider);
         if (adapter == NULL || adapter->build_chat == NULL || adapter->stream_bridge_new == NULL) {
+            continue;
+        }
+
+        if (model_router_acquire_target(target) != 0) {
+            concurrency_saturated_count++;
             continue;
         }
 
@@ -945,6 +995,7 @@ handle_chat_stream(chat_req_t* q)
                                 &merged,
                                 &mlen) != 0) {
             free(merged);
+            model_router_release_target(target);
             continue;
         }
 
@@ -972,6 +1023,7 @@ handle_chat_stream(chat_req_t* q)
         stream_bridge_t* bridge = adapter->stream_bridge_new(&proxy_rc, q->model);
         if (bridge == NULL) {
             free(merged);
+            model_router_release_target(target);
             continue;
         }
 
@@ -988,6 +1040,7 @@ handle_chat_stream(chat_req_t* q)
             .lt = q->ac->lt,
             .model = q->model,
             .endpoint = target->endpoint,
+            .provider = target->provider,
             .t0 = t0,
             .first_chunk_recorded = false,
             .q = q,
@@ -1030,6 +1083,7 @@ handle_chat_stream(chat_req_t* q)
                                        &slen);
             headers_sent = adapter->stream_bridge_headers_sent(bridge);
         }
+        model_router_release_target(target);
         uint64_t lat = mono_ns() - t0;
         total_lat += lat;
 
@@ -1164,6 +1218,15 @@ handle_chat_stream(chat_req_t* q)
         acc.line_buf = NULL;
         adapter->stream_bridge_free(bridge);
 
+        chat_req_cleanup(q);
+        return 0;
+    }
+
+    if (concurrency_saturated_count > 0 && concurrency_saturated_count == q->n_candidates) {
+        if (q->rc->set_header != NULL) {
+            q->rc->set_header(q->rc->impl, "Retry-After", "1");
+        }
+        aigate_write_error(q->rc, 429, "rate_limit_error", "upstream concurrency limit exceeded");
         chat_req_cleanup(q);
         return 0;
     }

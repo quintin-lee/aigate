@@ -55,6 +55,100 @@ metrics_total_hedged_won(void)
     return atomic_load_explicit(&g_hedged_won_total, memory_order_relaxed);
 }
 
+#define TTFT_MAX_PROVIDERS 16
+#define TTFT_NUM_BUCKETS 9
+
+static const long TTFT_BUCKETS_NS[TTFT_NUM_BUCKETS] = {
+    50000000L,    /* 0.05s / 50ms */
+    100000000L,   /* 0.1s / 100ms */
+    250000000L,   /* 0.25s / 250ms */
+    500000000L,   /* 0.5s / 500ms */
+    1000000000L,  /* 1.0s */
+    2500000000L,  /* 2.5s */
+    5000000000L,  /* 5.0s */
+    10000000000L, /* 10.0s */
+    30000000000L, /* 30.0s */
+};
+
+static const char* TTFT_BUCKET_LE[TTFT_NUM_BUCKETS] = {
+    "0.05", "0.1", "0.25", "0.5", "1", "2.5", "5", "10", "30"};
+
+typedef struct provider_ttft {
+    int         in_use;
+    char        provider[32];
+    atomic_long buckets[TTFT_NUM_BUCKETS];
+    atomic_long count;
+    atomic_long sum_ns;
+} provider_ttft_t;
+
+static provider_ttft_t g_ttft_table[TTFT_MAX_PROVIDERS];
+static pthread_mutex_t g_ttft_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+void
+metrics_record_upstream_ttft(const char* provider, uint64_t ttft_ns)
+{
+    const char* p = (provider != NULL && provider[0] != '\0') ? provider : "unknown";
+
+    provider_ttft_t* entry = NULL;
+    pthread_mutex_lock(&g_ttft_mtx);
+    for (int i = 0; i < TTFT_MAX_PROVIDERS; i++) {
+        if (g_ttft_table[i].in_use && strcmp(g_ttft_table[i].provider, p) == 0) {
+            entry = &g_ttft_table[i];
+            break;
+        }
+    }
+    if (entry == NULL) {
+        for (int i = 0; i < TTFT_MAX_PROVIDERS; i++) {
+            if (!g_ttft_table[i].in_use) {
+                g_ttft_table[i].in_use = 1;
+                snprintf(g_ttft_table[i].provider, sizeof(g_ttft_table[i].provider), "%s", p);
+                for (int b = 0; b < TTFT_NUM_BUCKETS; b++) {
+                    atomic_init(&g_ttft_table[i].buckets[b], 0);
+                }
+                atomic_init(&g_ttft_table[i].count, 0);
+                atomic_init(&g_ttft_table[i].sum_ns, 0);
+                entry = &g_ttft_table[i];
+                break;
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_ttft_mtx);
+
+    if (entry != NULL) {
+        for (int b = 0; b < TTFT_NUM_BUCKETS; b++) {
+            if (ttft_ns <= (uint64_t)TTFT_BUCKETS_NS[b]) {
+                atomic_fetch_add(&entry->buckets[b], 1);
+            }
+        }
+        atomic_fetch_add(&entry->count, 1);
+        atomic_fetch_add(&entry->sum_ns, (long)ttft_ns);
+    }
+}
+
+void
+metrics_reset_ttft(void)
+{
+    pthread_mutex_lock(&g_ttft_mtx);
+    memset(g_ttft_table, 0, sizeof g_ttft_table);
+    pthread_mutex_unlock(&g_ttft_mtx);
+}
+
+long
+metrics_get_ttft_count(const char* provider)
+{
+    const char* p = (provider != NULL && provider[0] != '\0') ? provider : "unknown";
+    pthread_mutex_lock(&g_ttft_mtx);
+    for (int i = 0; i < TTFT_MAX_PROVIDERS; i++) {
+        if (g_ttft_table[i].in_use && strcmp(g_ttft_table[i].provider, p) == 0) {
+            long c = atomic_load(&g_ttft_table[i].count);
+            pthread_mutex_unlock(&g_ttft_mtx);
+            return c;
+        }
+    }
+    pthread_mutex_unlock(&g_ttft_mtx);
+    return 0;
+}
+
 /** @brief Latency histogram bucket count (matches BUCKET_LE length). */
 #define NUM_BUCKETS 6
 /** Latency histogram bucket upper bounds (nanoseconds, as strings, matching exposition output). */
@@ -222,6 +316,76 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
         }
     }
     pthread_mutex_unlock(&g_failover_mtx);
+
+    /* TTFT histogram */
+    pthread_mutex_lock(&g_ttft_mtx);
+    int have_ttft = 0;
+    for (int i = 0; i < TTFT_MAX_PROVIDERS; i++) {
+        if (g_ttft_table[i].in_use && atomic_load(&g_ttft_table[i].count) > 0) {
+            have_ttft = 1;
+            break;
+        }
+    }
+    if (have_ttft) {
+        n = snprintf(
+            w,
+            rem,
+            "# HELP aigate_upstream_ttft_seconds Time to first token histogram by provider "
+            "(seconds).\n"
+            "# TYPE aigate_upstream_ttft_seconds histogram\n");
+        if (n < 0 || (size_t)n >= rem) {
+            pthread_mutex_unlock(&g_ttft_mtx);
+            return -1;
+        }
+        w += n;
+        rem -= (size_t)n;
+
+        for (int i = 0; i < TTFT_MAX_PROVIDERS; i++) {
+            if (!g_ttft_table[i].in_use) {
+                continue;
+            }
+            long count = atomic_load(&g_ttft_table[i].count);
+            if (count == 0) {
+                continue;
+            }
+            long        sum_ns = atomic_load(&g_ttft_table[i].sum_ns);
+            const char* p = g_ttft_table[i].provider;
+
+            for (int b = 0; b < TTFT_NUM_BUCKETS; b++) {
+                long bcount = atomic_load(&g_ttft_table[i].buckets[b]);
+                n = snprintf(w,
+                             rem,
+                             "aigate_upstream_ttft_seconds_bucket{provider=\"%s\",le=\"%s\"} %ld\n",
+                             p,
+                             TTFT_BUCKET_LE[b],
+                             bcount);
+                if (n < 0 || (size_t)n >= rem) {
+                    pthread_mutex_unlock(&g_ttft_mtx);
+                    return -1;
+                }
+                w += n;
+                rem -= (size_t)n;
+            }
+            n = snprintf(w,
+                         rem,
+                         "aigate_upstream_ttft_seconds_bucket{provider=\"%s\",le=\"+Inf\"} %ld\n"
+                         "aigate_upstream_ttft_seconds_sum{provider=\"%s\"} %.6f\n"
+                         "aigate_upstream_ttft_seconds_count{provider=\"%s\"} %ld\n",
+                         p,
+                         count,
+                         p,
+                         (double)sum_ns / 1000000000.0,
+                         p,
+                         count);
+            if (n < 0 || (size_t)n >= rem) {
+                pthread_mutex_unlock(&g_ttft_mtx);
+                return -1;
+            }
+            w += n;
+            rem -= (size_t)n;
+        }
+    }
+    pthread_mutex_unlock(&g_ttft_mtx);
 
     *w = '\0';
     return 0;

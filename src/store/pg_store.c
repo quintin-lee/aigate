@@ -523,6 +523,11 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
                                       : 1;
                     tgt->priority =
                         (jpr && json_is_integer(jpr)) ? (int)json_integer_value(jpr) : 0;
+                    json_t* jmc = json_object_get(item, "max_concurrent");
+                    tgt->max_concurrent =
+                        (jmc && json_is_integer(jmc) && json_integer_value(jmc) >= 0)
+                            ? (int)json_integer_value(jmc)
+                            : 0;
                 }
                 json_decref(jarr);
             }
@@ -905,7 +910,7 @@ serialize_targets_json(const model_rec_t* m)
         return NULL;
     }
     if (m->n_targets == 0 && m->endpoint[0] != '\0') {
-        json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i}",
+        json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i, s:i}",
                                  "provider",
                                  m->provider[0] != '\0' ? m->provider : "openai",
                                  "endpoint",
@@ -915,14 +920,16 @@ serialize_targets_json(const model_rec_t* m)
                                  "weight",
                                  1,
                                  "priority",
-                                 0);
+                                 0,
+                                 "max_concurrent",
+                                 m->max_concurrent >= 0 ? m->max_concurrent : 0);
         if (item != NULL) {
             json_array_append_new(jarr, item);
         }
     } else {
         for (int i = 0; i < m->n_targets && i < MAX_TARGETS_PER_MODEL; i++) {
             const upstream_target_t* tgt = &m->targets[i];
-            json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i}",
+            json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i, s:i}",
                                      "provider",
                                      tgt->provider[0] != '\0' ? tgt->provider : "openai",
                                      "endpoint",
@@ -932,7 +939,9 @@ serialize_targets_json(const model_rec_t* m)
                                      "weight",
                                      tgt->weight > 0 ? tgt->weight : 1,
                                      "priority",
-                                     tgt->priority >= 0 ? tgt->priority : 0);
+                                     tgt->priority >= 0 ? tgt->priority : 0,
+                                     "max_concurrent",
+                                     tgt->max_concurrent >= 0 ? tgt->max_concurrent : 0);
             if (item != NULL) {
                 json_array_append_new(jarr, item);
             }

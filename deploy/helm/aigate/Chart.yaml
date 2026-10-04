@@ -1,0 +1,14 @@
+apiVersion: v2
+name: aigate
+description: Production-grade Helm Chart for aigate (High-performance LLM AI Gateway written in C)
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - llm
+  - ai-gateway
+  - openai
+  - proxy
+  - api-gateway
+maintainers:
+  - name: aigate-team

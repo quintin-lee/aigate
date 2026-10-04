@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 /** @brief CivetWeb transport instance state. */
 struct transport_civetweb {
@@ -33,7 +34,9 @@ struct transport_civetweb {
     long                  max_body_bytes;         /**< max /v1 request body in bytes */
     int                   worker_threads;         /**< worker threads count */
     int                   request_timeout_ms;     /**< request timeout ms */
-    volatile sig_atomic_t draining;               /**< 1 when node is draining */
+    char*                 ssl_combined_pem;       /**< path to PEM file passed to civetweb */
+    bool                  ssl_is_temp; /**< true if ssl_combined_pem is a temporary file */
+    volatile sig_atomic_t draining;    /**< 1 when node is draining */
 };
 
 /** @brief Per-request response state for the CivetWeb adapter. */
@@ -679,17 +682,64 @@ handle_ready(struct mg_connection* conn, void* cbdata)
     return 1;
 }
 
+static char*
+prepare_ssl_pem(const char* ssl_cert, const char* ssl_key, bool* out_is_temp)
+{
+    *out_is_temp = false;
+    if (ssl_cert == NULL || ssl_cert[0] == '\0') {
+        return NULL;
+    }
+    if (ssl_key == NULL || ssl_key[0] == '\0' || strcmp(ssl_cert, ssl_key) == 0) {
+        return strdup(ssl_cert);
+    }
+    char tmppath[] = "/tmp/aigate_ssl_XXXXXX";
+    int  fd = mkstemp(tmppath);
+    if (fd < 0) {
+        return strdup(ssl_cert);
+    }
+    FILE* out = fdopen(fd, "w");
+    if (out == NULL) {
+        close(fd);
+        unlink(tmppath);
+        return strdup(ssl_cert);
+    }
+    FILE* fc = fopen(ssl_cert, "r");
+    if (fc != NULL) {
+        char   buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), fc)) > 0) {
+            fwrite(buf, 1, n, out);
+        }
+        fclose(fc);
+    }
+    fputc('\n', out);
+    FILE* fk = fopen(ssl_key, "r");
+    if (fk != NULL) {
+        char   buf[4096];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), fk)) > 0) {
+            fwrite(buf, 1, n, out);
+        }
+        fclose(fk);
+    }
+    fclose(out);
+    *out_is_temp = true;
+    return strdup(tmppath);
+}
+
 transport_civetweb_t*
-transport_civetweb_start(aigate_core* ac,
-                         pg_store_t*  ps,
-                         const char*  admin_token_hash,
-                         const char*  listen_addr,
-                         const char*  metrics_acl,
-                         long         max_body_bytes,
-                         int          worker_threads,
-                         int          request_timeout_ms,
-                         const char*  trusted_proxies,
-                         const char*  cors_allow_origin)
+transport_civetweb_start_tls(aigate_core* ac,
+                             pg_store_t*  ps,
+                             const char*  admin_token_hash,
+                             const char*  listen_addr,
+                             const char*  metrics_acl,
+                             long         max_body_bytes,
+                             int          worker_threads,
+                             int          request_timeout_ms,
+                             const char*  trusted_proxies,
+                             const char*  cors_allow_origin,
+                             const char*  ssl_cert,
+                             const char*  ssl_key)
 {
     transport_civetweb_t* cw = calloc(1, sizeof *cw);
     if (cw == NULL) {
@@ -717,6 +767,8 @@ transport_civetweb_start(aigate_core* ac,
         snprintf(cw->cors_allow_origin, sizeof cw->cors_allow_origin, "*");
     }
 
+    cw->ssl_combined_pem = prepare_ssl_pem(ssl_cert, ssl_key, &cw->ssl_is_temp);
+
     cw->adm.ac = ac;
     cw->adm.ps = ps;
     cw->adm.admin_token_hash = cw->admin_token_hash;
@@ -733,11 +785,17 @@ transport_civetweb_start(aigate_core* ac,
     const char* lw = getenv("AIGATE_LOCKOUT_WINDOW_S");
     admin_lockout_set_policy(lf != NULL ? atoi(lf) : 10, lw != NULL ? atoi(lw) : 300);
 
+    char        final_port_spec[128];
     const char* port_spec = listen_addr;
     if (port_spec == NULL || port_spec[0] == '\0') {
-        port_spec = "8080";
+        port_spec = (cw->ssl_combined_pem != NULL) ? "8443s" : "8080";
     } else if (port_spec[0] == ':' && port_spec[1] != '\0') {
         port_spec = port_spec + 1;
+    }
+
+    if (cw->ssl_combined_pem != NULL && strchr(port_spec, 's') == NULL) {
+        snprintf(final_port_spec, sizeof(final_port_spec), "%ss", port_spec);
+        port_spec = final_port_spec;
     }
 
     char threads_str[16];
@@ -745,27 +803,37 @@ transport_civetweb_start(aigate_core* ac,
     snprintf(threads_str, sizeof(threads_str), "%d", cw->worker_threads);
     snprintf(timeout_str, sizeof(timeout_str), "%d", cw->request_timeout_ms);
 
-    const char* options[] = {
-        "listening_ports",
-        port_spec,
-        "num_threads",
-        threads_str,
-        "request_timeout_ms",
-        timeout_str,
-        "access_control_allow_methods",
-        "",
-        "access_control_allow_origin",
-        "",
-        "access_control_allow_headers",
-        "",
-        NULL,
-    };
+    const char* options[32];
+    int         opt_i = 0;
+    options[opt_i++] = "listening_ports";
+    options[opt_i++] = port_spec;
+    options[opt_i++] = "num_threads";
+    options[opt_i++] = threads_str;
+    options[opt_i++] = "request_timeout_ms";
+    options[opt_i++] = timeout_str;
+    options[opt_i++] = "access_control_allow_methods";
+    options[opt_i++] = "";
+    options[opt_i++] = "access_control_allow_origin";
+    options[opt_i++] = "";
+    options[opt_i++] = "access_control_allow_headers";
+    options[opt_i++] = "";
+    if (cw->ssl_combined_pem != NULL) {
+        options[opt_i++] = "ssl_certificate";
+        options[opt_i++] = cw->ssl_combined_pem;
+    }
+    options[opt_i++] = NULL;
 
     pthread_mutex_init(&cw->cfg_mtx, NULL);
 
     cw->ctx = mg_start(NULL, NULL, options);
     if (cw->ctx == NULL) {
         AIGATE_LOG_ERROR("transport_civetweb: failed to bind on %s", port_spec);
+        if (cw->ssl_combined_pem != NULL) {
+            if (cw->ssl_is_temp) {
+                unlink(cw->ssl_combined_pem);
+            }
+            free(cw->ssl_combined_pem);
+        }
         pthread_mutex_destroy(&cw->cfg_mtx);
         free(cw);
         return NULL;
@@ -781,11 +849,38 @@ transport_civetweb_start(aigate_core* ac,
     mg_set_request_handler(cw->ctx, "/ready", handle_ready, cw);
     mg_set_request_handler(cw->ctx, "/$", handle_root, cw);
 
-    AIGATE_LOG_INFO("transport_civetweb: listening on %s (threads: %d, timeout: %dms)",
+    AIGATE_LOG_INFO("transport_civetweb: listening on %s (threads: %d, timeout: %dms, tls: %s)",
                     port_spec,
                     cw->worker_threads,
-                    cw->request_timeout_ms);
+                    cw->request_timeout_ms,
+                    cw->ssl_combined_pem != NULL ? "enabled" : "disabled");
     return cw;
+}
+
+transport_civetweb_t*
+transport_civetweb_start(aigate_core* ac,
+                         pg_store_t*  ps,
+                         const char*  admin_token_hash,
+                         const char*  listen_addr,
+                         const char*  metrics_acl,
+                         long         max_body_bytes,
+                         int          worker_threads,
+                         int          request_timeout_ms,
+                         const char*  trusted_proxies,
+                         const char*  cors_allow_origin)
+{
+    return transport_civetweb_start_tls(ac,
+                                        ps,
+                                        admin_token_hash,
+                                        listen_addr,
+                                        metrics_acl,
+                                        max_body_bytes,
+                                        worker_threads,
+                                        request_timeout_ms,
+                                        trusted_proxies,
+                                        cors_allow_origin,
+                                        NULL,
+                                        NULL);
 }
 
 void
@@ -841,6 +936,13 @@ transport_civetweb_stop(transport_civetweb_t* cw)
     if (cw->ctx != NULL) {
         mg_stop(cw->ctx);
         cw->ctx = NULL;
+    }
+    if (cw->ssl_combined_pem != NULL) {
+        if (cw->ssl_is_temp) {
+            unlink(cw->ssl_combined_pem);
+        }
+        free(cw->ssl_combined_pem);
+        cw->ssl_combined_pem = NULL;
     }
     pthread_mutex_destroy(&cw->cfg_mtx);
     free(cw);

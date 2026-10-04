@@ -59,8 +59,123 @@ model_router_free(model_router_t* mr)
     free(mr);
 }
 
+#include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
+
+#define MR_MAX_CONCURRENT_TARGETS 256
+
+typedef struct {
+    char         endpoint[512];
+    _Atomic int  in_flight;
+    _Atomic bool in_use;
+} target_slot_t;
+
+static target_slot_t   g_target_slots[MR_MAX_CONCURRENT_TARGETS];
+static pthread_mutex_t g_target_slots_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+static target_slot_t*
+find_or_create_slot(const char* endpoint)
+{
+    if (endpoint == NULL || endpoint[0] == '\0') {
+        return NULL;
+    }
+    for (int i = 0; i < MR_MAX_CONCURRENT_TARGETS; i++) {
+        if (atomic_load_explicit(&g_target_slots[i].in_use, memory_order_acquire) &&
+            strcmp(g_target_slots[i].endpoint, endpoint) == 0) {
+            return &g_target_slots[i];
+        }
+    }
+    pthread_mutex_lock(&g_target_slots_mtx);
+    for (int i = 0; i < MR_MAX_CONCURRENT_TARGETS; i++) {
+        if (atomic_load_explicit(&g_target_slots[i].in_use, memory_order_relaxed) &&
+            strcmp(g_target_slots[i].endpoint, endpoint) == 0) {
+            pthread_mutex_unlock(&g_target_slots_mtx);
+            return &g_target_slots[i];
+        }
+    }
+    for (int i = 0; i < MR_MAX_CONCURRENT_TARGETS; i++) {
+        if (!atomic_load_explicit(&g_target_slots[i].in_use, memory_order_relaxed)) {
+            snprintf(
+                g_target_slots[i].endpoint, sizeof(g_target_slots[i].endpoint), "%s", endpoint);
+            atomic_store_explicit(&g_target_slots[i].in_flight, 0, memory_order_relaxed);
+            atomic_store_explicit(&g_target_slots[i].in_use, true, memory_order_release);
+            pthread_mutex_unlock(&g_target_slots_mtx);
+            return &g_target_slots[i];
+        }
+    }
+    pthread_mutex_unlock(&g_target_slots_mtx);
+    return NULL;
+}
+
+int
+model_router_acquire_target(const upstream_target_t* target)
+{
+    if (target == NULL || target->endpoint[0] == '\0') {
+        return 0;
+    }
+    target_slot_t* slot = find_or_create_slot(target->endpoint);
+    if (slot == NULL) {
+        return 0;
+    }
+    int cur = atomic_load_explicit(&slot->in_flight, memory_order_relaxed);
+    while (true) {
+        if (target->max_concurrent > 0 && cur >= target->max_concurrent) {
+            return -1;
+        }
+        if (atomic_compare_exchange_weak_explicit(
+                &slot->in_flight, &cur, cur + 1, memory_order_acquire, memory_order_relaxed)) {
+            return 0;
+        }
+    }
+}
+
+void
+model_router_release_target(const upstream_target_t* target)
+{
+    if (target == NULL || target->endpoint[0] == '\0') {
+        return;
+    }
+    for (int i = 0; i < MR_MAX_CONCURRENT_TARGETS; i++) {
+        if (atomic_load_explicit(&g_target_slots[i].in_use, memory_order_acquire) &&
+            strcmp(g_target_slots[i].endpoint, target->endpoint) == 0) {
+            int prev =
+                atomic_fetch_sub_explicit(&g_target_slots[i].in_flight, 1, memory_order_release);
+            if (prev <= 1) {
+                atomic_store_explicit(&g_target_slots[i].in_flight, 0, memory_order_relaxed);
+            }
+            return;
+        }
+    }
+}
+
+int
+model_router_get_in_flight(const char* endpoint)
+{
+    if (endpoint == NULL || endpoint[0] == '\0') {
+        return 0;
+    }
+    for (int i = 0; i < MR_MAX_CONCURRENT_TARGETS; i++) {
+        if (atomic_load_explicit(&g_target_slots[i].in_use, memory_order_acquire) &&
+            strcmp(g_target_slots[i].endpoint, endpoint) == 0) {
+            int val = atomic_load_explicit(&g_target_slots[i].in_flight, memory_order_relaxed);
+            return val > 0 ? val : 0;
+        }
+    }
+    return 0;
+}
+
+void
+model_router_reset_concurrency(void)
+{
+    pthread_mutex_lock(&g_target_slots_mtx);
+    for (int i = 0; i < MR_MAX_CONCURRENT_TARGETS; i++) {
+        atomic_store_explicit(&g_target_slots[i].in_flight, 0, memory_order_relaxed);
+        atomic_store_explicit(&g_target_slots[i].in_use, false, memory_order_relaxed);
+        g_target_slots[i].endpoint[0] = '\0';
+    }
+    pthread_mutex_unlock(&g_target_slots_mtx);
+}
 
 /* One round-robin counter shared by every model (P3-8): it only selects
  * among a model's own targets, so cross-model interleaving is a harmless
@@ -236,12 +351,16 @@ model_router_select_candidates_targeted(circuit_breaker_t* cb,
                  model->upstream_key);
         src_targets[0].weight = 1;
         src_targets[0].priority = 0;
+        src_targets[0].max_concurrent = model->max_concurrent;
     } else {
         if (n_tgts > MAX_TARGETS_PER_MODEL) {
             n_tgts = MAX_TARGETS_PER_MODEL;
         }
         for (int i = 0; i < n_tgts; i++) {
             src_targets[i] = model->targets[i];
+            if (src_targets[i].max_concurrent <= 0 && model->max_concurrent > 0) {
+                src_targets[i].max_concurrent = model->max_concurrent;
+            }
             if (src_targets[i].provider[0] == '\0') {
                 snprintf(src_targets[i].provider,
                          sizeof(src_targets[i].provider),
@@ -341,49 +460,77 @@ model_router_select_candidates_targeted(circuit_breaker_t* cb,
                 continue; /* Skip empty or fully tripped tier */
             }
 
+            /* Prioritize unsaturated targets over saturated targets within this tier */
+            int unconstrained[MAX_TARGETS_PER_MODEL];
+            int saturated[MAX_TARGETS_PER_MODEL];
+            int n_uncon = 0, n_sat = 0;
+            for (int k = 0; k < n_th; k++) {
+                int src_idx = tier_healthy_idx[k];
+                if (src_targets[src_idx].max_concurrent > 0 &&
+                    model_router_get_in_flight(src_targets[src_idx].endpoint) >=
+                        src_targets[src_idx].max_concurrent) {
+                    saturated[n_sat++] = src_idx;
+                } else {
+                    unconstrained[n_uncon++] = src_idx;
+                }
+            }
+
+            int eval_pool[MAX_TARGETS_PER_MODEL];
+            int n_eval = 0;
+            if (n_uncon > 0 && n_sat > 0) {
+                for (int k = 0; k < n_uncon; k++) {
+                    eval_pool[k] = unconstrained[k];
+                }
+                n_eval = n_uncon;
+            } else {
+                for (int k = 0; k < n_th; k++) {
+                    eval_pool[k] = tier_healthy_idx[k];
+                }
+                n_eval = n_th;
+            }
+
             /* Apply Load Balancing policy within the current priority tier */
-            if (strcmp(model->lb_policy, "round_robin") == 0 && n_th > 1) {
+            if (strcmp(model->lb_policy, "round_robin") == 0 && n_eval > 1) {
                 /* Policy A: Atomic Round-Robin. Relaxed atomic increment avoids cross-core mutex locks. */
                 unsigned long start =
                     atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) %
-                    (unsigned long)n_th;
-                for (int k = 0; k < n_th && total_added < cap; k++) {
-                    int src_idx =
-                        tier_healthy_idx[(start + (unsigned long)k) % (unsigned long)n_th];
+                    (unsigned long)n_eval;
+                for (int k = 0; k < n_eval && total_added < cap; k++) {
+                    int src_idx = eval_pool[(start + (unsigned long)k) % (unsigned long)n_eval];
                     out_candidates[total_added++] = src_targets[src_idx];
                 }
             } else if ((strcmp(model->lb_policy, "weighted") == 0 ||
                         strcmp(model->lb_policy, "weighted_round_robin") == 0) &&
-                       n_th > 1) {
+                       n_eval > 1) {
                 /* Policy B: Configured Static Weights Roulette Wheel Selection.
                  * Pick first candidate by cumulative weight probability, sort remainder by weight descending. */
                 int total_w = 0;
-                for (int k = 0; k < n_th; k++) {
-                    total_w += src_targets[tier_healthy_idx[k]].weight;
+                for (int k = 0; k < n_eval; k++) {
+                    total_w += src_targets[eval_pool[k]].weight;
                 }
                 if (total_w <= 0) {
-                    total_w = n_th;
+                    total_w = n_eval;
                 }
                 unsigned long pick =
                     atomic_fetch_add_explicit(&g_rr_counter, 1, memory_order_relaxed) %
                     (unsigned long)total_w;
                 int chosen_k = 0;
                 int acc = 0;
-                for (int k = 0; k < n_th; k++) {
-                    acc += src_targets[tier_healthy_idx[k]].weight;
+                for (int k = 0; k < n_eval; k++) {
+                    acc += src_targets[eval_pool[k]].weight;
                     if ((unsigned long)acc > pick) {
                         chosen_k = k;
                         break;
                     }
                 }
                 /* Place winning target first */
-                out_candidates[total_added++] = src_targets[tier_healthy_idx[chosen_k]];
+                out_candidates[total_added++] = src_targets[eval_pool[chosen_k]];
                 /* Sort remaining targets in this tier by weight descending for fallback ordering */
                 int rem_k[MAX_TARGETS_PER_MODEL];
                 int n_rem = 0;
-                for (int k = 0; k < n_th; k++) {
+                for (int k = 0; k < n_eval; k++) {
                     if (k != chosen_k) {
-                        rem_k[n_rem++] = tier_healthy_idx[k];
+                        rem_k[n_rem++] = eval_pool[k];
                     }
                 }
                 for (int a = 0; a < n_rem - 1; a++) {
@@ -398,22 +545,22 @@ model_router_select_candidates_targeted(circuit_breaker_t* cb,
                 for (int k = 0; k < n_rem && total_added < cap; k++) {
                     out_candidates[total_added++] = src_targets[rem_k[k]];
                 }
-            } else if (strcmp(model->lb_policy, "latency_p95") == 0 && n_th > 1) {
+            } else if (strcmp(model->lb_policy, "latency_p95") == 0 && n_eval > 1) {
                 /* Policy C: Latency P95 Optimal Selection.
                  * Query sliding window P95 latency (ms) for each endpoint; sort ascending (fastest first). */
                 struct {
                     int      src_idx;
                     uint32_t p95;
                 } lat_cands[MAX_TARGETS_PER_MODEL];
-                for (int k = 0; k < n_th; k++) {
-                    int src_idx = tier_healthy_idx[k];
+                for (int k = 0; k < n_eval; k++) {
+                    int src_idx = eval_pool[k];
                     lat_cands[k].src_idx = src_idx;
                     lat_cands[k].p95 =
                         latency_tracker_get_p95_ms(lt, model->name, src_targets[src_idx].endpoint);
                 }
                 /* Sort ascending by P95 latency */
-                for (int a = 0; a < n_th - 1; a++) {
-                    for (int b = a + 1; b < n_th; b++) {
+                for (int a = 0; a < n_eval - 1; a++) {
+                    for (int b = a + 1; b < n_eval; b++) {
                         if (lat_cands[b].p95 < lat_cands[a].p95) {
                             int      tmp_idx = lat_cands[a].src_idx;
                             uint32_t tmp_p95 = lat_cands[a].p95;
@@ -424,17 +571,17 @@ model_router_select_candidates_targeted(circuit_breaker_t* cb,
                         }
                     }
                 }
-                for (int k = 0; k < n_th && total_added < cap; k++) {
+                for (int k = 0; k < n_eval && total_added < cap; k++) {
                     out_candidates[total_added++] = src_targets[lat_cands[k].src_idx];
                 }
-            } else if (strcmp(model->lb_policy, "dynamic_weighted") == 0 && n_th > 1) {
+            } else if (strcmp(model->lb_policy, "dynamic_weighted") == 0 && n_eval > 1) {
                 /* Policy D: Dynamic Latency-Weighted (EWMA Inverse).
                  * Dynamic weight formula: W_i = max(1, 1000 / (EWMA_ms + 10)).
                  * The constant +10 dampens jitter and avoids division-by-zero on microsecond latencies. */
                 int dyn_weights[MAX_TARGETS_PER_MODEL];
                 int total_w = 0;
-                for (int k = 0; k < n_th; k++) {
-                    int      src_idx = tier_healthy_idx[k];
+                for (int k = 0; k < n_eval; k++) {
+                    int      src_idx = eval_pool[k];
                     uint32_t ewma =
                         latency_tracker_get_ewma_ms(lt, model->name, src_targets[src_idx].endpoint);
                     int w = 1000 / (int)(ewma + 10);
@@ -445,7 +592,7 @@ model_router_select_candidates_targeted(circuit_breaker_t* cb,
                     total_w += w;
                 }
                 if (total_w <= 0) {
-                    total_w = n_th;
+                    total_w = n_eval;
                 }
                 /* Roulette wheel selection using dynamic inverse latency weights */
                 unsigned long pick =
@@ -453,7 +600,7 @@ model_router_select_candidates_targeted(circuit_breaker_t* cb,
                     (unsigned long)total_w;
                 int chosen_k = 0;
                 int acc = 0;
-                for (int k = 0; k < n_th; k++) {
+                for (int k = 0; k < n_eval; k++) {
                     acc += dyn_weights[k];
                     if ((unsigned long)acc > pick) {
                         chosen_k = k;
@@ -461,13 +608,13 @@ model_router_select_candidates_targeted(circuit_breaker_t* cb,
                     }
                 }
                 /* Selected dynamic winner placed first */
-                out_candidates[total_added++] = src_targets[tier_healthy_idx[chosen_k]];
+                out_candidates[total_added++] = src_targets[eval_pool[chosen_k]];
                 /* Add remaining targets sorted by dynamic weight descending for optimal failover */
                 int rem_k[MAX_TARGETS_PER_MODEL];
                 int n_rem = 0;
-                for (int k = 0; k < n_th; k++) {
+                for (int k = 0; k < n_eval; k++) {
                     if (k != chosen_k) {
-                        rem_k[n_rem++] = k;
+                        rem_k[n_rem++] = eval_pool[k];
                     }
                 }
                 for (int a = 0; a < n_rem - 1; a++) {
@@ -480,12 +627,19 @@ model_router_select_candidates_targeted(circuit_breaker_t* cb,
                     }
                 }
                 for (int k = 0; k < n_rem && total_added < cap; k++) {
-                    out_candidates[total_added++] = src_targets[tier_healthy_idx[rem_k[k]]];
+                    out_candidates[total_added++] = src_targets[rem_k[k]];
                 }
             } else {
                 /* Policy E: Default Priority order (maintain original declaration order) */
-                for (int k = 0; k < n_th && total_added < cap; k++) {
-                    out_candidates[total_added++] = src_targets[tier_healthy_idx[k]];
+                for (int k = 0; k < n_eval && total_added < cap; k++) {
+                    out_candidates[total_added++] = src_targets[eval_pool[k]];
+                }
+            }
+
+            /* Append saturated targets at the tail of this priority tier for fallback */
+            if (n_uncon > 0 && n_sat > 0) {
+                for (int k = 0; k < n_sat && total_added < cap; k++) {
+                    out_candidates[total_added++] = src_targets[saturated[k]];
                 }
             }
         }

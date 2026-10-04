@@ -50,3 +50,24 @@ groups:
         annotations:
           summary: "Frequent upstream failovers detected"
           description: "Model {{ $labels.model }} failing over from {{ $labels.from_provider }} to {{ $labels.to_provider }} at rate {{ $value }} / sec."
+
+      - alert: AigateHighTTFT
+        expr: histogram_quantile(0.95, sum(rate(aigate_upstream_ttft_seconds_bucket[5m])) by (le, provider)) > 2.5
+        for: 5m
+        labels:
+          severity: warning
+          tier: gateway
+        annotations:
+          summary: "aigate upstream streaming TTFT exceeded 2.5s"
+          description: "Provider {{ $labels.provider }} P95 Time To First Token is {{ $value | printf \"%.2f\" }}s (> 2.5s) for the last 5 minutes."
+
+      - alert: AigateUpstreamSaturation
+        expr: sum(rate(aigate_requests_total{code="429"}[2m])) > 5
+        for: 2m
+        labels:
+          severity: warning
+          tier: gateway
+        annotations:
+          summary: "Gateway upstream capacity saturated (429s returned)"
+          description: "Gateway returning > 5 rate limit 429 responses per second due to in-flight max_concurrent limits."
+

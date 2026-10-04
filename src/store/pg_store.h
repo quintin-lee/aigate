@@ -51,6 +51,7 @@ typedef struct upstream_target {
     char upstream_key[1024];     /**< resolved in-memory */
     int  weight;                 /**< weight > 0, default 1 */
     int  priority;               /**< 0 = primary tier, 1 = fallback tier, etc. */
+    int  max_concurrent;         /**< 0 = unlimited, >0 max in-flight requests */
 } upstream_target_t;
 
 /** @brief Model route record (models row + resolved upstream key). */
@@ -73,6 +74,7 @@ typedef struct model_rec {
     int  hedged_delay_ms;     /**< 0 for auto-P95, >0 for static ms delay */
     int  hedge_budget_pct;    /**< Max % of requests that can trigger hedge (default: 15) */
     bool hedged_enabled;      /**< True if hedged speculative execution is active */
+    int  max_concurrent;      /**< 0 = unlimited, >0 max in-flight requests */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
@@ -183,6 +185,8 @@ typedef struct cost_row {
 #define MMASK_HEDGE_BUDGET (1 << 10)
 /** @brief Model update mask: hedged enabled boolean. */
 #define MMASK_HEDGED_ENABLED (1 << 11)
+/** @brief Model update mask: max in-flight concurrent requests. */
+#define MMASK_MAX_CONCURRENT (1 << 12)
 
 /** @brief Provider update mask: provider type. */
 #define PMASK_TYPE (1 << 0)

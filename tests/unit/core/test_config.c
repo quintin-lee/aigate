@@ -22,7 +22,9 @@ clear_env(void)
                           "AIGATE_REDIS_FAIL_OPEN",
                           "AIGATE_CORS_ALLOW_ORIGIN",
                           "AIGATE_LOG_FORMAT",
-                          "AIGATE_LOG_LEVEL"};
+                          "AIGATE_LOG_LEVEL",
+                          "AIGATE_SSL_CERT",
+                          "AIGATE_SSL_KEY"};
     for (size_t i = 0; i < sizeof vars / sizeof vars[0]; i++) {
         unsetenv(vars[i]);
     }
@@ -49,6 +51,8 @@ TEST_CASE(test_config_defaults)
     TEST_ASSERT(strcmp(c.cors_allow_origin, "*") == 0, "default cors allow origin *");
     TEST_ASSERT(strcmp(c.log_format, "text") == 0, "default log format text");
     TEST_ASSERT(strcmp(c.log_level, "info") == 0, "default log level info");
+    TEST_ASSERT(c.ssl_cert[0] == '\0', "default ssl_cert empty");
+    TEST_ASSERT(c.ssl_key[0] == '\0', "default ssl_key empty");
     clear_env();
 }
 
@@ -139,6 +143,23 @@ TEST_CASE(test_config_p1_features)
     TEST_ASSERT(aigate_config_load(&c) == 0, "load with fallback for invalid log format/level");
     TEST_ASSERT(strcmp(c.log_format, "text") == 0, "fallback log format text");
     TEST_ASSERT(strcmp(c.log_level, "info") == 0, "fallback log level info");
+
+    clear_env();
+}
+
+TEST_CASE(test_config_ssl)
+{
+    aigate_config c;
+    clear_env();
+    setenv("AIGATE_PG_DSN", "dbname=x", 1);
+    setenv("AIGATE_ADMIN_TOKEN", "t", 1);
+
+    setenv("AIGATE_SSL_CERT", "/etc/ssl/certs/aigate.crt", 1);
+    setenv("AIGATE_SSL_KEY", "/etc/ssl/private/aigate.key", 1);
+
+    TEST_ASSERT(aigate_config_load(&c) == 0, "load custom SSL configs");
+    TEST_ASSERT(strcmp(c.ssl_cert, "/etc/ssl/certs/aigate.crt") == 0, "custom ssl cert");
+    TEST_ASSERT(strcmp(c.ssl_key, "/etc/ssl/private/aigate.key") == 0, "custom ssl key");
 
     clear_env();
 }

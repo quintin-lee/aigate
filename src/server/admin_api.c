@@ -992,6 +992,11 @@ parse_targets_array(json_t* jtargets, upstream_target_t* targets, int max_target
 
         json_t* pr = json_object_get(item, "priority");
         tgt->priority = (pr && json_is_integer(pr)) ? (int)json_integer_value(pr) : 0;
+
+        json_t* mc = json_object_get(item, "max_concurrent");
+        tgt->max_concurrent = (mc && json_is_integer(mc) && json_integer_value(mc) >= 0)
+                                  ? (int)json_integer_value(mc)
+                                  : 0;
     }
     return 0;
 }
@@ -1109,6 +1114,13 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     } else {
         m.hedge_budget_pct = 15;
     }
+    json_t* jmc = json_object_get(jbody, "max_concurrent");
+    if (jmc != NULL && json_is_integer(jmc)) {
+        int mc = (int)json_integer_value(jmc);
+        if (mc >= 0) {
+            m.max_concurrent = mc;
+        }
+    }
     m.enabled = 1;
 
     int rc = pg_store_ops(adm->ps)->create_key != NULL
@@ -1126,6 +1138,7 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     json_object_set_new(out, "hedged_enabled", json_boolean(m.hedged_enabled));
     json_object_set_new(out, "hedged_delay_ms", json_integer(m.hedged_delay_ms));
     json_object_set_new(out, "hedge_budget_pct", json_integer(m.hedge_budget_pct));
+    json_object_set_new(out, "max_concurrent", json_integer(m.max_concurrent));
     json_object_set_new(out,
                         "system_prompt",
                         m.system_prompt[0] != '\0' ? json_string(m.system_prompt) : json_null());
@@ -1195,6 +1208,7 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
             json_object_set_new(to, "upstream_key_ref", json_string(tgt->upstream_key_ref));
             json_object_set_new(to, "weight", json_integer(tgt->weight));
             json_object_set_new(to, "priority", json_integer(tgt->priority));
+            json_object_set_new(to, "max_concurrent", json_integer(tgt->max_concurrent));
 
             const char* cb_state_str = "closed";
             if (adm->ac != NULL && adm->ac->cb != NULL) {
@@ -1209,6 +1223,7 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
             json_array_append_new(tgts_arr, to);
         }
         json_object_set_new(o, "targets", tgts_arr);
+        json_object_set_new(o, "max_concurrent", json_integer(recs[i].max_concurrent));
         json_object_set_new(o,
                             "system_prompt",
                             recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt)
@@ -1363,6 +1378,14 @@ model_patch(
         if (budget >= 0 && budget <= 100) {
             m.hedge_budget_pct = budget;
             mask |= MMASK_HEDGE_BUDGET;
+        }
+    }
+    v = json_object_get(jbody, "max_concurrent");
+    if (v != NULL && json_is_integer(v)) {
+        int mc = (int)json_integer_value(v);
+        if (mc >= 0) {
+            m.max_concurrent = mc;
+            mask |= MMASK_MAX_CONCURRENT;
         }
     }
     json_decref(jbody);

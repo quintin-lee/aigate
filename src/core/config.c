@@ -152,5 +152,8 @@ aigate_config_load(aigate_config* out)
         snprintf(out->log_level, sizeof out->log_level, "info");
     }
 
+    env_str("AIGATE_SSL_CERT", "", out->ssl_cert, sizeof out->ssl_cert);
+    env_str("AIGATE_SSL_KEY", "", out->ssl_key, sizeof out->ssl_key);
+
     return 0;
 }
