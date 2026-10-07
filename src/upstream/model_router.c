@@ -177,6 +177,27 @@ model_router_reset_concurrency(void)
     pthread_mutex_unlock(&g_target_slots_mtx);
 }
 
+int
+model_router_snapshot_in_flight(char (*endpoints)[512], int* in_flight, int cap)
+{
+    if (endpoints == NULL || in_flight == NULL || cap <= 0) {
+        return 0;
+    }
+    int n = 0;
+    pthread_mutex_lock(&g_target_slots_mtx);
+    for (int i = 0; i < MR_MAX_CONCURRENT_TARGETS && n < cap; i++) {
+        if (!atomic_load_explicit(&g_target_slots[i].in_use, memory_order_acquire)) {
+            continue;
+        }
+        snprintf(endpoints[n], 512, "%s", g_target_slots[i].endpoint);
+        int v = atomic_load_explicit(&g_target_slots[i].in_flight, memory_order_relaxed);
+        in_flight[n] = v > 0 ? v : 0;
+        n++;
+    }
+    pthread_mutex_unlock(&g_target_slots_mtx);
+    return n;
+}
+
 /* One round-robin counter shared by every model (P3-8): it only selects
  * among a model's own targets, so cross-model interleaving is a harmless
  * fairness artifact, not a bug. */

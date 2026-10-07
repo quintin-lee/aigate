@@ -58,6 +58,22 @@ void metrics_reset_ttft(void);
 /** @brief Sample count of TTFT recordings for @p provider. */
 long metrics_get_ttft_count(const char* provider);
 
+/** @brief Render into a heap buffer that grows as needed (64 KB → 16 MB cap).
+ *  @param um      Usage table (may be NULL).
+ *  @param out_len Optional; receives the rendered length (excluding NUL).
+ *  @return malloc'd NUL-terminated text (caller frees), or NULL on OOM / > cap. */
+char* metrics_render_alloc(usage_meter_t* um, size_t* out_len);
+
+/** @brief Count a request rejected with 429 because every candidate target
+ *  for @p model hit its max_concurrent limit. */
+void metrics_inc_concurrency_rejected(const char* model);
+
+/** @brief Rejected-by-concurrency count for @p model (NULL → lifetime total). */
+long metrics_get_concurrency_rejected(const char* model);
+
+/** @brief Reset concurrency-rejection counters (for tests). */
+void metrics_reset_concurrency_rejected(void);
+
 /** @brief 1 when @p ip (dotted-quad string) is contained in the comma-
  *  separated CIDR/IPv4 list @p acl ("127.0.0.1,10.0.0.0/8").
  *  @note ACL is IPv4-only by design (spec §5); empty @p acl → allow all. */

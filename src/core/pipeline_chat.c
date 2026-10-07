@@ -808,7 +808,20 @@ handle_chat_sync(chat_req_t* q)
         if (q->rc->set_header != NULL) {
             q->rc->set_header(q->rc->impl, "Retry-After", "1");
         }
+        metrics_inc_concurrency_rejected(q->model);
         aigate_write_error(q->rc, 429, "rate_limit_error", "upstream concurrency limit exceeded");
+        record_usage_and_event(q->ac,
+                               q->krec.key_id,
+                               q->model,
+                               429,
+                               0,
+                               0,
+                               0,
+                               0,
+                               total_lat,
+                               last_provider,
+                               q->guardrail_act,
+                               0.0);
         chat_req_cleanup(q);
         return 0;
     }
@@ -1226,7 +1239,20 @@ handle_chat_stream(chat_req_t* q)
         if (q->rc->set_header != NULL) {
             q->rc->set_header(q->rc->impl, "Retry-After", "1");
         }
+        metrics_inc_concurrency_rejected(q->model);
         aigate_write_error(q->rc, 429, "rate_limit_error", "upstream concurrency limit exceeded");
+        record_usage_and_event(q->ac,
+                               q->krec.key_id,
+                               q->model,
+                               429,
+                               0,
+                               0,
+                               0,
+                               0,
+                               total_lat,
+                               last_provider,
+                               q->guardrail_act,
+                               0.0);
         chat_req_cleanup(q);
         return 0;
     }

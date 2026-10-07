@@ -62,7 +62,7 @@ groups:
           description: "Provider {{ $labels.provider }} P95 Time To First Token is {{ $value | printf \"%.2f\" }}s (> 2.5s) for the last 5 minutes."
 
       - alert: AigateUpstreamSaturation
-        expr: sum(rate(aigate_requests_total{code="429"}[2m])) > 5
+        expr: sum(rate(aigate_concurrency_rejected_total[2m])) > 5
         for: 2m
         labels:
           severity: warning

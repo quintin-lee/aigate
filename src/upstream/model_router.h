@@ -127,4 +127,12 @@ int model_router_get_in_flight(const char* endpoint);
 /** @brief Reset in-flight concurrency tracking table (for tests). */
 void model_router_reset_concurrency(void);
 
+/** @brief Snapshot per-target in-flight counts (process-local).
+ *  @param endpoints Output array of endpoint URLs (512 bytes each).
+ *  @param in_flight Output array of in-flight counts.
+ *  @param cap Capacity of both arrays.
+ *  @return Number of entries written.
+ */
+int model_router_snapshot_in_flight(char (*endpoints)[512], int* in_flight, int cap);
+
 #endif /* AIGATE_MODEL_ROUTER_H */

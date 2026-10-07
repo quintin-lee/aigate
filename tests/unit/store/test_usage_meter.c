@@ -407,3 +407,35 @@ TEST_CASE(test_um_high_volume_drain)
     usage_meter_free(um);
     pg_store_close(ps);
 }
+
+TEST_CASE(test_metrics_concurrency_rejection_and_alloc)
+{
+    metrics_reset_concurrency_rejected();
+    TEST_ASSERT(metrics_get_concurrency_rejected("gpt-4o") == 0, "initially 0 rejections");
+
+    metrics_inc_concurrency_rejected("gpt-4o");
+    metrics_inc_concurrency_rejected("gpt-4o");
+    metrics_inc_concurrency_rejected("claude-3-5");
+    metrics_inc_concurrency_rejected(NULL);
+
+    TEST_ASSERT(metrics_get_concurrency_rejected("gpt-4o") == 2, "gpt-4o count == 2");
+    TEST_ASSERT(metrics_get_concurrency_rejected("claude-3-5") == 1, "claude count == 1");
+    TEST_ASSERT(metrics_get_concurrency_rejected("unknown") == 1, "unknown count == 1");
+    TEST_ASSERT(metrics_get_concurrency_rejected("nonexistent") == 0, "nonexistent count == 0");
+
+    size_t out_len = 0;
+    char*  mbuf = metrics_render_alloc(NULL, &out_len);
+    TEST_ASSERT(mbuf != NULL, "render alloc returned buffer");
+    TEST_ASSERT(out_len > 0, "out_len > 0");
+    TEST_ASSERT(strlen(mbuf) == out_len, "mbuf length matches out_len");
+    TEST_ASSERT(strstr(mbuf, "aigate_concurrency_rejected_total{model=\"gpt-4o\"} 2") != NULL,
+                "contains gpt-4o rejections");
+    TEST_ASSERT(strstr(mbuf, "aigate_concurrency_rejected_total{model=\"claude-3-5\"} 1") != NULL,
+                "contains claude rejections");
+    TEST_ASSERT(strstr(mbuf, "# TYPE aigate_concurrency_rejected_total counter") != NULL,
+                "contains help/type for concurrency rejections");
+    free(mbuf);
+
+    metrics_reset_concurrency_rejected();
+    TEST_ASSERT(metrics_get_concurrency_rejected("gpt-4o") == 0, "reset ok");
+}

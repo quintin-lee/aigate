@@ -570,18 +570,13 @@ handle_metrics(struct mg_connection* conn, void* cbdata)
         return 1;
     }
 
-    char* mbuf = malloc(65536);
+    size_t mlen = 0;
+    char*  mbuf = metrics_render_alloc(cw->ac->um, &mlen);
     if (mbuf == NULL) {
-        mg_send_http_error(conn, 500, "Internal error: OOM");
-        return 1;
-    }
-    if (metrics_render(cw->ac->um, mbuf, 65536) != 0) {
-        free(mbuf);
-        mg_send_http_error(conn, 500, "Internal error: metrics buffer overflow");
+        mg_send_http_error(conn, 500, "Internal error: metrics render failed");
         return 1;
     }
 
-    size_t mlen = strlen(mbuf);
     mg_printf(conn,
               "HTTP/1.1 200 OK\r\n"
               "Content-Type: text/plain; version=0.0.4\r\n"

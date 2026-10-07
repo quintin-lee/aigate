@@ -5,10 +5,96 @@
 
 #include <arpa/inet.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include "model_router.h"
+
+#define METRICS_MAX_REJECTIONS 128
+
+typedef struct {
+    char        model[128];
+    atomic_long count;
+    int         in_use;
+} rejection_metric_entry_t;
+
+static rejection_metric_entry_t g_rejections[METRICS_MAX_REJECTIONS];
+static pthread_mutex_t          g_rejection_mtx = PTHREAD_MUTEX_INITIALIZER;
+
+void
+metrics_inc_concurrency_rejected(const char* model)
+{
+    const char* m = (model != NULL && model[0] != '\0') ? model : "unknown";
+    pthread_mutex_lock(&g_rejection_mtx);
+    for (int i = 0; i < METRICS_MAX_REJECTIONS; i++) {
+        if (g_rejections[i].in_use && strcmp(g_rejections[i].model, m) == 0) {
+            atomic_fetch_add(&g_rejections[i].count, 1);
+            pthread_mutex_unlock(&g_rejection_mtx);
+            return;
+        }
+    }
+    for (int i = 0; i < METRICS_MAX_REJECTIONS; i++) {
+        if (!g_rejections[i].in_use) {
+            g_rejections[i].in_use = 1;
+            snprintf(g_rejections[i].model, sizeof g_rejections[i].model, "%s", m);
+            atomic_init(&g_rejections[i].count, 1);
+            pthread_mutex_unlock(&g_rejection_mtx);
+            return;
+        }
+    }
+    pthread_mutex_unlock(&g_rejection_mtx);
+}
+
+long
+metrics_get_concurrency_rejected(const char* model)
+{
+    pthread_mutex_lock(&g_rejection_mtx);
+    if (model == NULL || model[0] == '\0') {
+        long total = 0;
+        for (int i = 0; i < METRICS_MAX_REJECTIONS; i++) {
+            if (g_rejections[i].in_use) {
+                total += atomic_load(&g_rejections[i].count);
+            }
+        }
+        pthread_mutex_unlock(&g_rejection_mtx);
+        return total;
+    }
+    for (int i = 0; i < METRICS_MAX_REJECTIONS; i++) {
+        if (g_rejections[i].in_use && strcmp(g_rejections[i].model, model) == 0) {
+            long val = atomic_load(&g_rejections[i].count);
+            pthread_mutex_unlock(&g_rejection_mtx);
+            return val;
+        }
+    }
+    pthread_mutex_unlock(&g_rejection_mtx);
+    return 0;
+}
+
+void
+metrics_reset_concurrency_rejected(void)
+{
+    pthread_mutex_lock(&g_rejection_mtx);
+    memset(g_rejections, 0, sizeof g_rejections);
+    pthread_mutex_unlock(&g_rejection_mtx);
+}
+
+static int
+appendf(char** w, size_t* rem, const char* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(*w, *rem, fmt, ap);
+    va_end(ap);
+    if (n < 0 || (size_t)n >= *rem) {
+        return -1;
+    }
+    *w += n;
+    *rem -= (size_t)n;
+    return 0;
+}
 
 /** @brief Failover metrics table capacity (upper bound on model from_prov→to_prov entries). */
 #define METRICS_MAX_FAILOVERS 128
@@ -201,71 +287,74 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
 
     if (um != NULL) {
         char provs[16][32];
-        int  nprov = 0;
-        /* re-derive provider names through the meter accessor; cap 16 */
-        nprov = um_provider_names(um, (char (*)[32])provs, 16);
-
+        long counts[16];
+        int  nprov = um_provider_names(um, (char (*)[32])provs, 16);
+        int  nlive = 0;
         for (int i = 0; i < nprov; i++) {
-            const char* p = provs[i];
-            long        count = um_provider_sampled(um, p);
-            if (count == 0) {
-                continue; /* no samples yet for this provider */
+            counts[i] = um_provider_sampled(um, provs[i]);
+            if (counts[i] > 0) {
+                nlive++;
             }
+        }
 
-            n = snprintf(w,
-                         rem,
-                         "# HELP aigate_upstream_requests_total Upstream calls by provider.\n"
-                         "# TYPE aigate_upstream_requests_total counter\n"
-                         "aigate_upstream_requests_total{provider=\"%s\"} %ld\n",
-                         p,
-                         count);
-            if (n < 0 || (size_t)n >= rem) {
+        /* Prometheus text format: every sample of a family must be contiguous
+         * and HELP/TYPE may appear only once per family, so emit each family
+         * in its own pass across providers. */
+        if (nlive > 0) {
+            if (appendf(&w,
+                        &rem,
+                        "# HELP aigate_upstream_requests_total Upstream calls by provider.\n"
+                        "# TYPE aigate_upstream_requests_total counter\n") != 0) {
                 return -1;
             }
-            w += n;
-            rem -= (size_t)n;
-
-            double mean = um_provider_mean_ns(um, p);
-            long   sum_ns = (long)(mean * count);
-
-            n = snprintf(w,
-                         rem,
-                         "# HELP aigate_upstream_latency_ns_ns Upstream latency histogram (ns).\n"
-                         "# TYPE aigate_upstream_latency_ns_ns histogram\n");
-            if (n < 0 || (size_t)n >= rem) {
-                return -1;
-            }
-            w += n;
-            rem -= (size_t)n;
-
-            for (int b = 0; b < NUM_BUCKETS; b++) {
-                long le_ns = atol(BUCKET_LE[b]);
-                n = snprintf(
-                    w,
-                    rem,
-                    "aigate_upstream_latency_ns_ns_bucket{provider=\"%s\",le=\"%s\"} %ld\n",
-                    p,
-                    BUCKET_LE[b],
-                    um_provider_count_below_ns(um, p, le_ns));
-                if (n < 0 || (size_t)n >= rem) {
+            for (int i = 0; i < nprov; i++) {
+                if (counts[i] > 0 &&
+                    appendf(&w,
+                            &rem,
+                            "aigate_upstream_requests_total{provider=\"%s\"} %ld\n",
+                            provs[i],
+                            counts[i]) != 0) {
                     return -1;
                 }
-                w += n;
-                rem -= (size_t)n;
             }
-            n = snprintf(w,
-                         rem,
-                         "aigate_upstream_latency_ns_ns_bucket{provider=\"%s\",le=\"+Inf\"} %ld\n"
-                         "aigate_upstream_latency_ns_ns_sum{provider=\"%s\"} %ld\n"
-                         "aigate_upstream_latency_ns_ns_count{provider=\"%s\"} %ld\n",
-                         p,
-                         (long)sum_ns,
-                         p,
-                         (long)sum_ns,
-                         p,
-                         count);
-            if (n < 0 || (size_t)n >= rem) {
+
+            if (appendf(&w,
+                        &rem,
+                        "# HELP aigate_upstream_latency_ns_ns Upstream latency histogram (ns).\n"
+                        "# TYPE aigate_upstream_latency_ns_ns histogram\n") != 0) {
                 return -1;
+            }
+            for (int i = 0; i < nprov; i++) {
+                if (counts[i] <= 0) {
+                    continue;
+                }
+                const char* p = provs[i];
+                long        sum_ns = (long)(um_provider_mean_ns(um, p) * (double)counts[i]);
+                for (int b = 0; b < NUM_BUCKETS; b++) {
+                    if (appendf(
+                            &w,
+                            &rem,
+                            "aigate_upstream_latency_ns_ns_bucket{provider=\"%s\",le=\"%s\"} %ld\n",
+                            p,
+                            BUCKET_LE[b],
+                            um_provider_count_below_ns(um, p, atol(BUCKET_LE[b]))) != 0) {
+                        return -1;
+                    }
+                }
+                if (appendf(
+                        &w,
+                        &rem,
+                        "aigate_upstream_latency_ns_ns_bucket{provider=\"%s\",le=\"+Inf\"} %ld\n"
+                        "aigate_upstream_latency_ns_ns_sum{provider=\"%s\"} %ld\n"
+                        "aigate_upstream_latency_ns_ns_count{provider=\"%s\"} %ld\n",
+                        p,
+                        counts[i],
+                        p,
+                        sum_ns,
+                        p,
+                        counts[i]) != 0) {
+                    return -1;
+                }
             }
         }
     }
@@ -387,8 +476,91 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
     }
     pthread_mutex_unlock(&g_ttft_mtx);
 
+    /* Concurrency rejection counters */
+    pthread_mutex_lock(&g_rejection_mtx);
+    int have_rejections = 0;
+    for (int i = 0; i < METRICS_MAX_REJECTIONS; i++) {
+        if (g_rejections[i].in_use && atomic_load(&g_rejections[i].count) > 0) {
+            have_rejections = 1;
+            break;
+        }
+    }
+    if (have_rejections) {
+        if (appendf(&w,
+                    &rem,
+                    "# HELP aigate_concurrency_rejected_total Total requests rejected due to "
+                    "concurrency saturation.\n"
+                    "# TYPE aigate_concurrency_rejected_total counter\n") != 0) {
+            pthread_mutex_unlock(&g_rejection_mtx);
+            return -1;
+        }
+        for (int i = 0; i < METRICS_MAX_REJECTIONS; i++) {
+            if (!g_rejections[i].in_use) {
+                continue;
+            }
+            long c = atomic_load(&g_rejections[i].count);
+            if (c <= 0) {
+                continue;
+            }
+            if (appendf(&w,
+                        &rem,
+                        "aigate_concurrency_rejected_total{model=\"%s\"} %ld\n",
+                        g_rejections[i].model,
+                        c) != 0) {
+                pthread_mutex_unlock(&g_rejection_mtx);
+                return -1;
+            }
+        }
+    }
+    pthread_mutex_unlock(&g_rejection_mtx);
+
+    /* Upstream in-flight concurrency gauge */
+    char eps[128][512];
+    int  inflights[128];
+    int  n_inflight = model_router_snapshot_in_flight(eps, inflights, 128);
+    if (n_inflight > 0) {
+        if (appendf(
+                &w,
+                &rem,
+                "# HELP aigate_upstream_inflight Current in-flight requests per upstream target.\n"
+                "# TYPE aigate_upstream_inflight gauge\n") != 0) {
+            return -1;
+        }
+        for (int i = 0; i < n_inflight; i++) {
+            if (appendf(&w,
+                        &rem,
+                        "aigate_upstream_inflight{endpoint=\"%s\"} %d\n",
+                        eps[i],
+                        inflights[i]) != 0) {
+                return -1;
+            }
+        }
+    }
+
     *w = '\0';
     return 0;
+}
+
+char*
+metrics_render_alloc(usage_meter_t* um, size_t* out_len)
+{
+    size_t       cap = 65536;
+    const size_t max_cap = 16 * 1024 * 1024; /* 16 MB cap */
+    while (cap <= max_cap) {
+        char* buf = malloc(cap);
+        if (buf == NULL) {
+            return NULL;
+        }
+        if (metrics_render(um, buf, cap) == 0) {
+            if (out_len != NULL) {
+                *out_len = strlen(buf);
+            }
+            return buf;
+        }
+        free(buf);
+        cap *= 2;
+    }
+    return NULL;
 }
 
 void

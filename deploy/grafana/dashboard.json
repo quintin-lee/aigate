@@ -407,7 +407,16 @@
           "mappings": [],
           "unit": "reqps"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": { "id": "byRegexp", "options": "/In-Flight/" },
+            "properties": [
+              { "id": "unit", "value": "short" },
+              { "id": "custom.axisPlacement", "value": "right" },
+              { "id": "custom.axisLabel", "value": "in-flight requests" }
+            ]
+          }
+        ]
       },
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
       "id": 11,
@@ -419,16 +428,16 @@
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
           "editorMode": "code",
-          "expr": "sum(rate(aigate_requests_total{code=\"429\"}[1m]))",
-          "legendFormat": "Gateway 429 Rate Limiting Rate",
+          "expr": "sum(rate(aigate_concurrency_rejected_total[1m])) by (model)",
+          "legendFormat": "Concurrency Rejections: {{model}}",
           "range": true,
           "refId": "A"
         },
         {
           "datasource": { "type": "prometheus", "uid": "${DS_PROMETHEUS}" },
           "editorMode": "code",
-          "expr": "sum(rate(aigate_upstream_requests_total{code=\"429\"}[1m])) by (provider)",
-          "legendFormat": "Upstream {{provider}} 429 Throttle Rate",
+          "expr": "sum(aigate_upstream_inflight) by (endpoint)",
+          "legendFormat": "In-Flight: {{endpoint}}",
           "range": true,
           "refId": "B"
         }
