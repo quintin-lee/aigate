@@ -4,9 +4,11 @@
 > [DEVELOPMENT.md](DEVELOPMENT.md)（构建变体、加模块/加测试）。
 > 一站式新人上手包见 [ONBOARDING.md](ONBOARDING.md)。
 > 配置详解：[CONFIGURATION.md](CONFIGURATION.md)（全量语义，以源码为准）。
+> 生产部署：[DEPLOYMENT.md](DEPLOYMENT.md)（Helm / Compose / K8s / 监控告警全指南）。
 
 ## Top-level directories
 
+- `deploy/` — 部署配置与基准压测：`helm/`（官方 Helm Chart）、`kubernetes/`（原生 Manifests）、`prometheus/`（告警规则）、`grafana/`（监控看板）与 `bench/`（k6/压测脚本）。
 - `src/` — gateway source, 7 layers: `core/` (lifecycle/config/log/secrets),
   `common/` (lru/sha256), `upstream/` (model router + providers + client),
   `policy/` (auth/budget/circuit-breaker/guardrails/ratelimit/response-cache),

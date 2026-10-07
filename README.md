@@ -51,6 +51,12 @@ export AIGATE_REDIS_URL="redis://127.0.0.1:6379"
 
 完整变量清单见 [docs/CONFIGURATION.md](docs/CONFIGURATION.md)。
 
+## 生产与集群部署
+
+- **Kubernetes (Helm)**：推荐使用官方 Helm Chart [`deploy/helm/aigate`](deploy/helm/aigate/)（含 HPA、PDB、只读根文件系统安全加固）。详见 [Helm Chart 文档](deploy/helm/aigate/README.md)。
+- **全量部署手册**：涵盖 Docker Compose、Helm、Minikube 本地集群及监控告警集成的完整部署指南，见 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)。
+- **容量与压测评估**：见 [deploy/bench/SIZING.md](deploy/bench/SIZING.md)。
+
 ## 测试
 
 - 单元测试：`ctest --test-dir build`（6 项全绿为基线）。
@@ -63,8 +69,11 @@ export AIGATE_REDIS_URL="redis://127.0.0.1:6379"
 ## 文档
 
 - [docs/README.md](docs/README.md) — 全仓目录地图
+- [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — 生产与集群部署全指南（Helm / Compose / Minikube / 监控告警）
+- [deploy/helm/aigate/README.md](deploy/helm/aigate/README.md) — 官方 Helm Chart 使用与配置参数表
 - [docs/ONBOARDING.md](docs/ONBOARDING.md) — 新人一站式上手（构建/配置/首个请求/排障）
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) — 构建变体、加模块/加测试、代码风格
 - [docs/CONFIGURATION.md](docs/CONFIGURATION.md) — 全量配置语义（14 个网关变量/越界行为/归属划分）
 - [docs/architecture/](docs/architecture/) — 架构笔记
 - [docs/superpowers/](docs/superpowers/) — specs / plans / reports
+
