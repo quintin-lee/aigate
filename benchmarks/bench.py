@@ -20,7 +20,7 @@ os.environ["NO_PROXY"] = "127.0.0.1,localhost," + os.environ.get("NO_PROXY", "")
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 BENCH_DIR = os.path.join(ROOT_DIR, "benchmarks")
-BUILD_DIR = os.path.join(ROOT_DIR, ".build")
+BUILD_DIR = os.path.join(ROOT_DIR, "build") if os.path.isfile(os.path.join(ROOT_DIR, "build", "aigate")) else os.path.join(ROOT_DIR, ".build")
 AIGATE_BIN = os.path.join(BUILD_DIR, "aigate")
 REPORTS_DIR = os.path.join(BENCH_DIR, "reports")
 
@@ -30,10 +30,11 @@ ADMIN_TOKEN = "admin_bench_secret"
 
 DEFAULT_PG_CANDIDATES = [
     os.environ.get("AIGATE_PG_DSN", ""),
+    "postgresql://aigate:changeme@127.0.0.1:5432/aigate",
+    "postgresql://postgres:postgres@127.0.0.1:5432/aigate",
+    "postgresql://postgres:postgres@127.0.0.1:5432/aigate_test",
     "postgresql://aigate:changeme@172.39.4.3:5432/aigate",
     "postgresql://aigate:changeme@172.39.4.2:5432/aigate",
-    "postgresql://postgres:postgres@127.0.0.1:5432/aigate_test",
-    "postgresql://postgres:postgres@127.0.0.1:5432/aigate",
 ]
 
 
@@ -251,6 +252,7 @@ def run_k6_scenario(scenario, duration, concurrency, api_key):
         "-e", f"DURATION={duration}s",
         "-e", f"TARGET_URL=http://127.0.0.1:{GATEWAY_PORT}/v1/chat/completions",
         "-e", f"API_KEY={api_key}",
+        "--summary-trend-stats", "avg,min,med,max,p(50),p(90),p(95),p(99)",
         "--summary-export", summary_file,
         script
     ]
@@ -271,16 +273,27 @@ def run_k6_scenario(scenario, duration, concurrency, api_key):
 
         metrics = data.get("metrics", {})
         if "http_reqs" in metrics:
-            rate = metrics["http_reqs"].get("values", {}).get("rate", 0.0)
+            m = metrics["http_reqs"]
+            rate = m.get("rate") if "rate" in m else m.get("values", {}).get("rate", 0.0)
             qps = round(rate, 2)
         if "http_req_duration" in metrics:
-            vals = metrics["http_req_duration"].get("values", {})
-            p50 = f"{vals.get('p(50)', 0):.2f}ms"
+            vals = metrics["http_req_duration"]
+            if "values" in vals:
+                vals = vals["values"]
+            p50 = f"{vals.get('p(50)', vals.get('med', 0)):.2f}ms"
             p90 = f"{vals.get('p(90)', 0):.2f}ms"
             p99 = f"{vals.get('p(99)', 0):.2f}ms"
         if "aigate_ttft_ms" in metrics:
-            vals = metrics["aigate_ttft_ms"].get("values", {})
-            ttft = f"{vals.get('avg', 0):.2f}ms"
+            vals = metrics["aigate_ttft_ms"]
+            if "values" in vals:
+                vals = vals["values"]
+            avg_val = vals.get("avg")
+            if avg_val is not None:
+                ttft = f"{avg_val:.2f}ms"
+        if "checks" in metrics:
+            chk = metrics["checks"]
+            crate = chk.get("rate") if "rate" in chk else chk.get("values", {}).get("rate", 1.0)
+            success_rate = f"{crate * 100:.1f}%"
 
     return {
         "tool": "k6",
