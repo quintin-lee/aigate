@@ -3,7 +3,9 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "audit_logger.h"
+#include <errno.h>
 #include <jansson.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -338,4 +340,156 @@ audit_event_to_webhook_payload(const audit_event_t* ev, audit_webhook_format_t f
     char* res = json_dumps(root, JSON_COMPACT);
     json_decref(root);
     return res;
+}
+
+/* --- High-Performance Non-blocking Ring Buffer --- */
+
+struct audit_ring {
+    audit_event_t*  slots;
+    size_t          head;
+    size_t          tail;
+    size_t          count;
+    size_t          capacity;
+    uint64_t        dropped_count;
+    pthread_mutex_t lock;
+    pthread_cond_t  not_empty;
+};
+
+audit_ring_t*
+audit_ring_create(size_t capacity)
+{
+    if (capacity < 4) {
+        capacity = 4;
+    }
+    audit_ring_t* ring = calloc(1, sizeof(*ring));
+    if (ring == NULL) {
+        return NULL;
+    }
+    ring->slots = calloc(capacity, sizeof(audit_event_t));
+    if (ring->slots == NULL) {
+        free(ring);
+        return NULL;
+    }
+    ring->capacity = capacity;
+    ring->head = 0;
+    ring->tail = 0;
+    ring->count = 0;
+    ring->dropped_count = 0;
+    pthread_mutex_init(&ring->lock, NULL);
+    pthread_cond_init(&ring->not_empty, NULL);
+    return ring;
+}
+
+void
+audit_ring_destroy(audit_ring_t* ring)
+{
+    if (ring == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&ring->lock);
+    for (size_t i = 0; i < ring->count; i++) {
+        size_t idx = (ring->head + i) % ring->capacity;
+        audit_event_cleanup(&ring->slots[idx]);
+    }
+    pthread_mutex_unlock(&ring->lock);
+    pthread_mutex_destroy(&ring->lock);
+    pthread_cond_destroy(&ring->not_empty);
+    free(ring->slots);
+    free(ring);
+}
+
+bool
+audit_ring_push(audit_ring_t* ring, const audit_event_t* ev)
+{
+    if (ring == NULL || ev == NULL) {
+        return false;
+    }
+
+    pthread_mutex_lock(&ring->lock);
+    if (ring->count == ring->capacity) {
+        /* Ring is full: evict oldest element at head without blocking */
+        audit_event_cleanup(&ring->slots[ring->head]);
+        if (audit_event_copy(&ring->slots[ring->head], ev) != 0) {
+            pthread_mutex_unlock(&ring->lock);
+            return false;
+        }
+        ring->head = (ring->head + 1) % ring->capacity;
+        ring->tail = ring->head;
+        ring->dropped_count++;
+    } else {
+        if (audit_event_copy(&ring->slots[ring->tail], ev) != 0) {
+            pthread_mutex_unlock(&ring->lock);
+            return false;
+        }
+        ring->tail = (ring->tail + 1) % ring->capacity;
+        ring->count++;
+    }
+
+    pthread_cond_signal(&ring->not_empty);
+    pthread_mutex_unlock(&ring->lock);
+    return true;
+}
+
+size_t
+audit_ring_pop_batch(audit_ring_t*  ring,
+                     audit_event_t* out_batch,
+                     size_t         max_count,
+                     uint32_t       timeout_ms)
+{
+    if (ring == NULL || out_batch == NULL || max_count == 0) {
+        return 0;
+    }
+
+    pthread_mutex_lock(&ring->lock);
+    if (ring->count == 0 && timeout_ms > 0) {
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        uint64_t nsec = (uint64_t)ts.tv_nsec + (uint64_t)timeout_ms * 1000000ULL;
+        ts.tv_sec += (time_t)(nsec / 1000000000ULL);
+        ts.tv_nsec = (long)(nsec % 1000000000ULL);
+
+        while (ring->count == 0) {
+            int rc = pthread_cond_timedwait(&ring->not_empty, &ring->lock, &ts);
+            if (rc != 0) {
+                break;
+            }
+        }
+    }
+
+    size_t popped = 0;
+    while (popped < max_count && ring->count > 0) {
+        out_batch[popped] = ring->slots[ring->head];
+        /* Zero slot in ring so ownership is cleanly moved to caller */
+        memset(&ring->slots[ring->head], 0, sizeof(audit_event_t));
+        ring->head = (ring->head + 1) % ring->capacity;
+        ring->count--;
+        popped++;
+    }
+
+    pthread_mutex_unlock(&ring->lock);
+    return popped;
+}
+
+size_t
+audit_ring_count(audit_ring_t* ring)
+{
+    if (ring == NULL) {
+        return 0;
+    }
+    pthread_mutex_lock(&ring->lock);
+    size_t count = ring->count;
+    pthread_mutex_unlock(&ring->lock);
+    return count;
+}
+
+uint64_t
+audit_ring_dropped(audit_ring_t* ring)
+{
+    if (ring == NULL) {
+        return 0;
+    }
+    pthread_mutex_lock(&ring->lock);
+    uint64_t dropped = ring->dropped_count;
+    pthread_mutex_unlock(&ring->lock);
+    return dropped;
 }

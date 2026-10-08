@@ -80,3 +80,36 @@ TEST_CASE(test_audit_event_serialization_and_snapshots)
 
     audit_event_cleanup(&ev_violation);
 }
+
+TEST_CASE(test_audit_ring_buffer_concurrency_and_drops)
+{
+    /* 创建容量为 8 的微型环形缓冲区进行压力饱和测试 */
+    audit_ring_t* ring = audit_ring_create(8);
+    TEST_ASSERT(ring != NULL, "audit_ring_create failed");
+
+    for (int i = 0; i < 12; i++) {
+        audit_event_t ev;
+        audit_event_init(&ev);
+        ev.timestamp_ms = i;
+        ev.key_id = i;
+        ev.severity = AUDIT_SEV_INFO;
+        TEST_ASSERT(audit_ring_push(ring, &ev) == true, "push must succeed non-blocking");
+        audit_event_cleanup(&ev);
+    }
+
+    /* 8 个容量放入 12 条，应恰好丢弃最旧的 4 条 */
+    TEST_ASSERT(audit_ring_count(ring) == 8, "count should be clamped to capacity 8");
+    TEST_ASSERT(audit_ring_dropped(ring) == 4, "dropped count must be 4");
+
+    audit_event_t batch[16];
+    size_t        popped = audit_ring_pop_batch(ring, batch, 16, 0);
+    TEST_ASSERT(popped == 8, "should pop 8 events");
+    TEST_ASSERT(batch[0].key_id == 4, "oldest 4 items dropped, first remaining must be key_id 4");
+    TEST_ASSERT(batch[7].key_id == 11, "last item must be key_id 11");
+
+    for (size_t i = 0; i < popped; i++) {
+        audit_event_cleanup(&batch[i]);
+    }
+
+    audit_ring_destroy(ring);
+}

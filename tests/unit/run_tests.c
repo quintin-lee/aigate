@@ -650,6 +650,10 @@ main(int argc, char** argv)
     test_register("audit_event_serialization_and_snapshots",
                   test_audit_event_serialization_and_snapshots);
 
+    extern void test_audit_ring_buffer_concurrency_and_drops(void);
+    test_register("audit_ring_buffer_concurrency_and_drops",
+                  test_audit_ring_buffer_concurrency_and_drops);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

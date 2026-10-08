@@ -100,4 +100,67 @@ char* audit_event_to_ndjson(const audit_event_t* ev);
  */
 char* audit_event_to_webhook_payload(const audit_event_t* ev, audit_webhook_format_t fmt);
 
+/* --- High-Performance Non-blocking Ring Buffer --- */
+
+/**
+ * @brief Thread-safe ring buffer for audit events.
+ */
+typedef struct audit_ring audit_ring_t;
+
+/**
+ * @brief Create a new audit ring buffer with fixed capacity.
+ * @param capacity Maximum number of items in the buffer (min 4).
+ * @return Newly allocated ring buffer or NULL on OOM.
+ */
+audit_ring_t* audit_ring_create(size_t capacity);
+
+/**
+ * @brief Destroy ring buffer and free all pending events.
+ * @param ring Ring buffer to destroy (safe with NULL).
+ */
+void audit_ring_destroy(audit_ring_t* ring);
+
+/**
+ * @brief Non-blocking push of an audit event into the ring buffer.
+ *
+ * If the ring buffer is full, the oldest event at the head is freed and overwritten,
+ * and the dropped counter is incremented. Never blocks the caller.
+ *
+ * @param ring Ring buffer instance.
+ * @param ev Audit event to deep-copy into the buffer.
+ * @return true on success, false on invalid arguments or OOM.
+ */
+bool audit_ring_push(audit_ring_t* ring, const audit_event_t* ev);
+
+/**
+ * @brief Pop a batch of audit events from the ring buffer.
+ *
+ * Waits up to timeout_ms if buffer is currently empty.
+ * Ownership of popped audit events is transferred to caller (caller must audit_event_cleanup).
+ *
+ * @param ring Ring buffer instance.
+ * @param out_batch Destination array for popped events.
+ * @param max_count Maximum number of events to pop in this batch.
+ * @param timeout_ms Maximum time to wait in milliseconds if buffer is empty (0 for non-blocking).
+ * @return Number of events popped into out_batch.
+ */
+size_t audit_ring_pop_batch(audit_ring_t*  ring,
+                            audit_event_t* out_batch,
+                            size_t         max_count,
+                            uint32_t       timeout_ms);
+
+/**
+ * @brief Get the current number of queued events in the ring buffer.
+ * @param ring Ring buffer instance.
+ * @return Queued item count.
+ */
+size_t audit_ring_count(audit_ring_t* ring);
+
+/**
+ * @brief Get the lifetime total dropped events due to buffer saturation.
+ * @param ring Ring buffer instance.
+ * @return Total dropped events.
+ */
+uint64_t audit_ring_dropped(audit_ring_t* ring);
+
 #endif /* AIGATE_AUDIT_LOGGER_H */
