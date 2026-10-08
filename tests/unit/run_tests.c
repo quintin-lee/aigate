@@ -663,6 +663,9 @@ main(int argc, char** argv)
     extern void test_config_audit_parameters(void);
     test_register("config_audit_parameters", test_config_audit_parameters);
 
+    extern void test_audit_metrics_exposition(void);
+    test_register("audit_metrics_exposition", test_audit_metrics_exposition);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

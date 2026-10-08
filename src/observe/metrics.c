@@ -96,6 +96,63 @@ appendf(char** w, size_t* rem, const char* fmt, ...)
     return 0;
 }
 
+static atomic_uint_fast64_t g_audit_events_info = 0;
+static atomic_uint_fast64_t g_audit_events_warn = 0;
+static atomic_uint_fast64_t g_audit_events_violation = 0;
+static atomic_uint_fast64_t g_audit_events_error = 0;
+static atomic_uint_fast64_t g_audit_dropped = 0;
+static atomic_uint_fast64_t g_audit_webhook_success = 0;
+static atomic_uint_fast64_t g_audit_webhook_failures = 0;
+
+void
+metrics_inc_audit_event(audit_severity_t sev)
+{
+    switch (sev) {
+    case AUDIT_SEV_INFO:
+        atomic_fetch_add(&g_audit_events_info, 1);
+        break;
+    case AUDIT_SEV_WARN:
+        atomic_fetch_add(&g_audit_events_warn, 1);
+        break;
+    case AUDIT_SEV_VIOLATION:
+        atomic_fetch_add(&g_audit_events_violation, 1);
+        break;
+    case AUDIT_SEV_ERROR:
+        atomic_fetch_add(&g_audit_events_error, 1);
+        break;
+    }
+}
+
+void
+metrics_inc_audit_dropped(uint64_t count)
+{
+    atomic_fetch_add(&g_audit_dropped, count);
+}
+
+void
+metrics_inc_audit_webhook_success(void)
+{
+    atomic_fetch_add(&g_audit_webhook_success, 1);
+}
+
+void
+metrics_inc_audit_webhook_failure(void)
+{
+    atomic_fetch_add(&g_audit_webhook_failures, 1);
+}
+
+void
+metrics_reset_audit(void)
+{
+    atomic_store(&g_audit_events_info, 0);
+    atomic_store(&g_audit_events_warn, 0);
+    atomic_store(&g_audit_events_violation, 0);
+    atomic_store(&g_audit_events_error, 0);
+    atomic_store(&g_audit_dropped, 0);
+    atomic_store(&g_audit_webhook_success, 0);
+    atomic_store(&g_audit_webhook_failures, 0);
+}
+
 /** @brief Failover metrics table capacity (upper bound on model from_prov→to_prov entries). */
 #define METRICS_MAX_FAILOVERS 128
 
@@ -534,6 +591,76 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
                         inflights[i]) != 0) {
                 return -1;
             }
+        }
+    }
+
+    /* Audit logger metrics */
+    uint64_t a_info = atomic_load(&g_audit_events_info);
+    uint64_t a_warn = atomic_load(&g_audit_events_warn);
+    uint64_t a_viol = atomic_load(&g_audit_events_violation);
+    uint64_t a_err = atomic_load(&g_audit_events_error);
+    uint64_t a_drop = atomic_load(&g_audit_dropped);
+    uint64_t a_ws = atomic_load(&g_audit_webhook_success);
+    uint64_t a_wf = atomic_load(&g_audit_webhook_failures);
+
+    if (a_info > 0 || a_warn > 0 || a_viol > 0 || a_err > 0 || a_drop > 0 || a_ws > 0 || a_wf > 0) {
+        if (appendf(&w,
+                    &rem,
+                    "# HELP aigate_audit_events_total Total audit events recorded by severity.\n"
+                    "# TYPE aigate_audit_events_total counter\n") != 0) {
+            return -1;
+        }
+        if (a_info > 0) {
+            if (appendf(&w,
+                        &rem,
+                        "aigate_audit_events_total{severity=\"info\"} %llu\n",
+                        (unsigned long long)a_info) != 0) {
+                return -1;
+            }
+        }
+        if (a_warn > 0) {
+            if (appendf(&w,
+                        &rem,
+                        "aigate_audit_events_total{severity=\"warn\"} %llu\n",
+                        (unsigned long long)a_warn) != 0) {
+                return -1;
+            }
+        }
+        if (a_viol > 0) {
+            if (appendf(&w,
+                        &rem,
+                        "aigate_audit_events_total{severity=\"violation\"} %llu\n",
+                        (unsigned long long)a_viol) != 0) {
+                return -1;
+            }
+        }
+        if (a_err > 0) {
+            if (appendf(&w,
+                        &rem,
+                        "aigate_audit_events_total{severity=\"error\"} %llu\n",
+                        (unsigned long long)a_err) != 0) {
+                return -1;
+            }
+        }
+
+        if (appendf(&w,
+                    &rem,
+                    "# HELP aigate_audit_dropped_total Total audit events dropped due to ring "
+                    "buffer overflow.\n"
+                    "# TYPE aigate_audit_dropped_total counter\n"
+                    "aigate_audit_dropped_total %llu\n"
+                    "# HELP aigate_audit_webhook_success_total Total audit webhook alerts "
+                    "delivered successfully.\n"
+                    "# TYPE aigate_audit_webhook_success_total counter\n"
+                    "aigate_audit_webhook_success_total %llu\n"
+                    "# HELP aigate_audit_webhook_failures_total Total audit webhook alert delivery "
+                    "failures.\n"
+                    "# TYPE aigate_audit_webhook_failures_total counter\n"
+                    "aigate_audit_webhook_failures_total %llu\n",
+                    (unsigned long long)a_drop,
+                    (unsigned long long)a_ws,
+                    (unsigned long long)a_wf) != 0) {
+            return -1;
         }
     }
 

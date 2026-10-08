@@ -3,6 +3,7 @@
  */
 #include "audit_logger.h"
 #include "config.h"
+#include "metrics.h"
 #include "run_tests.h"
 #include <jansson.h>
 #include <stdlib.h>
@@ -243,4 +244,29 @@ TEST_CASE(test_config_audit_parameters)
     unsetenv("AIGATE_AUDIT_SAMPLE_RATE");
     unsetenv("AIGATE_PG_DSN");
     unsetenv("AIGATE_ADMIN_TOKEN");
+}
+
+TEST_CASE(test_audit_metrics_exposition)
+{
+    metrics_reset_audit();
+    metrics_inc_audit_event(AUDIT_SEV_INFO);
+    metrics_inc_audit_event(AUDIT_SEV_VIOLATION);
+    metrics_inc_audit_dropped(2);
+    metrics_inc_audit_webhook_success();
+    metrics_inc_audit_webhook_failure();
+
+    char buf[4096];
+    int  rc = metrics_render(NULL, buf, sizeof(buf));
+    TEST_ASSERT(rc == 0, "metrics_render failed");
+    TEST_ASSERT(strstr(buf, "# TYPE aigate_audit_events_total counter") != NULL,
+                "audit_events_total header missing");
+    TEST_ASSERT(strstr(buf, "aigate_audit_events_total{severity=\"info\"} 1") != NULL,
+                "info event counter missing");
+    TEST_ASSERT(strstr(buf, "aigate_audit_events_total{severity=\"violation\"} 1") != NULL,
+                "violation event counter missing");
+    TEST_ASSERT(strstr(buf, "aigate_audit_dropped_total 2") != NULL, "dropped counter missing");
+    TEST_ASSERT(strstr(buf, "aigate_audit_webhook_success_total 1") != NULL,
+                "webhook success counter missing");
+    TEST_ASSERT(strstr(buf, "aigate_audit_webhook_failures_total 1") != NULL,
+                "webhook failure counter missing");
 }

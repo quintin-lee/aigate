@@ -79,4 +79,21 @@ void metrics_reset_concurrency_rejected(void);
  *  @note ACL is IPv4-only by design (spec §5); empty @p acl → allow all. */
 int metrics_acl_allows(const char* ip, const char* acl);
 
+#include "audit_logger.h"
+
+/** @brief Increment audit event counter by severity. */
+void metrics_inc_audit_event(audit_severity_t sev);
+
+/** @brief Increment audit dropped counter. */
+void metrics_inc_audit_dropped(uint64_t count);
+
+/** @brief Increment audit webhook success counter. */
+void metrics_inc_audit_webhook_success(void);
+
+/** @brief Increment audit webhook failure counter. */
+void metrics_inc_audit_webhook_failure(void);
+
+/** @brief Reset audit metrics counters (for tests). */
+void metrics_reset_audit(void);
+
 #endif /* AIGATE_METRICS_H */
