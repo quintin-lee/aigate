@@ -3,6 +3,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "audit_logger.h"
+#include <curl/curl.h>
 #include <errno.h>
 #include <jansson.h>
 #include <pthread.h>
@@ -616,7 +617,76 @@ audit_webhook_worker_thread(void* arg)
 
     while (al->running || (al->webhook_ring != NULL && audit_ring_count(al->webhook_ring) > 0)) {
         size_t count = audit_ring_pop_batch(al->webhook_ring, batch, 16, 200);
+        if (count == 0) {
+            continue;
+        }
+
         for (size_t i = 0; i < count; i++) {
+            char* payload = audit_event_to_webhook_payload(&batch[i], al->cfg.webhook_format);
+            if (payload == NULL) {
+                audit_event_cleanup(&batch[i]);
+                continue;
+            }
+
+            if (al->cfg.webhook_url[0] == '\0') {
+                free(payload);
+                audit_event_cleanup(&batch[i]);
+                continue;
+            }
+
+            bool success = false;
+            long backoff_ms = 1000;
+
+            for (int attempt = 1; attempt <= 3; attempt++) {
+                CURL* c = curl_easy_init();
+                if (c != NULL) {
+                    struct curl_slist* hdrs = NULL;
+                    hdrs = curl_slist_append(hdrs, "Content-Type: application/json");
+                    hdrs = curl_slist_append(hdrs, "User-Agent: aigate-audit-webhook/1.0");
+
+                    curl_easy_setopt(c, CURLOPT_URL, al->cfg.webhook_url);
+                    curl_easy_setopt(c, CURLOPT_POST, 1L);
+                    curl_easy_setopt(c, CURLOPT_POSTFIELDS, payload);
+                    curl_easy_setopt(c, CURLOPT_POSTFIELDSIZE, (long)strlen(payload));
+                    curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdrs);
+                    curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT_MS, 2000L);
+                    curl_easy_setopt(c, CURLOPT_TIMEOUT_MS, 5000L);
+                    curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+
+                    CURLcode res = curl_easy_perform(c);
+                    long     http_code = 0;
+                    if (res == CURLE_OK) {
+                        curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &http_code);
+                    }
+                    curl_slist_free_all(hdrs);
+                    curl_easy_cleanup(c);
+
+                    if (res == CURLE_OK && http_code >= 200 && http_code < 300) {
+                        success = true;
+                        break;
+                    }
+                }
+
+                if (!al->running || attempt == 3) {
+                    break;
+                }
+
+                struct timespec ts;
+                ts.tv_sec = backoff_ms / 1000;
+                ts.tv_nsec = (backoff_ms % 1000) * 1000000ULL;
+                nanosleep(&ts, NULL);
+                backoff_ms *= 2;
+            }
+
+            pthread_mutex_lock(&al->metrics_lock);
+            if (success) {
+                al->webhook_success_total++;
+            } else {
+                al->webhook_failures_total++;
+            }
+            pthread_mutex_unlock(&al->metrics_lock);
+
+            free(payload);
             audit_event_cleanup(&batch[i]);
         }
     }

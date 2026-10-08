@@ -657,6 +657,9 @@ main(int argc, char** argv)
     extern void test_audit_file_worker_and_rotation(void);
     test_register("audit_file_worker_and_rotation", test_audit_file_worker_and_rotation);
 
+    extern void test_audit_webhook_worker_and_retry(void);
+    test_register("audit_webhook_worker_and_retry", test_audit_webhook_worker_and_retry);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
