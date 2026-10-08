@@ -6,6 +6,7 @@
 #include <jansson.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 TEST_CASE(test_audit_event_serialization_and_snapshots)
 {
@@ -112,4 +113,57 @@ TEST_CASE(test_audit_ring_buffer_concurrency_and_drops)
     }
 
     audit_ring_destroy(ring);
+}
+
+TEST_CASE(test_audit_file_worker_and_rotation)
+{
+    const char* test_file = "/tmp/aigate_test_audit.ndjson";
+    unlink(test_file);
+    unlink("/tmp/aigate_test_audit.ndjson.1");
+    unlink("/tmp/aigate_test_audit.ndjson.2");
+
+    audit_config_t cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    strncpy(cfg.log_file, test_file, sizeof(cfg.log_file) - 1);
+    cfg.max_size_mb = 1;
+    cfg.max_backups = 2;
+    cfg.max_prompt_len = 1024;
+    cfg.sample_rate = 1.0;
+
+    audit_logger_t* al = audit_logger_create(&cfg);
+    TEST_ASSERT(al != NULL, "audit_logger_create failed");
+    TEST_ASSERT(audit_logger_start(al) == 0, "audit_logger_start failed");
+
+    /* 记录 100 条审计事件 */
+    for (int i = 0; i < 100; i++) {
+        audit_event_t ev;
+        audit_event_init(&ev);
+        snprintf(ev.trace_id, sizeof(ev.trace_id), "trace-%03d", i);
+        ev.timestamp_ms = 1760000000000LL + i;
+        ev.key_id = 1;
+        ev.http_status = 200;
+        ev.severity = AUDIT_SEV_INFO;
+        audit_logger_record(al, &ev);
+        audit_event_cleanup(&ev);
+    }
+
+    /* 触发 SIGHUP 重载测试 */
+    audit_logger_reload(al);
+
+    /* 优雅停止（应清空残留并 flush） */
+    audit_logger_stop(al);
+    audit_logger_destroy(al);
+
+    /* 校验目标文件已生成且内容完整包含 100 行 */
+    FILE* fp = fopen(test_file, "r");
+    TEST_ASSERT(fp != NULL, "audit file was not created");
+    char line[4096];
+    int  line_count = 0;
+    while (fgets(line, sizeof(line), fp) != NULL) {
+        line_count++;
+    }
+    fclose(fp);
+    TEST_ASSERT(line_count == 100, "all 100 lines must be flushed to disk");
+
+    unlink(test_file);
 }

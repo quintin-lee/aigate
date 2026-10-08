@@ -654,6 +654,9 @@ main(int argc, char** argv)
     test_register("audit_ring_buffer_concurrency_and_drops",
                   test_audit_ring_buffer_concurrency_and_drops);
 
+    extern void test_audit_file_worker_and_rotation(void);
+    test_register("audit_file_worker_and_rotation", test_audit_file_worker_and_rotation);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

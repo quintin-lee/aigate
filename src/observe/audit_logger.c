@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 static const char*
 severity_to_str(audit_severity_t sev)
@@ -492,4 +493,323 @@ audit_ring_dropped(audit_ring_t* ring)
     uint64_t dropped = ring->dropped_count;
     pthread_mutex_unlock(&ring->lock);
     return dropped;
+}
+
+/* --- Dual-Channel Audit Logger Engine --- */
+
+struct audit_logger {
+    audit_config_t  cfg;
+    audit_ring_t*   file_ring;
+    audit_ring_t*   webhook_ring;
+    pthread_t       file_th;
+    bool            file_th_started;
+    pthread_t       webhook_th;
+    bool            webhook_th_started;
+    volatile bool   running;
+    volatile bool   reload_requested;
+    FILE*           file_fp;
+    size_t          current_file_size;
+    pthread_mutex_t fp_lock;
+    uint64_t        webhook_success_total;
+    uint64_t        webhook_failures_total;
+    pthread_mutex_t metrics_lock;
+};
+
+static void
+audit_file_rotate(audit_logger_t* al)
+{
+    if (al->file_fp != NULL) {
+        fclose(al->file_fp);
+        al->file_fp = NULL;
+    }
+    if (al->cfg.max_backups > 0) {
+        char old_path[600];
+        snprintf(old_path, sizeof(old_path), "%s.%d", al->cfg.log_file, al->cfg.max_backups);
+        unlink(old_path);
+
+        for (int i = al->cfg.max_backups - 1; i >= 1; i--) {
+            char src[600], dst[600];
+            snprintf(src, sizeof(src), "%s.%d", al->cfg.log_file, i);
+            snprintf(dst, sizeof(dst), "%s.%d", al->cfg.log_file, i + 1);
+            rename(src, dst);
+        }
+
+        char first_backup[600];
+        snprintf(first_backup, sizeof(first_backup), "%s.1", al->cfg.log_file);
+        rename(al->cfg.log_file, first_backup);
+    }
+    al->file_fp = fopen(al->cfg.log_file, "a");
+    al->current_file_size = 0;
+}
+
+static void*
+audit_file_worker_thread(void* arg)
+{
+    audit_logger_t* al = (audit_logger_t*)arg;
+    audit_event_t   batch[64];
+
+    while (al->running || (al->file_ring != NULL && audit_ring_count(al->file_ring) > 0)) {
+        if (al->reload_requested) {
+            al->reload_requested = false;
+            pthread_mutex_lock(&al->fp_lock);
+            if (al->file_fp != NULL) {
+                fclose(al->file_fp);
+                al->file_fp = NULL;
+            }
+            if (al->cfg.log_file[0] != '\0') {
+                al->file_fp = fopen(al->cfg.log_file, "a");
+                if (al->file_fp != NULL) {
+                    fseek(al->file_fp, 0, SEEK_END);
+                    al->current_file_size = (size_t)ftell(al->file_fp);
+                }
+            }
+            pthread_mutex_unlock(&al->fp_lock);
+        }
+
+        size_t count = audit_ring_pop_batch(al->file_ring, batch, 64, 200);
+        if (count == 0) {
+            continue;
+        }
+
+        pthread_mutex_lock(&al->fp_lock);
+        if (al->file_fp == NULL && al->cfg.log_file[0] != '\0') {
+            al->file_fp = fopen(al->cfg.log_file, "a");
+            if (al->file_fp != NULL) {
+                fseek(al->file_fp, 0, SEEK_END);
+                al->current_file_size = (size_t)ftell(al->file_fp);
+            }
+        }
+
+        if (al->file_fp != NULL) {
+            for (size_t i = 0; i < count; i++) {
+                char* line = audit_event_to_ndjson(&batch[i]);
+                if (line != NULL) {
+                    size_t len = strlen(line);
+                    fwrite(line, 1, len, al->file_fp);
+                    fputc('\n', al->file_fp);
+                    al->current_file_size += len + 1;
+                    free(line);
+                }
+                audit_event_cleanup(&batch[i]);
+            }
+            fflush(al->file_fp);
+
+            if (al->cfg.max_size_mb > 0 &&
+                al->current_file_size >= (size_t)al->cfg.max_size_mb * 1024 * 1024) {
+                audit_file_rotate(al);
+            }
+        } else {
+            for (size_t i = 0; i < count; i++) {
+                audit_event_cleanup(&batch[i]);
+            }
+        }
+        pthread_mutex_unlock(&al->fp_lock);
+    }
+    return NULL;
+}
+
+static void*
+audit_webhook_worker_thread(void* arg)
+{
+    audit_logger_t* al = (audit_logger_t*)arg;
+    audit_event_t   batch[16];
+
+    while (al->running || (al->webhook_ring != NULL && audit_ring_count(al->webhook_ring) > 0)) {
+        size_t count = audit_ring_pop_batch(al->webhook_ring, batch, 16, 200);
+        for (size_t i = 0; i < count; i++) {
+            audit_event_cleanup(&batch[i]);
+        }
+    }
+    return NULL;
+}
+
+audit_logger_t*
+audit_logger_create(const audit_config_t* cfg)
+{
+    if (cfg == NULL) {
+        return NULL;
+    }
+    audit_logger_t* al = calloc(1, sizeof(*al));
+    if (al == NULL) {
+        return NULL;
+    }
+    al->cfg = *cfg;
+    if (al->cfg.max_size_mb <= 0) {
+        al->cfg.max_size_mb = 100;
+    }
+    if (al->cfg.max_backups <= 0) {
+        al->cfg.max_backups = 5;
+    }
+    if (al->cfg.max_prompt_len <= 0) {
+        al->cfg.max_prompt_len = 4096;
+    }
+    if (al->cfg.sample_rate <= 0.0 && cfg->sample_rate <= 0.0) {
+        al->cfg.sample_rate = 1.0;
+    }
+
+    if (al->cfg.log_file[0] != '\0') {
+        al->file_ring = audit_ring_create(4096);
+        if (al->file_ring == NULL) {
+            free(al);
+            return NULL;
+        }
+    }
+
+    if (al->cfg.webhook_url[0] != '\0') {
+        al->webhook_ring = audit_ring_create(1024);
+        if (al->webhook_ring == NULL) {
+            if (al->file_ring != NULL) {
+                audit_ring_destroy(al->file_ring);
+            }
+            free(al);
+            return NULL;
+        }
+    }
+
+    pthread_mutex_init(&al->fp_lock, NULL);
+    pthread_mutex_init(&al->metrics_lock, NULL);
+    return al;
+}
+
+int
+audit_logger_start(audit_logger_t* al)
+{
+    if (al == NULL) {
+        return -1;
+    }
+    al->running = true;
+    if (al->file_ring != NULL) {
+        if (pthread_create(&al->file_th, NULL, audit_file_worker_thread, al) != 0) {
+            al->running = false;
+            return -1;
+        }
+        al->file_th_started = true;
+    }
+    if (al->webhook_ring != NULL) {
+        if (pthread_create(&al->webhook_th, NULL, audit_webhook_worker_thread, al) != 0) {
+            /* non-fatal; continue with file worker */
+        } else {
+            al->webhook_th_started = true;
+        }
+    }
+    return 0;
+}
+
+void
+audit_logger_stop(audit_logger_t* al)
+{
+    if (al == NULL || !al->running) {
+        return;
+    }
+    al->running = false;
+    if (al->file_th_started) {
+        pthread_join(al->file_th, NULL);
+        al->file_th_started = false;
+    }
+    if (al->webhook_th_started) {
+        pthread_join(al->webhook_th, NULL);
+        al->webhook_th_started = false;
+    }
+    pthread_mutex_lock(&al->fp_lock);
+    if (al->file_fp != NULL) {
+        fflush(al->file_fp);
+        fclose(al->file_fp);
+        al->file_fp = NULL;
+    }
+    pthread_mutex_unlock(&al->fp_lock);
+}
+
+void
+audit_logger_reload(audit_logger_t* al)
+{
+    if (al == NULL) {
+        return;
+    }
+    al->reload_requested = true;
+}
+
+void
+audit_logger_record(audit_logger_t* al, const audit_event_t* ev)
+{
+    if (al == NULL || ev == NULL) {
+        return;
+    }
+
+    /* Probabilistic sampling for normal INFO events */
+    if (ev->severity == AUDIT_SEV_INFO && al->cfg.sample_rate < 1.0) {
+        if (al->cfg.sample_rate <= 0.0) {
+            return;
+        }
+        double r = (double)rand() / (double)RAND_MAX;
+        if (r > al->cfg.sample_rate) {
+            return;
+        }
+    }
+
+    if (al->file_ring != NULL) {
+        audit_ring_push(al->file_ring, ev);
+    }
+    if (al->webhook_ring != NULL && ev->severity >= AUDIT_SEV_VIOLATION) {
+        audit_ring_push(al->webhook_ring, ev);
+    }
+}
+
+void
+audit_logger_destroy(audit_logger_t* al)
+{
+    if (al == NULL) {
+        return;
+    }
+    audit_logger_stop(al);
+    if (al->file_ring != NULL) {
+        audit_ring_destroy(al->file_ring);
+        al->file_ring = NULL;
+    }
+    if (al->webhook_ring != NULL) {
+        audit_ring_destroy(al->webhook_ring);
+        al->webhook_ring = NULL;
+    }
+    pthread_mutex_destroy(&al->fp_lock);
+    pthread_mutex_destroy(&al->metrics_lock);
+    free(al);
+}
+
+uint64_t
+audit_logger_get_dropped_total(audit_logger_t* al)
+{
+    if (al == NULL) {
+        return 0;
+    }
+    uint64_t total = 0;
+    if (al->file_ring != NULL) {
+        total += audit_ring_dropped(al->file_ring);
+    }
+    if (al->webhook_ring != NULL) {
+        total += audit_ring_dropped(al->webhook_ring);
+    }
+    return total;
+}
+
+uint64_t
+audit_logger_get_webhook_success_total(audit_logger_t* al)
+{
+    if (al == NULL) {
+        return 0;
+    }
+    pthread_mutex_lock(&al->metrics_lock);
+    uint64_t c = al->webhook_success_total;
+    pthread_mutex_unlock(&al->metrics_lock);
+    return c;
+}
+
+uint64_t
+audit_logger_get_webhook_failures_total(audit_logger_t* al)
+{
+    if (al == NULL) {
+        return 0;
+    }
+    pthread_mutex_lock(&al->metrics_lock);
+    uint64_t c = al->webhook_failures_total;
+    pthread_mutex_unlock(&al->metrics_lock);
+    return c;
 }

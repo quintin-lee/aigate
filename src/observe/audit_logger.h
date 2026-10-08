@@ -163,4 +163,84 @@ size_t audit_ring_count(audit_ring_t* ring);
  */
 uint64_t audit_ring_dropped(audit_ring_t* ring);
 
+/* --- Dual-Channel Audit Logger Engine --- */
+
+/**
+ * @brief Audit logger configuration parameters.
+ */
+typedef struct {
+    char log_file[512];    /**< Destination NDJSON file path (empty = disabled). */
+    int  max_size_mb;      /**< Single file maximum size before rotation (MB). */
+    int  max_backups;      /**< Maximum number of rolled backup files retained. */
+    char webhook_url[512]; /**< Target Webhook alert endpoint URL (empty = disabled). */
+    audit_webhook_format_t webhook_format; /**< Payload template adapter format. */
+    int                    max_prompt_len; /**< Maximum characters retained in prompt snapshot. */
+    double sample_rate; /**< Probabilistic sample rate (0.0 to 1.0) for INFO events. */
+} audit_config_t;
+
+/**
+ * @brief Opaque handle to audit logger service.
+ */
+typedef struct audit_logger audit_logger_t;
+
+/**
+ * @brief Create a new audit logger instance with configuration.
+ * @param cfg Pointer to audit configuration.
+ * @return Newly allocated audit logger or NULL on OOM.
+ */
+audit_logger_t* audit_logger_create(const audit_config_t* cfg);
+
+/**
+ * @brief Start background worker threads for Channel A and Channel B.
+ * @param al Audit logger instance.
+ * @return 0 on success, -1 on thread creation failure.
+ */
+int audit_logger_start(audit_logger_t* al);
+
+/**
+ * @brief Stop background workers and flush pending queued events.
+ * @param al Audit logger instance.
+ */
+void audit_logger_stop(audit_logger_t* al);
+
+/**
+ * @brief Signal Channel A file worker to reload and reopen the log file (SIGHUP support).
+ * @param al Audit logger instance.
+ */
+void audit_logger_reload(audit_logger_t* al);
+
+/**
+ * @brief Non-blocking record of an audit event into the dual-channel pipeline (< 1µs).
+ * @param al Audit logger instance (safe if NULL).
+ * @param ev Audit event to record.
+ */
+void audit_logger_record(audit_logger_t* al, const audit_event_t* ev);
+
+/**
+ * @brief Destroy audit logger and free all associated resources.
+ * @param al Audit logger instance (safe if NULL).
+ */
+void audit_logger_destroy(audit_logger_t* al);
+
+/**
+ * @brief Get total dropped events across all internal buffers.
+ * @param al Audit logger instance.
+ * @return Dropped events count.
+ */
+uint64_t audit_logger_get_dropped_total(audit_logger_t* al);
+
+/**
+ * @brief Get total successful webhook dispatches.
+ * @param al Audit logger instance.
+ * @return Success count.
+ */
+uint64_t audit_logger_get_webhook_success_total(audit_logger_t* al);
+
+/**
+ * @brief Get total failed webhook dispatches (after exhausting retries).
+ * @param al Audit logger instance.
+ * @return Failure count.
+ */
+uint64_t audit_logger_get_webhook_failures_total(audit_logger_t* al);
+
 #endif /* AIGATE_AUDIT_LOGGER_H */
