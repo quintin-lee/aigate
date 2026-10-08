@@ -37,6 +37,22 @@ filter_guardrails(chat_req_t* q)
             aigate_write_error(q->rc, 400, "content_policy_violation", block_msg);
             record_usage_and_event(
                 q->ac, q->krec.key_id, q->model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
+            aigate_record_audit(q->ac,
+                                q->trace_ctx.trace_id,
+                                (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                q->krec.key_id,
+                                q->model,
+                                NULL,
+                                400,
+                                0,
+                                0,
+                                0,
+                                0,
+                                AUDIT_SEV_VIOLATION,
+                                "guardrail_block",
+                                matched_rule[0] ? matched_rule : "blocked content",
+                                (q->rq != NULL) ? (const char*)q->rq->body : NULL,
+                                (q->rq != NULL) ? q->rq->body_len : 0);
             return FILTER_STOP;
         }
         if (gr_res == GUARDRAILS_MASKED && q->sanitized_body != NULL) {
@@ -70,6 +86,22 @@ filter_guardrails(chat_req_t* q)
             aigate_write_error(q->rc, 400, "content_policy_violation", block_msg);
             record_usage_and_event(
                 q->ac, q->krec.key_id, q->model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
+            aigate_record_audit(q->ac,
+                                q->trace_ctx.trace_id,
+                                (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                q->krec.key_id,
+                                q->model,
+                                NULL,
+                                400,
+                                0,
+                                0,
+                                0,
+                                0,
+                                AUDIT_SEV_VIOLATION,
+                                "guardrail_block",
+                                wh_reason[0] ? wh_reason : "content_policy_violation",
+                                (q->rq != NULL) ? (const char*)q->rq->body : NULL,
+                                (q->rq != NULL) ? q->rq->body_len : 0);
             return FILTER_STOP;
         }
         if (wh_res == GUARDRAILS_MASKED && wh_sanitized != NULL) {
@@ -190,6 +222,22 @@ filter_chain_execute_outbound(
             aigate_write_error(q->rc, 400, "content_policy_violation", block_msg);
             record_usage_and_event(
                 q->ac, q->krec.key_id, q->model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
+            aigate_record_audit(q->ac,
+                                q->trace_ctx.trace_id,
+                                (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                q->krec.key_id,
+                                q->model,
+                                NULL,
+                                400,
+                                0,
+                                0,
+                                0,
+                                0,
+                                AUDIT_SEV_VIOLATION,
+                                "guardrail_block_outbound",
+                                wh_reason[0] ? wh_reason : "prohibited_content",
+                                resp_body,
+                                resp_len);
             return FILTER_STOP;
         }
         if (act == GUARDRAILS_MASKED && wh_sanitized != NULL) {

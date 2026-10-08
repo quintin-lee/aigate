@@ -267,6 +267,71 @@ record_usage_and_event(aigate_core* ac,
     }
 }
 
+void
+aigate_record_audit(aigate_core*     ac,
+                    const char*      trace_id,
+                    const char*      client_ip,
+                    int64_t          key_id,
+                    const char*      model,
+                    const char*      provider,
+                    int              http_status,
+                    uint32_t         prompt_tokens,
+                    uint32_t         completion_tokens,
+                    uint64_t         latency_ns,
+                    uint64_t         ttft_ns,
+                    audit_severity_t severity,
+                    const char*      violation_type,
+                    const char*      rule_detail,
+                    const char*      prompt_raw,
+                    size_t           prompt_len)
+{
+    if (ac == NULL || ac->audit == NULL) {
+        return;
+    }
+
+    audit_event_t ev;
+    audit_event_init(&ev);
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ev.timestamp_ms = (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+
+    if (trace_id != NULL) {
+        snprintf(ev.trace_id, sizeof(ev.trace_id), "%s", trace_id);
+    }
+    if (client_ip != NULL) {
+        snprintf(ev.client_ip, sizeof(ev.client_ip), "%s", client_ip);
+    }
+    ev.key_id = key_id;
+    if (model != NULL) {
+        snprintf(ev.model, sizeof(ev.model), "%s", model);
+    }
+    if (provider != NULL) {
+        snprintf(ev.provider, sizeof(ev.provider), "%s", provider);
+    }
+    ev.http_status = http_status;
+    ev.prompt_tokens = prompt_tokens;
+    ev.completion_tokens = completion_tokens;
+    ev.latency_ns = latency_ns;
+    ev.ttft_ns = ttft_ns;
+    ev.severity = severity;
+    if (violation_type != NULL) {
+        snprintf(ev.violation_type, sizeof(ev.violation_type), "%s", violation_type);
+    }
+    if (rule_detail != NULL) {
+        snprintf(ev.rule_detail, sizeof(ev.rule_detail), "%s", rule_detail);
+    }
+
+    if (severity >= AUDIT_SEV_VIOLATION && prompt_raw != NULL && prompt_len > 0) {
+        int    max_len = audit_logger_get_max_prompt_len(ac->audit);
+        size_t limit = (prompt_len > (size_t)max_len) ? (size_t)max_len : prompt_len;
+        audit_event_set_prompt(&ev, prompt_raw, limit);
+    }
+
+    audit_logger_record(ac->audit, &ev);
+    audit_event_cleanup(&ev);
+}
+
 int
 aigate_core_init(aigate_core*   ac,
                  pg_store_t*    ps,
@@ -463,6 +528,10 @@ aigate_core_shutdown(aigate_core* ac)
         ac->cache_opt_cache = NULL;
     }
     pthread_mutex_destroy(&ac->cache_opt_rules_lock);
+    if (ac->audit != NULL) {
+        audit_logger_destroy(ac->audit);
+        ac->audit = NULL;
+    }
     auth_key_shutdown(&ac->keys);
 }
 
@@ -1376,6 +1445,23 @@ settle_success(chat_req_t* q,
     if (ptok + ctok > 0) {
         rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
     }
+    aigate_record_audit(q->ac,
+                        q->trace_ctx.trace_id,
+                        (q->rq != NULL) ? q->rq->client_ip : NULL,
+                        q->krec.key_id,
+                        q->model,
+                        provider,
+                        status,
+                        (uint32_t)ptok,
+                        (uint32_t)ctok,
+                        lat,
+                        0,
+                        (status < 400) ? AUDIT_SEV_INFO
+                                       : (status == 429 ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR),
+                        "",
+                        "",
+                        NULL,
+                        0);
 }
 
 /** @brief Failover warning log + failover metric. */

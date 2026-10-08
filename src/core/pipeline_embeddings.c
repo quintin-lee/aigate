@@ -161,6 +161,22 @@ handle_embeddings(chat_req_t* q)
                                        target->provider,
                                        q->guardrail_act,
                                        0.0);
+                aigate_record_audit(q->ac,
+                                    q->trace_ctx.trace_id,
+                                    (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                    q->krec.key_id,
+                                    q->model,
+                                    target->provider,
+                                    status,
+                                    0,
+                                    0,
+                                    total_lat,
+                                    0,
+                                    (status == 429) ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR,
+                                    "upstream_error",
+                                    "upstream returned error",
+                                    NULL,
+                                    0);
                 int rv = aigate_write_json(q->rc, status, ubody, ulen);
                 free(ubody);
                 chat_req_cleanup(q);
@@ -196,6 +212,22 @@ handle_embeddings(chat_req_t* q)
                                last_provider,
                                q->guardrail_act,
                                0.0);
+        aigate_record_audit(q->ac,
+                            q->trace_ctx.trace_id,
+                            (q->rq != NULL) ? q->rq->client_ip : NULL,
+                            q->krec.key_id,
+                            q->model,
+                            last_provider,
+                            429,
+                            0,
+                            0,
+                            total_lat,
+                            0,
+                            AUDIT_SEV_WARN,
+                            "rate_limit_exceeded",
+                            "upstream concurrency limit exceeded",
+                            NULL,
+                            0);
         chat_req_cleanup(q);
         return 0;
     }
@@ -217,6 +249,22 @@ handle_embeddings(chat_req_t* q)
                            last_provider,
                            q->guardrail_act,
                            0.0);
+    aigate_record_audit(q->ac,
+                        q->trace_ctx.trace_id,
+                        (q->rq != NULL) ? q->rq->client_ip : NULL,
+                        q->krec.key_id,
+                        q->model,
+                        last_provider,
+                        PIPE_UPSTREAM,
+                        0,
+                        0,
+                        total_lat,
+                        0,
+                        AUDIT_SEV_ERROR,
+                        "upstream_exhaustion",
+                        "upstream embeddings request failed",
+                        NULL,
+                        0);
     chat_req_cleanup(q);
     return 0;
 }

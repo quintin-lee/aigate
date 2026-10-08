@@ -666,6 +666,9 @@ main(int argc, char** argv)
     extern void test_audit_metrics_exposition(void);
     test_register("audit_metrics_exposition", test_audit_metrics_exposition);
 
+    extern void test_audit_pipeline_hook_recording(void);
+    test_register("audit_pipeline_hook_recording", test_audit_pipeline_hook_recording);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

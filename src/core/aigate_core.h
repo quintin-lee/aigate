@@ -26,6 +26,7 @@
 #include "ratelimit.h"
 #include "usage_meter.h"
 #include "observe/tracer.h"
+#include "observe/audit_logger.h"
 #include "policy/prompt_compressor.h"
 #include "policy/cache_optimizer.h"
 
@@ -98,6 +99,7 @@ typedef struct aigate_core {
     cache_optimizer_rule_t cache_opt_rules[64];  /**< Cached prompt cache optimizer rules */
     int                    n_cache_opt_rules;    /**< Number of active cache optimizer rules */
     pthread_mutex_t        cache_opt_rules_lock; /**< Mutex protecting cache_opt_rules */
+    audit_logger_t*        audit; /**< Dual-channel audit logger, may be NULL (disabled) */
 } aigate_core;
 
 /** @brief Type alias for gateway pipeline context. */
@@ -159,5 +161,29 @@ int aigate_write_gemini_error(aigate_response_ctx* rc,
                               int                  http_status,
                               const char*          status_str,
                               const char*          message);
+
+/**
+ * @brief Record an audit event into the core audit logger pipeline.
+ *
+ * Captures request metadata and dynamically evaluates severity level:
+ * - INFO level: prompt_snapshot is set to NULL (zero allocation, no privacy leakage).
+ * - VIOLATION / ERROR level: prompt_raw is truncated and safely copied for forensic retention.
+ */
+void aigate_record_audit(aigate_core*     ac,
+                         const char*      trace_id,
+                         const char*      client_ip,
+                         int64_t          key_id,
+                         const char*      model,
+                         const char*      provider,
+                         int              http_status,
+                         uint32_t         prompt_tokens,
+                         uint32_t         completion_tokens,
+                         uint64_t         latency_ns,
+                         uint64_t         ttft_ns,
+                         audit_severity_t severity,
+                         const char*      violation_type,
+                         const char*      rule_detail,
+                         const char*      prompt_raw,
+                         size_t           prompt_len);
 
 #endif /* AIGATE_CORE_H */

@@ -3,6 +3,7 @@
  */
 #define _POSIX_C_SOURCE 200809L
 #include "audit_logger.h"
+#include "metrics.h"
 #include <curl/curl.h>
 #include <errno.h>
 #include <jansson.h>
@@ -418,6 +419,7 @@ audit_ring_push(audit_ring_t* ring, const audit_event_t* ev)
         ring->head = (ring->head + 1) % ring->capacity;
         ring->tail = ring->head;
         ring->dropped_count++;
+        metrics_inc_audit_dropped(1);
     } else {
         if (audit_event_copy(&ring->slots[ring->tail], ev) != 0) {
             pthread_mutex_unlock(&ring->lock);
@@ -681,8 +683,10 @@ audit_webhook_worker_thread(void* arg)
             pthread_mutex_lock(&al->metrics_lock);
             if (success) {
                 al->webhook_success_total++;
+                metrics_inc_audit_webhook_success();
             } else {
                 al->webhook_failures_total++;
+                metrics_inc_audit_webhook_failure();
             }
             pthread_mutex_unlock(&al->metrics_lock);
 
@@ -816,6 +820,8 @@ audit_logger_record(audit_logger_t* al, const audit_event_t* ev)
         }
     }
 
+    metrics_inc_audit_event(ev->severity);
+
     if (al->file_ring != NULL) {
         audit_ring_push(al->file_ring, ev);
     }
@@ -882,4 +888,13 @@ audit_logger_get_webhook_failures_total(audit_logger_t* al)
     uint64_t c = al->webhook_failures_total;
     pthread_mutex_unlock(&al->metrics_lock);
     return c;
+}
+
+int
+audit_logger_get_max_prompt_len(const audit_logger_t* al)
+{
+    if (al == NULL) {
+        return 4096;
+    }
+    return al->cfg.max_prompt_len > 0 ? al->cfg.max_prompt_len : 4096;
 }

@@ -243,4 +243,11 @@ uint64_t audit_logger_get_webhook_success_total(audit_logger_t* al);
  */
 uint64_t audit_logger_get_webhook_failures_total(audit_logger_t* al);
 
+/**
+ * @brief Get maximum allowed prompt length configured for this logger.
+ * @param al Audit logger instance (safe if NULL).
+ * @return Configured max prompt length, or default 4096.
+ */
+int audit_logger_get_max_prompt_len(const audit_logger_t* al);
+
 #endif /* AIGATE_AUDIT_LOGGER_H */

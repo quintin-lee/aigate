@@ -154,6 +154,22 @@ prepare_chat_cache(chat_req_t* q, bool* is_streaming)
                                        "cache",
                                        q->guardrail_act,
                                        ce->cost_usd);
+                aigate_record_audit(q->ac,
+                                    q->trace_ctx.trace_id,
+                                    (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                    q->krec.key_id,
+                                    q->model,
+                                    "cache",
+                                    200,
+                                    (uint32_t)ce->prompt_tokens,
+                                    (uint32_t)ce->completion_tokens,
+                                    100000ULL,
+                                    0,
+                                    AUDIT_SEV_INFO,
+                                    "",
+                                    "",
+                                    NULL,
+                                    0);
                 if (q->ac->be != NULL) {
                     budget_enforce_record(q->ac->be,
                                           q->krec.key_id,
@@ -483,6 +499,25 @@ handle_chat_sync(chat_req_t* q)
                                            win_target->provider,
                                            q->guardrail_act,
                                            req_cost);
+                    aigate_record_audit(
+                        q->ac,
+                        q->trace_ctx.trace_id,
+                        (q->rq != NULL) ? q->rq->client_ip : NULL,
+                        q->krec.key_id,
+                        q->model,
+                        win_target->provider,
+                        parsed_status,
+                        (uint32_t)ptok,
+                        (uint32_t)ctok,
+                        total_lat,
+                        0,
+                        (parsed_status < 400)
+                            ? AUDIT_SEV_INFO
+                            : (parsed_status == 429 ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR),
+                        "",
+                        "",
+                        NULL,
+                        0);
                     if (q->ac->be != NULL) {
                         budget_enforce_record(
                             q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
@@ -525,6 +560,22 @@ handle_chat_sync(chat_req_t* q)
                                                win_target->provider,
                                                q->guardrail_act,
                                                0.0);
+                        aigate_record_audit(q->ac,
+                                            q->trace_ctx.trace_id,
+                                            (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                            q->krec.key_id,
+                                            q->model,
+                                            win_target->provider,
+                                            status,
+                                            0,
+                                            0,
+                                            total_lat,
+                                            0,
+                                            (status == 429) ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR,
+                                            "upstream_error",
+                                            "upstream returned error",
+                                            NULL,
+                                            0);
                         int rv = aigate_write_json(q->rc, status, ubody, ulen);
                         free(ubody);
                         chat_req_cleanup(q);
@@ -726,6 +777,24 @@ handle_chat_sync(chat_req_t* q)
                                    target->provider,
                                    q->guardrail_act,
                                    req_cost);
+            aigate_record_audit(q->ac,
+                                q->trace_ctx.trace_id,
+                                (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                q->krec.key_id,
+                                q->model,
+                                target->provider,
+                                parsed_status,
+                                (uint32_t)ptok,
+                                (uint32_t)ctok,
+                                total_lat,
+                                0,
+                                (parsed_status < 400)
+                                    ? AUDIT_SEV_INFO
+                                    : (parsed_status == 429 ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR),
+                                "",
+                                "",
+                                NULL,
+                                0);
             if (q->ac->be != NULL) {
                 budget_enforce_record(
                     q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
@@ -822,6 +891,22 @@ handle_chat_sync(chat_req_t* q)
                                last_provider,
                                q->guardrail_act,
                                0.0);
+        aigate_record_audit(q->ac,
+                            q->trace_ctx.trace_id,
+                            (q->rq != NULL) ? q->rq->client_ip : NULL,
+                            q->krec.key_id,
+                            q->model,
+                            last_provider,
+                            429,
+                            0,
+                            0,
+                            total_lat,
+                            0,
+                            AUDIT_SEV_WARN,
+                            "rate_limit_exceeded",
+                            "upstream concurrency limit exceeded",
+                            NULL,
+                            0);
         chat_req_cleanup(q);
         return 0;
     }
@@ -842,6 +927,22 @@ handle_chat_sync(chat_req_t* q)
                            last_provider,
                            q->guardrail_act,
                            0.0);
+    aigate_record_audit(q->ac,
+                        q->trace_ctx.trace_id,
+                        (q->rq != NULL) ? q->rq->client_ip : NULL,
+                        q->krec.key_id,
+                        q->model,
+                        last_provider,
+                        PIPE_UPSTREAM,
+                        0,
+                        0,
+                        total_lat,
+                        0,
+                        AUDIT_SEV_ERROR,
+                        "upstream_exhaustion",
+                        "upstream request failed",
+                        NULL,
+                        0);
     chat_req_cleanup(q);
     return 0;
 }
@@ -893,6 +994,22 @@ handle_stream_preheaders(chat_req_t*               q,
                                    target->provider,
                                    q->guardrail_act,
                                    0.0);
+            aigate_record_audit(q->ac,
+                                q->trace_ctx.trace_id,
+                                (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                q->krec.key_id,
+                                q->model,
+                                target->provider,
+                                status,
+                                0,
+                                0,
+                                total_lat,
+                                0,
+                                (status == 429) ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR,
+                                "upstream_error",
+                                "upstream returned error",
+                                NULL,
+                                0);
             *ret_rv = aigate_write_json(q->rc, status, sbody, slen);
             free(sbody);
             return -1;
@@ -1201,6 +1318,23 @@ handle_chat_stream(chat_req_t* q)
                                target->provider,
                                q->guardrail_act,
                                req_cost);
+        aigate_record_audit(q->ac,
+                            q->trace_ctx.trace_id,
+                            (q->rq != NULL) ? q->rq->client_ip : NULL,
+                            q->krec.key_id,
+                            q->model,
+                            target->provider,
+                            status > 0 ? status : 200,
+                            (uint32_t)ptok,
+                            (uint32_t)ctok,
+                            total_lat,
+                            0,
+                            (status < 400) ? AUDIT_SEV_INFO
+                                           : (status == 429 ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR),
+                            "",
+                            "",
+                            NULL,
+                            0);
         if (q->ac->be != NULL) {
             budget_enforce_record(
                 q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
@@ -1253,6 +1387,22 @@ handle_chat_stream(chat_req_t* q)
                                last_provider,
                                q->guardrail_act,
                                0.0);
+        aigate_record_audit(q->ac,
+                            q->trace_ctx.trace_id,
+                            (q->rq != NULL) ? q->rq->client_ip : NULL,
+                            q->krec.key_id,
+                            q->model,
+                            last_provider,
+                            429,
+                            0,
+                            0,
+                            total_lat,
+                            0,
+                            AUDIT_SEV_WARN,
+                            "rate_limit_exceeded",
+                            "upstream concurrency limit exceeded",
+                            NULL,
+                            0);
         chat_req_cleanup(q);
         return 0;
     }
@@ -1273,6 +1423,22 @@ handle_chat_stream(chat_req_t* q)
                            last_provider,
                            q->guardrail_act,
                            0.0);
+    aigate_record_audit(q->ac,
+                        q->trace_ctx.trace_id,
+                        (q->rq != NULL) ? q->rq->client_ip : NULL,
+                        q->krec.key_id,
+                        q->model,
+                        last_provider,
+                        PIPE_UPSTREAM,
+                        0,
+                        0,
+                        total_lat,
+                        0,
+                        AUDIT_SEV_ERROR,
+                        "upstream_exhaustion",
+                        "upstream request failed",
+                        NULL,
+                        0);
     chat_req_cleanup(q);
     return 0;
 }

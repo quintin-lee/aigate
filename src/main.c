@@ -147,6 +147,37 @@ main(int argc, char** argv)
         return 1;
     }
 
+    /* 4a. Audit logger initialization */
+    if (cfg.audit_log_file[0] != '\0' || cfg.audit_webhook_url[0] != '\0') {
+        audit_config_t acfg;
+        memset(&acfg, 0, sizeof(acfg));
+        strncpy(acfg.log_file, cfg.audit_log_file, sizeof(acfg.log_file) - 1);
+        acfg.max_size_mb = cfg.audit_max_size_mb;
+        acfg.max_backups = cfg.audit_max_backups;
+        strncpy(acfg.webhook_url, cfg.audit_webhook_url, sizeof(acfg.webhook_url) - 1);
+        if (strcmp(cfg.audit_webhook_format, "feishu") == 0) {
+            acfg.webhook_format = AUDIT_HOOK_FEISHU;
+        } else if (strcmp(cfg.audit_webhook_format, "dingtalk") == 0) {
+            acfg.webhook_format = AUDIT_HOOK_DINGTALK;
+        } else if (strcmp(cfg.audit_webhook_format, "wechat_work") == 0) {
+            acfg.webhook_format = AUDIT_HOOK_WECHAT_WORK;
+        } else {
+            acfg.webhook_format = AUDIT_HOOK_STANDARD;
+        }
+        acfg.max_prompt_len = cfg.audit_max_prompt_len;
+        acfg.sample_rate = cfg.audit_sample_rate;
+        core.audit = audit_logger_create(&acfg);
+        if (core.audit != NULL) {
+            if (audit_logger_start(core.audit) != 0) {
+                AIGATE_LOG_WARN("main: failed to start audit logger worker threads");
+            } else {
+                AIGATE_LOG_INFO("main: audit logger started (file='%s', webhook='%s')",
+                                acfg.log_file,
+                                acfg.webhook_url);
+            }
+        }
+    }
+
     if (core.hp != NULL) {
         health_prober_start(core.hp);
     }
@@ -218,6 +249,9 @@ main(int argc, char** argv)
                 aigate_log_init(new_cfg.log_format, new_cfg.log_level);
                 transport_civetweb_update_cors(cw, new_cfg.cors_allow_origin);
                 transport_civetweb_update_trusted_proxies(cw, new_cfg.trusted_proxies);
+                if (core.audit != NULL) {
+                    audit_logger_reload(core.audit);
+                }
                 AIGATE_LOG_INFO(
                     "main: configuration reloaded via SIGHUP (level=%s, format=%s, cors=%s, "
                     "proxies=%s)",

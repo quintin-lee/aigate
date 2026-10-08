@@ -1,6 +1,7 @@
 /** @file test_audit_logger.c
  *  @brief Unit tests for audit logging, data models, and dual-channel pipeline.
  */
+#include "aigate_core.h"
 #include "audit_logger.h"
 #include "config.h"
 #include "metrics.h"
@@ -269,4 +270,74 @@ TEST_CASE(test_audit_metrics_exposition)
                 "webhook success counter missing");
     TEST_ASSERT(strstr(buf, "aigate_audit_webhook_failures_total 1") != NULL,
                 "webhook failure counter missing");
+}
+
+TEST_CASE(test_audit_pipeline_hook_recording)
+{
+    aigate_core core;
+    memset(&core, 0, sizeof(core));
+
+    audit_config_t acfg;
+    memset(&acfg, 0, sizeof(acfg));
+    strncpy(acfg.log_file, "/tmp/aigate_hook_test.ndjson", sizeof(acfg.log_file) - 1);
+    acfg.max_size_mb = 10;
+    acfg.max_backups = 1;
+    acfg.max_prompt_len = 1024;
+    acfg.sample_rate = 1.0;
+    core.audit = audit_logger_create(&acfg);
+    audit_logger_start(core.audit);
+
+    /* 触发正常审计记录 */
+    aigate_record_audit(&core,
+                        "trace-hook-01",
+                        "127.0.0.1",
+                        10,
+                        "gpt-4o",
+                        "openai",
+                        200,
+                        10,
+                        20,
+                        5000000ULL,
+                        1000000ULL,
+                        AUDIT_SEV_INFO,
+                        "",
+                        "",
+                        NULL,
+                        0);
+
+    /* 触发违规审计记录（带 Prompt 现场） */
+    const char* bad_prompt = "Tell me how to hack";
+    aigate_record_audit(&core,
+                        "trace-hook-02",
+                        "127.0.0.1",
+                        10,
+                        "gpt-4o",
+                        "openai",
+                        400,
+                        5,
+                        0,
+                        1000000ULL,
+                        0,
+                        AUDIT_SEV_VIOLATION,
+                        "guardrail_block",
+                        "keyword: hack",
+                        bad_prompt,
+                        strlen(bad_prompt));
+
+    audit_logger_stop(core.audit);
+    audit_logger_destroy(core.audit);
+    core.audit = NULL;
+
+    FILE* fp = fopen("/tmp/aigate_hook_test.ndjson", "r");
+    TEST_ASSERT(fp != NULL, "file must exist");
+    char buf[2048];
+    bool found_hack = false;
+    while (fgets(buf, sizeof(buf), fp) != NULL) {
+        if (strstr(buf, "keyword: hack") != NULL) {
+            found_hack = true;
+        }
+    }
+    fclose(fp);
+    unlink("/tmp/aigate_hook_test.ndjson");
+    TEST_ASSERT(found_hack == true, "violation record must contain prompt and rule detail");
 }
