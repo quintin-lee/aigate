@@ -16,7 +16,7 @@ typedef void (*test_fn)(void);
 static struct {
     const char* name;
     test_fn     fn;
-} g_tests[256];
+} g_tests[512];
 static int g_n_tests = 0;
 
 /** @brief Register a test case.
@@ -645,6 +645,10 @@ main(int argc, char** argv)
 
     extern void test_transport_dynamic_config_reload(void);
     test_register("transport_dynamic_config_reload", test_transport_dynamic_config_reload);
+
+    extern void test_audit_event_serialization_and_snapshots(void);
+    test_register("audit_event_serialization_and_snapshots",
+                  test_audit_event_serialization_and_snapshots);
 
     int ran = 0;
     int failed = 0;
