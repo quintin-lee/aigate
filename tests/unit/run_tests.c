@@ -660,6 +660,9 @@ main(int argc, char** argv)
     extern void test_audit_webhook_worker_and_retry(void);
     test_register("audit_webhook_worker_and_retry", test_audit_webhook_worker_and_retry);
 
+    extern void test_config_audit_parameters(void);
+    test_register("config_audit_parameters", test_config_audit_parameters);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

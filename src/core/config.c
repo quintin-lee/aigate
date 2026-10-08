@@ -155,5 +155,46 @@ aigate_config_load(aigate_config* out)
     env_str("AIGATE_SSL_CERT", "", out->ssl_cert, sizeof out->ssl_cert);
     env_str("AIGATE_SSL_KEY", "", out->ssl_key, sizeof out->ssl_key);
 
+    env_str("AIGATE_AUDIT_LOG_FILE", "", out->audit_log_file, sizeof out->audit_log_file);
+
+    env_str("AIGATE_AUDIT_MAX_SIZE_MB", "100", raw_key, sizeof raw_key);
+    out->audit_max_size_mb = atoi(raw_key);
+    if (out->audit_max_size_mb < 1 || out->audit_max_size_mb > 10240) {
+        out->audit_max_size_mb = 100;
+    }
+
+    env_str("AIGATE_AUDIT_MAX_BACKUPS", "5", raw_key, sizeof raw_key);
+    out->audit_max_backups = atoi(raw_key);
+    if (out->audit_max_backups < 1 || out->audit_max_backups > 100) {
+        out->audit_max_backups = 5;
+    }
+
+    env_str("AIGATE_AUDIT_WEBHOOK_URL", "", out->audit_webhook_url, sizeof out->audit_webhook_url);
+
+    env_str("AIGATE_AUDIT_WEBHOOK_FORMAT",
+            "standard",
+            out->audit_webhook_format,
+            sizeof out->audit_webhook_format);
+    if (strcasecmp(out->audit_webhook_format, "standard") != 0 &&
+        strcasecmp(out->audit_webhook_format, "feishu") != 0 &&
+        strcasecmp(out->audit_webhook_format, "dingtalk") != 0 &&
+        strcasecmp(out->audit_webhook_format, "wechat_work") != 0) {
+        AIGATE_LOG_WARN("invalid AIGATE_AUDIT_WEBHOOK_FORMAT '%s', defaulting to 'standard'",
+                        out->audit_webhook_format);
+        snprintf(out->audit_webhook_format, sizeof out->audit_webhook_format, "standard");
+    }
+
+    env_str("AIGATE_AUDIT_MAX_PROMPT_LEN", "4096", raw_key, sizeof raw_key);
+    out->audit_max_prompt_len = atoi(raw_key);
+    if (out->audit_max_prompt_len < 64 || out->audit_max_prompt_len > 65536) {
+        out->audit_max_prompt_len = 4096;
+    }
+
+    env_str("AIGATE_AUDIT_SAMPLE_RATE", "1.0", raw_key, sizeof raw_key);
+    out->audit_sample_rate = atof(raw_key);
+    if (out->audit_sample_rate < 0.0 || out->audit_sample_rate > 1.0) {
+        out->audit_sample_rate = 1.0;
+    }
+
     return 0;
 }

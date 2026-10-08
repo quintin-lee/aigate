@@ -2,6 +2,7 @@
  *  @brief Unit tests for audit logging, data models, and dual-channel pipeline.
  */
 #include "audit_logger.h"
+#include "config.h"
 #include "run_tests.h"
 #include <jansson.h>
 #include <stdlib.h>
@@ -204,4 +205,42 @@ TEST_CASE(test_audit_webhook_worker_and_retry)
     TEST_ASSERT(audit_logger_get_webhook_failures_total(al) >= 1,
                 "failed destination should record failure metric");
     audit_logger_destroy(al);
+}
+
+TEST_CASE(test_config_audit_parameters)
+{
+    /* 设置环境变量测试解析 */
+    setenv("AIGATE_AUDIT_LOG_FILE", "/var/log/aigate/audit.ndjson", 1);
+    setenv("AIGATE_AUDIT_MAX_SIZE_MB", "200", 1);
+    setenv("AIGATE_AUDIT_MAX_BACKUPS", "10", 1);
+    setenv("AIGATE_AUDIT_WEBHOOK_URL", "https://open.feishu.cn/open-apis/bot/v2/hook/xxx", 1);
+    setenv("AIGATE_AUDIT_WEBHOOK_FORMAT", "feishu", 1);
+    setenv("AIGATE_AUDIT_MAX_PROMPT_LEN", "2048", 1);
+    setenv("AIGATE_AUDIT_SAMPLE_RATE", "0.5", 1);
+    setenv("AIGATE_PG_DSN", "postgres://localhost/test", 1);
+    setenv("AIGATE_ADMIN_TOKEN", "supersecret", 1);
+
+    aigate_config cfg;
+    TEST_ASSERT(aigate_config_load(&cfg) == 0, "config load must succeed");
+    TEST_ASSERT(strcmp(cfg.audit_log_file, "/var/log/aigate/audit.ndjson") == 0,
+                "log file mismatch");
+    TEST_ASSERT(cfg.audit_max_size_mb == 200, "max size mismatch");
+    TEST_ASSERT(cfg.audit_max_backups == 10, "max backups mismatch");
+    TEST_ASSERT(strcmp(cfg.audit_webhook_url, "https://open.feishu.cn/open-apis/bot/v2/hook/xxx") ==
+                    0,
+                "webhook url mismatch");
+    TEST_ASSERT(strcmp(cfg.audit_webhook_format, "feishu") == 0, "webhook format mismatch");
+    TEST_ASSERT(cfg.audit_max_prompt_len == 2048, "max prompt len mismatch");
+    TEST_ASSERT(cfg.audit_sample_rate >= 0.49 && cfg.audit_sample_rate <= 0.51,
+                "sample rate mismatch");
+
+    unsetenv("AIGATE_AUDIT_LOG_FILE");
+    unsetenv("AIGATE_AUDIT_MAX_SIZE_MB");
+    unsetenv("AIGATE_AUDIT_MAX_BACKUPS");
+    unsetenv("AIGATE_AUDIT_WEBHOOK_URL");
+    unsetenv("AIGATE_AUDIT_WEBHOOK_FORMAT");
+    unsetenv("AIGATE_AUDIT_MAX_PROMPT_LEN");
+    unsetenv("AIGATE_AUDIT_SAMPLE_RATE");
+    unsetenv("AIGATE_PG_DSN");
+    unsetenv("AIGATE_ADMIN_TOKEN");
 }
