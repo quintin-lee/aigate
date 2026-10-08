@@ -38,7 +38,7 @@
 - Create: `tests/unit/observe/test_audit_logger.c`
 - Modify: `tests/unit/run_tests.c:16-30`
 
-- [ ] **Step 1: 扩容 `tests/unit/run_tests.c` 并编写首个失败单元测试**
+- [x] **Step 1: 扩容 `tests/unit/run_tests.c` 并编写首个失败单元测试**
 
 在 `tests/unit/run_tests.c` 中将 `g_tests[256]` 修改为 `g_tests[512]`，并在 `tests/unit/observe/test_audit_logger.c` 编写测试用例 `test_audit_event_serialization_and_snapshots`：
 
@@ -125,12 +125,12 @@ extern void test_audit_event_serialization_and_snapshots(void);
 test_register("audit_event_serialization_and_snapshots", test_audit_event_serialization_and_snapshots);
 ```
 
-- [ ] **Step 2: 编译并运行测试确认其失败**
+- [x] **Step 2: 编译并运行测试确认其失败**
 
 Run: `cmake -B build -S . && cmake --build build --target aigate_unit_tests`
 Expected: 编译报错提示找不到 `audit_logger.h` 或相关未定义符号。
 
-- [ ] **Step 3: 编写数据模型与序列化最小实现**
+- [x] **Step 3: 编写数据模型与序列化最小实现**
 
 在 `src/observe/audit_logger.h` 中定义：
 ```c
@@ -191,12 +191,12 @@ char* audit_event_to_webhook_payload(const audit_event_t* ev, audit_webhook_form
 
 在 `src/observe/audit_logger.c` 中实现对应初始化、快照拷贝与 Jansson JSON 序列化逻辑，包括 ISO8601 时间格式化及飞书、钉钉、企微和标准格式构造。
 
-- [ ] **Step 4: 重新编译并执行测试验证通过**
+- [x] **Step 4: 重新编译并执行测试验证通过**
 
 Run: `cmake --build build --target aigate_unit_tests && ./build/tests/aigate_unit_tests audit_event_serialization`
 Expected: `PASS: 1/1 test(s), 0 failure(s)`
 
-- [ ] **Step 5: 提交更改**
+- [x] **Step 5: 提交更改**
 
 ```bash
 git add src/observe/audit_logger.h src/observe/audit_logger.c tests/unit/observe/test_audit_logger.c tests/unit/run_tests.c
@@ -213,7 +213,7 @@ git commit -m "feat(audit): ✨ add audit event data models and serialization ad
 - Modify: `tests/unit/observe/test_audit_logger.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写环形缓冲区并发与饱和丢弃失败测试**
+- [x] **Step 1: 编写环形缓冲区并发与饱和丢弃失败测试**
 
 在 `tests/unit/observe/test_audit_logger.c` 中增加：
 ```c
@@ -257,12 +257,12 @@ extern void test_audit_ring_buffer_concurrency_and_drops(void);
 test_register("audit_ring_buffer_concurrency_and_drops", test_audit_ring_buffer_concurrency_and_drops);
 ```
 
-- [ ] **Step 2: 编译测试确认编译/运行失败**
+- [x] **Step 2: 编译测试确认编译/运行失败**
 
 Run: `cmake --build build --target aigate_unit_tests`
 Expected: 编译失败，提示 `audit_ring_t` 未定义。
 
-- [ ] **Step 3: 实现 `audit_ring_t` 无阻塞推入与批量弹出**
+- [x] **Step 3: 实现 `audit_ring_t` 无阻塞推入与批量弹出**
 
 在 `src/observe/audit_logger.h` 增加：
 ```c
@@ -280,12 +280,12 @@ uint64_t      audit_ring_dropped(audit_ring_t* ring);
 - `audit_ring_push`: 锁互斥后检查 `count == capacity`；满时深释放 `slots[head]`，`head = (head + 1) % capacity`，`dropped++`；新元素深拷贝到 `tail`，`tail = (tail + 1) % capacity`，`pthread_cond_signal`。
 - `audit_ring_pop_batch`: 支持带超时的 `pthread_cond_timedwait`，批量转移所有权，返回取出数量。
 
-- [ ] **Step 4: 编译并执行测试验证通过**
+- [x] **Step 4: 编译并执行测试验证通过**
 
 Run: `cmake --build build --target aigate_unit_tests && ./build/tests/aigate_unit_tests audit_ring_buffer`
 Expected: `PASS: 1/1 test(s), 0 failure(s)`
 
-- [ ] **Step 5: 提交更改**
+- [x] **Step 5: 提交更改**
 
 ```bash
 git add src/observe/audit_logger.h src/observe/audit_logger.c tests/unit/observe/test_audit_logger.c tests/unit/run_tests.c
@@ -302,7 +302,7 @@ git commit -m "feat(audit): ⚡ implement non-blocking audit ring buffer with dr
 - Modify: `tests/unit/observe/test_audit_logger.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写文件落盘与多份备份轮转失败测试**
+- [x] **Step 1: 编写文件落盘与多份备份轮转失败测试**
 
 在 `tests/unit/observe/test_audit_logger.c` 中增加：
 ```c
@@ -368,12 +368,12 @@ extern void test_audit_file_worker_and_rotation(void);
 test_register("audit_file_worker_and_rotation", test_audit_file_worker_and_rotation);
 ```
 
-- [ ] **Step 2: 编译测试确认其失败**
+- [x] **Step 2: 编译测试确认其失败**
 
 Run: `cmake --build build --target aigate_unit_tests`
 Expected: 编译报错提示 `audit_config_t`、`audit_logger_create` 未定义。
 
-- [ ] **Step 3: 实现文件 Worker 线程、轮转重命名与 SIGHUP 处理**
+- [x] **Step 3: 实现文件 Worker 线程、轮转重命名与 SIGHUP 处理**
 
 在 `src/observe/audit_logger.h` 增加：
 ```c
@@ -405,12 +405,12 @@ void            audit_logger_destroy(audit_logger_t* al);
   - 大小超过阈值时触发轮转：关闭原句柄，将 `.1` 改为 `.2`，将当前文件滚动重命名为 `.1`，重新以 `"a"` 打开新文件。
   - 批量写入末尾执行 `fflush`。
 
-- [ ] **Step 4: 编译并执行测试验证通过**
+- [x] **Step 4: 编译并执行测试验证通过**
 
 Run: `cmake --build build --target aigate_unit_tests && ./build/tests/aigate_unit_tests audit_file_worker`
 Expected: `PASS: 1/1 test(s), 0 failure(s)`
 
-- [ ] **Step 5: 提交更改**
+- [x] **Step 5: 提交更改**
 
 ```bash
 git add src/observe/audit_logger.h src/observe/audit_logger.c tests/unit/observe/test_audit_logger.c tests/unit/run_tests.c
@@ -427,7 +427,7 @@ git commit -m "feat(audit): 📁 add Channel A NDJSON file worker with log rotat
 - Modify: `tests/unit/observe/test_audit_logger.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写 Webhook 告警过滤、指标计数与退避逻辑失败测试**
+- [x] **Step 1: 编写 Webhook 告警过滤、指标计数与退避逻辑失败测试**
 
 在 `tests/unit/observe/test_audit_logger.c` 中增加：
 ```c
@@ -475,12 +475,12 @@ extern void test_audit_webhook_worker_and_retry(void);
 test_register("audit_webhook_worker_and_retry", test_audit_webhook_worker_and_retry);
 ```
 
-- [ ] **Step 2: 编译测试确认其失败**
+- [x] **Step 2: 编译测试确认其失败**
 
 Run: `cmake --build build --target aigate_unit_tests`
 Expected: 编译报错提示 `audit_logger_get_webhook_failures_total` 未定义。
 
-- [ ] **Step 3: 实现 Channel B Webhook Worker 与 libcurl 指数退避调度**
+- [x] **Step 3: 实现 Channel B Webhook Worker 与 libcurl 指数退避调度**
 
 在 `src/observe/audit_logger.h` 增加指标统计接口：
 ```c
@@ -499,12 +499,12 @@ uint64_t audit_logger_get_webhook_failures_total(audit_logger_t* al);
   - 最多重试 3 次，间隔 1s -> 2s -> 4s（若 `!al->running` 则提前退出重试杜绝阻塞停机）。
   - 成功时更新原子计数器 `al->webhook_success_total`，3 次均失败时更新 `al->webhook_failures_total` 并记录限频警告。
 
-- [ ] **Step 4: 编译并执行测试验证通过**
+- [x] **Step 4: 编译并执行测试验证通过**
 
 Run: `cmake --build build --target aigate_unit_tests && ./build/tests/aigate_unit_tests audit_webhook_worker`
 Expected: `PASS: 1/1 test(s), 0 failure(s)`
 
-- [ ] **Step 5: 提交更改**
+- [x] **Step 5: 提交更改**
 
 ```bash
 git add src/observe/audit_logger.h src/observe/audit_logger.c tests/unit/observe/test_audit_logger.c tests/unit/run_tests.c
@@ -521,7 +521,7 @@ git commit -m "feat(audit): 🔔 add Channel B real-time webhook alert worker wi
 - Modify: `tests/unit/observe/test_audit_logger.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写配置解析与校验单元测试**
+- [x] **Step 1: 编写配置解析与校验单元测试**
 
 在 `tests/unit/observe/test_audit_logger.c` 增加：
 ```c
@@ -564,12 +564,12 @@ extern void test_config_audit_parameters(void);
 test_register("config_audit_parameters", test_config_audit_parameters);
 ```
 
-- [ ] **Step 2: 编译测试确认其失败**
+- [x] **Step 2: 编译测试确认其失败**
 
 Run: `cmake --build build --target aigate_unit_tests`
 Expected: 编译报错提示 `aigate_config` 结构体没有 `audit_log_file` 等字段。
 
-- [ ] **Step 3: 在 `config.h` 和 `config.c` 添加审计配置字段与校验**
+- [x] **Step 3: 在 `config.h` 和 `config.c` 添加审计配置字段与校验**
 
 在 `src/core/config.h` 的 `aigate_config` 增加：
 ```c
@@ -584,12 +584,12 @@ Expected: 编译报错提示 `aigate_config` 结构体没有 `audit_log_file` �
 
 在 `src/core/config.c` 添加解析并设置默认值和合法性校验。
 
-- [ ] **Step 4: 编译并执行测试验证通过**
+- [x] **Step 4: 编译并执行测试验证通过**
 
 Run: `cmake --build build --target aigate_unit_tests && ./build/tests/aigate_unit_tests config_audit`
 Expected: `PASS: 1/1 test(s), 0 failure(s)`
 
-- [ ] **Step 5: 提交更改**
+- [x] **Step 5: 提交更改**
 
 ```bash
 git add src/core/config.h src/core/config.c tests/unit/observe/test_audit_logger.c tests/unit/run_tests.c
@@ -606,7 +606,7 @@ git commit -m "feat(config): ⚙️ add audit log streaming and webhook configur
 - Modify: `tests/unit/observe/test_audit_logger.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写 Prometheus 审计指标输出测试**
+- [x] **Step 1: 编写 Prometheus 审计指标输出测试**
 
 在 `tests/unit/observe/test_audit_logger.c` 增加：
 ```c
@@ -638,21 +638,21 @@ extern void test_audit_metrics_exposition(void);
 test_register("audit_metrics_exposition", test_audit_metrics_exposition);
 ```
 
-- [ ] **Step 2: 编译测试确认其失败**
+- [x] **Step 2: 编译测试确认其失败**
 
 Run: `cmake --build build --target aigate_unit_tests`
 Expected: 编译报错提示 `metrics_inc_audit_event` 等函数未定义。
 
-- [ ] **Step 3: 在 `metrics.h` 和 `metrics.c` 中导出审计指标**
+- [x] **Step 3: 在 `metrics.h` 和 `metrics.c` 中导出审计指标**
 
 在 `src/observe/metrics.h` 增加指标辅助函数声明并在 `src/observe/metrics.c` 中实现原子计数和 Prometheus 渲染输出。
 
-- [ ] **Step 4: 编译并执行测试验证通过**
+- [x] **Step 4: 编译并执行测试验证通过**
 
 Run: `cmake --build build --target aigate_unit_tests && ./build/tests/aigate_unit_tests audit_metrics`
 Expected: `PASS: 1/1 test(s), 0 failure(s)`
 
-- [ ] **Step 5: 提交更改**
+- [x] **Step 5: 提交更改**
 
 ```bash
 git add src/observe/metrics.h src/observe/metrics.c tests/unit/observe/test_audit_logger.c tests/unit/run_tests.c
@@ -672,7 +672,7 @@ git commit -m "feat(observe): 📊 add Prometheus metrics for audit events and w
 - Modify: `tests/unit/observe/test_audit_logger.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写核心埋点逻辑单元测试**
+- [x] **Step 1: 编写核心埋点逻辑单元测试**
 
 在 `tests/unit/observe/test_audit_logger.c` 增加：
 ```c
@@ -725,12 +725,12 @@ extern void test_audit_pipeline_hook_recording(void);
 test_register("audit_pipeline_hook_recording", test_audit_pipeline_hook_recording);
 ```
 
-- [ ] **Step 2: 编译测试确认其失败**
+- [x] **Step 2: 编译测试确认其失败**
 
 Run: `cmake --build build --target aigate_unit_tests`
 Expected: 编译报错提示 `aigate_record_audit` 未定义或 `core.audit` 字段缺失。
 
-- [ ] **Step 3: 实现 `aigate_record_audit` 并在流水线与主进程接入**
+- [x] **Step 3: 实现 `aigate_record_audit` 并在流水线与主进程接入**
 
 1. 在 `src/core/aigate_core.h`:
    - 包含 `"observe/audit_logger.h"`。
@@ -763,12 +763,12 @@ Expected: 编译报错提示 `aigate_record_audit` 未定义或 `core.audit` 字
 4. 在 `src/main.c`:
    - 在 SIGHUP 信号触发分支调用 `audit_logger_reload(core.audit)`。
 
-- [ ] **Step 4: 编译并执行测试验证通过**
+- [x] **Step 4: 编译并执行测试验证通过**
 
 Run: `cmake --build build --target aigate_unit_tests && ./build/tests/aigate_unit_tests audit_pipeline_hook`
 Expected: `PASS: 1/1 test(s), 0 failure(s)`
 
-- [ ] **Step 5: 提交更改**
+- [x] **Step 5: 提交更改**
 
 ```bash
 git add src/core/aigate_core.h src/core/aigate_core.c src/core/pipeline_chat.c src/core/pipeline_embeddings.c src/main.c tests/unit/observe/test_audit_logger.c tests/unit/run_tests.c
@@ -782,7 +782,7 @@ git commit -m "feat(pipeline): 🔗 integrate audit logger into request lifecycl
 **Files:**
 - Create: `tests/integration/test_audit_pipeline.py`
 
-- [ ] **Step 1: 编写 Python 端到端集成测试脚本**
+- [x] **Step 1: 编写 Python 端到端集成测试脚本**
 
 在 `tests/integration/test_audit_pipeline.py` 中编写自动化端到端测试：
 - 本地启动轻量 `http.server` 充当 Mock Webhook 接收端。
@@ -791,17 +791,17 @@ git commit -m "feat(pipeline): 🔗 integrate audit logger into request lifecycl
 - 发送触犯安全护栏的请求（如包含黑名单关键词）：验证文件写入一行 `severity=VIOLATION`，且 Mock Webhook 在 1 秒内收到 JSON 警报推送，包含违规 Prompt 与规则信息。
 - 发送 `SIGHUP` 信号验证轮转重载；关闭网关验证存量排空与文件句柄释放。
 
-- [ ] **Step 2: 执行集成测试并验证通过**
+- [x] **Step 2: 执行集成测试并验证通过**
 
 Run: `python3 tests/integration/test_audit_pipeline.py`
 Expected: 所有的端到端断言均输出 `[PASS]`，退出码为 0。
 
-- [ ] **Step 3: 运行全量单元测试套件确认零回归**
+- [x] **Step 3: 运行全量单元测试套件确认零回归**
 
 Run: `ctest --test-dir build --output-on-failure`
 Expected: `100% tests passed out of 6`，且所有审计相关单元测试均绿灯通过。
 
-- [ ] **Step 4: 提交更改**
+- [x] **Step 4: 提交更改**
 
 ```bash
 git add tests/integration/test_audit_pipeline.py
