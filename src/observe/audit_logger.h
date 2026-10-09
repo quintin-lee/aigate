@@ -57,6 +57,31 @@ typedef struct audit_event {
 } audit_event_t;
 
 /**
+ * @brief In-memory live audit event snapshot for admin live inspection.
+ */
+typedef struct {
+    uint64_t         seq_id;                   /**< Monotonic sequence identifier. */
+    char             trace_id[64];             /**< Distributed trace ID. */
+    char             tenant_id[64];            /**< Tenant identifier. */
+    char             client_ip[48];            /**< Client IP address. */
+    char             model[64];                /**< Model requested. */
+    char             routed_model[64];         /**< Actual model routed. */
+    char             provider[32];             /**< Upstream provider. */
+    int              http_status;              /**< HTTP status returned. */
+    uint32_t         prompt_tokens;            /**< Prompt tokens. */
+    uint32_t         completion_tokens;        /**< Completion tokens. */
+    uint32_t         ttft_ms;                  /**< Time to first token in ms. */
+    uint32_t         total_latency_ms;         /**< Total latency in ms. */
+    audit_severity_t severity;                 /**< Severity classification. */
+    char             violation_type[32];       /**< Rule tag / violation reason. */
+    char             rule_detail[128];         /**< Matched rule detail. */
+    char             fallback_reason[32];      /**< Fallback trigger reason. */
+    char             prompt_snippet[1024];     /**< Truncated prompt snapshot. */
+    char             completion_snippet[1024]; /**< Truncated completion snapshot. */
+    int64_t          timestamp_ms;             /**< Milliseconds epoch timestamp. */
+} audit_live_event_t;
+
+/**
  * @brief Initialize an audit event structure to zero/defaults.
  * @param[out] ev Pointer to audit event.
  */
@@ -249,5 +274,20 @@ uint64_t audit_logger_get_webhook_failures_total(audit_logger_t* al);
  * @return Configured max prompt length, or default 4096.
  */
 int audit_logger_get_max_prompt_len(const audit_logger_t* al);
+
+/**
+ * @brief Query recent audit events from the in-memory live ring buffer.
+ * @param[in]  al Audit logger handle.
+ * @param[out] out_events Destination array for returned live events.
+ * @param[in]  max_count Maximum events to return in out_events.
+ * @param[in]  after_seq Return events with seq_id > after_seq (0 returns oldest available up to max_count).
+ * @param[out] out_missed Outputs count of events overwritten/missed since after_seq.
+ * @return Number of events populated in out_events.
+ */
+size_t audit_logger_query_recent(audit_logger_t*     al,
+                                 audit_live_event_t* out_events,
+                                 size_t              max_count,
+                                 uint64_t            after_seq,
+                                 size_t*             out_missed);
 
 #endif /* AIGATE_AUDIT_LOGGER_H */

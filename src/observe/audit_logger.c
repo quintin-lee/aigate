@@ -516,6 +516,12 @@ struct audit_logger {
     uint64_t        webhook_success_total;
     uint64_t        webhook_failures_total;
     pthread_mutex_t metrics_lock;
+
+    /* In-memory live ring buffer for admin stream inspection */
+    audit_live_event_t* live_ring;
+    size_t              live_ring_cap;
+    uint64_t            next_seq_id;
+    pthread_mutex_t     live_lock;
 };
 
 static void
@@ -742,6 +748,12 @@ audit_logger_create(const audit_config_t* cfg)
 
     pthread_mutex_init(&al->fp_lock, NULL);
     pthread_mutex_init(&al->metrics_lock, NULL);
+
+    al->live_ring_cap = 2048;
+    al->live_ring = calloc(al->live_ring_cap, sizeof(audit_live_event_t));
+    al->next_seq_id = 1;
+    pthread_mutex_init(&al->live_lock, NULL);
+
     return al;
 }
 
@@ -828,6 +840,33 @@ audit_logger_record(audit_logger_t* al, const audit_event_t* ev)
     if (al->webhook_ring != NULL && ev->severity >= AUDIT_SEV_VIOLATION) {
         audit_ring_push(al->webhook_ring, ev);
     }
+
+    /* Record into in-memory live ring buffer */
+    pthread_mutex_lock(&al->live_lock);
+    if (al->live_ring != NULL && al->live_ring_cap > 0) {
+        size_t              idx = (size_t)((al->next_seq_id - 1) % al->live_ring_cap);
+        audit_live_event_t* slot = &al->live_ring[idx];
+        memset(slot, 0, sizeof(*slot));
+        slot->seq_id = al->next_seq_id++;
+        strncpy(slot->trace_id, ev->trace_id, sizeof(slot->trace_id) - 1);
+        strncpy(slot->client_ip, ev->client_ip, sizeof(slot->client_ip) - 1);
+        strncpy(slot->model, ev->model, sizeof(slot->model) - 1);
+        strncpy(slot->routed_model, ev->model, sizeof(slot->routed_model) - 1);
+        strncpy(slot->provider, ev->provider, sizeof(slot->provider) - 1);
+        slot->http_status = ev->http_status;
+        slot->prompt_tokens = ev->prompt_tokens;
+        slot->completion_tokens = ev->completion_tokens;
+        slot->ttft_ms = (uint32_t)(ev->ttft_ns / 1000000ULL);
+        slot->total_latency_ms = (uint32_t)(ev->latency_ns / 1000000ULL);
+        slot->severity = ev->severity;
+        strncpy(slot->violation_type, ev->violation_type, sizeof(slot->violation_type) - 1);
+        strncpy(slot->rule_detail, ev->rule_detail, sizeof(slot->rule_detail) - 1);
+        if (ev->prompt_snapshot != NULL) {
+            strncpy(slot->prompt_snippet, ev->prompt_snapshot, sizeof(slot->prompt_snippet) - 1);
+        }
+        slot->timestamp_ms = ev->timestamp_ms;
+    }
+    pthread_mutex_unlock(&al->live_lock);
 }
 
 void
@@ -847,6 +886,13 @@ audit_logger_destroy(audit_logger_t* al)
     }
     pthread_mutex_destroy(&al->fp_lock);
     pthread_mutex_destroy(&al->metrics_lock);
+
+    pthread_mutex_lock(&al->live_lock);
+    free(al->live_ring);
+    al->live_ring = NULL;
+    pthread_mutex_unlock(&al->live_lock);
+    pthread_mutex_destroy(&al->live_lock);
+
     free(al);
 }
 
@@ -897,4 +943,66 @@ audit_logger_get_max_prompt_len(const audit_logger_t* al)
         return 4096;
     }
     return al->cfg.max_prompt_len > 0 ? al->cfg.max_prompt_len : 4096;
+}
+
+size_t
+audit_logger_query_recent(audit_logger_t*     al,
+                          audit_live_event_t* out_events,
+                          size_t              max_count,
+                          uint64_t            after_seq,
+                          size_t*             out_missed)
+{
+    if (al == NULL || out_events == NULL || max_count == 0) {
+        if (out_missed != NULL) {
+            *out_missed = 0;
+        }
+        return 0;
+    }
+
+    pthread_mutex_lock(&al->live_lock);
+    if (al->live_ring == NULL || al->next_seq_id <= 1) {
+        pthread_mutex_unlock(&al->live_lock);
+        if (out_missed != NULL) {
+            *out_missed = 0;
+        }
+        return 0;
+    }
+
+    uint64_t total_pushed = al->next_seq_id - 1;
+    uint64_t oldest_seq =
+        (total_pushed > al->live_ring_cap) ? (total_pushed - al->live_ring_cap + 1) : 1;
+
+    size_t   missed = 0;
+    uint64_t start_seq = 0;
+
+    if (after_seq == 0) {
+        if (total_pushed > max_count) {
+            start_seq = total_pushed - max_count + 1;
+            if (start_seq < oldest_seq) {
+                start_seq = oldest_seq;
+            }
+        } else {
+            start_seq = oldest_seq;
+        }
+    } else {
+        if (after_seq < oldest_seq - 1) {
+            missed = (size_t)((oldest_seq - 1) - after_seq);
+            start_seq = oldest_seq;
+        } else {
+            start_seq = after_seq + 1;
+        }
+    }
+
+    size_t count = 0;
+    for (uint64_t s = start_seq; s <= total_pushed && count < max_count; s++) {
+        size_t idx = (size_t)((s - 1) % al->live_ring_cap);
+        out_events[count++] = al->live_ring[idx];
+    }
+
+    pthread_mutex_unlock(&al->live_lock);
+
+    if (out_missed != NULL) {
+        *out_missed = missed;
+    }
+    return count;
 }
