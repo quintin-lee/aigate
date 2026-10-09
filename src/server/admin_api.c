@@ -27,6 +27,7 @@
 #include "event_bus.h"
 #include "response_cache.h"
 #include "observe/tracer.h"
+#include "observe/audit_logger.h"
 #include "policy/shadow.h"
 #include "policy/prompt_compressor.h"
 #include "policy/cache_optimizer.h"
@@ -4955,6 +4956,271 @@ admin_cache_optimizer_stats_get(admin_ctx_t* adm, int* status, char** body, size
     return finish_json(status, body, len, 200, out);
 }
 
+/* ------------------------------------------------------------ audit & SLA */
+
+static const char*
+audit_severity_str(audit_severity_t s)
+{
+    switch (s) {
+    case AUDIT_SEV_INFO:
+        return "INFO";
+    case AUDIT_SEV_WARN:
+        return "WARN";
+    case AUDIT_SEV_VIOLATION:
+        return "VIOLATION";
+    case AUDIT_SEV_ERROR:
+        return "ERROR";
+    default:
+        return "UNKNOWN";
+    }
+}
+
+static int
+admin_audit_events_get(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
+{
+    size_t   limit = 50;
+    uint64_t after_seq = 0;
+    if (query != NULL) {
+        char limit_str[32] = {0};
+        if (query_param(query, "limit", limit_str, sizeof(limit_str)) == 0) {
+            long val = atol(limit_str);
+            if (val > 0) {
+                limit = (size_t)val;
+                if (limit > 200) {
+                    limit = 200;
+                }
+            }
+        }
+        char after_str[32] = {0};
+        if (query_param(query, "after_seq", after_str, sizeof(after_str)) == 0) {
+            after_seq = (uint64_t)strtoull(after_str, NULL, 10);
+        }
+    }
+
+    json_t* arr = json_array();
+    if (adm->ac != NULL && adm->ac->audit != NULL) {
+        audit_live_event_t events[200];
+        size_t             missed = 0;
+        size_t count = audit_logger_query_recent(adm->ac->audit, events, limit, after_seq, &missed);
+        for (size_t i = 0; i < count; i++) {
+            json_t* item = json_object();
+            json_object_set_new(item, "seq_id", json_integer((json_int_t)events[i].seq_id));
+            json_object_set_new(item, "trace_id", json_string(events[i].trace_id));
+            json_object_set_new(item, "tenant_id", json_string(events[i].tenant_id));
+            json_object_set_new(item, "client_ip", json_string(events[i].client_ip));
+            json_object_set_new(item, "model", json_string(events[i].model));
+            json_object_set_new(item, "routed_model", json_string(events[i].routed_model));
+            json_object_set_new(item, "provider", json_string(events[i].provider));
+            json_object_set_new(item, "http_status", json_integer(events[i].http_status));
+            json_object_set_new(item, "prompt_tokens", json_integer(events[i].prompt_tokens));
+            json_object_set_new(
+                item, "completion_tokens", json_integer(events[i].completion_tokens));
+            json_object_set_new(item, "ttft_ms", json_integer(events[i].ttft_ms));
+            json_object_set_new(item, "total_latency_ms", json_integer(events[i].total_latency_ms));
+            json_object_set_new(
+                item, "severity", json_string(audit_severity_str(events[i].severity)));
+            json_object_set_new(item, "violation_type", json_string(events[i].violation_type));
+            json_object_set_new(item, "rule_detail", json_string(events[i].rule_detail));
+            json_object_set_new(item, "fallback_reason", json_string(events[i].fallback_reason));
+            json_object_set_new(item, "prompt_snippet", json_string(events[i].prompt_snippet));
+            json_object_set_new(item, "timestamp_ms", json_integer(events[i].timestamp_ms));
+            json_array_append_new(arr, item);
+        }
+    }
+    return finish_json(status, body, len, 200, arr);
+}
+
+static int
+admin_audit_violations_get(
+    admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
+{
+    char tenant_id[64] = {0};
+    char rule_tag[64] = {0};
+    char trace_id[64] = {0};
+    int  limit = 50;
+    int  offset = 0;
+
+    if (query != NULL) {
+        query_param(query, "tenant_id", tenant_id, sizeof(tenant_id));
+        query_param(query, "rule_tag", rule_tag, sizeof(rule_tag));
+        query_param(query, "trace_id", trace_id, sizeof(trace_id));
+        char lim_buf[32] = {0};
+        if (query_param(query, "limit", lim_buf, sizeof(lim_buf)) == 0) {
+            int v = atoi(lim_buf);
+            if (v > 0) {
+                limit = v;
+            }
+            if (limit > 200) {
+                limit = 200;
+            }
+        }
+        char off_buf[32] = {0};
+        if (query_param(query, "offset", off_buf, sizeof(off_buf)) == 0) {
+            int v = atoi(off_buf);
+            if (v >= 0) {
+                offset = v;
+            }
+        }
+    }
+
+    json_t* root = json_object();
+    json_t* items = json_array();
+
+    if (adm->ps != NULL && pg_store_ops(adm->ps) != NULL &&
+        pg_store_ops(adm->ps)->list_audit_violations != NULL) {
+        audit_violation_record_t recs[200];
+        int                      total = 0;
+        int                      returned = 0;
+        int rc = pg_store_list_audit_violations(adm->ps,
+                                                tenant_id[0] ? tenant_id : NULL,
+                                                rule_tag[0] ? rule_tag : NULL,
+                                                trace_id[0] ? trace_id : NULL,
+                                                limit,
+                                                offset,
+                                                recs,
+                                                200,
+                                                &total,
+                                                &returned);
+        if (rc == 0) {
+            json_object_set_new(root, "total", json_integer(total));
+            for (int i = 0; i < returned; i++) {
+                json_t* it = json_object();
+                json_object_set_new(it, "id", json_integer((json_int_t)recs[i].id));
+                json_object_set_new(it, "trace_id", json_string(recs[i].trace_id));
+                json_object_set_new(it, "tenant_id", json_string(recs[i].tenant_id));
+                json_object_set_new(it, "client_ip", json_string(recs[i].client_ip));
+                json_object_set_new(it, "model", json_string(recs[i].model));
+                json_object_set_new(it, "routed_model", json_string(recs[i].routed_model));
+                json_object_set_new(it, "http_status", json_integer(recs[i].http_status));
+                json_object_set_new(it, "rule_tag", json_string(recs[i].rule_tag));
+                json_object_set_new(it, "severity", json_string(recs[i].severity));
+                json_object_set_new(it, "ttft_ms", json_integer(recs[i].ttft_ms));
+                json_object_set_new(it, "total_latency_ms", json_integer(recs[i].total_latency_ms));
+                json_object_set_new(it, "fallback_reason", json_string(recs[i].fallback_reason));
+                if (recs[i].prompt_snapshot != NULL) {
+                    json_object_set_new(
+                        it, "prompt_snapshot", json_string(recs[i].prompt_snapshot));
+                } else {
+                    json_object_set_new(it, "prompt_snapshot", json_null());
+                }
+                if (recs[i].completion_snapshot != NULL) {
+                    json_object_set_new(
+                        it, "completion_snapshot", json_string(recs[i].completion_snapshot));
+                } else {
+                    json_object_set_new(it, "completion_snapshot", json_null());
+                }
+                json_object_set_new(it, "created_at", json_string(recs[i].created_at));
+                json_array_append_new(items, it);
+                audit_violation_record_free(&recs[i]);
+            }
+        } else {
+            json_object_set_new(root, "total", json_integer(0));
+        }
+    } else {
+        json_object_set_new(root, "total", json_integer(0));
+    }
+
+    json_object_set_new(root, "items", items);
+    return finish_json(status, body, len, 200, root);
+}
+
+static int
+admin_models_sla_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
+{
+    json_t* arr = json_array();
+
+    if (adm->ps != NULL && pg_store_ops(adm->ps) != NULL &&
+        pg_store_ops(adm->ps)->list_models != NULL) {
+        model_rec_t recs[256];
+        int         n_models = 0;
+        if (pg_store_ops(adm->ps)->list_models(pg_store_ops(adm->ps)->ctx, recs, 256, &n_models) ==
+            0) {
+            for (int i = 0; i < n_models; i++) {
+                char       fallback[64] = {0};
+                cb_state_t st = CB_CLOSED;
+                uint32_t   avg_ttft = 0;
+                if (adm->ac != NULL && adm->ac->cb != NULL) {
+                    st = cb_get_sla_state(
+                        adm->ac->cb, recs[i].name, NULL, fallback, sizeof(fallback));
+                    avg_ttft = cb_get_sla_avg_ttft(adm->ac->cb, recs[i].name, NULL);
+                }
+
+                json_t* it = json_object();
+                json_object_set_new(it, "model", json_string(recs[i].name));
+                json_object_set_new(it, "sla_state", json_string(cb_state_to_str(st)));
+                json_object_set_new(it, "fallback_model", json_string(fallback));
+                json_object_set_new(it, "current_avg_ttft_ms", json_integer(avg_ttft));
+                json_array_append_new(arr, it);
+                model_rec_free(&recs[i]);
+            }
+        }
+    }
+
+    return finish_json(status, body, len, 200, arr);
+}
+
+static int
+admin_model_sla_override(admin_ctx_t* adm,
+                         int*         status,
+                         char**       body,
+                         size_t*      len,
+                         const char*  model_subpath,
+                         const void*  req_body)
+{
+    const char* p = strstr(model_subpath, "/sla/override");
+    if (p == NULL) {
+        return finish_error(status, body, len, 404, "not_found", "endpoint not found");
+    }
+    size_t name_len = (size_t)(p - model_subpath);
+    if (name_len == 0 || name_len >= 64) {
+        return finish_error(status, body, len, 400, "bad_request", "invalid model identifier");
+    }
+    char model_id[64] = {0};
+    memcpy(model_id, model_subpath, name_len);
+    model_id[name_len] = '\0';
+
+    json_error_t err;
+    json_t*      jbody = json_loads(req_body ? (const char*)req_body : "", 0, &err);
+    if (jbody == NULL || !json_is_object(jbody)) {
+        if (jbody != NULL) {
+            json_decref(jbody);
+        }
+        return finish_error(status, body, len, 400, "bad_request", "invalid JSON body");
+    }
+
+    json_t*     jaction = json_object_get(jbody, "action");
+    const char* action =
+        (jaction != NULL && json_is_string(jaction)) ? json_string_value(jaction) : "";
+
+    cb_state_t new_st = CB_CLOSED;
+    if (strcmp(action, "degrade") == 0) {
+        new_st = CB_SLA_DEGRADED;
+    } else if (strcmp(action, "reset") == 0) {
+        new_st = CB_CLOSED;
+    } else if (strcmp(action, "open") == 0) {
+        new_st = CB_OPEN;
+    } else {
+        json_decref(jbody);
+        return finish_error(status,
+                            body,
+                            len,
+                            400,
+                            "bad_request",
+                            "unknown action; must be degrade, reset, or open");
+    }
+    json_decref(jbody);
+
+    if (adm->ac != NULL && adm->ac->cb != NULL) {
+        cb_override_state(adm->ac->cb, model_id, NULL, new_st);
+    }
+
+    json_t* out = json_object();
+    json_object_set_new(out, "model", json_string(model_id));
+    json_object_set_new(out, "action", json_string(action));
+    json_object_set_new(out, "success", json_true());
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -5039,7 +5305,13 @@ admin_dispatch(admin_ctx_t* adm,
                 return model_list(adm, out_status, out_body, out_len, query);
             }
         }
+        if (strcmp(rest, "models/sla") == 0 && strcmp(method, "GET") == 0) {
+            return admin_models_sla_get(adm, out_status, out_body, out_len);
+        }
         if (rest[6] == '/') {
+            if (strstr(rest + 7, "/sla/override") != NULL && strcmp(method, "POST") == 0) {
+                return admin_model_sla_override(adm, out_status, out_body, out_len, rest + 7, body);
+            }
             if (strcmp(method, "PATCH") == 0 || strcmp(method, "PUT") == 0) {
                 return model_patch(adm, out_status, out_body, out_len, rest + 7, body);
             }
@@ -5232,6 +5504,13 @@ admin_dispatch(admin_ctx_t* adm,
         }
         if (strcmp(rest, "cache-optimizer/stats") == 0 && strcmp(method, "GET") == 0) {
             return admin_cache_optimizer_stats_get(adm, out_status, out_body, out_len);
+        }
+    } else if (strncmp(rest, "audit", 5) == 0) {
+        if (strcmp(rest, "audit/events") == 0 && strcmp(method, "GET") == 0) {
+            return admin_audit_events_get(adm, out_status, out_body, out_len, query);
+        }
+        if (strcmp(rest, "audit/violations") == 0 && strcmp(method, "GET") == 0) {
+            return admin_audit_violations_get(adm, out_status, out_body, out_len, query);
         }
     }
 

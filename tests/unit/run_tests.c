@@ -682,6 +682,9 @@ main(int argc, char** argv)
     test_register("model_router_sla_fallback_redirection",
                   test_model_router_sla_fallback_redirection);
 
+    extern void test_admin_audit_and_sla_endpoints(void);
+    test_register("admin_audit_and_sla_endpoints", test_admin_audit_and_sla_endpoints);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
