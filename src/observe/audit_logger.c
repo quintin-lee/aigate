@@ -4,6 +4,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "audit_logger.h"
 #include "metrics.h"
+#include "audit_hash_chain.h"
 #include <curl/curl.h>
 #include <errno.h>
 #include <jansson.h>
@@ -534,6 +535,9 @@ struct audit_logger {
     size_t              live_ring_cap;
     uint64_t            next_seq_id;
     pthread_mutex_t     live_lock;
+
+    /* Cryptographic tamper-proof hash chain */
+    audit_hash_chain_ctx_t* chain_ctx;
 };
 
 static void
@@ -605,8 +609,15 @@ audit_file_worker_thread(void* arg)
             for (size_t i = 0; i < count; i++) {
                 char* line = audit_event_to_ndjson(&batch[i]);
                 if (line != NULL) {
-                    size_t len = strlen(line);
-                    fwrite(line, 1, len, al->file_fp);
+                    char        signed_buf[4096];
+                    const char* to_write = line;
+                    if (al->chain_ctx != NULL &&
+                        audit_hash_chain_sign(
+                            al->chain_ctx, line, signed_buf, sizeof(signed_buf)) == 0) {
+                        to_write = signed_buf;
+                    }
+                    size_t len = strlen(to_write);
+                    fwrite(to_write, 1, len, al->file_fp);
                     fputc('\n', al->file_fp);
                     al->current_file_size += len + 1;
                     free(line);
@@ -766,6 +777,8 @@ audit_logger_create(const audit_config_t* cfg)
     al->next_seq_id = 1;
     pthread_mutex_init(&al->live_lock, NULL);
 
+    al->chain_ctx = audit_hash_chain_create(NULL);
+
     return al;
 }
 
@@ -910,6 +923,11 @@ audit_logger_destroy(audit_logger_t* al)
     pthread_mutex_unlock(&al->live_lock);
     pthread_mutex_destroy(&al->live_lock);
 
+    if (al->chain_ctx != NULL) {
+        audit_hash_chain_destroy(al->chain_ctx);
+        al->chain_ctx = NULL;
+    }
+
     free(al);
 }
 
@@ -1022,4 +1040,16 @@ audit_logger_query_recent(audit_logger_t*     al,
         *out_missed = missed;
     }
     return count;
+}
+
+struct audit_hash_chain_ctx*
+audit_logger_get_chain(audit_logger_t* al)
+{
+    return (al != NULL) ? (struct audit_hash_chain_ctx*)al->chain_ctx : NULL;
+}
+
+const char*
+audit_logger_get_log_filepath(const audit_logger_t* al)
+{
+    return (al != NULL) ? al->cfg.log_file : NULL;
 }

@@ -717,6 +717,15 @@ main(int argc, char** argv)
     test_register("watermark_pipeline_anthropic_outbound",
                   test_watermark_pipeline_anthropic_outbound);
 
+    extern void test_audit_hash_chain_sign_and_verify(void);
+    test_register("audit_hash_chain_sign_and_verify", test_audit_hash_chain_sign_and_verify);
+
+    extern void test_audit_hash_chain_tamper_detection(void);
+    test_register("audit_hash_chain_tamper_detection", test_audit_hash_chain_tamper_detection);
+
+    extern void test_audit_hash_chain_deletion_detection(void);
+    test_register("audit_hash_chain_deletion_detection", test_audit_hash_chain_deletion_detection);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

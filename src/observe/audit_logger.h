@@ -299,4 +299,20 @@ size_t audit_logger_query_recent(audit_logger_t*     al,
                                  uint64_t            after_seq,
                                  size_t*             out_missed);
 
+struct audit_hash_chain_ctx;
+
+/**
+ * @brief Get cryptographic hash chain context for audit integrity verification.
+ * @param al Audit logger instance.
+ * @return Pointer to audit_hash_chain_ctx_t or NULL if disabled.
+ */
+struct audit_hash_chain_ctx* audit_logger_get_chain(audit_logger_t* al);
+
+/**
+ * @brief Get configured destination audit log file path.
+ * @param al Audit logger instance.
+ * @return File path string or NULL.
+ */
+const char* audit_logger_get_log_filepath(const audit_logger_t* al);
+
 #endif /* AIGATE_AUDIT_LOGGER_H */
