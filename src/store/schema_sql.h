@@ -4,7 +4,7 @@
 #ifndef AIGATE_SCHEMA_SQL_H
 #define AIGATE_SCHEMA_SQL_H
 
-#define AIGATE_SCHEMA_VERSION 15
+#define AIGATE_SCHEMA_VERSION 16
 
 static const char SCHEMA_SQL[] =
     R"SQL(-- aigate schema (version 1); applied by pg_store_migrate() in one transaction.
@@ -227,6 +227,27 @@ CREATE TABLE IF NOT EXISTS cache_optimizer_rules (
 );
 CREATE INDEX IF NOT EXISTS idx_cache_optimizer_rules_model ON cache_optimizer_rules(enabled, model_pattern);
 INSERT INTO schema_migrations(version) VALUES (15) ON CONFLICT (version) DO NOTHING;
+-- Migration v16: persistent audit violations for compliance and forensics
+CREATE TABLE IF NOT EXISTS audit_violations (
+    id                  BIGSERIAL PRIMARY KEY,
+    trace_id            VARCHAR(64) NOT NULL,
+    tenant_id           VARCHAR(64) NOT NULL DEFAULT '',
+    client_ip           VARCHAR(48) NOT NULL DEFAULT '',
+    model               VARCHAR(64) NOT NULL,
+    routed_model        VARCHAR(64) NOT NULL DEFAULT '',
+    severity            VARCHAR(16) NOT NULL,
+    rule_tag            VARCHAR(64) NOT NULL,
+    http_status         INT NOT NULL DEFAULT 400,
+    ttft_ms             INT NOT NULL DEFAULT 0,
+    total_latency_ms    INT NOT NULL DEFAULT 0,
+    fallback_reason     VARCHAR(32) NOT NULL DEFAULT '',
+    prompt_snapshot     TEXT,
+    completion_snapshot TEXT,
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_violations_search ON audit_violations (tenant_id, model, rule_tag, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_violations_trace ON audit_violations (trace_id);
+INSERT INTO schema_migrations(version) VALUES (16) ON CONFLICT (version) DO NOTHING;
 )SQL";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

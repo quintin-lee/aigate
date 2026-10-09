@@ -212,6 +212,25 @@ typedef struct provider_rec {
     time_t created_at;        /**< Creation timestamp */
 } provider_rec_t;
 
+/** @brief Persistent audit violation record (audit_violations row). */
+typedef struct audit_violation_record {
+    int64_t id;                  /**< Primary key */
+    char    trace_id[64];        /**< Request trace ID */
+    char    tenant_id[64];       /**< Tenant identifier */
+    char    client_ip[48];       /**< Client IP address */
+    char    model[64];           /**< Requested model name */
+    char    routed_model[64];    /**< Actual routed model (or fallback target) */
+    char    severity[16];        /**< Severity level: VIOLATION or ERROR */
+    char    rule_tag[64];        /**< Rule tag / trigger reason */
+    int     http_status;         /**< HTTP response status */
+    int     ttft_ms;             /**< Time to first token in ms */
+    int     total_latency_ms;    /**< Total latency in ms */
+    char    fallback_reason[32]; /**< Fallback reason tag */
+    char*   prompt_snapshot;     /**< Heap allocated prompt snapshot */
+    char*   completion_snapshot; /**< Heap allocated completion snapshot */
+    char    created_at[64];      /**< ISO-8601 created timestamp */
+} audit_violation_record_t;
+
 /** @brief Uniform persistence operations; real libpq or in-memory fakes.
  *
  *  All functions return 0 on success, -1 on error. out parameters may be
@@ -349,6 +368,20 @@ typedef struct pg_ops {
         const cache_optimizer_rule_t* rule); /**< Upsert prompt cache optimizer rule by UUID id. */
     int (*delete_cache_optimizer_rule)(
         void* ctx, const char* id);          /**< Delete prompt cache optimizer rule by UUID id. */
+
+    int (*insert_audit_violation)(
+        void* ctx, const audit_violation_record_t* rec); /**< Insert an audit violation record. */
+    int (*list_audit_violations)(
+        void*                     ctx,
+        const char*               tenant_id,
+        const char*               rule_tag,
+        const char*               trace_id,
+        int                       limit,
+        int                       offset,
+        audit_violation_record_t* out,
+        int                       cap,
+        int*                      total_count,
+        int* returned_count); /**< List audit violations with filtering and pagination. */
 } pg_ops_t;
 
 /** @brief Storage handle (opaque; holder of a libpq connection or a fake context). */
@@ -484,5 +517,37 @@ int pg_store_upsert_cache_optimizer_rule(const pg_store_t* ps, const cache_optim
  *  @param id Rule UUID.
  *  @return 0 on success, -1 on storage error. */
 int pg_store_delete_cache_optimizer_rule(const pg_store_t* ps, const char* id);
+
+/** @brief Insert an audit violation record into storage.
+ *  @param ps  Storage handle.
+ *  @param rec Violation record.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_insert_audit_violation(const pg_store_t* ps, const audit_violation_record_t* rec);
+
+/** @brief Query audit violations with optional filtering and pagination.
+ *  @param ps             Storage handle.
+ *  @param tenant_id      Filter by tenant (empty/NULL for any).
+ *  @param rule_tag       Filter by rule tag (empty/NULL for any).
+ *  @param trace_id       Filter by trace ID (empty/NULL for any).
+ *  @param limit          Page limit.
+ *  @param offset         Page offset.
+ *  @param out            Output buffer.
+ *  @param cap            Buffer capacity.
+ *  @param total_count    Returns total count matching filters.
+ *  @param returned_count Returns number of records populated in out.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_list_audit_violations(const pg_store_t*         ps,
+                                   const char*               tenant_id,
+                                   const char*               rule_tag,
+                                   const char*               trace_id,
+                                   int                       limit,
+                                   int                       offset,
+                                   audit_violation_record_t* out,
+                                   int                       cap,
+                                   int*                      total_count,
+                                   int*                      returned_count);
+
+/** @brief Free heap allocations in audit_violation_record_t. */
+void audit_violation_record_free(audit_violation_record_t* rec);
 
 #endif /* AIGATE_PG_STORE_H */

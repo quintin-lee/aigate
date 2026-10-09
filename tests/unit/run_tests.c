@@ -669,6 +669,9 @@ main(int argc, char** argv)
     extern void test_audit_pipeline_hook_recording(void);
     test_register("audit_pipeline_hook_recording", test_audit_pipeline_hook_recording);
 
+    extern void test_pg_audit_violations_crud(void);
+    test_register("pg_audit_violations_crud", test_pg_audit_violations_crud);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

@@ -2570,6 +2570,184 @@ pq_delete_cache_optimizer_rule(void* vctx, const char* id)
     return -1;
 }
 
+/** @brief libpq implementation of pg_ops.insert_audit_violation: 0 on success, -1 on error. */
+static int
+pq_insert_audit_violation(void* vctx, const audit_violation_record_t* rec)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO audit_violations(trace_id, tenant_id, client_ip, model, routed_model, "
+        "severity, rule_tag, http_status, ttft_ms, total_latency_ms, fallback_reason, "
+        "prompt_snapshot, completion_snapshot) "
+        "VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)";
+
+    char status_str[16];
+    char ttft_str[16];
+    char lat_str[16];
+    snprintf(status_str, sizeof(status_str), "%d", rec->http_status);
+    snprintf(ttft_str, sizeof(ttft_str), "%d", rec->ttft_ms);
+    snprintf(lat_str, sizeof(lat_str), "%d", rec->total_latency_ms);
+
+    const char* vals[13] = {rec->trace_id,
+                            rec->tenant_id,
+                            rec->client_ip,
+                            rec->model,
+                            rec->routed_model,
+                            rec->severity,
+                            rec->rule_tag,
+                            status_str,
+                            ttft_str,
+                            lat_str,
+                            rec->fallback_reason,
+                            rec->prompt_snapshot,
+                            rec->completion_snapshot};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 13, NULL, vals, NULL, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL &&
+        (PQresultStatus(res) == PGRES_COMMAND_OK || PQresultStatus(res) == PGRES_TUPLES_OK)) {
+        PQclear(res);
+        return 0;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg insert_audit_violation: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    }
+    return -1;
+}
+
+/** @brief libpq implementation of pg_ops.list_audit_violations: 0 on success, -1 on error. */
+static int
+pq_list_audit_violations(void*                     vctx,
+                         const char*               tenant_id,
+                         const char*               rule_tag,
+                         const char*               trace_id,
+                         int                       limit,
+                         int                       offset,
+                         audit_violation_record_t* out,
+                         int                       cap,
+                         int*                      total_count,
+                         int*                      returned_count)
+{
+    struct pq_ctx* px = vctx;
+    if (total_count != NULL) {
+        *total_count = 0;
+    }
+    if (returned_count != NULL) {
+        *returned_count = 0;
+    }
+    if (out == NULL || cap <= 0) {
+        return 0;
+    }
+
+    char        count_q[1024];
+    char        list_q[2048];
+    char        where_clause[512] = "";
+    int         n_params = 0;
+    const char* vals[5];
+
+    if (tenant_id != NULL && tenant_id[0] != '\0') {
+        vals[n_params++] = tenant_id;
+        strcat(where_clause, " WHERE tenant_id = $1");
+    }
+    if (rule_tag != NULL && rule_tag[0] != '\0') {
+        n_params++;
+        vals[n_params - 1] = rule_tag;
+        char buf[64];
+        snprintf(
+            buf, sizeof(buf), "%s rule_tag = $%d", (n_params == 1) ? " WHERE" : " AND", n_params);
+        strcat(where_clause, buf);
+    }
+    if (trace_id != NULL && trace_id[0] != '\0') {
+        n_params++;
+        vals[n_params - 1] = trace_id;
+        char buf[64];
+        snprintf(
+            buf, sizeof(buf), "%s trace_id = $%d", (n_params == 1) ? " WHERE" : " AND", n_params);
+        strcat(where_clause, buf);
+    }
+
+    snprintf(count_q, sizeof(count_q), "SELECT COUNT(*) FROM audit_violations%s", where_clause);
+
+    pq_lock(px);
+    PGresult* c_res = PQexecParams(px->db, count_q, n_params, NULL, vals, NULL, NULL, 0);
+    if (c_res != NULL && PQresultStatus(c_res) == PGRES_TUPLES_OK && PQntuples(c_res) > 0) {
+        if (total_count != NULL) {
+            *total_count = atoi(PQgetvalue(c_res, 0, 0));
+        }
+        PQclear(c_res);
+    } else {
+        if (c_res != NULL) {
+            PQclear(c_res);
+        }
+        pq_unlock(px);
+        return -1;
+    }
+
+    char lim_str[16], off_str[16];
+    snprintf(lim_str, sizeof(lim_str), "%d", limit > 0 ? limit : 50);
+    snprintf(off_str, sizeof(off_str), "%d", offset >= 0 ? offset : 0);
+    vals[n_params++] = lim_str;
+    vals[n_params++] = off_str;
+
+    snprintf(list_q,
+             sizeof(list_q),
+             "SELECT id, trace_id, tenant_id, client_ip, model, routed_model, severity, rule_tag, "
+             "http_status, ttft_ms, total_latency_ms, fallback_reason, prompt_snapshot, "
+             "completion_snapshot, to_char(created_at, 'YYYY-MM-DD\"T\"HH24:MI:SS\"Z\"') "
+             "FROM audit_violations%s ORDER BY id DESC LIMIT $%d OFFSET $%d",
+             where_clause,
+             n_params - 1,
+             n_params);
+
+    PGresult* res = PQexecParams(px->db, list_q, n_params, NULL, vals, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_audit_violations: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    int nt = PQntuples(res);
+    if (nt > cap) {
+        nt = cap;
+    }
+    for (int i = 0; i < nt; i++) {
+        memset(&out[i], 0, sizeof(audit_violation_record_t));
+        out[i].id = atoll(PQgetvalue(res, i, 0));
+        copy_field(out[i].trace_id, sizeof(out[i].trace_id), PQgetvalue(res, i, 1));
+        copy_field(out[i].tenant_id, sizeof(out[i].tenant_id), PQgetvalue(res, i, 2));
+        copy_field(out[i].client_ip, sizeof(out[i].client_ip), PQgetvalue(res, i, 3));
+        copy_field(out[i].model, sizeof(out[i].model), PQgetvalue(res, i, 4));
+        copy_field(out[i].routed_model, sizeof(out[i].routed_model), PQgetvalue(res, i, 5));
+        copy_field(out[i].severity, sizeof(out[i].severity), PQgetvalue(res, i, 6));
+        copy_field(out[i].rule_tag, sizeof(out[i].rule_tag), PQgetvalue(res, i, 7));
+        out[i].http_status = atoi(PQgetvalue(res, i, 8));
+        out[i].ttft_ms = atoi(PQgetvalue(res, i, 9));
+        out[i].total_latency_ms = atoi(PQgetvalue(res, i, 10));
+        copy_field(out[i].fallback_reason, sizeof(out[i].fallback_reason), PQgetvalue(res, i, 11));
+        const char* p_snap = PQgetvalue(res, i, 12);
+        if (p_snap != NULL && p_snap[0] != '\0') {
+            out[i].prompt_snapshot = strdup(p_snap);
+        }
+        const char* c_snap = PQgetvalue(res, i, 13);
+        if (c_snap != NULL && c_snap[0] != '\0') {
+            out[i].completion_snapshot = strdup(c_snap);
+        }
+        copy_field(out[i].created_at, sizeof(out[i].created_at), PQgetvalue(res, i, 14));
+    }
+    if (returned_count != NULL) {
+        *returned_count = nt;
+    }
+    PQclear(res);
+    return 0;
+}
+
 /* ------------------------------------------------------- store lifecycle */
 
 pg_store_t*
@@ -2670,6 +2848,8 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.list_cache_optimizer_rules = pq_list_cache_optimizer_rules;
     ps->ops.upsert_cache_optimizer_rule = pq_upsert_cache_optimizer_rule;
     ps->ops.delete_cache_optimizer_rule = pq_delete_cache_optimizer_rule;
+    ps->ops.insert_audit_violation = pq_insert_audit_violation;
+    ps->ops.list_audit_violations = pq_list_audit_violations;
     ps->ops.ctx = px;
     ps->ctx = px;
     ps->owns_ctx = 1;
@@ -2915,6 +3095,58 @@ pg_store_delete_cache_optimizer_rule(const pg_store_t* ps, const char* id)
     return (ops != NULL && ops->delete_cache_optimizer_rule != NULL)
                ? ops->delete_cache_optimizer_rule(ops->ctx, id)
                : -1;
+}
+
+int
+pg_store_insert_audit_violation(const pg_store_t* ps, const audit_violation_record_t* rec)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->insert_audit_violation != NULL)
+               ? ops->insert_audit_violation(ops->ctx, rec)
+               : -1;
+}
+
+int
+pg_store_list_audit_violations(const pg_store_t*         ps,
+                               const char*               tenant_id,
+                               const char*               rule_tag,
+                               const char*               trace_id,
+                               int                       limit,
+                               int                       offset,
+                               audit_violation_record_t* out,
+                               int                       cap,
+                               int*                      total_count,
+                               int*                      returned_count)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->list_audit_violations != NULL)
+               ? ops->list_audit_violations(ops->ctx,
+                                            tenant_id,
+                                            rule_tag,
+                                            trace_id,
+                                            limit,
+                                            offset,
+                                            out,
+                                            cap,
+                                            total_count,
+                                            returned_count)
+               : -1;
+}
+
+void
+audit_violation_record_free(audit_violation_record_t* rec)
+{
+    if (rec == NULL) {
+        return;
+    }
+    if (rec->prompt_snapshot != NULL) {
+        free(rec->prompt_snapshot);
+        rec->prompt_snapshot = NULL;
+    }
+    if (rec->completion_snapshot != NULL) {
+        free(rec->completion_snapshot);
+        rec->completion_snapshot = NULL;
+    }
 }
 
 int
