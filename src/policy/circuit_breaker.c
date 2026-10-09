@@ -18,28 +18,52 @@
 /** @brief Bucket array shard count (hashed by model+endpoint). */
 #define CB_BUCKETS 64
 
-/** @brief Per-endpoint breaker state: model/endpoint/tri-state/failure count/open deadline/half-open probe/link. */
+#define CB_MAX_SLA_SAMPLES 128
+
+typedef struct {
+    uint32_t ttft_ms;
+    uint32_t latency_ms;
+} sla_sample_t;
+
+typedef struct model_sla_cfg {
+    char                  model[128];
+    uint32_t              ttft_max_ms;
+    uint32_t              p95_max_ms;
+    uint32_t              window_size;
+    float                 violation_ratio;
+    char                  fallback_model[128];
+    int                   consecutive_recover_need;
+    struct model_sla_cfg* next;
+} model_sla_cfg_t;
+
+/** @brief Per-endpoint breaker state: model/endpoint/state/failure count/open deadline/half-open probe/SLA/link. */
 typedef struct cb_entry {
     char             model[128];             /**< Model name. */
     char             endpoint[512];          /**< Endpoint URL. */
-    cb_state_t       state;                  /**< Current tri-state. */
+    cb_state_t       state;                  /**< Current four-state. */
     int              consecutive_failures;   /**< Consecutive failure count. */
     time_t           open_until;             /**< Open-state deadline timestamp. */
     int              half_open_probe_active; /**< Half-open probe in-flight flag. */
-    struct cb_entry* next;                   /**< Intra-bucket link. */
+    sla_sample_t     samples[CB_MAX_SLA_SAMPLES];
+    size_t           sample_count;
+    size_t           sample_head;
+    int              consecutive_sla_normal;
+    int              manual_override;
+    struct cb_entry* next; /**< Intra-bucket link. */
 } cb_entry_t;
 
 /** @brief Breaker instance: lock/threshold/cooldown/time source/Redis pool/event bus/shard buckets. */
 struct circuit_breaker {
-    pthread_mutex_t mtx;                 /**< Instance mutex. */
-    int             failure_threshold;   /**< Trip threshold (consecutive failures). */
-    int             cooloff_sec;         /**< Cooldown window in seconds. */
-    cb_time_fn      time_fn;             /**< Time source (fake clock injectable). */
-    redis_pool_t*   pool;                /**< Shared Redis pool (distributed breaking, nullable). */
-    char            sha_cb[48];          /**< Redis Lua script SHA cache. */
-    event_bus_t*    eb;                  /**< Event bus (state transition events, nullable). */
-    int             fail_open;           /**< Fallback to local breaker on Redis error. */
-    cb_entry_t*     buckets[CB_BUCKETS]; /**< Endpoint state shard buckets. */
+    pthread_mutex_t  mtx;               /**< Instance mutex. */
+    int              failure_threshold; /**< Trip threshold (consecutive failures). */
+    int              cooloff_sec;       /**< Cooldown window in seconds. */
+    cb_time_fn       time_fn;           /**< Time source (fake clock injectable). */
+    redis_pool_t*    pool;              /**< Shared Redis pool (distributed breaking, nullable). */
+    char             sha_cb[48];        /**< Redis Lua script SHA cache. */
+    event_bus_t*     eb;                /**< Event bus (state transition events, nullable). */
+    int              fail_open;         /**< Fallback to local breaker on Redis error. */
+    cb_entry_t*      buckets[CB_BUCKETS]; /**< Endpoint state shard buckets. */
+    model_sla_cfg_t* sla_configs;         /**< Model SLA config chain. */
 };
 
 /** @brief Current time: injected test clock first, else time(). */
@@ -72,15 +96,33 @@ hash_key(const char* model, const char* endpoint)
     return h % CB_BUCKETS;
 }
 
+static model_sla_cfg_t*
+find_sla_cfg_locked(circuit_breaker_t* cb, const char* model)
+{
+    if (cb == NULL || model == NULL) {
+        return NULL;
+    }
+    model_sla_cfg_t* cfg = cb->sla_configs;
+    while (cfg != NULL) {
+        if (strcmp(cfg->model, model) == 0) {
+            return cfg;
+        }
+        cfg = cfg->next;
+    }
+    return NULL;
+}
+
 /** @brief Exact lookup of a model+endpoint entry in the hash bucket chain (caller must hold the lock).
  *  @return Entry pointer; NULL when absent. */
 static cb_entry_t*
 find_entry_locked(circuit_breaker_t* cb, const char* model, const char* endpoint)
 {
-    unsigned int idx = hash_key(model, endpoint);
+    const char*  m = model ? model : "";
+    const char*  ep = endpoint ? endpoint : "";
+    unsigned int idx = hash_key(m, ep);
     cb_entry_t*  e = cb->buckets[idx];
     while (e != NULL) {
-        if (strcmp(e->model, model) == 0 && strcmp(e->endpoint, endpoint) == 0) {
+        if (strcmp(e->model, m) == 0 && strcmp(e->endpoint, ep) == 0) {
             return e;
         }
         e = e->next;
@@ -172,6 +214,13 @@ cb_reset(circuit_breaker_t* cb)
         }
         cb->buckets[i] = NULL;
     }
+    model_sla_cfg_t* sc = cb->sla_configs;
+    while (sc != NULL) {
+        model_sla_cfg_t* next = sc->next;
+        free(sc);
+        sc = next;
+    }
+    cb->sla_configs = NULL;
     pthread_mutex_unlock(&cb->mtx);
 }
 
@@ -375,7 +424,7 @@ cb_allow_request(circuit_breaker_t* cb, const char* model, const char* endpoint)
     update_state_on_time_locked(cb, e, now);
 
     bool allowed = false;
-    if (e->state == CB_CLOSED) {
+    if (e->state == CB_CLOSED || e->state == CB_SLA_DEGRADED) {
         allowed = true;
     } else if (e->state == CB_HALF_OPEN) {
         if (!e->half_open_probe_active) {
@@ -414,7 +463,9 @@ cb_record_success(circuit_breaker_t* cb, const char* model, const char* endpoint
         pthread_mutex_lock(&cb->mtx);
         cb_entry_t* e = find_entry_locked(cb, model, endpoint);
         if (e != NULL) {
-            e->state = CB_CLOSED;
+            if (e->state == CB_HALF_OPEN) {
+                e->state = CB_CLOSED;
+            }
             e->consecutive_failures = 0;
             e->open_until = 0;
             e->half_open_probe_active = 0;
@@ -434,8 +485,8 @@ cb_record_success(circuit_breaker_t* cb, const char* model, const char* endpoint
                 event_bus_publish_cb(
                     cb->eb, e->endpoint, e->model, "HALF_OPEN", "CLOSED", "probe succeeded");
             }
+            e->state = CB_CLOSED;
         }
-        e->state = CB_CLOSED;
         e->consecutive_failures = 0;
         e->open_until = 0;
         e->half_open_probe_active = 0;
@@ -482,7 +533,7 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
                 e->state = CB_OPEN;
                 e->open_until = now + cb->cooloff_sec;
                 e->half_open_probe_active = 0;
-            } else if (e->state == CB_CLOSED) {
+            } else if (e->state == CB_CLOSED || e->state == CB_SLA_DEGRADED) {
                 e->consecutive_failures++;
                 if (e->consecutive_failures >= cb->failure_threshold) {
                     e->state = CB_OPEN;
@@ -519,7 +570,8 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
             event_bus_publish_cb(
                 cb->eb, e->endpoint, e->model, "HALF_OPEN", "OPEN", "probe failed");
         }
-    } else if (e->state == CB_CLOSED) {
+    } else if (e->state == CB_CLOSED || e->state == CB_SLA_DEGRADED) {
+        cb_state_t prev_st = e->state;
         e->consecutive_failures++;
         if (e->consecutive_failures >= cb->failure_threshold) {
             e->state = CB_OPEN;
@@ -533,8 +585,12 @@ cb_record_failure(circuit_breaker_t* cb, const char* model, const char* endpoint
                             http_status,
                             (long)e->open_until);
             if (cb->eb != NULL) {
-                event_bus_publish_cb(
-                    cb->eb, e->endpoint, e->model, "CLOSED", "OPEN", "failures reached threshold");
+                event_bus_publish_cb(cb->eb,
+                                     e->endpoint,
+                                     e->model,
+                                     (prev_st == CB_SLA_DEGRADED ? "SLA_DEGRADED" : "CLOSED"),
+                                     "OPEN",
+                                     "failures reached threshold");
             }
         }
     } else {
@@ -556,7 +612,243 @@ cb_state_to_str(cb_state_t state)
         return "open";
     case CB_HALF_OPEN:
         return "half_open";
+    case CB_SLA_DEGRADED:
+        return "sla_degraded";
     default:
         return "unknown";
     }
+}
+
+void
+cb_configure_sla(circuit_breaker_t* cb,
+                 const char*        model,
+                 uint32_t           ttft_max_ms,
+                 uint32_t           p95_max_ms,
+                 uint32_t           window_size,
+                 float              violation_ratio,
+                 const char*        fallback_model)
+{
+    if (cb == NULL || model == NULL) {
+        return;
+    }
+    pthread_mutex_lock(&cb->mtx);
+    model_sla_cfg_t* cfg = find_sla_cfg_locked(cb, model);
+    if (cfg == NULL) {
+        cfg = calloc(1, sizeof(*cfg));
+        if (cfg == NULL) {
+            pthread_mutex_unlock(&cb->mtx);
+            return;
+        }
+        strncpy(cfg->model, model, sizeof(cfg->model) - 1);
+        cfg->next = cb->sla_configs;
+        cb->sla_configs = cfg;
+    }
+    cfg->ttft_max_ms = ttft_max_ms;
+    cfg->p95_max_ms = p95_max_ms;
+    cfg->window_size = window_size > 0 ? window_size : 10;
+    if (cfg->window_size > CB_MAX_SLA_SAMPLES) {
+        cfg->window_size = CB_MAX_SLA_SAMPLES;
+    }
+    cfg->violation_ratio = violation_ratio;
+    if (fallback_model != NULL) {
+        strncpy(cfg->fallback_model, fallback_model, sizeof(cfg->fallback_model) - 1);
+    } else {
+        cfg->fallback_model[0] = '\0';
+    }
+    cfg->consecutive_recover_need = 2;
+    pthread_mutex_unlock(&cb->mtx);
+}
+
+void
+cb_record_sla_sample(circuit_breaker_t* cb,
+                     const char*        model,
+                     const char*        endpoint,
+                     uint32_t           ttft_ms,
+                     uint32_t           latency_ms)
+{
+    if (cb == NULL || model == NULL) {
+        return;
+    }
+    const char* ep = (endpoint != NULL) ? endpoint : "";
+
+    pthread_mutex_lock(&cb->mtx);
+    model_sla_cfg_t* cfg = find_sla_cfg_locked(cb, model);
+    if (cfg == NULL) {
+        pthread_mutex_unlock(&cb->mtx);
+        return;
+    }
+
+    cb_entry_t* e = get_or_create_entry_locked(cb, model, ep);
+    if (e == NULL) {
+        pthread_mutex_unlock(&cb->mtx);
+        return;
+    }
+
+    time_t now = get_now(cb);
+    update_state_on_time_locked(cb, e, now);
+
+    /* Record sample in circular buffer */
+    e->samples[e->sample_head].ttft_ms = ttft_ms;
+    e->samples[e->sample_head].latency_ms = latency_ms;
+    e->sample_head = (e->sample_head + 1) % cfg->window_size;
+    if (e->sample_count < cfg->window_size) {
+        e->sample_count++;
+    }
+
+    bool is_violation = false;
+    if ((cfg->ttft_max_ms > 0 && ttft_ms > cfg->ttft_max_ms) ||
+        (cfg->p95_max_ms > 0 && latency_ms > cfg->p95_max_ms)) {
+        is_violation = true;
+    }
+
+    if (is_violation) {
+        e->consecutive_sla_normal = 0;
+    } else {
+        e->consecutive_sla_normal++;
+    }
+
+    if (e->state == CB_CLOSED) {
+        if (e->sample_count >= cfg->window_size) {
+            size_t violations = 0;
+            for (size_t i = 0; i < e->sample_count; i++) {
+                if ((cfg->ttft_max_ms > 0 && e->samples[i].ttft_ms > cfg->ttft_max_ms) ||
+                    (cfg->p95_max_ms > 0 && e->samples[i].latency_ms > cfg->p95_max_ms)) {
+                    violations++;
+                }
+            }
+            float ratio = (float)violations / (float)e->sample_count;
+            if (ratio >= cfg->violation_ratio - 0.0001f) {
+                e->state = CB_SLA_DEGRADED;
+                e->consecutive_sla_normal = 0;
+                AIGATE_LOG_WARN("circuit breaker for %s:%s transitioned to CB_SLA_DEGRADED (ratio "
+                                "%.2f >= %.2f)",
+                                e->model,
+                                e->endpoint,
+                                ratio,
+                                cfg->violation_ratio);
+                if (cb->eb != NULL) {
+                    event_bus_publish_cb(cb->eb,
+                                         e->endpoint,
+                                         e->model,
+                                         "CLOSED",
+                                         "SLA_DEGRADED",
+                                         "SLA violation threshold exceeded");
+                }
+            }
+        }
+    } else if (e->state == CB_SLA_DEGRADED) {
+        if (e->consecutive_sla_normal >= cfg->consecutive_recover_need) {
+            e->state = CB_CLOSED;
+            e->sample_count = 0;
+            e->sample_head = 0;
+            e->consecutive_sla_normal = 0;
+            AIGATE_LOG_INFO("circuit breaker for %s:%s recovered from CB_SLA_DEGRADED to CLOSED",
+                            e->model,
+                            e->endpoint);
+            if (cb->eb != NULL) {
+                event_bus_publish_cb(
+                    cb->eb, e->endpoint, e->model, "SLA_DEGRADED", "CLOSED", "SLA probe recovered");
+            }
+        }
+    }
+
+    pthread_mutex_unlock(&cb->mtx);
+}
+
+cb_state_t
+cb_get_sla_state(circuit_breaker_t* cb,
+                 const char*        model,
+                 const char*        endpoint,
+                 char*              out_fallback_model,
+                 size_t             fallback_size)
+{
+    if (cb == NULL || model == NULL) {
+        return CB_CLOSED;
+    }
+    const char* ep = (endpoint != NULL) ? endpoint : "";
+
+    pthread_mutex_lock(&cb->mtx);
+    model_sla_cfg_t* cfg = find_sla_cfg_locked(cb, model);
+    if (out_fallback_model != NULL && fallback_size > 0) {
+        if (cfg != NULL && cfg->fallback_model[0] != '\0') {
+            strncpy(out_fallback_model, cfg->fallback_model, fallback_size - 1);
+            out_fallback_model[fallback_size - 1] = '\0';
+        } else {
+            out_fallback_model[0] = '\0';
+        }
+    }
+
+    cb_entry_t* e = find_entry_locked(cb, model, ep);
+    if (e == NULL) {
+        pthread_mutex_unlock(&cb->mtx);
+        return CB_CLOSED;
+    }
+
+    time_t now = get_now(cb);
+    update_state_on_time_locked(cb, e, now);
+    cb_state_t st = e->state;
+    pthread_mutex_unlock(&cb->mtx);
+    return st;
+}
+
+bool
+cb_override_state(circuit_breaker_t* cb,
+                  const char*        model,
+                  const char*        endpoint,
+                  cb_state_t         new_state)
+{
+    if (cb == NULL || model == NULL) {
+        return false;
+    }
+    const char* ep = (endpoint != NULL) ? endpoint : "";
+
+    pthread_mutex_lock(&cb->mtx);
+    cb_entry_t* e = get_or_create_entry_locked(cb, model, ep);
+    if (e == NULL) {
+        pthread_mutex_unlock(&cb->mtx);
+        return false;
+    }
+
+    e->state = new_state;
+    e->manual_override = 1;
+    if (new_state == CB_CLOSED) {
+        e->consecutive_failures = 0;
+        e->open_until = 0;
+        e->half_open_probe_active = 0;
+        e->sample_count = 0;
+        e->consecutive_sla_normal = 0;
+    } else if (new_state == CB_OPEN) {
+        time_t now = get_now(cb);
+        e->open_until = now + cb->cooloff_sec;
+        e->half_open_probe_active = 0;
+    } else if (new_state == CB_SLA_DEGRADED) {
+        e->consecutive_sla_normal = 0;
+    }
+
+    pthread_mutex_unlock(&cb->mtx);
+    return true;
+}
+
+uint32_t
+cb_get_sla_avg_ttft(circuit_breaker_t* cb, const char* model, const char* endpoint)
+{
+    if (cb == NULL || model == NULL) {
+        return 0;
+    }
+    const char* ep = (endpoint != NULL) ? endpoint : "";
+
+    pthread_mutex_lock(&cb->mtx);
+    cb_entry_t* e = find_entry_locked(cb, model, ep);
+    if (e == NULL || e->sample_count == 0) {
+        pthread_mutex_unlock(&cb->mtx);
+        return 0;
+    }
+
+    uint64_t sum = 0;
+    for (size_t i = 0; i < e->sample_count; i++) {
+        sum += e->samples[i].ttft_ms;
+    }
+    uint32_t avg = (uint32_t)(sum / e->sample_count);
+    pthread_mutex_unlock(&cb->mtx);
+    return avg;
 }

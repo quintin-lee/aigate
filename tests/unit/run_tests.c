@@ -675,6 +675,9 @@ main(int argc, char** argv)
     extern void test_audit_live_ring_query_recent(void);
     test_register("audit_live_ring_query_recent", test_audit_live_ring_query_recent);
 
+    extern void test_sla_degradation_state_machine(void);
+    test_register("sla_degradation_state_machine", test_sla_degradation_state_machine);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

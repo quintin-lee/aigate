@@ -6,13 +6,14 @@
 #define AIGATE_CIRCUIT_BREAKER_H
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <time.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-/** @brief Breaker tri-state: closed (admit)/open (reject)/half-open (probing). */
+/** @brief Breaker four-state: closed (admit)/open (reject)/half-open (probing)/sla_degraded (soft degradation). */
 typedef enum {
     /** @brief Closed: admitting normally, failure count accumulating. */
     CB_CLOSED = 0,
@@ -20,6 +21,8 @@ typedef enum {
     CB_OPEN = 1,
     /** @brief Half-open: admitting a trickle of probe traffic after cooldown, closing on success. */
     CB_HALF_OPEN = 2,
+    /** @brief SLA degraded: latency/TTFT exceeded threshold, transparent fallback active. */
+    CB_SLA_DEGRADED = 3,
 } cb_state_t;
 
 /** @brief Breaker instance (opaque, defined in circuit_breaker.c). */
@@ -80,6 +83,48 @@ const char* cb_state_to_str(cb_state_t state);
 
 /** @brief Reset all tracked entries (e.g. for testing). */
 void cb_reset(circuit_breaker_t* cb);
+
+/**
+ * @brief Configure SLA threshold parameters for a model.
+ */
+void cb_configure_sla(circuit_breaker_t* cb,
+                      const char*        model,
+                      uint32_t           ttft_max_ms,
+                      uint32_t           p95_max_ms,
+                      uint32_t           window_size,
+                      float              violation_ratio,
+                      const char*        fallback_model);
+
+/**
+ * @brief Record an SLA sample (TTFT and total latency) for a model endpoint.
+ */
+void cb_record_sla_sample(circuit_breaker_t* cb,
+                          const char*        model,
+                          const char*        endpoint,
+                          uint32_t           ttft_ms,
+                          uint32_t           latency_ms);
+
+/**
+ * @brief Get current circuit/SLA state and optional fallback model.
+ */
+cb_state_t cb_get_sla_state(circuit_breaker_t* cb,
+                            const char*        model,
+                            const char*        endpoint,
+                            char*              out_fallback_model,
+                            size_t             fallback_size);
+
+/**
+ * @brief Manually override breaker state for a model endpoint.
+ */
+bool cb_override_state(circuit_breaker_t* cb,
+                       const char*        model,
+                       const char*        endpoint,
+                       cb_state_t         new_state);
+
+/**
+ * @brief Get current average TTFT for a model endpoint over sliding window.
+ */
+uint32_t cb_get_sla_avg_ttft(circuit_breaker_t* cb, const char* model, const char* endpoint);
 
 #ifdef __cplusplus
 }
