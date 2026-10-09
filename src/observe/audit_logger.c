@@ -14,8 +14,8 @@
 #include <time.h>
 #include <unistd.h>
 
-static const char*
-severity_to_str(audit_severity_t sev)
+const char*
+audit_severity_str(audit_severity_t sev)
 {
     switch (sev) {
     case AUDIT_SEV_INFO:
@@ -29,6 +29,12 @@ severity_to_str(audit_severity_t sev)
     default:
         return "UNKNOWN";
     }
+}
+
+static const char*
+severity_to_str(audit_severity_t sev)
+{
+    return audit_severity_str(sev);
 }
 
 void

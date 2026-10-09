@@ -148,7 +148,7 @@ main(int argc, char** argv)
     }
 
     /* 4a. Audit logger initialization */
-    if (cfg.audit_log_file[0] != '\0' || cfg.audit_webhook_url[0] != '\0') {
+    {
         audit_config_t acfg;
         memset(&acfg, 0, sizeof(acfg));
         strncpy(acfg.log_file, cfg.audit_log_file, sizeof(acfg.log_file) - 1);
@@ -171,9 +171,10 @@ main(int argc, char** argv)
             if (audit_logger_start(core.audit) != 0) {
                 AIGATE_LOG_WARN("main: failed to start audit logger worker threads");
             } else {
-                AIGATE_LOG_INFO("main: audit logger started (file='%s', webhook='%s')",
-                                acfg.log_file,
-                                acfg.webhook_url);
+                AIGATE_LOG_INFO(
+                    "main: audit logger started (file='%s', webhook='%s', live_ring=enabled)",
+                    acfg.log_file,
+                    acfg.webhook_url);
             }
         }
     }

@@ -120,6 +120,13 @@ int audit_event_set_prompt(audit_event_t* ev, const char* prompt, size_t max_len
 char* audit_event_to_ndjson(const audit_event_t* ev);
 
 /**
+ * @brief Convert severity level to human-readable string.
+ * @param[in] s Severity level.
+ * @return Static string constant ("INFO", "WARN", "VIOLATION", "ERROR", "UNKNOWN").
+ */
+const char* audit_severity_str(audit_severity_t s);
+
+/**
  * @brief Convert audit event to a target webhook payload string.
  * @param[in] ev Audit event to format.
  * @param[in] fmt Target webhook adapter format.

@@ -1054,24 +1054,36 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
              jstring(jbody, "upstream_key_ref", def_kref));
     snprintf(m.lb_policy, sizeof m.lb_policy, "%s", jstring(jbody, "lb_policy", "priority"));
 
-    json_t* jparams = json_object_get(jbody, "default_params");
-    if (jparams != NULL && json_is_object(jparams)) {
-        char* packed = json_dumps(jparams, JSON_COMPACT);
-        if (packed == NULL) {
-            json_decref(jbody);
-            return finish_error(status, body, len, 500, "internal_error", "json encode failed");
-        }
-        if (strlen(packed) >= sizeof m.default_params_json) {
-            /* A truncated JSONB blob silently poisons the model row; reject. */
-            free(packed);
-            json_decref(jbody);
-            return finish_error(status, body, len, 400, "bad_request", "default_params too large");
-        }
-        snprintf(m.default_params_json, sizeof m.default_params_json, "%s", packed);
-        free(packed);
-    } else {
-        snprintf(m.default_params_json, sizeof m.default_params_json, "{}");
+    char    fallback_model_buf[128] = {0};
+    json_t* jfb = json_object_get(jbody, "fallback_model");
+    if (jfb != NULL && json_is_string(jfb)) {
+        snprintf(fallback_model_buf, sizeof(fallback_model_buf), "%s", json_string_value(jfb));
     }
+
+    json_t* jparams = json_object_get(jbody, "default_params");
+    json_t* params_obj = NULL;
+    if (jparams != NULL && json_is_object(jparams)) {
+        params_obj = json_deep_copy(jparams);
+    } else {
+        params_obj = json_object();
+    }
+    if (fallback_model_buf[0] != '\0') {
+        json_object_set_new(params_obj, "fallback_model", json_string(fallback_model_buf));
+    }
+    char* packed = json_dumps(params_obj, JSON_COMPACT);
+    json_decref(params_obj);
+    if (packed == NULL) {
+        json_decref(jbody);
+        return finish_error(status, body, len, 500, "internal_error", "json encode failed");
+    }
+    if (strlen(packed) >= sizeof m.default_params_json) {
+        /* A truncated JSONB blob silently poisons the model row; reject. */
+        free(packed);
+        json_decref(jbody);
+        return finish_error(status, body, len, 400, "bad_request", "default_params too large");
+    }
+    snprintf(m.default_params_json, sizeof m.default_params_json, "%s", packed);
+    free(packed);
 
     json_t* jpricing = json_object_get(jbody, "pricing");
     if (jpricing != NULL) {
@@ -1132,6 +1144,11 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
         return finish_error(status, body, len, 500, "internal_error", "model create failed");
     }
     model_router_invalidate(adm->ac->router, m.name);
+    if (fallback_model_buf[0] != '\0') {
+        if (adm->ac != NULL && adm->ac->cb != NULL) {
+            cb_configure_sla(adm->ac->cb, m.name, 3000, 6000, 10, 0.40f, fallback_model_buf);
+        }
+    }
 
     json_t* out = json_object();
     json_object_set_new(out, "name", json_string(m.name));
@@ -4958,23 +4975,6 @@ admin_cache_optimizer_stats_get(admin_ctx_t* adm, int* status, char** body, size
 
 /* ------------------------------------------------------------ audit & SLA */
 
-static const char*
-audit_severity_str(audit_severity_t s)
-{
-    switch (s) {
-    case AUDIT_SEV_INFO:
-        return "INFO";
-    case AUDIT_SEV_WARN:
-        return "WARN";
-    case AUDIT_SEV_VIOLATION:
-        return "VIOLATION";
-    case AUDIT_SEV_ERROR:
-        return "ERROR";
-    default:
-        return "UNKNOWN";
-    }
-}
-
 static int
 admin_audit_events_get(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* query)
 {
@@ -4997,18 +4997,24 @@ admin_audit_events_get(admin_ctx_t* adm, int* status, char** body, size_t* len, 
         }
     }
 
-    json_t* arr = json_array();
+    json_t*  root = json_object();
+    json_t*  arr = json_array();
+    uint64_t max_seq = 0;
+    size_t   missed = 0;
     if (adm->ac != NULL && adm->ac->audit != NULL) {
         audit_live_event_t events[200];
-        size_t             missed = 0;
         size_t count = audit_logger_query_recent(adm->ac->audit, events, limit, after_seq, &missed);
         for (size_t i = 0; i < count; i++) {
+            if (events[i].seq_id > max_seq) {
+                max_seq = events[i].seq_id;
+            }
             json_t* item = json_object();
             json_object_set_new(item, "seq_id", json_integer((json_int_t)events[i].seq_id));
             json_object_set_new(item, "trace_id", json_string(events[i].trace_id));
             json_object_set_new(item, "tenant_id", json_string(events[i].tenant_id));
             json_object_set_new(item, "client_ip", json_string(events[i].client_ip));
             json_object_set_new(item, "model", json_string(events[i].model));
+            json_object_set_new(item, "requested_model", json_string(events[i].model));
             json_object_set_new(item, "routed_model", json_string(events[i].routed_model));
             json_object_set_new(item, "provider", json_string(events[i].provider));
             json_object_set_new(item, "http_status", json_integer(events[i].http_status));
@@ -5021,13 +5027,24 @@ admin_audit_events_get(admin_ctx_t* adm, int* status, char** body, size_t* len, 
                 item, "severity", json_string(audit_severity_str(events[i].severity)));
             json_object_set_new(item, "violation_type", json_string(events[i].violation_type));
             json_object_set_new(item, "rule_detail", json_string(events[i].rule_detail));
+            json_object_set_new(
+                item,
+                "rule_tag",
+                json_string(
+                    events[i].violation_type[0]
+                        ? events[i].violation_type
+                        : (events[i].fallback_reason[0] ? events[i].fallback_reason : "NONE")));
             json_object_set_new(item, "fallback_reason", json_string(events[i].fallback_reason));
             json_object_set_new(item, "prompt_snippet", json_string(events[i].prompt_snippet));
             json_object_set_new(item, "timestamp_ms", json_integer(events[i].timestamp_ms));
             json_array_append_new(arr, item);
         }
     }
-    return finish_json(status, body, len, 200, arr);
+    json_object_set_new(root, "status", json_string("ok"));
+    json_object_set_new(root, "events", arr);
+    json_object_set_new(root, "latest_seq", json_integer((json_int_t)max_seq));
+    json_object_set_new(root, "missed_count", json_integer((json_int_t)missed));
+    return finish_json(status, body, len, 200, root);
 }
 
 static int
@@ -5124,9 +5141,27 @@ admin_audit_violations_get(
     return finish_json(status, body, len, 200, root);
 }
 
+static const char*
+admin_sla_state_str(cb_state_t st)
+{
+    switch (st) {
+    case CB_CLOSED:
+        return "HEALTHY";
+    case CB_SLA_DEGRADED:
+        return "SLA_DEGRADED";
+    case CB_OPEN:
+        return "OPEN";
+    case CB_HALF_OPEN:
+        return "HALF_OPEN";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 static int
 admin_models_sla_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
 {
+    json_t* root = json_object();
     json_t* arr = json_array();
 
     if (adm->ps != NULL && pg_store_ops(adm->ps) != NULL &&
@@ -5145,9 +5180,25 @@ admin_models_sla_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
                     avg_ttft = cb_get_sla_avg_ttft(adm->ac->cb, recs[i].name, NULL);
                 }
 
+                if (fallback[0] == '\0' && recs[i].default_params_json[0] != '\0') {
+                    json_error_t jerr;
+                    json_t*      jdp = json_loads(recs[i].default_params_json, 0, &jerr);
+                    if (jdp != NULL) {
+                        json_t* jfb_val = json_object_get(jdp, "fallback_model");
+                        if (jfb_val != NULL && json_is_string(jfb_val)) {
+                            snprintf(fallback, sizeof(fallback), "%s", json_string_value(jfb_val));
+                            if (adm->ac != NULL && adm->ac->cb != NULL) {
+                                cb_configure_sla(
+                                    adm->ac->cb, recs[i].name, 3000, 6000, 10, 0.40f, fallback);
+                            }
+                        }
+                        json_decref(jdp);
+                    }
+                }
+
                 json_t* it = json_object();
                 json_object_set_new(it, "model", json_string(recs[i].name));
-                json_object_set_new(it, "sla_state", json_string(cb_state_to_str(st)));
+                json_object_set_new(it, "sla_state", json_string(admin_sla_state_str(st)));
                 json_object_set_new(it, "fallback_model", json_string(fallback));
                 json_object_set_new(it, "current_avg_ttft_ms", json_integer(avg_ttft));
                 json_array_append_new(arr, it);
@@ -5156,7 +5207,8 @@ admin_models_sla_get(admin_ctx_t* adm, int* status, char** body, size_t* len)
         }
     }
 
-    return finish_json(status, body, len, 200, arr);
+    json_object_set_new(root, "models", arr);
+    return finish_json(status, body, len, 200, root);
 }
 
 static int
@@ -5211,12 +5263,40 @@ admin_model_sla_override(admin_ctx_t* adm,
     json_decref(jbody);
 
     if (adm->ac != NULL && adm->ac->cb != NULL) {
+        char cur_fb[64] = {0};
+        cb_get_sla_state(adm->ac->cb, model_id, NULL, cur_fb, sizeof(cur_fb));
+        if (cur_fb[0] == '\0' && adm->ps != NULL && pg_store_ops(adm->ps)->get_model != NULL) {
+            model_rec_t mrec;
+            if (pg_store_ops(adm->ps)->get_model(pg_store_ops(adm->ps)->ctx, model_id, &mrec) ==
+                0) {
+                if (mrec.default_params_json[0] != '\0') {
+                    json_error_t jerr;
+                    json_t*      jdp = json_loads(mrec.default_params_json, 0, &jerr);
+                    if (jdp != NULL) {
+                        json_t* jfb_val = json_object_get(jdp, "fallback_model");
+                        if (jfb_val != NULL && json_is_string(jfb_val)) {
+                            cb_configure_sla(adm->ac->cb,
+                                             model_id,
+                                             3000,
+                                             6000,
+                                             10,
+                                             0.40f,
+                                             json_string_value(jfb_val));
+                        }
+                        json_decref(jdp);
+                    }
+                }
+                model_rec_free(&mrec);
+            }
+        }
         cb_override_state(adm->ac->cb, model_id, NULL, new_st);
     }
 
     json_t* out = json_object();
+    json_object_set_new(out, "status", json_string("ok"));
     json_object_set_new(out, "model", json_string(model_id));
     json_object_set_new(out, "action", json_string(action));
+    json_object_set_new(out, "new_state", json_string(admin_sla_state_str(new_st)));
     json_object_set_new(out, "success", json_true());
     return finish_json(status, body, len, 200, out);
 }

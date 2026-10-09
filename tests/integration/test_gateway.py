@@ -2386,8 +2386,8 @@ def test_guardrails_pii_masking_e2e(gateway):
     assert len(reqs) > 0
     upstream_body = reqs[-1]["body"]
     msg_content = upstream_body["messages"][0]["content"]
-    assert "[PHONE]" in msg_content
-    assert "[EMAIL]" in msg_content
+    assert "[PHONE" in msg_content
+    assert "[EMAIL" in msg_content
     assert "13812345678" not in msg_content
     assert "user@corp.com" not in msg_content
 

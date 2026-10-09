@@ -13,11 +13,13 @@
 #include "filter_chain.h"
 #include "latency_tracker.h"
 
+#include <inttypes.h>
 #include <jansson.h>
 #include <limits.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include "store/pg_store.h"
 
 /** @brief Current monotonic time in nanoseconds, for latency measurement (immune to system clock jumps).
  *  @return Nanoseconds since CLOCK_MONOTONIC epoch. */
@@ -287,59 +289,107 @@ aigate_record_audit_ex(aigate_core*     ac,
                        const char*      prompt_raw,
                        size_t           prompt_len)
 {
-    if (ac == NULL || ac->audit == NULL) {
+    if (ac == NULL) {
         return;
     }
 
-    audit_event_t ev;
-    audit_event_init(&ev);
+    if (ac->audit != NULL) {
+        audit_event_t ev;
+        audit_event_init(&ev);
 
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    ev.timestamp_ms = (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        ev.timestamp_ms = (int64_t)ts.tv_sec * 1000 + (int64_t)(ts.tv_nsec / 1000000);
 
-    if (trace_id != NULL) {
-        snprintf(ev.trace_id, sizeof(ev.trace_id), "%s", trace_id);
-    }
-    if (client_ip != NULL) {
-        snprintf(ev.client_ip, sizeof(ev.client_ip), "%s", client_ip);
-    }
-    ev.key_id = key_id;
-    if (model != NULL) {
-        snprintf(ev.model, sizeof(ev.model), "%s", model);
-    }
-    if (routed_model != NULL && routed_model[0] != '\0') {
-        snprintf(ev.routed_model, sizeof(ev.routed_model), "%s", routed_model);
-    } else if (model != NULL) {
-        snprintf(ev.routed_model, sizeof(ev.routed_model), "%s", model);
-    }
-    if (provider != NULL) {
-        snprintf(ev.provider, sizeof(ev.provider), "%s", provider);
-    }
-    ev.http_status = http_status;
-    ev.prompt_tokens = prompt_tokens;
-    ev.completion_tokens = completion_tokens;
-    ev.latency_ns = latency_ns;
-    ev.ttft_ns = ttft_ns;
-    ev.severity = severity;
-    if (violation_type != NULL) {
-        snprintf(ev.violation_type, sizeof(ev.violation_type), "%s", violation_type);
-    }
-    if (rule_detail != NULL) {
-        snprintf(ev.rule_detail, sizeof(ev.rule_detail), "%s", rule_detail);
-    }
-    if (fallback_reason != NULL) {
-        snprintf(ev.fallback_reason, sizeof(ev.fallback_reason), "%s", fallback_reason);
+        if (trace_id != NULL) {
+            snprintf(ev.trace_id, sizeof(ev.trace_id), "%s", trace_id);
+        }
+        if (client_ip != NULL) {
+            snprintf(ev.client_ip, sizeof(ev.client_ip), "%s", client_ip);
+        }
+        ev.key_id = key_id;
+        if (model != NULL) {
+            snprintf(ev.model, sizeof(ev.model), "%s", model);
+        }
+        if (routed_model != NULL && routed_model[0] != '\0') {
+            snprintf(ev.routed_model, sizeof(ev.routed_model), "%s", routed_model);
+        } else if (model != NULL) {
+            snprintf(ev.routed_model, sizeof(ev.routed_model), "%s", model);
+        }
+        if (provider != NULL) {
+            snprintf(ev.provider, sizeof(ev.provider), "%s", provider);
+        }
+        ev.http_status = http_status;
+        ev.prompt_tokens = prompt_tokens;
+        ev.completion_tokens = completion_tokens;
+        ev.latency_ns = latency_ns;
+        ev.ttft_ns = ttft_ns;
+        ev.severity = severity;
+        if (violation_type != NULL) {
+            snprintf(ev.violation_type, sizeof(ev.violation_type), "%s", violation_type);
+        }
+        if (rule_detail != NULL) {
+            snprintf(ev.rule_detail, sizeof(ev.rule_detail), "%s", rule_detail);
+        }
+        if (fallback_reason != NULL) {
+            snprintf(ev.fallback_reason, sizeof(ev.fallback_reason), "%s", fallback_reason);
+        }
+
+        if (severity >= AUDIT_SEV_VIOLATION && prompt_raw != NULL && prompt_len > 0) {
+            int    max_len = audit_logger_get_max_prompt_len(ac->audit);
+            size_t limit = (prompt_len > (size_t)max_len) ? (size_t)max_len : prompt_len;
+            audit_event_set_prompt(&ev, prompt_raw, limit);
+        }
+
+        audit_logger_record(ac->audit, &ev);
+        audit_event_cleanup(&ev);
     }
 
-    if (severity >= AUDIT_SEV_VIOLATION && prompt_raw != NULL && prompt_len > 0) {
-        int    max_len = audit_logger_get_max_prompt_len(ac->audit);
-        size_t limit = (prompt_len > (size_t)max_len) ? (size_t)max_len : prompt_len;
-        audit_event_set_prompt(&ev, prompt_raw, limit);
+    /* Persist violations to cold tier in PostgreSQL if available */
+    if (severity >= AUDIT_SEV_VIOLATION && ac->ps != NULL) {
+        audit_violation_record_t vrec;
+        memset(&vrec, 0, sizeof(vrec));
+        snprintf(vrec.trace_id, sizeof(vrec.trace_id), "%s", trace_id ? trace_id : "");
+        snprintf(vrec.tenant_id, sizeof(vrec.tenant_id), "%s", "default");
+        if (key_id > 0) {
+            snprintf(vrec.tenant_id, sizeof(vrec.tenant_id), "key#%" PRId64, key_id);
+        }
+        snprintf(vrec.client_ip, sizeof(vrec.client_ip), "%s", client_ip ? client_ip : "");
+        snprintf(vrec.model, sizeof(vrec.model), "%s", model ? model : "");
+        snprintf(vrec.routed_model,
+                 sizeof(vrec.routed_model),
+                 "%s",
+                 routed_model ? routed_model : (model ? model : ""));
+        snprintf(vrec.severity, sizeof(vrec.severity), "%s", audit_severity_str(severity));
+        snprintf(vrec.rule_tag,
+                 sizeof(vrec.rule_tag),
+                 "%s",
+                 violation_type ? violation_type : "VIOLATION");
+        vrec.http_status = http_status;
+        vrec.ttft_ms = (uint32_t)(ttft_ns / 1000000ULL);
+        vrec.total_latency_ms = (uint32_t)(latency_ns / 1000000ULL);
+        snprintf(vrec.fallback_reason,
+                 sizeof(vrec.fallback_reason),
+                 "%s",
+                 fallback_reason ? fallback_reason : "");
+        if (prompt_raw != NULL && prompt_len > 0) {
+            vrec.prompt_snapshot = (char*)malloc(prompt_len + 1);
+            if (vrec.prompt_snapshot != NULL) {
+                memcpy(vrec.prompt_snapshot, prompt_raw, prompt_len);
+                vrec.prompt_snapshot[prompt_len] = '\0';
+            }
+        }
+        if (rule_detail != NULL && rule_detail[0] != '\0') {
+            vrec.completion_snapshot = (char*)strdup(rule_detail);
+        }
+        pg_store_insert_audit_violation(ac->ps, &vrec);
+        if (vrec.prompt_snapshot != NULL) {
+            free(vrec.prompt_snapshot);
+        }
+        if (vrec.completion_snapshot != NULL) {
+            free(vrec.completion_snapshot);
+        }
     }
-
-    audit_logger_record(ac->audit, &ev);
-    audit_event_cleanup(&ev);
 }
 
 void
