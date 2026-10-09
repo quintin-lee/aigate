@@ -710,6 +710,13 @@ main(int argc, char** argv)
     test_register("watermark_mixed_chinese_and_truncation",
                   test_watermark_mixed_chinese_and_truncation);
 
+    extern void test_watermark_pipeline_openai_outbound(void);
+    test_register("watermark_pipeline_openai_outbound", test_watermark_pipeline_openai_outbound);
+
+    extern void test_watermark_pipeline_anthropic_outbound(void);
+    test_register("watermark_pipeline_anthropic_outbound",
+                  test_watermark_pipeline_anthropic_outbound);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

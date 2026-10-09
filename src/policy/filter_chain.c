@@ -2,9 +2,11 @@
 #include "guardrails.h"
 #include "prompt_template.h"
 #include "jailbreak_detector.h"
+#include "watermark_engine.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /**
  * @brief Inbound Filter 1: Content moderation & PII scanning.
@@ -329,6 +331,97 @@ filter_chain_execute_outbound(
             if (out_len != NULL) {
                 *out_len = strlen(restored);
             }
+        }
+    }
+
+    /* Watermark steganographic injection if enabled on the API key */
+    if (q->krec.watermark_enabled) {
+        const char* cur_body = (out_body != NULL && *out_body != NULL) ? *out_body : resp_body;
+        json_t*     root = json_loads(cur_body, 0, NULL);
+        if (root != NULL && json_is_object(root)) {
+            bool                modified = false;
+            watermark_payload_t wp;
+            memset(&wp, 0, sizeof(wp));
+            wp.timestamp = (uint32_t)time(NULL);
+            wp.key_id = (uint32_t)q->krec.key_id;
+            if (q->trace_ctx.trace_id[0] != '\0') {
+                wp.short_trace = strtoull(q->trace_ctx.trace_id, NULL, 16);
+                if (wp.short_trace == 0) {
+                    for (const char* p = q->trace_ctx.trace_id; *p; p++) {
+                        wp.short_trace = (wp.short_trace * 31) + (unsigned char)*p;
+                    }
+                }
+            } else {
+                wp.short_trace = ((uint64_t)wp.key_id << 32) ^ (uint64_t)wp.timestamp;
+            }
+
+            /* 1. Check OpenAI format: choices[0].message.content */
+            json_t* choices = json_object_get(root, "choices");
+            if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+                json_t* choice0 = json_array_get(choices, 0);
+                if (choice0 != NULL && json_is_object(choice0)) {
+                    json_t* msg = json_object_get(choice0, "message");
+                    if (msg != NULL && json_is_object(msg)) {
+                        json_t* content_val = json_object_get(msg, "content");
+                        if (content_val != NULL && json_is_string(content_val)) {
+                            const char* raw_txt = json_string_value(content_val);
+                            if (raw_txt != NULL && raw_txt[0] != '\0') {
+                                size_t wm_sz = 0;
+                                char*  wm_txt =
+                                    watermark_inject(raw_txt, strlen(raw_txt), &wp, &wm_sz);
+                                if (wm_txt != NULL) {
+                                    json_object_set_new(msg, "content", json_string(wm_txt));
+                                    free(wm_txt);
+                                    modified = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            /* 2. Check Anthropic format: content[0].text */
+            if (!modified) {
+                json_t* content_arr = json_object_get(root, "content");
+                if (content_arr != NULL && json_is_array(content_arr) &&
+                    json_array_size(content_arr) > 0) {
+                    json_t* block0 = json_array_get(content_arr, 0);
+                    if (block0 != NULL && json_is_object(block0)) {
+                        json_t* text_val = json_object_get(block0, "text");
+                        if (text_val != NULL && json_is_string(text_val)) {
+                            const char* raw_txt = json_string_value(text_val);
+                            if (raw_txt != NULL && raw_txt[0] != '\0') {
+                                size_t wm_sz = 0;
+                                char*  wm_txt =
+                                    watermark_inject(raw_txt, strlen(raw_txt), &wp, &wm_sz);
+                                if (wm_txt != NULL) {
+                                    json_object_set_new(block0, "text", json_string(wm_txt));
+                                    free(wm_txt);
+                                    modified = true;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (modified) {
+                char* new_json = json_dumps(root, JSON_COMPACT);
+                if (new_json != NULL) {
+                    if (out_body != NULL && *out_body != NULL) {
+                        free(*out_body);
+                    }
+                    if (out_body != NULL) {
+                        *out_body = new_json;
+                    } else {
+                        free(new_json);
+                    }
+                    if (out_len != NULL) {
+                        *out_len = strlen(new_json);
+                    }
+                }
+            }
+            json_decref(root);
         }
     }
 

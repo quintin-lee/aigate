@@ -38,6 +38,7 @@ typedef struct key_rec {
     long   monthly_token_budget; /**< 0 = unlimited */
     char   system_prompt[4096];  /**< Optional prompt template */
     int    prompt_mode;          /**< 0=prepend, 1=append, 2=override */
+    int    watermark_enabled;    /**< 1 = watermark enabled, 0 = disabled */
 } key_rec_t;
 
 /** @brief Per-model multi-target cap. */
