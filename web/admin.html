@@ -1602,6 +1602,80 @@
         </div>
       </div>
 
+      <!-- ==================== Forensics & Chain Verification Workbench ==================== -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+        <!-- Left Column: Zero-Width Watermark Forensic Decoder -->
+        <div class="card p-4 space-y-3.5">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+            <div class="flex items-center space-x-2">
+              <span class="text-base">🕵️</span>
+              <h3 class="text-sm font-bold text-white">响应零宽隐写水印溯源 (Watermark Forensic Decoder)</h3>
+            </div>
+            <span class="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-brand-500/20 text-brand-300 border border-brand-500/30">Unicode 2-bit 隐写</span>
+          </div>
+          <p class="text-xs text-slate-400">
+            粘贴疑似外泄的大模型响应文本，自动提取隐式零宽字符帧（Magic 0x57），逆向还原调用租户 Key ID、请求时间戳与短链路追踪指纹。
+          </p>
+
+          <div class="space-y-2">
+            <textarea id="watermark-input" rows="3" placeholder="在此粘贴待取证的文本（即使经过复制粘贴，Unicode 零宽字符仍会保留）..." class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-brand-500 font-sans resize-none"></textarea>
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] text-slate-500">支持 4 种零宽字符组合编码，内置 CRC-16 校验</span>
+              <button id="btn-decode-watermark" onclick="decodeWatermark()" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition flex items-center space-x-1.5 shadow-sm">
+                <span>🔍</span>
+                <span>开始逆向提取</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Decoded Result Container -->
+          <div id="watermark-result" class="min-h-[50px] flex items-center justify-center p-3 rounded-xl bg-slate-900/40 border border-slate-800/80 text-xs text-slate-500">
+            <span>输入文本并点击「开始逆向提取」查看水印指纹信息</span>
+          </div>
+        </div>
+
+        <!-- Right Column: HMAC-SHA256 Audit Hash Chain Verifier -->
+        <div class="card p-4 space-y-3.5">
+          <div class="flex items-center justify-between border-b border-slate-800 pb-2.5">
+            <div class="flex items-center space-x-2">
+              <span class="text-base">⛓️</span>
+              <h3 class="text-sm font-bold text-white">审计日志防篡改哈希链验签 (Hash Chain Verifier)</h3>
+            </div>
+            <span id="chain-status-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-slate-800 text-slate-300 border border-slate-700">就绪 (待验签)</span>
+          </div>
+          <p class="text-xs text-slate-400">
+            基于连续 HMAC-SHA256 密码学链式签名，对落盘 NDJSON 审计存证全量校验序列号单调性与哈希完整性，严格防篡改、防删、防截断。
+          </p>
+
+          <div class="grid grid-cols-2 gap-2.5 text-xs">
+            <div class="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+              <div class="text-[10px] text-slate-400">已核验记录数</div>
+              <div id="chain-verified-count" class="font-mono font-bold text-white text-base mt-0.5">0</div>
+            </div>
+            <div class="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800">
+              <div class="text-[10px] text-slate-400">异常断裂序列号</div>
+              <div id="chain-broken-seq" class="font-mono font-bold text-slate-300 text-base mt-0.5">-</div>
+            </div>
+          </div>
+
+          <div class="bg-slate-900/80 p-2.5 rounded-xl border border-slate-800 space-y-1">
+            <div class="text-[10px] text-slate-400 flex items-center justify-between">
+              <span>当前链头指纹 (Head HMAC-SHA256)</span>
+              <span id="chain-filepath" class="text-[10px] text-slate-500 font-mono truncate max-w-[200px]" title="审计存证文件路径">-</span>
+            </div>
+            <div id="chain-head-hash" class="font-mono text-[11px] text-brand-300 break-all select-all">-</div>
+            <div id="chain-error-msg" class="hidden text-[11px] text-rose-400 font-medium"></div>
+          </div>
+
+          <div class="flex items-center justify-end pt-1">
+            <button id="btn-verify-chain" onclick="verifyAuditChain()" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-500 text-white transition flex items-center space-x-1.5 shadow-sm">
+              <span>🛡️</span>
+              <span>立即全量验签</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       <!-- Filter Controls Toolbar -->
       <div class="card p-4 space-y-3">
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
@@ -7560,6 +7634,169 @@
         if (indicator) indicator.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
         showToast("实时流已恢复滚动", "info");
         fetchAuditLiveStream();
+      }
+    }
+
+    // --- AI Threat Defense Forensics & Audit Chain Verification ---
+    async function decodeWatermark() {
+      const inputEl = document.getElementById("watermark-input");
+      const resultEl = document.getElementById("watermark-result");
+      const btn = document.getElementById("btn-decode-watermark");
+      if (!inputEl || !resultEl) return;
+
+      const text = inputEl.value;
+      if (!text) {
+        showToast("请输入需要检测水印的文本", "warning");
+        return;
+      }
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="inline-block animate-spin mr-1">↻</span> 提取中...`;
+      }
+
+      try {
+        const resp = await apiCall("/admin/v1/watermark/decode", {
+          method: "POST",
+          body: { text: text }
+        });
+
+        if (!resp || !resp.ok) {
+          showToast("水印解码请求失败", "error");
+          resultEl.innerHTML = `<div class="p-3 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 text-xs">解码服务异常</div>`;
+          return;
+        }
+
+        const data = await resp.json();
+        if (!data.found) {
+          resultEl.innerHTML = `
+            <div class="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-400 text-xs flex items-center space-x-2 w-full">
+              <span class="text-amber-400 text-base">⚠️</span>
+              <div>
+                <div class="font-semibold text-slate-300">未检测到有效水印</div>
+                <div class="text-[11px] text-slate-500 mt-0.5">文本中不包含由本网关签发的 19 字节零宽隐写帧（Magic 0x57）或已被彻底净化。</div>
+              </div>
+            </div>`;
+          showToast("文本中未检测到隐写水印", "info");
+        } else {
+          const dateStr = data.timestamp ? new Date(data.timestamp * 1000).toLocaleString() : "未知";
+          const traceHex = data.short_trace ? "0x" + BigInt(data.short_trace).toString(16).toUpperCase().padStart(16, "0") : "-";
+          const crcBadge = data.crc_valid
+            ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">CRC-16 校验通过</span>`
+            : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30">CRC 校验失败</span>`;
+
+          resultEl.innerHTML = `
+            <div class="p-4 rounded-xl bg-emerald-500/10 border border-emerald-500/20 space-y-3 w-full">
+              <div class="flex items-center justify-between">
+                <span class="text-xs font-bold text-emerald-400 flex items-center space-x-1.5">
+                  <span>🎯</span><span>成功提取零宽隐写指纹</span>
+                </span>
+                ${crcBadge}
+              </div>
+              <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
+                <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                  <div class="text-[10px] text-slate-400">调用租户 (Key ID)</div>
+                  <div class="font-mono font-bold text-white mt-0.5 text-sm">#${data.key_id}</div>
+                </div>
+                <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                  <div class="text-[10px] text-slate-400">生成时间 (Timestamp)</div>
+                  <div class="font-mono text-slate-200 mt-0.5 text-[11px]">${dateStr}</div>
+                </div>
+                <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
+                  <div class="text-[10px] text-slate-400">短追踪标识 (Trace ID)</div>
+                  <div class="font-mono text-cyan-300 mt-0.5 text-[11px] truncate" title="${traceHex}">${traceHex}</div>
+                </div>
+              </div>
+              <div class="flex items-center justify-end space-x-2 pt-1 border-t border-emerald-500/10">
+                <button onclick="searchAuditForTrace('${traceHex}')" class="px-2.5 py-1 rounded-lg text-xs font-semibold bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 transition">
+                  🔍 在审计流中检索追踪
+                </button>
+              </div>
+            </div>`;
+          showToast("零宽水印解码成功", "success");
+        }
+      } catch (err) {
+        showToast(`解码出错：${err.message}`, "error");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<span>🔍</span><span>开始逆向提取</span>`;
+        }
+      }
+    }
+
+    function searchAuditForTrace(val) {
+      const searchInput = document.getElementById("auditSearchInput");
+      if (searchInput) {
+        searchInput.value = val;
+        filterAuditRequests(true);
+        searchInput.scrollIntoView({ behavior: "smooth" });
+      }
+    }
+
+    async function verifyAuditChain() {
+      const badge = document.getElementById("chain-status-badge");
+      const btn = document.getElementById("btn-verify-chain");
+      const verifiedEl = document.getElementById("chain-verified-count");
+      const brokenEl = document.getElementById("chain-broken-seq");
+      const headEl = document.getElementById("chain-head-hash");
+      const pathEl = document.getElementById("chain-filepath");
+      const errEl = document.getElementById("chain-error-msg");
+
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span class="inline-block animate-spin mr-1">↻</span> 验签核验中...`;
+      }
+
+      try {
+        const resp = await apiCall("/admin/v1/audit/chain/verify", {
+          method: "POST",
+          body: {}
+        });
+
+        if (!resp || !resp.ok) {
+          if (badge) {
+            badge.className = "px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30";
+            badge.textContent = "验签接口异常";
+          }
+          showToast("审计链验签接口调用失败", "error");
+          return;
+        }
+
+        const data = await resp.json();
+        if (verifiedEl) verifiedEl.textContent = (data.verified_records || 0).toLocaleString();
+        if (brokenEl) brokenEl.textContent = (data.broken_seq !== undefined && data.broken_seq !== null) ? `#${data.broken_seq}` : "-";
+        if (headEl) headEl.textContent = data.head_hash || "-";
+        if (pathEl) pathEl.textContent = data.filepath || "-";
+
+        if (data.valid) {
+          if (badge) {
+            badge.className = "px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+            badge.textContent = "完整有效 (100% 匹配)";
+          }
+          if (errEl) {
+            errEl.classList.add("hidden");
+            errEl.textContent = "";
+          }
+          showToast(`审计哈希链完整性验证通过（核验 ${data.verified_records || 0} 条记录）`, "success");
+        } else {
+          if (badge) {
+            badge.className = "px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30 animate-pulse";
+            badge.textContent = `发现篡改/断链 (Seq #${data.broken_seq || '?'})`;
+          }
+          if (errEl) {
+            errEl.classList.remove("hidden");
+            errEl.textContent = `断裂原因: ${data.error || "哈希不匹配或序列号不连续"}`;
+          }
+          showToast("⚠️ 警告：审计日志完整性已被破坏！", "error");
+        }
+      } catch (err) {
+        showToast(`验签出错：${err.message}`, "error");
+      } finally {
+        if (btn) {
+          btn.disabled = false;
+          btn.innerHTML = `<span>🛡️</span><span>立即全量验签</span>`;
+        }
       }
     }
 

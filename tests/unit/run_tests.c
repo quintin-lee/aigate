@@ -732,6 +732,10 @@ main(int argc, char** argv)
     extern void test_admin_audit_chain_verify_endpoint(void);
     test_register("admin_audit_chain_verify_endpoint", test_admin_audit_chain_verify_endpoint);
 
+    extern void test_admin_ui_watermark_and_chain_elements(void);
+    test_register("admin_ui_watermark_and_chain_elements",
+                  test_admin_ui_watermark_and_chain_elements);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
