@@ -1,6 +1,7 @@
 #include "filter_chain.h"
 #include "guardrails.h"
 #include "prompt_template.h"
+#include "jailbreak_detector.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -168,6 +169,58 @@ filter_prompt_template(chat_req_t* q)
     return FILTER_CONTINUE;
 }
 
+/**
+ * @brief Inbound Filter 2: Heuristic jailbreak & adversarial prompt injection defense.
+ */
+static filter_action_t
+filter_jailbreak(chat_req_t* q)
+{
+    if (q == NULL || !q->krec.guardrails_enabled || q->eff_body == NULL || q->eff_len == 0) {
+        return FILTER_CONTINUE;
+    }
+
+    jailbreak_result_t res;
+    memset(&res, 0, sizeof(res));
+    jailbreak_action_t act =
+        jailbreak_detector_inspect(NULL, (const char*)q->eff_body, q->eff_len, &res);
+
+    if (act == JAILBREAK_ACTION_BLOCK) {
+        char block_msg[256];
+        snprintf(block_msg,
+                 sizeof block_msg,
+                 "Blocked by safety guardrail: adversarial injection detected (%s)",
+                 res.rule_tag[0] ? res.rule_tag : "jailbreak");
+        aigate_write_error(q->rc, 400, "adversarial_injection_detected", block_msg);
+        if (q->ac != NULL) {
+            record_usage_and_event(
+                q->ac, q->krec.key_id, q->model, 400, 0, 0, 0, 0, 0, NULL, "blocked", 0.0);
+            aigate_record_audit(q->ac,
+                                q->trace_ctx.trace_id,
+                                (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                q->krec.key_id,
+                                q->model,
+                                NULL,
+                                400,
+                                0,
+                                0,
+                                0,
+                                0,
+                                AUDIT_SEV_VIOLATION,
+                                "jailbreak_detected",
+                                res.reason[0] ? res.reason : "adversarial prompt injection",
+                                (q->rq != NULL) ? (const char*)q->rq->body : NULL,
+                                (q->rq != NULL) ? q->rq->body_len : 0);
+        }
+        return FILTER_STOP;
+    }
+
+    if (act == JAILBREAK_ACTION_FLAG) {
+        snprintf(q->guardrail_act, sizeof q->guardrail_act, "flagged");
+    }
+
+    return FILTER_CONTINUE;
+}
+
 filter_action_t
 filter_chain_execute_inbound(chat_req_t* q)
 {
@@ -176,6 +229,10 @@ filter_chain_execute_inbound(chat_req_t* q)
     }
 
     if (filter_guardrails(q) == FILTER_STOP) {
+        return FILTER_STOP;
+    }
+
+    if (filter_jailbreak(q) == FILTER_STOP) {
         return FILTER_STOP;
     }
 

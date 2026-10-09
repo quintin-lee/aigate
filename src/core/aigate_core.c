@@ -636,15 +636,23 @@ aigate_core_shutdown(aigate_core* ac)
 int
 aigate_write_json(aigate_response_ctx* rc, int status, const char* body, size_t len)
 {
+    if (rc == NULL) {
+        return -1;
+    }
     if (!rc->headers_sent) {
         rc->status = status;
-        rc->set_header(rc->impl, "Content-Type", "application/json");
-        char cl[32];
-        snprintf(cl, sizeof cl, "%zu", len);
-        rc->set_header(rc->impl, "Content-Length", cl);
+        if (rc->set_header != NULL) {
+            rc->set_header(rc->impl, "Content-Type", "application/json");
+            char cl[32];
+            snprintf(cl, sizeof cl, "%zu", len);
+            rc->set_header(rc->impl, "Content-Length", cl);
+        }
         rc->headers_sent = true;
     }
-    return rc->write(rc->impl, body, len, true);
+    if (rc->write != NULL) {
+        return rc->write(rc->impl, body, len, true);
+    }
+    return 0;
 }
 
 int

@@ -697,6 +697,12 @@ main(int argc, char** argv)
     test_register("jailbreak_detector_persona_and_obfuscation",
                   test_jailbreak_detector_persona_and_obfuscation);
 
+    extern void test_filter_chain_jailbreak_blocking(void);
+    test_register("filter_chain_jailbreak_blocking", test_filter_chain_jailbreak_blocking);
+
+    extern void test_filter_chain_jailbreak_clean_pass(void);
+    test_register("filter_chain_jailbreak_clean_pass", test_filter_chain_jailbreak_clean_pass);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
