@@ -1503,14 +1503,32 @@
 
     <!-- ==================== Tab: Request Audit Stream ==================== -->
     <div id="tab-audit" class="tab-content hidden space-y-6">
-      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
-            <span>📋</span> 实时请求审计流 (Live Request Audit Stream)
+            <span>📋</span> 实时请求审计流与合规工作台 (Live Audit & Forensics Workbench)
           </h2>
-          <p class="text-xs text-slate-400 mt-0.5">全量实时捕获请求流水、Token 消耗细分、毫秒级响应延迟与安全风控审计</p>
+          <p class="text-xs text-slate-400 mt-0.5">双层审计架构：内存无锁热环流 (2048 槽位) 实时追踪 + PostgreSQL 冷库违规持久化合规取证</p>
         </div>
-        <div class="flex items-center space-x-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <!-- Dual-tier mode switch -->
+          <div class="inline-flex p-1 rounded-xl bg-slate-900 border border-slate-800 text-xs font-semibold">
+            <button id="auditModeLiveBtn" onclick="switchAuditMode('live')" class="px-3 py-1.5 rounded-lg bg-brand-600 text-white transition flex items-center space-x-1 shadow-sm">
+              <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+              <span>● 实时热流 (Memory Ring)</span>
+            </button>
+            <button id="auditModeHistoryBtn" onclick="switchAuditMode('history')" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition flex items-center space-x-1">
+              <span>🏛️</span>
+              <span>历史违规库 (PostgreSQL)</span>
+            </button>
+          </div>
+
+          <!-- Pause/Resume stream controller -->
+          <button id="auditStreamToggleBtn" onclick="toggleAuditLiveStream()" title="暂停/继续实时滚动" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition flex items-center space-x-1">
+            <span id="auditStreamToggleIcon">⏸</span>
+            <span id="auditStreamToggleText">暂停滚动</span>
+          </button>
+
           <!-- Auto-refresh controller -->
           <div class="flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs">
             <span id="auditStreamIndicator" class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -1525,6 +1543,12 @@
 
           <button id="auditRefreshBtn" onclick="fetchAuditRequests()" title="立刻手动刷新" class="p-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-slate-300 border border-slate-800 transition">
             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          </button>
+
+          <!-- Export buttons -->
+          <button id="auditExportNdjsonBtn" onclick="exportAuditNdjson()" title="导出当前视图为 NDJSON 格式" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition flex items-center space-x-1">
+            <span>⤓</span>
+            <span>NDJSON</span>
           </button>
 
           <button id="auditExportCsvBtn" onclick="exportAuditAsCsv()" title="导出当前视图为 CSV" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-900/90 hover:bg-slate-800 text-slate-300 border border-slate-700/80 transition flex items-center space-x-1">
@@ -1543,38 +1567,38 @@
       <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div class="card p-4">
           <div class="flex items-center justify-between">
-            <span class="text-[11px] text-slate-400 font-medium">窗口请求总量</span>
+            <span class="text-[11px] text-slate-400 font-medium">窗口事件总量</span>
             <span class="text-xs">📊</span>
           </div>
           <div id="auditStatTotalRequests" class="text-2xl font-bold text-white mt-1">0</div>
-          <div class="text-[10px] text-slate-500 mt-0.5">最近拉取的请求样本</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">当前视图拉取的审计记录数</div>
         </div>
 
         <div class="card p-4">
           <div class="flex items-center justify-between">
-            <span class="text-[11px] text-slate-400 font-medium">平均响应耗时</span>
+            <span class="text-[11px] text-slate-400 font-medium">平均首字延迟 (TTFT)</span>
             <span class="text-xs">⚡</span>
           </div>
           <div id="auditStatAvgLatency" class="text-2xl font-bold text-emerald-400 mt-1">0 ms</div>
-          <div class="text-[10px] text-slate-500 mt-0.5">端到端网关+上游延迟</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">上游首字响应 / 端到端延迟</div>
         </div>
 
         <div class="card p-4">
           <div class="flex items-center justify-between">
-            <span class="text-[11px] text-slate-400 font-medium">异常错误率</span>
+            <span class="text-[11px] text-slate-400 font-medium">SLA 降级 / 异常率</span>
             <span class="text-xs">⚠️</span>
           </div>
           <div id="auditStatErrorRate" class="text-2xl font-bold text-sky-400 mt-1">0.0%</div>
-          <div class="text-[10px] text-slate-500 mt-0.5">4xx / 5xx 状态码占比</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">降级 (DEGRADED) 与错误占比</div>
         </div>
 
         <div class="card p-4">
           <div class="flex items-center justify-between">
-            <span class="text-[11px] text-slate-400 font-medium">风控干预拦截</span>
+            <span class="text-[11px] text-slate-400 font-medium">安全风控与违规拦截</span>
             <span class="text-xs">🛡️</span>
           </div>
           <div id="auditStatGuardrails" class="text-2xl font-bold text-purple-400 mt-1">0</div>
-          <div class="text-[10px] text-slate-500 mt-0.5">敏感脱敏与阻断次数</div>
+          <div class="text-[10px] text-slate-500 mt-0.5">VIOLATION 敏感阻断与脱敏次数</div>
         </div>
       </div>
 
@@ -1583,7 +1607,7 @@
         <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3">
           <!-- Key filter -->
           <div>
-            <label class="block text-[11px] font-medium text-slate-400 mb-1">API 密钥</label>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">API 密钥 / 租户</label>
             <select id="auditKeyFilter" onchange="filterAuditRequests(true)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
               <option value="">全部密钥</option>
             </select>
@@ -1608,11 +1632,14 @@
             </select>
           </div>
 
-          <!-- Guardrail filter -->
+          <!-- Guardrail / Severity filter -->
           <div>
-            <label class="block text-[11px] font-medium text-slate-400 mb-1">风控动作</label>
+            <label class="block text-[11px] font-medium text-slate-400 mb-1">级别 / 风控</label>
             <select id="auditGuardrailFilter" onchange="filterAuditRequests(true)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500 font-mono">
-              <option value="all">全部动作</option>
+              <option value="all">全部级别/动作</option>
+              <option value="info">INFO 正常</option>
+              <option value="degraded">DEGRADED 降级</option>
+              <option value="violation">VIOLATION 违规</option>
               <option value="none">无干预 (none)</option>
               <option value="masked">脱敏 (masked)</option>
               <option value="blocked">阻断 (blocked)</option>
@@ -1623,7 +1650,7 @@
           <div>
             <label class="block text-[11px] font-medium text-slate-400 mb-1">快速模糊搜索</label>
             <div class="relative">
-              <input type="text" id="auditSearchInput" oninput="filterAuditRequests(true)" placeholder="搜索模型、供应商、Key ID..." class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
+              <input type="text" id="auditSearchInput" oninput="filterAuditRequests(true)" placeholder="搜索模型、Trace、租户、规则..." class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-800 text-xs text-slate-200 focus:outline-none focus:border-brand-500">
             </div>
           </div>
         </div>
@@ -1636,19 +1663,18 @@
             <thead>
               <tr class="border-b border-slate-800 bg-slate-900/60 text-slate-400 font-medium whitespace-nowrap">
                 <th class="py-3 px-4">请求时间</th>
-                <th class="py-3 px-4">API 密钥</th>
                 <th class="py-3 px-4">链路追踪 (Trace)</th>
-                <th class="py-3 px-4">上游模型</th>
-                <th class="py-3 px-4">供应商</th>
+                <th class="py-3 px-4">租户 / IP / 密钥</th>
+                <th class="py-3 px-4">请求模型 ➔ 路由目标</th>
                 <th class="py-3 px-4">状态码</th>
-                <th class="py-3 px-4 text-right">Tokens 明细 (P / C / Σ)</th>
-                <th class="py-3 px-4 text-right">耗时</th>
-                <th class="py-3 px-4 text-center">风控动作</th>
+                <th class="py-3 px-4 text-right">TTFT / 耗时</th>
+                <th class="py-3 px-4 text-center">级别 / 动作</th>
+                <th class="py-3 px-4 text-center">命中规则 / 原因</th>
                 <th class="py-3 px-4 text-center">操作</th>
               </tr>
             </thead>
             <tbody id="auditTableBody" class="divide-y divide-slate-800/60 font-mono">
-              <tr><td colspan="10" class="py-8 px-4 text-center text-slate-500 text-xs">正在连接并拉取审计日志…</td></tr>
+              <tr><td colspan="9" class="py-8 px-4 text-center text-slate-500 text-xs">正在连接并拉取审计日志…</td></tr>
             </tbody>
           </table>
         </div>
@@ -3892,6 +3918,126 @@
     </div>
   </div>
 
+  <!-- 10. Audit Forensic Drawer (480px Slide-out Forensic Workbench) -->
+  <div id="auditForensicBackdrop" class="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-sm hidden transition-opacity" onclick="closeAuditForensicDrawer()"></div>
+
+  <div id="auditForensicDrawer" class="fixed top-0 right-0 z-50 h-full w-full max-w-[480px] bg-slate-900 border-l border-slate-800 shadow-2xl p-6 overflow-y-auto custom-scroll translate-x-full transition-transform duration-300 ease-in-out hidden flex flex-col space-y-5">
+    <!-- Header -->
+    <div class="flex items-center justify-between border-b border-slate-800 pb-3">
+      <div class="flex items-center space-x-2">
+        <span class="text-xl">🔍</span>
+        <div>
+          <h3 class="text-base font-bold text-white">安全取证与链路诊断</h3>
+          <p class="text-[11px] text-slate-400">首字时延分析、SLA 路由溯源与敏感现场快照</p>
+        </div>
+      </div>
+      <button onclick="closeAuditForensicDrawer()" class="text-slate-400 hover:text-white p-1 text-lg rounded-lg hover:bg-slate-800 transition">&times;</button>
+    </div>
+
+    <!-- Diagnostic Overview Card -->
+    <div class="card p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <div id="forensicDrawerSeverityBadge"></div>
+        <span id="forensicDrawerTime" class="text-xs text-slate-400 font-mono"></span>
+      </div>
+      <div class="grid grid-cols-2 gap-3 text-xs pt-1">
+        <div>
+          <span class="text-slate-500 block text-[11px]">链路追踪 (Trace ID)</span>
+          <div class="flex items-center space-x-1 mt-0.5">
+            <span id="forensicDrawerTraceId" class="text-indigo-300 font-mono font-semibold truncate max-w-[150px]"></span>
+            <button onclick="copyForensicTraceId()" class="text-[10px] text-slate-400 hover:text-white" title="复制 Trace ID">📋</button>
+          </div>
+        </div>
+        <div>
+          <span class="text-slate-500 block text-[11px]">租户 & 来源 IP</span>
+          <span id="forensicDrawerTenantIp" class="text-slate-200 font-mono font-semibold mt-0.5 block truncate"></span>
+        </div>
+        <div class="col-span-2">
+          <span class="text-slate-500 block text-[11px]">模型路由决策路径</span>
+          <div id="forensicDrawerModelPath" class="mt-0.5 font-mono text-xs font-semibold"></div>
+        </div>
+        <div>
+          <span class="text-slate-500 block text-[11px]">HTTP 响应状态码</span>
+          <div id="forensicDrawerHttpStatus" class="mt-0.5"></div>
+        </div>
+        <div>
+          <span class="text-slate-500 block text-[11px]">命中规则 / 降级原因</span>
+          <div id="forensicDrawerRuleTag" class="mt-0.5"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Latency & TTFT Breakdown Micro-bar -->
+    <div class="card p-4 space-y-3">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+          <span>⚡</span> 耗时构成与 TTFT 诊断
+        </span>
+        <span class="text-xs font-mono font-bold text-white" id="forensicDrawerTotalLatency">总耗时: 0 ms</span>
+      </div>
+      <div class="w-full bg-slate-950 rounded-full h-2.5 overflow-hidden flex" id="forensicDrawerLatencyBar">
+        <div id="forensicDrawerTtftBar" class="bg-amber-400 h-full" style="width: 0%" title="TTFT 首字延迟"></div>
+        <div id="forensicDrawerRestBar" class="bg-indigo-500 h-full" style="width: 0%" title="传输推理耗时"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-2 text-center pt-1 text-xs">
+        <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+          <span class="text-[10px] text-amber-400 block font-medium">TTFT 首字延迟</span>
+          <span id="forensicDrawerTtftVal" class="text-sm font-mono font-bold text-white">0 ms</span>
+        </div>
+        <div class="bg-slate-950/60 p-2 rounded-xl border border-slate-800">
+          <span class="text-[10px] text-indigo-400 block font-medium">传输与推理耗时</span>
+          <span id="forensicDrawerRestVal" class="text-sm font-mono font-bold text-white">0 ms</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Prompt Snapshot & Keyword Highlighting -->
+    <div class="card p-4 space-y-2.5">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+          <span>🛡️</span> Prompt 快照现场取证
+        </span>
+        <span id="forensicPromptBadge" class="text-[10px] px-2 py-0.5 rounded font-mono font-bold bg-slate-800 text-slate-400">现场快照</span>
+      </div>
+      <p class="text-[11px] text-slate-400">命中安全风控/敏感词汇已施加红色高亮下划线标识：</p>
+      <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 overflow-x-auto custom-scroll max-h-48">
+        <div id="forensicDrawerPromptContent" class="font-mono text-xs text-slate-200 whitespace-pre-wrap leading-relaxed select-text"></div>
+      </div>
+
+      <!-- Completion Snapshot if any -->
+      <div id="forensicDrawerCompletionSection" class="hidden space-y-1.5 pt-2 border-t border-slate-800/80">
+        <span class="text-[11px] font-bold text-slate-400">回复快照 / 拦截响应:</span>
+        <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800 text-xs text-rose-300/90 font-mono max-h-28 overflow-y-auto" id="forensicDrawerCompletionContent"></div>
+      </div>
+    </div>
+
+    <!-- Raw Forensic JSON -->
+    <div class="card p-4 space-y-2">
+      <div class="flex items-center justify-between">
+        <span class="text-xs font-bold uppercase tracking-wider text-slate-400">原始取证证据 (JSON)</span>
+        <button onclick="copyForensicJson()" class="px-2 py-1 rounded-lg text-[11px] bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition flex items-center gap-1">
+          <span>📋</span><span>复制 JSON</span>
+        </button>
+      </div>
+      <div class="bg-slate-950 p-3 rounded-xl border border-slate-800/80 overflow-x-auto custom-scroll max-h-40">
+        <pre id="forensicDrawerJsonPre" class="font-mono text-xs text-cyan-300/90 whitespace-pre-wrap leading-relaxed select-all"></pre>
+      </div>
+    </div>
+
+    <!-- Footer actions -->
+    <div class="flex items-center justify-between space-x-2 pt-2 border-t border-slate-800">
+      <div class="flex items-center space-x-2">
+        <button onclick="copyAuditForensicCurl()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-indigo-600/30 hover:bg-indigo-600/40 text-indigo-300 border border-indigo-500/40 transition flex items-center gap-1 shadow-sm">
+          <span>📋</span><span>复制 cURL</span>
+        </button>
+        <button onclick="exportAuditForensicJson()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1 shadow-sm">
+          <span>⤓</span><span>导出 JSON</span>
+        </button>
+      </div>
+      <button onclick="closeAuditForensicDrawer()" class="px-4 py-1.5 rounded-xl text-xs font-semibold bg-slate-800 hover:bg-slate-700 text-white transition">关闭</button>
+    </div>
+  </div>
+
   <!-- ==================== CORE JAVASCRIPT ==================== -->
   <script>
     const state = {
@@ -4662,13 +4808,42 @@
       const tbody = document.getElementById("modelsTableBody");
       tbody.innerHTML = `<tr><td colspan="5" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载模型…</td></tr>`;
       document.getElementById("modelsEmptyState").classList.add("hidden");
-      const resp = await apiCall("/admin/v1/models");
-      if (!resp || !resp.ok) return;
-      const data = await resp.json();
+
+      const [respModels, respSla] = await Promise.all([
+        apiCall("/admin/v1/models"),
+        apiCall("/admin/v1/models/sla")
+      ]);
+
+      if (respSla && respSla.ok) {
+        try {
+          const slaData = await respSla.json();
+          state.modelsSla = slaData.models || [];
+        } catch (e) {
+          state.modelsSla = [];
+        }
+      }
+
+      if (!respModels || !respModels.ok) return;
+      const data = await respModels.json();
       state.models = data.models || data.data || [];
       paginationState.models.page = 1;
       renderModelsTable();
       populateModelFilters();
+    }
+
+    async function overrideModelSla(modelName, action) {
+      if (!confirm(`确定要对模型 [${modelName}] 执行手动 SLA 干预操作 [${action}] 吗？`)) return;
+      const resp = await apiCall(`/admin/v1/models/${encodeURIComponent(modelName)}/sla/override`, {
+        method: "POST",
+        body: JSON.stringify({ action: action })
+      });
+      if (!resp || !resp.ok) {
+        showToast(`SLA 操作失败: ${action}`, "error");
+        return;
+      }
+      const data = await resp.json();
+      showToast(`模型 [${modelName}] SLA 状态已更新为: ${data.new_state || action}`, "success");
+      fetchModels();
     }
 
 // Render the model routing table.
@@ -4717,6 +4892,21 @@
 
         const targetCountBadge = `<span class="ml-1.5 px-2 py-0.5 rounded text-[10px] bg-slate-800 text-slate-300 font-mono">${tgts.length} 目标</span>`;
 
+        // Render SLA badge
+        const slaInfo = (state.modelsSla || []).find(s => s.model === name) || {};
+        let slaBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="SLA 正常 (Healthy)">🟢 HEALTHY</span>`;
+        if (slaInfo.sla_state === "SLA_DEGRADED") {
+          const fb = slaInfo.fallback_model ? ` ➔ ${escapeHtml(slaInfo.fallback_model)}` : "";
+          slaBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/40" title="SLA 软降级引流中">🟡 SLA DEGRADED${fb}</span>`;
+        } else if (slaInfo.sla_state === "OPEN" || slaInfo.sla_state === "CIRCUIT_OPEN") {
+          slaBadge = `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-300 border border-rose-500/40 animate-pulse" title="熔断器跳闸保护中">🔴 CIRCUIT OPEN</span>`;
+        }
+
+        let ttftInfo = "";
+        if (slaInfo.current_avg_ttft_ms != null && slaInfo.current_avg_ttft_ms > 0) {
+          ttftInfo = `<span class="text-[10px] text-slate-400 font-mono block mt-0.5">TTFT 均值: ${slaInfo.current_avg_ttft_ms}ms</span>`;
+        }
+
         // Render targets preview & circuit breaker pills
         const targetPills = tgts.map((t, idx) => {
           let cbBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20" title="熔断器正常 (Closed)">🟢 正常</span>`;
@@ -4755,6 +4945,8 @@
           <td class="py-3 px-4 font-mono font-bold text-slate-100">
             <span>${name}</span>
             ${pricingBadge}
+            <div class="mt-1 flex items-center space-x-1">${slaBadge}</div>
+            ${ttftInfo}
           </td>
           <td class="py-3 px-4 whitespace-nowrap">
             ${policyBadge}
@@ -4767,7 +4959,9 @@
             </div>
           </td>
           <td class="py-3 px-4 text-center whitespace-nowrap">${statusBadge}</td>
-          <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
+          <td class="py-3 px-4 text-right space-x-1.5 whitespace-nowrap">
+            <button onclick="overrideModelSla('${name}', 'degrade')" class="text-xs text-amber-400 hover:text-amber-300 transition" title="手动软降级至备选模型">降级</button>
+            <button onclick="overrideModelSla('${name}', 'reset')" class="text-xs text-emerald-400 hover:text-emerald-300 transition" title="手动复位健康状态">复位</button>
             <button onclick="openPlaygroundForModel('${name}')" class="text-xs text-brand-400 hover:text-brand-300 transition" title="在调试场中测试">⚡ 测试</button>
             <button onclick="editModel('${name}')" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
             <button onclick="deleteModel('${name}')" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
@@ -7320,9 +7514,71 @@
       });
     }
 
-    // --- Live Request Audit Stream Management ---
+    // --- Live Request Audit Stream & Forensic Management ---
+    let auditMode = "live"; // 'live' | 'history'
+    let auditLivePaused = false;
+    let auditLatestSeq = 0;
+    let auditLiveEvents = [];
+    let auditViolations = [];
+    let selectedForensicEvent = null;
     let auditFilteredRecords = [];
     let auditCurrentPageSlice = [];
+
+    function switchAuditMode(mode) {
+      auditMode = mode;
+      const liveBtn = document.getElementById("auditModeLiveBtn");
+      const histBtn = document.getElementById("auditModeHistoryBtn");
+      const toggleBtn = document.getElementById("auditStreamToggleBtn");
+
+      if (mode === "live") {
+        if (liveBtn) liveBtn.className = "px-3 py-1.5 rounded-lg bg-brand-600 text-white transition flex items-center space-x-1 shadow-sm";
+        if (histBtn) histBtn.className = "px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition flex items-center space-x-1";
+        if (toggleBtn) toggleBtn.classList.remove("hidden");
+        fetchAuditLiveStream();
+      } else {
+        if (liveBtn) liveBtn.className = "px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition flex items-center space-x-1";
+        if (histBtn) histBtn.className = "px-3 py-1.5 rounded-lg bg-brand-600 text-white transition flex items-center space-x-1 shadow-sm";
+        if (toggleBtn) toggleBtn.classList.add("hidden");
+        fetchAuditViolations();
+      }
+    }
+
+    function toggleAuditLiveStream() {
+      auditLivePaused = !auditLivePaused;
+      const icon = document.getElementById("auditStreamToggleIcon");
+      const text = document.getElementById("auditStreamToggleText");
+      const indicator = document.getElementById("auditStreamIndicator");
+
+      if (auditLivePaused) {
+        if (icon) icon.textContent = "▶";
+        if (text) text.textContent = "继续滚动";
+        if (indicator) indicator.className = "w-2 h-2 rounded-full bg-amber-400";
+        showToast("实时流已暂停滚动", "info");
+      } else {
+        if (icon) icon.textContent = "⏸";
+        if (text) text.textContent = "暂停滚动";
+        if (indicator) indicator.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
+        showToast("实时流已恢复滚动", "info");
+        fetchAuditLiveStream();
+      }
+    }
+
+    function exportAuditNdjson() {
+      const records = (auditFilteredRecords && auditFilteredRecords.length > 0) ? auditFilteredRecords : (state.auditRecords || []);
+      if (records.length === 0) {
+        showToast("当前无审计记录可导出", "error");
+        return;
+      }
+      const lines = records.map(r => JSON.stringify(r)).join("\n");
+      const blob = new Blob([lines], { type: "application/x-ndjson;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `aigate_audit_${auditMode}_${new Date().toISOString().slice(0, 10)}.ndjson`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast(`已导出 ${records.length} 条审计记录为 NDJSON`, "success");
+    }
 
     function startAuditPolling() {
       stopAuditPolling();
@@ -7358,7 +7614,7 @@
     function updateAuditStreamIndicator(active) {
       const el = document.getElementById("auditStreamIndicator");
       if (!el) return;
-      if (active && state.auditAutoRefresh > 0) {
+      if (active && state.auditAutoRefresh > 0 && !auditLivePaused) {
         el.className = "w-2 h-2 rounded-full bg-emerald-400 animate-pulse";
       } else {
         el.className = "w-2 h-2 rounded-full bg-amber-400";
@@ -7389,7 +7645,7 @@
         }
       }
 
-      keySelect.innerHTML = `<option value="">全部密钥</option>`;
+      keySelect.innerHTML = `<option value="">全部密钥 / 租户</option>`;
       (state.keys || []).forEach(k => {
         const kid = k.key_id != null ? k.key_id : k.id;
         const opt = document.createElement("option");
@@ -7409,10 +7665,60 @@
       modelSelect.value = currentModel;
     }
 
+    async function fetchAuditLiveStream(silent = false) {
+      if (auditLivePaused && !silent) return;
+      const query = auditLatestSeq > 0 ? `?limit=50&after_seq=${auditLatestSeq}` : `?limit=50`;
+      const resp = await apiCall(`/admin/v1/audit/events${query}`);
+      if (!resp || !resp.ok) {
+        return fetchAuditRequestsFallback(silent);
+      }
+      const data = await resp.json();
+      const newEvents = data.events || [];
+      if (data.latest_seq && data.latest_seq > auditLatestSeq) {
+        auditLatestSeq = data.latest_seq;
+      }
+
+      if (auditLatestSeq === 0 || auditLiveEvents.length === 0) {
+        auditLiveEvents = newEvents;
+      } else if (newEvents.length > 0) {
+        const existingIds = new Set(auditLiveEvents.map(e => e.seq_id || e.trace_id));
+        const toAdd = newEvents.filter(e => !existingIds.has(e.seq_id || e.trace_id));
+        auditLiveEvents = [...toAdd, ...auditLiveEvents].slice(0, 500);
+      }
+
+      state.auditRecords = auditLiveEvents;
+      calculateAuditKPIs(auditLiveEvents);
+      filterAuditRequests(false);
+
+      if (!silent) {
+        showToast("已更新内存实时审计热流", "info");
+      }
+    }
+
+    async function fetchAuditViolations(silent = false) {
+      const resp = await apiCall(`/admin/v1/audit/violations?limit=50&offset=0`);
+      if (!resp || !resp.ok) return;
+      const data = await resp.json();
+      auditViolations = data.items || [];
+      state.auditRecords = auditViolations;
+      calculateAuditKPIs(auditViolations);
+      filterAuditRequests(false);
+
+      if (!silent) {
+        showToast(`已加载 ${data.total || auditViolations.length} 条违规取证记录`, "info");
+      }
+    }
+
     async function fetchAuditRequests(silent = false) {
+      if (auditMode === "history") {
+        return fetchAuditViolations(silent);
+      }
+      return fetchAuditLiveStream(silent);
+    }
+
+    async function fetchAuditRequestsFallback(silent = false) {
       const kid = document.getElementById("auditKeyFilter")?.value || "";
       const query = kid ? `?limit=100&key_id=${encodeURIComponent(kid)}` : "?limit=100";
-
       const resp = await apiCall(`/admin/v1/usage/requests${query}`);
       if (!resp || !resp.ok) {
         const tbody = document.getElementById("auditTableBody");
@@ -7421,15 +7727,11 @@
         }
         return;
       }
-
       const data = await resp.json();
       state.auditRecords = data.requests || [];
       calculateAuditKPIs(state.auditRecords);
       filterAuditRequests(false);
-
-      if (!silent) {
-        showToast("已刷新审计日志", "info");
-      }
+      if (!silent) showToast("已刷新审计日志", "info");
     }
 
     function calculateAuditKPIs(records = []) {
@@ -7449,22 +7751,27 @@
       }
 
       let totalLatency = 0;
-      let errorCount = 0;
-      let guardrailCount = 0;
+      let degradedCount = 0;
+      let violationCount = 0;
 
       records.forEach(r => {
-        totalLatency += (r.latency_ms || 0);
-        if (r.http_status >= 400) errorCount++;
-        const ga = (r.guardrail_action || "").toLowerCase();
-        if (ga && ga !== "none" && ga !== "pass") guardrailCount++;
+        const lat = r.ttft_ms != null ? r.ttft_ms : (r.latency_ms || 0);
+        totalLatency += lat;
+        const sev = (r.severity || "").toUpperCase();
+        if (sev === "DEGRADED" || (r.routed_model && r.requested_model && r.routed_model !== r.requested_model) || r.fallback_reason) {
+          degradedCount++;
+        }
+        if (sev === "VIOLATION" || sev === "ERROR" || r.http_status >= 400) {
+          violationCount++;
+        }
       });
 
       const avgLatency = totalLatency / count;
-      const errorRate = (errorCount / count) * 100;
+      const degradedOrErrRate = ((degradedCount + violationCount) / count) * 100;
 
       if (latencyEl) latencyEl.textContent = `${avgLatency.toFixed(1)} ms`;
-      if (errEl) errEl.textContent = `${errorRate.toFixed(1)}%`;
-      if (grEl) grEl.textContent = guardrailCount.toLocaleString();
+      if (errEl) errEl.textContent = `${degradedOrErrRate.toFixed(1)}%`;
+      if (grEl) grEl.textContent = violationCount.toLocaleString();
     }
 
     function filterAuditRequests(resetPage = false) {
@@ -7473,28 +7780,38 @@
       const kid = document.getElementById("auditKeyFilter")?.value || "";
       const model = (document.getElementById("auditModelFilter")?.value || "").toLowerCase();
       const statusFilter = document.getElementById("auditStatusFilter")?.value || "all";
-      const grFilter = document.getElementById("auditGuardrailFilter")?.value || "all";
+      const grFilter = (document.getElementById("auditGuardrailFilter")?.value || "all").toLowerCase();
       const q = (document.getElementById("auditSearchInput")?.value || "").toLowerCase().trim();
 
       auditFilteredRecords = (state.auditRecords || []).filter(r => {
-        if (kid && String(r.key_id) !== String(kid)) return false;
-        if (model && (r.model || "").toLowerCase() !== model) return false;
+        if (kid && String(r.key_id || r.tenant_id) !== String(kid)) return false;
+        const mName = (r.requested_model || r.model || "").toLowerCase();
+        if (model && mName !== model) return false;
 
         if (statusFilter === "2xx" && (r.http_status < 200 || r.http_status >= 300)) return false;
         if (statusFilter === "4xx" && (r.http_status < 400 || r.http_status >= 500)) return false;
         if (statusFilter === "5xx" && r.http_status < 500) return false;
 
+        const sev = (r.severity || "").toLowerCase();
         const ga = (r.guardrail_action || "").toLowerCase();
-        if (grFilter === "none" && ga && ga !== "none" && ga !== "pass") return false;
+        if (grFilter === "info" && sev !== "info" && ga) return false;
+        if (grFilter === "degraded" && sev !== "degraded" && !r.fallback_reason) return false;
+        if (grFilter === "violation" && sev !== "violation" && ga !== "blocked") return false;
+        if (grFilter === "none" && (ga === "blocked" || ga === "masked" || sev === "violation")) return false;
         if (grFilter === "masked" && ga !== "masked") return false;
-        if (grFilter === "blocked" && ga !== "blocked") return false;
+        if (grFilter === "blocked" && ga !== "blocked" && sev !== "violation") return false;
 
         if (q) {
-          const modStr = (r.model || "").toLowerCase();
+          const modStr = (r.model || r.requested_model || "").toLowerCase();
+          const routedStr = (r.routed_model || "").toLowerCase();
           const provStr = (r.provider || "").toLowerCase();
-          const keyStr = String(r.key_id);
-          const statStr = String(r.http_status);
-          if (!modStr.includes(q) && !provStr.includes(q) && !keyStr.includes(q) && !statStr.includes(q)) {
+          const traceStr = (r.trace_id || "").toLowerCase();
+          const tenantStr = (r.tenant_id || "").toLowerCase();
+          const ruleStr = (r.rule_tag || r.fallback_reason || "").toLowerCase();
+          const ipStr = (r.client_ip || "").toLowerCase();
+          if (!modStr.includes(q) && !routedStr.includes(q) && !provStr.includes(q) &&
+              !traceStr.includes(q) && !tenantStr.includes(q) && !ruleStr.includes(q) &&
+              !ipStr.includes(q)) {
             return false;
           }
         }
@@ -7522,15 +7839,14 @@
       auditCurrentPageSlice.forEach((r, idx) => {
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/60 transition cursor-pointer";
+        tr.onclick = () => openAuditForensicDrawer(r);
 
-        // Assign or retrieve trace_id
         r.trace_id = getOrGenerateTraceId(r, idx);
 
-        // Date format
-        const dateStr = r.ts ? new Date(r.ts).toLocaleString() : "—";
+        const ts = r.timestamp_ms || (r.created_at ? new Date(r.created_at).getTime() : (r.ts ? new Date(r.ts).getTime() : Date.now()));
+        const dateStr = new Date(ts).toLocaleString();
 
-        // Status badge
-        let statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">${r.http_status}</span>`;
+        let statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-slate-800 text-slate-300 border border-slate-700">${r.http_status || 200}</span>`;
         if (r.http_status >= 200 && r.http_status < 300) {
           statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">${r.http_status} OK</span>`;
         } else if (r.http_status >= 400 && r.http_status < 500) {
@@ -7539,52 +7855,216 @@
           statusBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">${r.http_status} ERR</span>`;
         }
 
-        // Latency color
-        const lat = r.latency_ms || 0;
-        let latClass = "text-emerald-400";
-        if (lat >= 2000) latClass = "text-rose-400";
-        else if (lat >= 500) latClass = "text-amber-400";
-
-        // Guardrail badge
-        const ga = (r.guardrail_action || "none").toLowerCase();
-        let grBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 text-slate-400 font-mono">none</span>`;
-        if (ga === "blocked") {
-          grBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] bg-rose-500/20 text-rose-400 border border-rose-500/30 font-bold">🚫 blocked</span>`;
-        } else if (ga === "masked") {
-          grBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] bg-amber-500/20 text-amber-400 border border-amber-500/30 font-bold">🛡️ masked</span>`;
+        const sev = (r.severity || (r.http_status >= 500 ? "ERROR" : (r.http_status >= 400 ? "VIOLATION" : "INFO"))).toUpperCase();
+        let sevBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">INFO</span>`;
+        if (sev === "DEGRADED") {
+          sevBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-300 border border-amber-500/30">DEGRADED</span>`;
+        } else if (sev === "VIOLATION") {
+          sevBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">VIOLATION</span>`;
+        } else if (sev === "ERROR") {
+          sevBadge = `<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-600/30 text-rose-300 border border-rose-500/50">ERROR</span>`;
         }
 
-        const totalTokens = (r.prompt_tokens || 0) + (r.completion_tokens || 0);
+        const reqModel = r.requested_model || r.model || "-";
+        const routedModel = r.routed_model || reqModel;
+        let modelDisplay = `<span class="font-bold text-white">${escapeHtml(reqModel)}</span>`;
+        if (routedModel !== reqModel || r.fallback_reason) {
+          modelDisplay = `<div><span class="text-slate-400 text-[11px] line-through">${escapeHtml(reqModel)}</span> <span class="text-amber-400 font-bold">➔ ${escapeHtml(routedModel)}</span></div>`;
+        }
+
+        const ttft = r.ttft_ms || 0;
+        const totalLat = r.total_latency_ms || r.latency_ms || ttft;
+        let latClass = "text-emerald-400";
+        if (totalLat >= 2000 || ttft >= 1500) latClass = "text-rose-400";
+        else if (totalLat >= 500 || ttft >= 500) latClass = "text-amber-400";
+
+        const ruleTag = r.rule_tag || r.fallback_reason || "-";
 
         tr.innerHTML = `
           <td class="py-3 px-4 text-slate-300 whitespace-nowrap">${dateStr}</td>
-          <td class="py-3 px-4 whitespace-nowrap"><span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300 font-mono text-[11px]">#${r.key_id}</span></td>
           <td class="py-3 px-4 whitespace-nowrap">
             <span onclick="event.stopPropagation(); openTraceWaterfallModal('${r.trace_id}', ${idx})" title="点击查看 OpenTelemetry 耗时瀑布图" class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded font-mono text-[10px] font-semibold bg-indigo-500/10 text-indigo-400 border border-indigo-500/20 hover:border-indigo-400 hover:bg-indigo-500/20 cursor-pointer transition">
               <span>⚡</span><span>#${r.trace_id.substring(0, 8)}…</span>
             </span>
           </td>
-          <td class="py-3 px-4 font-bold text-white whitespace-nowrap">${escapeHtml(r.model)}</td>
-          <td class="py-3 px-4 text-slate-400 whitespace-nowrap">${escapeHtml(r.provider || "-")}</td>
-          <td class="py-3 px-4 whitespace-nowrap">${statusBadge}</td>
-          <td class="py-3 px-4 text-right whitespace-nowrap text-slate-300">
-            <span class="text-indigo-400">${(r.prompt_tokens || 0).toLocaleString()}</span> /
-            <span class="text-cyan-400">${(r.completion_tokens || 0).toLocaleString()}</span>
-            <span class="text-slate-500 font-sans text-[10px]">(Σ ${totalTokens.toLocaleString()})</span>
+          <td class="py-3 px-4 whitespace-nowrap font-mono text-[11px] text-slate-300">
+            <span class="text-slate-300">${escapeHtml(r.tenant_id || (r.key_id ? 'key#' + r.key_id : '-'))}</span>
+            <span class="text-slate-500 text-[10px] block">${escapeHtml(r.client_ip || '-')}</span>
           </td>
-          <td class="py-3 px-4 text-right font-mono font-bold whitespace-nowrap ${latClass}">${lat.toFixed(1)} ms</td>
-          <td class="py-3 px-4 text-center whitespace-nowrap">${grBadge}</td>
+          <td class="py-3 px-4 whitespace-nowrap">${modelDisplay}</td>
+          <td class="py-3 px-4 whitespace-nowrap">${statusBadge}</td>
+          <td class="py-3 px-4 text-right whitespace-nowrap font-mono font-bold ${latClass}">
+            <div>${ttft > 0 ? ttft + 'ms' : '-'}</div>
+            <div class="text-[10px] text-slate-500 font-normal">总计 ${totalLat.toFixed(0)}ms</div>
+          </td>
+          <td class="py-3 px-4 text-center whitespace-nowrap">${sevBadge}</td>
+          <td class="py-3 px-4 text-center whitespace-nowrap font-mono text-[11px] text-indigo-300">${escapeHtml(ruleTag)}</td>
           <td class="py-3 px-4 text-center whitespace-nowrap space-x-1.5">
-            <button onclick="event.stopPropagation(); openTraceWaterfallModal('${r.trace_id}', ${idx})" title="查看 OpenTelemetry 耗时瀑布图" class="px-2 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-[11px] transition shadow-sm inline-flex items-center gap-1">
-              <span>⚡</span><span>瀑布图</span>
+            <button onclick="event.stopPropagation(); openAuditForensicDrawer(${idx})" class="px-2.5 py-1 rounded-lg bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-[11px] transition shadow-sm font-semibold inline-flex items-center gap-1">
+              <span>🔍</span><span>取证</span>
             </button>
-            <button onclick="openAuditDetail(${idx})" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] transition shadow-sm">
+            <button onclick="event.stopPropagation(); openAuditDetail(${idx})" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-[11px] transition shadow-sm">
               详情
             </button>
           </td>
         `;
         tbody.appendChild(tr);
       });
+    }
+
+    function openAuditForensicDrawer(recordOrIndex) {
+      let r = null;
+      if (typeof recordOrIndex === "number") {
+        r = auditCurrentPageSlice[recordOrIndex] || auditFilteredRecords[recordOrIndex];
+      } else if (recordOrIndex && typeof recordOrIndex === "object") {
+        r = recordOrIndex;
+      }
+      if (!r) return;
+      selectedForensicEvent = r;
+
+      const drawer = document.getElementById("auditForensicDrawer");
+      const backdrop = document.getElementById("auditForensicBackdrop");
+      if (!drawer || !backdrop) return;
+
+      const sev = (r.severity || (r.http_status >= 500 ? "ERROR" : (r.http_status >= 400 ? "VIOLATION" : "INFO"))).toUpperCase();
+      const sevEl = document.getElementById("forensicDrawerSeverityBadge");
+      if (sevEl) {
+        if (sev === "VIOLATION") {
+          sevEl.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-500/20 text-rose-400 border border-rose-500/40">🚫 VIOLATION (安全阻断)</span>`;
+        } else if (sev === "DEGRADED") {
+          sevEl.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40">🟡 SLA DEGRADED (软降级)</span>`;
+        } else if (sev === "ERROR") {
+          sevEl.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-rose-600/30 text-rose-300 border border-rose-500/50">⚠️ ERROR (服务异常)</span>`;
+        } else {
+          sevEl.innerHTML = `<span class="px-2.5 py-1 rounded-full text-xs font-mono font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">🟢 INFO (正常放行)</span>`;
+        }
+      }
+
+      const timeEl = document.getElementById("forensicDrawerTime");
+      if (timeEl) {
+        const ts = r.timestamp_ms || (r.created_at ? new Date(r.created_at).getTime() : (r.ts ? new Date(r.ts).getTime() : Date.now()));
+        timeEl.textContent = new Date(ts).toLocaleString();
+      }
+
+      const traceEl = document.getElementById("forensicDrawerTraceId");
+      const traceId = r.trace_id || `tr_${r.id || r.seq_id || 'unknown'}`;
+      if (traceEl) traceEl.textContent = traceId;
+
+      const tenantIpEl = document.getElementById("forensicDrawerTenantIp");
+      if (tenantIpEl) tenantIpEl.textContent = `${r.tenant_id || 'default'} @ ${r.client_ip || '127.0.0.1'}`;
+
+      const modelPathEl = document.getElementById("forensicDrawerModelPath");
+      const reqModel = r.requested_model || r.model || "unknown";
+      const routedModel = r.routed_model || reqModel;
+      const isFallback = routedModel !== reqModel || r.fallback_reason;
+      if (modelPathEl) {
+        if (isFallback) {
+          modelPathEl.innerHTML = `<span class="text-slate-300">${escapeHtml(reqModel)}</span> <span class="text-amber-400">➔ ${escapeHtml(routedModel)}</span> <span class="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 ml-1">Fallback: ${escapeHtml(r.fallback_reason || 'SLA_DEGRADED')}</span>`;
+        } else {
+          modelPathEl.innerHTML = `<span class="text-white">${escapeHtml(reqModel)}</span> <span class="text-slate-500 text-[10px]">(直连命中)</span>`;
+        }
+      }
+
+      const httpEl = document.getElementById("forensicDrawerHttpStatus");
+      if (httpEl) {
+        const code = r.http_status || 200;
+        const color = code >= 400 ? (code >= 500 ? "text-rose-400" : "text-amber-400") : "text-emerald-400";
+        httpEl.innerHTML = `<span class="font-mono font-bold ${color}">${code}</span>`;
+      }
+
+      const ruleEl = document.getElementById("forensicDrawerRuleTag");
+      if (ruleEl) {
+        const tag = r.rule_tag || r.fallback_reason || "NONE";
+        ruleEl.innerHTML = `<span class="px-2 py-0.5 rounded font-mono text-[11px] bg-slate-800 text-indigo-300 border border-slate-700">${escapeHtml(tag)}</span>`;
+      }
+
+      const ttft = r.ttft_ms || 0;
+      const totalLat = r.total_latency_ms || r.latency_ms || ttft;
+      const restLat = Math.max(0, totalLat - ttft);
+      document.getElementById("forensicDrawerTotalLatency").textContent = `总耗时: ${totalLat.toFixed(1)} ms`;
+      document.getElementById("forensicDrawerTtftVal").textContent = `${ttft.toFixed(1)} ms`;
+      document.getElementById("forensicDrawerRestVal").textContent = `${restLat.toFixed(1)} ms`;
+
+      const ttftPct = totalLat > 0 ? Math.min(100, (ttft / totalLat) * 100) : 50;
+      const restPct = totalLat > 0 ? Math.max(0, 100 - ttftPct) : 50;
+      document.getElementById("forensicDrawerTtftBar").style.width = `${ttftPct}%`;
+      document.getElementById("forensicDrawerRestBar").style.width = `${restPct}%`;
+
+      const promptEl = document.getElementById("forensicDrawerPromptContent");
+      const rawPrompt = r.prompt_snapshot || (r.prompt ? (typeof r.prompt === 'string' ? r.prompt : JSON.stringify(r.prompt)) : "");
+      if (rawPrompt) {
+        const escaped = escapeHtml(rawPrompt);
+        const kwRegex = /(ignore\s+all\s+safety|jailbreak|system\s+prompt|bypass|overwrite|admin|credentials|api_key|secret|drop\s+table|phone_num|id_card|credit_card|toxic|leak|hack|exploit)/gi;
+        const highlighted = escaped.replace(kwRegex, '<mark class="bg-rose-500/40 text-rose-200 underline decoration-rose-500 px-1 py-0.5 rounded font-bold">$&</mark>');
+        promptEl.innerHTML = highlighted;
+      } else {
+        promptEl.innerHTML = `<span class="text-slate-500 italic">[内存实时热流仅记录请求元数据与延迟指标；完整 Prompt 快照仅在触发安全风控 (VIOLATION) 并持久化至 PostgreSQL 冷库时保存]</span>`;
+      }
+
+      const compSec = document.getElementById("forensicDrawerCompletionSection");
+      const compEl = document.getElementById("forensicDrawerCompletionContent");
+      if (r.completion_snapshot && compSec && compEl) {
+        compSec.classList.remove("hidden");
+        compEl.textContent = r.completion_snapshot;
+      } else if (compSec) {
+        compSec.classList.add("hidden");
+      }
+
+      document.getElementById("forensicDrawerJsonPre").textContent = JSON.stringify(r, null, 2);
+
+      backdrop.classList.remove("hidden");
+      drawer.classList.remove("hidden");
+      drawer.classList.add("flex");
+      setTimeout(() => {
+        drawer.classList.remove("translate-x-full");
+      }, 10);
+    }
+
+    function closeAuditForensicDrawer() {
+      const drawer = document.getElementById("auditForensicDrawer");
+      const backdrop = document.getElementById("auditForensicBackdrop");
+      if (!drawer || !backdrop) return;
+      drawer.classList.add("translate-x-full");
+      setTimeout(() => {
+        drawer.classList.remove("flex");
+        drawer.classList.add("hidden");
+        backdrop.classList.add("hidden");
+      }, 300);
+    }
+
+    function copyForensicTraceId() {
+      const tid = selectedForensicEvent?.trace_id || document.getElementById("forensicDrawerTraceId")?.textContent || "";
+      if (!tid) return;
+      navigator.clipboard.writeText(tid).then(() => showToast("已复制 Trace ID: " + tid, "success"));
+    }
+
+    function copyForensicJson() {
+      const text = document.getElementById("forensicDrawerJsonPre")?.textContent || "";
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(() => showToast("已复制取证证据 JSON", "success"));
+    }
+
+    function copyAuditForensicCurl() {
+      const r = selectedForensicEvent;
+      if (!r) return;
+      const traceId = r.trace_id || "tr_sample";
+      const tenantId = r.tenant_id || "corp-ai";
+      const model = r.requested_model || r.model || "gpt-4o";
+      const curlCmd = `curl -X POST http://127.0.0.1:18080/v1/chat/completions \\\n  -H "Authorization: Bearer <YOUR_API_KEY>" \\\n  -H "Content-Type: application/json" \\\n  -H "X-AIGate-Trace-Id: ${traceId}" \\\n  -H "X-AIGate-Tenant-Id: ${tenantId}" \\\n  -d '{\\n    "model": "${model}",\\n    "messages": [{"role": "user", "content": "Hello"}]\\n  }'`;
+      navigator.clipboard.writeText(curlCmd).then(() => showToast("已复制可复现 cURL 命令至剪贴板", "success"));
+    }
+
+    function exportAuditForensicJson() {
+      const r = selectedForensicEvent;
+      if (!r) return;
+      const blob = new Blob([JSON.stringify(r, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit_forensic_${r.trace_id || r.id || 'evidence'}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast("已下载取证证据 JSON", "success");
     }
 
     function openAuditDetail(index) {

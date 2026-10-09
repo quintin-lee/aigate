@@ -685,6 +685,10 @@ main(int argc, char** argv)
     extern void test_admin_audit_and_sla_endpoints(void);
     test_register("admin_audit_and_sla_endpoints", test_admin_audit_and_sla_endpoints);
 
+    extern void test_admin_ui_contains_audit_forensic_drawer(void);
+    test_register("admin_ui_contains_audit_forensic_drawer",
+                  test_admin_ui_contains_audit_forensic_drawer);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
