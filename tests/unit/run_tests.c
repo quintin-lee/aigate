@@ -703,6 +703,13 @@ main(int argc, char** argv)
     extern void test_filter_chain_jailbreak_clean_pass(void);
     test_register("filter_chain_jailbreak_clean_pass", test_filter_chain_jailbreak_clean_pass);
 
+    extern void test_watermark_encode_decode_roundtrip(void);
+    test_register("watermark_encode_decode_roundtrip", test_watermark_encode_decode_roundtrip);
+
+    extern void test_watermark_mixed_chinese_and_truncation(void);
+    test_register("watermark_mixed_chinese_and_truncation",
+                  test_watermark_mixed_chinese_and_truncation);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
