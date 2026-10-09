@@ -7679,9 +7679,10 @@
             </div>`;
           showToast("文本中未检测到隐写水印", "info");
         } else {
-          const dateStr = data.timestamp ? new Date(data.timestamp * 1000).toLocaleString() : "未知";
-          const traceHex = data.short_trace ? "0x" + BigInt(data.short_trace).toString(16).toUpperCase().padStart(16, "0") : "-";
-          const crcBadge = data.crc_valid
+          const wm = data.watermark || data;
+          const dateStr = wm.timestamp ? new Date(wm.timestamp * 1000).toLocaleString() : "未知";
+          const traceHex = wm.short_trace ? (typeof wm.short_trace === "string" ? "0x" + wm.short_trace.toUpperCase() : "0x" + BigInt(wm.short_trace).toString(16).toUpperCase().padStart(16, "0")) : "-";
+          const crcBadge = wm.crc_valid
             ? `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">CRC-16 校验通过</span>`
             : `<span class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/20 text-rose-400 border border-rose-500/30">CRC 校验失败</span>`;
 
@@ -7696,7 +7697,7 @@
               <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 text-xs">
                 <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
                   <div class="text-[10px] text-slate-400">调用租户 (Key ID)</div>
-                  <div class="font-mono font-bold text-white mt-0.5 text-sm">#${data.key_id}</div>
+                  <div class="font-mono font-bold text-white mt-0.5 text-sm">#${wm.key_id}</div>
                 </div>
                 <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800">
                   <div class="text-[10px] text-slate-400">生成时间 (Timestamp)</div>

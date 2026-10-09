@@ -50,7 +50,7 @@
 - Create: `tests/unit/policy/test_jailbreak_detector.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写越狱检测器的单元测试**
+- [x] **Step 1: 编写越狱检测器的单元测试**
 
 在 `tests/unit/policy/test_jailbreak_detector.c` 中编写测试：
 
@@ -116,12 +116,12 @@ TEST_CASE(test_jailbreak_detector_persona_and_obfuscation)
 
 并在 `tests/unit/run_tests.c` 注册两个测试函数。
 
-- [ ] **Step 2: 运行测试确保失败**
+- [x] **Step 2: 运行测试确保失败**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter jailbreak_detector`
 Expected: 符号未定义或编译失败。
 
-- [ ] **Step 3: 实现 `src/policy/jailbreak_detector.h` 与 `src/policy/jailbreak_detector.c`**
+- [x] **Step 3: 实现 `src/policy/jailbreak_detector.h` 与 `src/policy/jailbreak_detector.c`**
 
 实现：
 - 规范化小写与空白归一化（忽略多余空格、常见标点符号分隔）；
@@ -131,12 +131,12 @@ Expected: 符号未定义或编译失败。
   - Dimension C: 统计不可见字符（`\xE2\x80\x8B`, `\xE2\x80\x8C`, `\xE2\x80\x8D`, `\xEF\xBB\xBF`, `\xC2\xAD` 等）比例是否超出 3%，检测可疑 Base64 前缀；
 - 风险累加打分逻辑：$\ge 70$ BLOCK, 40~69 FLAG, < 40 PASS。
 
-- [ ] **Step 4: 运行测试确保通过**
+- [x] **Step 4: 运行测试确保通过**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter jailbreak_detector`
 Expected: 2/2 测试通过。
 
-- [ ] **Step 5: 提交代码**
+- [x] **Step 5: 提交代码**
 
 Run: `git add src/policy/jailbreak_detector.* tests/unit/policy/test_jailbreak_detector.c tests/unit/run_tests.c && git commit -m "feat(policy): implement lightweight pure-c heuristic jailbreak detector"`
 
@@ -150,18 +150,18 @@ Run: `git add src/policy/jailbreak_detector.* tests/unit/policy/test_jailbreak_d
 - Create: `tests/unit/policy/test_filter_chain_jailbreak.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写中间件越狱拦截的单元测试**
+- [x] **Step 1: 编写中间件越狱拦截的单元测试**
 
 在 `tests/unit/policy/test_filter_chain_jailbreak.c` 中：
 - 构建 `chat_req_t` 结构体，填入恶意注入 Prompt；
 - 调用 `filter_chain_execute_inbound(q)`；
 - 验证返回 `FILTER_STOP`，且审计记录中包含 `AUDIT_SEV_VIOLATION` 和 `jailbreak_detected`。
 
-- [ ] **Step 2: 运行测试确保失败**
+- [x] **Step 2: 运行测试确保失败**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_filter_chain_jailbreak`
 
-- [ ] **Step 3: 在 `filter_chain.c` 中接入 `jailbreak_detector`**
+- [x] **Step 3: 在 `filter_chain.c` 中接入 `jailbreak_detector`**
 
 - 在 `filter_guardrails` 之后增加 `filter_jailbreak(chat_req_t* q)`；
 - 调用 `jailbreak_detector_inspect`；
@@ -170,12 +170,12 @@ Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filte
   - 调用 `aigate_record_audit` 记录违规审计日志；
   - 返回 `FILTER_STOP`。
 
-- [ ] **Step 4: 运行测试确保通过**
+- [x] **Step 4: 运行测试确保通过**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_filter_chain_jailbreak`
 Expected: 单元测试全部通过。
 
-- [ ] **Step 5: 提交代码**
+- [x] **Step 5: 提交代码**
 
 Run: `git add src/policy/filter_chain.c tests/unit/policy/test_filter_chain_jailbreak.c tests/unit/run_tests.c && git commit -m "feat(policy): integrate jailbreak detector into inbound filter chain"`
 
@@ -189,7 +189,7 @@ Run: `git add src/policy/filter_chain.c tests/unit/policy/test_filter_chain_jail
 - Create: `tests/unit/policy/test_watermark_engine.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写零宽隐写水印编解码的单元测试**
+- [x] **Step 1: 编写零宽隐写水印编解码的单元测试**
 
 在 `tests/unit/policy/test_watermark_engine.c` 中：
 
@@ -255,11 +255,11 @@ TEST_CASE(test_watermark_mixed_chinese_and_truncation)
 
 并在 `tests/unit/run_tests.c` 注册两个测试函数。
 
-- [ ] **Step 2: 运行测试确保编译或执行失败**
+- [x] **Step 2: 运行测试确保编译或执行失败**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter watermark`
 
-- [ ] **Step 3: 实现 `src/policy/watermark_engine.h` 与 `src/policy/watermark_engine.c`**
+- [x] **Step 3: 实现 `src/policy/watermark_engine.h` 与 `src/policy/watermark_engine.c`**
 
 实现：
 - 4 种零宽字符常量定义（`ZWSP`, `ZWNJ`, `ZWJ`, `ZWNBSP`）；
@@ -268,12 +268,12 @@ Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filte
 - `watermark_inject`: 在标点（逗号、句号、换行）或文末嵌入 76 个零宽字符（228 字节 UTF-8）；
 - `watermark_decode`: 扫描提取所有零宽字符，按 2-bit 组装为字节流，寻找 `0x57` 前缀魔数，校验 CRC-16 并解包还原。
 
-- [ ] **Step 4: 运行测试确保全部通过**
+- [x] **Step 4: 运行测试确保全部通过**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter watermark`
 Expected: 2/2 测试通过。
 
-- [ ] **Step 5: 提交代码**
+- [x] **Step 5: 提交代码**
 
 Run: `git add src/policy/watermark_engine.* tests/unit/policy/test_watermark_engine.c tests/unit/run_tests.c && git commit -m "feat(policy): implement zero-width steganographic watermark engine"`
 
@@ -287,28 +287,28 @@ Run: `git add src/policy/watermark_engine.* tests/unit/policy/test_watermark_eng
 - Create: `tests/unit/policy/test_watermark_injection_pipeline.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写管道水印注入单元测试**
+- [x] **Step 1: 编写管道水印注入单元测试**
 
 在 `tests/unit/policy/test_watermark_injection_pipeline.c` 中：
 - 验证当请求的 Key 启用水印时，出站过滤器自动在响应 JSON 的 `choices[0].message.content` 中嵌入零宽隐式水印；
 - 验证客户端解析该 JSON 时仍然是合法 JSON 字符串；
 - 验证解码函数能从 `content` 中精确反解出 `key_id`。
 
-- [ ] **Step 2: 运行测试确保失败**
+- [x] **Step 2: 运行测试确保失败**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_watermark_injection_pipeline`
 
-- [ ] **Step 3: 在 `filter_chain_execute_outbound` 与流式转发中注入水印**
+- [x] **Step 3: 在 `filter_chain_execute_outbound` 与流式转发中注入水印**
 
 - 非流式：解析 Jansson 响应中的 `content`，调用 `watermark_inject`，替换回 Jansson 树并重新序列化；
 - 流式：在下发的第一个带 text delta 的 SSE chunk 中附加水印。
 
-- [ ] **Step 4: 运行测试确保通过**
+- [x] **Step 4: 运行测试确保通过**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_watermark_injection_pipeline`
 Expected: 全部通过。
 
-- [ ] **Step 5: 提交代码**
+- [x] **Step 5: 提交代码**
 
 Run: `git add src/policy/filter_chain.c src/core/pipeline_chat.c tests/unit/policy/test_watermark_injection_pipeline.c tests/unit/run_tests.c && git commit -m "feat(policy): integrate watermark injection into outbound response pipeline"`
 
@@ -323,7 +323,7 @@ Run: `git add src/policy/filter_chain.c src/core/pipeline_chat.c tests/unit/poli
 - Modify: `tests/unit/run_tests.c`
 - Modify: `src/observe/audit_logger.c`
 
-- [ ] **Step 1: 编写防篡改哈希链单元测试**
+- [x] **Step 1: 编写防篡改哈希链单元测试**
 
 在 `tests/unit/observe/test_audit_hash_chain.c` 中：
 
@@ -409,11 +409,11 @@ TEST_CASE(test_audit_hash_chain_tamper_detection)
 
 并在 `tests/unit/run_tests.c` 注册两个测试。
 
-- [ ] **Step 2: 运行测试确保失败**
+- [x] **Step 2: 运行测试确保失败**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_audit_hash_chain`
 
-- [ ] **Step 3: 实现 `src/observe/audit_hash_chain.h` 与 `src/observe/audit_hash_chain.c`，并接入 `audit_logger.c`**
+- [x] **Step 3: 实现 `src/observe/audit_hash_chain.h` 与 `src/observe/audit_hash_chain.c`，并接入 `audit_logger.c`**
 
 - 基于 OpenSSL `HMAC(EVP_sha256(), ...)` 计算十六进制哈希；
 - 初始化创世哈希 $H_0$；
@@ -421,12 +421,12 @@ Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filte
 - `audit_hash_chain_verify_file`: 逐行读取，核验 `seq` 单调性、`prev_hash` 与上一行 `hash` 匹配性、以及重算当前行 HMAC 是否与 `hash` 一致；
 - 在 `audit_logger.c` 的文件落盘 Worker 中调用 `audit_hash_chain_sign`。
 
-- [ ] **Step 4: 运行测试确保通过**
+- [x] **Step 4: 运行测试确保通过**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_audit_hash_chain`
 Expected: 2/2 测试通过。
 
-- [ ] **Step 5: 提交代码**
+- [x] **Step 5: 提交代码**
 
 Run: `git add src/observe/audit_hash_chain.* src/observe/audit_logger.* tests/unit/observe/test_audit_hash_chain.c tests/unit/run_tests.c && git commit -m "feat(observe): implement HMAC-SHA256 tamper-proof audit hash chain"`
 
@@ -439,18 +439,18 @@ Run: `git add src/observe/audit_hash_chain.* src/observe/audit_logger.* tests/un
 - Create: `tests/unit/server/test_admin_watermark_and_chain_api.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写管理端 REST API 单元测试**
+- [x] **Step 1: 编写管理端 REST API 单元测试**
 
 在 `tests/unit/server/test_admin_watermark_and_chain_api.c` 中：
 - 测试 `POST /admin/v1/watermark/decode` 传入包含隐写水印的文本，返回 HTTP 200 且 JSON 中 `found: true`, `key_id: 4096`;
 - 测试 `POST /admin/v1/watermark/decode` 传入纯文本，返回 `found: false`;
 - 测试 `POST /admin/v1/audit/chain/verify` 触发链校验，返回 `valid: true` 与 `total_records`。
 
-- [ ] **Step 2: 运行测试确保失败**
+- [x] **Step 2: 运行测试确保失败**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_admin_watermark_and_chain_api`
 
-- [ ] **Step 3: 在 `src/server/admin_api.c` 中实现两个端点路由**
+- [x] **Step 3: 在 `src/server/admin_api.c` 中实现两个端点路由**
 
 - 注册路由匹配：
   - `POST /admin/v1/watermark/decode`
@@ -458,12 +458,12 @@ Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filte
 - 解析 Jansson 请求体，调用 `watermark_decode` 与 `audit_hash_chain_verify_file`；
 - 输出标准化 JSON 响应。
 
-- [ ] **Step 4: 运行测试确保通过**
+- [x] **Step 4: 运行测试确保通过**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_admin_watermark_and_chain_api`
 Expected: 全部通过。
 
-- [ ] **Step 5: 提交代码**
+- [x] **Step 5: 提交代码**
 
 Run: `git add src/server/admin_api.c tests/unit/server/test_admin_watermark_and_chain_api.c tests/unit/run_tests.c && git commit -m "feat(server): expose watermark decode and audit chain verify REST APIs"`
 
@@ -476,17 +476,17 @@ Run: `git add src/server/admin_api.c tests/unit/server/test_admin_watermark_and_
 - Create: `tests/unit/server/test_admin_ui_watermark_and_chain.c`
 - Modify: `tests/unit/run_tests.c`
 
-- [ ] **Step 1: 编写嵌入式控制台 HTML 完整性测试**
+- [x] **Step 1: 编写嵌入式控制台 HTML 完整性测试**
 
 在 `tests/unit/server/test_admin_ui_watermark_and_chain.c` 中：
 - 验证生成的 `admin_ui_html` 中包含水印溯源文本框 `watermark-input`、按钮 `btn-decode-watermark`、溯源结果面板 `watermark-result`；
 - 验证包含哈希链验签卡片 `btn-verify-chain` 与状态徽章 `chain-status-badge`。
 
-- [ ] **Step 2: 运行测试确保失败**
+- [x] **Step 2: 运行测试确保失败**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_admin_ui_watermark_and_chain`
 
-- [ ] **Step 3: 更新 `web/admin.html` 并生成头文件**
+- [x] **Step 3: 更新 `web/admin.html` 并生成头文件**
 
 - 在 `tab-audit` 中增加双列取证面板：
   - 左列：零宽水印溯源解码台（输入框、提取按钮、结果卡片、联动在审计库中反查按钮）；
@@ -494,12 +494,12 @@ Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filte
 - 增加 JS 函数：`decodeWatermark()` 与 `verifyAuditChain()`；
 - 执行 `python3 scripts/embed_html.py web/admin.html build/generated/admin_ui_html.h`。
 
-- [ ] **Step 4: 运行测试确保通过**
+- [x] **Step 4: 运行测试确保通过**
 
 Run: `make -C build aigate_unit_tests && ./build/tests/aigate_unit_tests --filter test_admin_ui_watermark_and_chain`
 Expected: 全部通过。
 
-- [ ] **Step 5: 提交代码**
+- [x] **Step 5: 提交代码**
 
 Run: `git add web/admin.html tests/unit/server/test_admin_ui_watermark_and_chain.c tests/unit/run_tests.c && git commit -m "feat(web): add watermark forensic decoder and audit hash chain verifier UI to console"`
 
@@ -510,7 +510,7 @@ Run: `git add web/admin.html tests/unit/server/test_admin_ui_watermark_and_chain
 **Files:**
 - Create: `tests/integration/test_ai_threat_defense_and_watermarking.py`
 
-- [ ] **Step 1: 编写端到端自动化测试脚本**
+- [x] **Step 1: 编写端到端自动化测试脚本**
 
 在 `tests/integration/test_ai_threat_defense_and_watermarking.py` 中：
 1. 启动 aigate 服务；
@@ -518,16 +518,16 @@ Run: `git add web/admin.html tests/unit/server/test_admin_ui_watermark_and_chain
 3. 发送带有对抗性越狱提示词（"Ignore previous instructions..."）的请求，验证网关返回 400 且错误码为 `adversarial_injection_detected`；
 4. 调用 `/admin/v1/audit/chain/verify` 验证落盘日志哈希链完整性（`valid: true`）。
 
-- [ ] **Step 2: 运行 Python 集成测试**
+- [x] **Step 2: 运行 Python 集成测试**
 
 Run: `pytest tests/integration/test_ai_threat_defense_and_watermarking.py -v`
 Expected: 全部用例通过。
 
-- [ ] **Step 3: 运行全量 C 单元测试矩阵**
+- [x] **Step 3: 运行全量 C 单元测试矩阵**
 
 Run: `ctest --test-dir build --output-on-failure`
 Expected: 100% 测试通过（280+ tests passing）。
 
-- [ ] **Step 4: 提交代码与计划完成状态**
+- [x] **Step 4: 提交代码与计划完成状态**
 
 Run: `git add tests/integration/test_ai_threat_defense_and_watermarking.py docs/superpowers/plans/2026-10-09-ai-threat-defense-and-watermarking.md && git commit -m "test(integration): verify e2e threat defense, watermarking and hash chain integrity"`

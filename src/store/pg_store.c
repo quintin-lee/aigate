@@ -283,7 +283,8 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
         "rate_qps, daily_token_quota, expires_at, revoked_at, "
         "COALESCE(group_id, 0), COALESCE(guardrails_enabled, true), "
         "COALESCE(monthly_cost_budget, 0.0), COALESCE(monthly_token_budget, 0), "
-        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0) "
+        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
+        "COALESCE(watermark_enabled, false) "
         "FROM api_keys WHERE key_hash = $1";
     const char* val[1] = {key_hash};
     int         plen[1] = {0};
@@ -338,6 +339,14 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
             if (PQnfields(res) > 13) {
                 const char* pm = PQgetvalue(res, 0, 13);
                 out->prompt_mode = (pm != NULL && pm[0] != '\0') ? atoi(pm) : 0;
+            }
+            if (PQnfields(res) > 14) {
+                const char* wm = PQgetvalue(res, 0, 14);
+                out->watermark_enabled =
+                    (wm != NULL &&
+                     (strcmp(wm, "t") == 0 || strcmp(wm, "1") == 0 || strcmp(wm, "true") == 0));
+            } else {
+                out->watermark_enabled = 0;
             }
             rc = 0;
         } else {
@@ -396,6 +405,13 @@ fill_key_row(PGresult* res, int row, key_rec_t* out)
         const char* pm = PQgetvalue(res, row, 13);
         out->prompt_mode = (pm != NULL && pm[0] != '\0') ? atoi(pm) : 0;
     }
+    if (PQnfields(res) > 14) {
+        const char* wm = PQgetvalue(res, row, 14);
+        out->watermark_enabled = (wm != NULL && (strcmp(wm, "t") == 0 || strcmp(wm, "1") == 0 ||
+                                                 strcmp(wm, "true") == 0));
+    } else {
+        out->watermark_enabled = 0;
+    }
 }
 
 /** @brief libpq implementation of pg_ops.list_keys: 0 on success, -1 on error (@p n always written with the actual count). */
@@ -409,7 +425,8 @@ pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
         "expires_at, revoked_at, COALESCE(group_id, 0), "
         "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
         "COALESCE(monthly_token_budget, 0), "
-        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0) "
+        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
+        "COALESCE(watermark_enabled, false) "
         "FROM api_keys ORDER BY key_id";
     *n = 0;
 
@@ -445,7 +462,8 @@ pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
         "expires_at, revoked_at, COALESCE(group_id, 0), "
         "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
         "COALESCE(monthly_token_budget, 0), "
-        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0) "
+        "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
+        "COALESCE(watermark_enabled, false) "
         "FROM api_keys WHERE key_id = $1";
     char        id[32];
     const char* val[1] = {0};
@@ -662,18 +680,19 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     static const char q[] =
         "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
         "daily_token_quota, expires_at, group_id, guardrails_enabled, monthly_cost_budget, "
-        "monthly_token_budget, system_prompt, prompt_mode) "
+        "monthly_token_budget, system_prompt, prompt_mode, watermark_enabled) "
         "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
         "ELSE string_to_array($3, '|') END, $4, $5, "
         "CASE WHEN $6 = 'null' THEN NULL "
         "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END, "
         "CASE WHEN $7 = '0' THEN NULL ELSE ($7)::bigint END, $8, $9, $10, "
-        "CASE WHEN $11 = '' THEN NULL ELSE $11 END, $12) RETURNING key_id";
+        "CASE WHEN $11 = '' THEN NULL ELSE $11 END, $12, $13) RETURNING key_id";
     char        joined[512], rate[16], quota[32], exp[32], gid_str[32], mcb_str[32], mtb_str[32];
     char        pm_str[16];
     const char* ge_str = k->guardrails_enabled ? "true" : "false";
-    const char* vals[12];
-    int         plens[12] = {0};
+    const char* wm_str = k->watermark_enabled ? "true" : "false";
+    const char* vals[13];
+    int         plens[13] = {0};
     long        id = -1;
 
     if (join_model_list(k, joined, sizeof joined) != 0) {
@@ -702,9 +721,10 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     vals[9] = mtb_str;
     vals[10] = k->system_prompt;
     vals[11] = pm_str;
+    vals[12] = wm_str;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 12, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 13, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
         id = atol(PQgetvalue(res, 0, 0));
@@ -756,6 +776,7 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
     snprintf(mtb_str, sizeof mtb_str, "%ld", k->monthly_token_budget);
     snprintf(pm_str, sizeof pm_str, "%d", k->prompt_mode);
     const char* ge_str = k->guardrails_enabled ? "true" : "false";
+    const char* wm_str = k->watermark_enabled ? "true" : "false";
 
     off = snprintf(sql, sizeof sql, "UPDATE api_keys SET ");
     if (mask & KMASK_RATE) {
@@ -846,6 +867,15 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
         off += snprintf(
             sql + off, sizeof sql - (size_t)off, "%sprompt_mode = $%d", nv > 1 ? ", " : "", nv);
         vals[nv - 1] = pm_str;
+    }
+    if (mask & KMASK_WATERMARK) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%swatermark_enabled = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = wm_str;
     }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE key_id = $%d", nv);

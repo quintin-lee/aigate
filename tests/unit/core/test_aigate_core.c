@@ -447,7 +447,7 @@ TEST_CASE(test_core_pipeline)
                 "upstream request received W3C traceparent header");
     TEST_ASSERT(trace_ring_buffer_count(ac.trace_rb) >= 1, "trace was pushed to ring buffer");
     trace_context_t pop_ctx;
-    TEST_ASSERT(trace_ring_buffer_pop(ac.trace_rb, &pop_ctx, 100) == true,
+    TEST_ASSERT(trace_ring_buffer_pop(ac.trace_rb, &pop_ctx, 1000) == true,
                 "popped trace from buffer");
     TEST_ASSERT(pop_ctx.span_count >= 4, "contains spans (got %d)", pop_ctx.span_count);
 

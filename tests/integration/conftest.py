@@ -9,6 +9,7 @@ from typing import Generator, Dict, Any
 
 from mock_upstream import start_mock_upstream
 
+LOCAL_DOCKER_PG_DSN = "postgresql://aigate:changeme@127.0.0.1:5432/aigate"
 DEFAULT_PG_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/aigate_test"
 DOCKER_PG_DSN = "postgresql://aigate:changeme@172.39.4.2:5432/aigate"
 DOCKER_PG_DSN_3 = "postgresql://aigate:changeme@172.39.4.3:5432/aigate"
@@ -21,7 +22,7 @@ def ensure_no_proxy():
 @pytest.fixture(scope="session")
 def pg_dsn() -> str:
     dsn = os.environ.get("TEST_PG_DSN")
-    candidates = [dsn] if dsn else [DEFAULT_PG_DSN, DOCKER_PG_DSN, DOCKER_PG_DSN_3]
+    candidates = [dsn] if dsn else [LOCAL_DOCKER_PG_DSN, DEFAULT_PG_DSN, DOCKER_PG_DSN, DOCKER_PG_DSN_3]
     for candidate in candidates:
         try:
             res = subprocess.run(["pg_isready", "-d", candidate, "-t", "2"], capture_output=True)
@@ -46,8 +47,8 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
 
     custom_bin = os.environ.get("AIGATE_BIN")
     candidates_bin = [custom_bin] if custom_bin else [
-        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.build/aigate")),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "../../build/aigate")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "../../.build/aigate")),
     ]
     bin_path = next((b for b in candidates_bin if b and os.path.exists(b)), None)
     if not bin_path:
@@ -59,6 +60,10 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
     except Exception:
         pass
 
+    audit_log_path = f"/tmp/aigate_session_audit_{port}.ndjson"
+    if os.path.exists(audit_log_path):
+        os.remove(audit_log_path)
+
     env = os.environ.copy()
     env["AIGATE_LISTEN"] = f":{port}"
     env["AIGATE_PG_DSN"] = pg_dsn
@@ -67,6 +72,7 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
     env["AIGATE_MAX_BODY_BYTES"] = "2048"
     env["AIGATE_USAGE_FLUSH_S"] = "1"
     env["AIGATE_MASTER_KEY"] = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    env["AIGATE_AUDIT_LOG_FILE"] = audit_log_path
     env["ANTHROPIC_API_KEY"] = "sk-ant-test-key"
 
     proc = subprocess.Popen([bin_path], env=env)
@@ -91,6 +97,7 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
         "base_url": base_url,
         "admin_token": ADMIN_TOKEN,
         "mock_upstream": mock_upstream,
+        "audit_log_file": audit_log_path,
     }
 
     proc.terminate()
@@ -98,3 +105,6 @@ def gateway(pg_dsn: str, mock_upstream: str) -> Generator[Dict[str, Any], None, 
         proc.wait(timeout=3)
     except subprocess.TimeoutExpired:
         proc.kill()
+
+    if os.path.exists(audit_log_path):
+        os.remove(audit_log_path)

@@ -161,6 +161,8 @@ typedef struct cost_row {
 #define KMASK_SYSTEM_PROMPT (1 << 8)
 /** @brief Key update mask: prompt template mode. */
 #define KMASK_PROMPT_MODE (1 << 9)
+/** @brief Key update mask: zero-width watermark enabling. */
+#define KMASK_WATERMARK (1 << 10)
 
 /** @brief Model update mask: endpoint. */
 #define MMASK_ENDPOINT (1 << 0)

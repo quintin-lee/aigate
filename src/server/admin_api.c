@@ -601,6 +601,11 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     if (jgr != NULL && json_is_boolean(jgr)) {
         k.guardrails_enabled = json_is_true(jgr) ? 1 : 0;
     }
+    k.watermark_enabled = 0;
+    json_t* jwm = json_object_get(jbody, "watermark_enabled");
+    if (jwm != NULL && json_is_boolean(jwm)) {
+        k.watermark_enabled = json_is_true(jwm) ? 1 : 0;
+    }
     json_t* jcost_b = json_object_get(jbody, "monthly_cost_budget");
     if (jcost_b != NULL && json_is_number(jcost_b)) {
         k.monthly_cost_budget = json_number_value(jcost_b);
@@ -648,6 +653,7 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     json_object_set_new(out, "name", json_string(k.name));
     json_object_set_new(out, "group_id", k.group_id > 0 ? json_integer(k.group_id) : json_null());
     json_object_set_new(out, "guardrails_enabled", json_boolean(k.guardrails_enabled));
+    json_object_set_new(out, "watermark_enabled", json_boolean(k.watermark_enabled));
     json_object_set_new(out, "monthly_cost_budget", json_real(k.monthly_cost_budget));
     json_object_set_new(out, "monthly_token_budget", json_integer(k.monthly_token_budget));
     json_object_set_new(out,
@@ -704,6 +710,7 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* qu
         json_object_set_new(
             o, "group_id", recs[i].group_id > 0 ? json_integer(recs[i].group_id) : json_null());
         json_object_set_new(o, "guardrails_enabled", json_boolean(recs[i].guardrails_enabled));
+        json_object_set_new(o, "watermark_enabled", json_boolean(recs[i].watermark_enabled));
         json_object_set_new(o, "monthly_cost_budget", json_real(recs[i].monthly_cost_budget));
         json_object_set_new(o, "monthly_token_budget", json_integer(recs[i].monthly_token_budget));
         json_object_set_new(o,
@@ -857,6 +864,18 @@ key_patch(
             json_decref(jbody);
             return finish_error(
                 status, body, len, 400, "bad_request", "guardrails_enabled must be boolean");
+        }
+    }
+    v = json_object_get(jbody, "watermark_enabled");
+    if (v != NULL) {
+        if (json_is_boolean(v)) {
+            k.watermark_enabled = json_is_true(v) ? 1 : 0;
+            mask |= KMASK_WATERMARK;
+        } else {
+            key_rec_free(&k);
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "watermark_enabled must be boolean");
         }
     }
     v = json_object_get(jbody, "monthly_cost_budget");

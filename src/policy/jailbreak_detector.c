@@ -67,6 +67,16 @@ count_invisible_chars(const char* src, size_t len)
     }
     size_t count = 0;
     for (size_t i = 0; i < len;) {
+        if (i + 6 <= len && src[i] == '\\' && (src[i + 1] == 'u' || src[i + 1] == 'U')) {
+            const char* esc = src + i + 2;
+            if (strncasecmp(esc, "200b", 4) == 0 || strncasecmp(esc, "200c", 4) == 0 ||
+                strncasecmp(esc, "200d", 4) == 0 || strncasecmp(esc, "feff", 4) == 0 ||
+                strncasecmp(esc, "00ad", 4) == 0) {
+                count++;
+                i += 6;
+                continue;
+            }
+        }
         if (i + 3 <= len) {
             unsigned char b0 = (unsigned char)src[i];
             unsigned char b1 = (unsigned char)src[i + 1];
@@ -184,7 +194,7 @@ jailbreak_detector_inspect(jailbreak_detector_t* d,
     size_t invis_count = count_invisible_chars(prompt_json, prompt_len);
     if (invis_count >= 6) {
         /* 如果不可见字符数达到 6 且占比超阈值 */
-        int invis_weight = (invis_count >= 12) ? 60 : 40;
+        int invis_weight = (invis_count >= 20) ? 80 : ((invis_count >= 12) ? 60 : 40);
         total_score += invis_weight;
         if (invis_weight > max_weight) {
             max_weight = invis_weight;
