@@ -268,22 +268,24 @@ record_usage_and_event(aigate_core* ac,
 }
 
 void
-aigate_record_audit(aigate_core*     ac,
-                    const char*      trace_id,
-                    const char*      client_ip,
-                    int64_t          key_id,
-                    const char*      model,
-                    const char*      provider,
-                    int              http_status,
-                    uint32_t         prompt_tokens,
-                    uint32_t         completion_tokens,
-                    uint64_t         latency_ns,
-                    uint64_t         ttft_ns,
-                    audit_severity_t severity,
-                    const char*      violation_type,
-                    const char*      rule_detail,
-                    const char*      prompt_raw,
-                    size_t           prompt_len)
+aigate_record_audit_ex(aigate_core*     ac,
+                       const char*      trace_id,
+                       const char*      client_ip,
+                       int64_t          key_id,
+                       const char*      model,
+                       const char*      routed_model,
+                       const char*      provider,
+                       int              http_status,
+                       uint32_t         prompt_tokens,
+                       uint32_t         completion_tokens,
+                       uint64_t         latency_ns,
+                       uint64_t         ttft_ns,
+                       audit_severity_t severity,
+                       const char*      violation_type,
+                       const char*      rule_detail,
+                       const char*      fallback_reason,
+                       const char*      prompt_raw,
+                       size_t           prompt_len)
 {
     if (ac == NULL || ac->audit == NULL) {
         return;
@@ -306,6 +308,11 @@ aigate_record_audit(aigate_core*     ac,
     if (model != NULL) {
         snprintf(ev.model, sizeof(ev.model), "%s", model);
     }
+    if (routed_model != NULL && routed_model[0] != '\0') {
+        snprintf(ev.routed_model, sizeof(ev.routed_model), "%s", routed_model);
+    } else if (model != NULL) {
+        snprintf(ev.routed_model, sizeof(ev.routed_model), "%s", model);
+    }
     if (provider != NULL) {
         snprintf(ev.provider, sizeof(ev.provider), "%s", provider);
     }
@@ -321,6 +328,9 @@ aigate_record_audit(aigate_core*     ac,
     if (rule_detail != NULL) {
         snprintf(ev.rule_detail, sizeof(ev.rule_detail), "%s", rule_detail);
     }
+    if (fallback_reason != NULL) {
+        snprintf(ev.fallback_reason, sizeof(ev.fallback_reason), "%s", fallback_reason);
+    }
 
     if (severity >= AUDIT_SEV_VIOLATION && prompt_raw != NULL && prompt_len > 0) {
         int    max_len = audit_logger_get_max_prompt_len(ac->audit);
@@ -330,6 +340,44 @@ aigate_record_audit(aigate_core*     ac,
 
     audit_logger_record(ac->audit, &ev);
     audit_event_cleanup(&ev);
+}
+
+void
+aigate_record_audit(aigate_core*     ac,
+                    const char*      trace_id,
+                    const char*      client_ip,
+                    int64_t          key_id,
+                    const char*      model,
+                    const char*      provider,
+                    int              http_status,
+                    uint32_t         prompt_tokens,
+                    uint32_t         completion_tokens,
+                    uint64_t         latency_ns,
+                    uint64_t         ttft_ns,
+                    audit_severity_t severity,
+                    const char*      violation_type,
+                    const char*      rule_detail,
+                    const char*      prompt_raw,
+                    size_t           prompt_len)
+{
+    aigate_record_audit_ex(ac,
+                           trace_id,
+                           client_ip,
+                           key_id,
+                           model,
+                           model,
+                           provider,
+                           http_status,
+                           prompt_tokens,
+                           completion_tokens,
+                           latency_ns,
+                           ttft_ns,
+                           severity,
+                           violation_type,
+                           rule_detail,
+                           "",
+                           prompt_raw,
+                           prompt_len);
 }
 
 int
@@ -815,6 +863,7 @@ resolve_chat_target(chat_req_t* q)
         aigate_write_error(rc, PIPE_FORBIDDEN, "auth_error", "model not allowed for this key");
         return -1;
     }
+    snprintf(q->requested_model, sizeof(q->requested_model), "%s", q->model);
 
     /* --- canary routing evaluation --- */
     char eff_model[64] = {0};
@@ -840,6 +889,29 @@ resolve_chat_target(chat_req_t* q)
         q->model = q->canary_model;
         if (rc->set_header != NULL) {
             rc->set_header(rc->impl, "X-Aigate-Canary", "true");
+        }
+    }
+
+    /* --- SLA soft degradation fallback evaluation --- */
+    char sla_routed[64] = {0};
+    char sla_reason[32] = {0};
+    bool is_sla_fallback = false;
+    if (model_router_resolve_with_sla(ac->cb,
+                                      q->model,
+                                      sla_routed,
+                                      sizeof(sla_routed),
+                                      &is_sla_fallback,
+                                      sla_reason,
+                                      sizeof(sla_reason)) == 0 &&
+        is_sla_fallback) {
+        q->is_fallback = true;
+        snprintf(q->fallback_reason, sizeof(q->fallback_reason), "%s", sla_reason);
+        snprintf(q->routed_model, sizeof(q->routed_model), "%s", sla_routed);
+        q->model = q->routed_model;
+        if (rc->set_header != NULL) {
+            rc->set_header(rc->impl, "X-AIGate-Fallback", "true");
+            rc->set_header(rc->impl, "X-AIGate-Fallback-Reason", q->fallback_reason);
+            rc->set_header(rc->impl, "X-AIGate-Routed-Model", q->routed_model);
         }
     }
 

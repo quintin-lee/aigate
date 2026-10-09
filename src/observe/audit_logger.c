@@ -143,6 +143,12 @@ audit_event_to_ndjson(const audit_event_t* ev)
     json_object_set_new(root, "key_id", json_integer(ev->key_id));
     json_object_set_new(root, "client_ip", json_string(ev->client_ip));
     json_object_set_new(root, "model", json_string(ev->model));
+    if (ev->routed_model[0] != '\0') {
+        json_object_set_new(root, "routed_model", json_string(ev->routed_model));
+    }
+    if (ev->fallback_reason[0] != '\0') {
+        json_object_set_new(root, "fallback_reason", json_string(ev->fallback_reason));
+    }
     json_object_set_new(root, "provider", json_string(ev->provider));
     json_object_set_new(root, "status", json_integer(ev->http_status));
     json_object_set_new(root, "prompt_tokens", json_integer(ev->prompt_tokens));
@@ -851,7 +857,11 @@ audit_logger_record(audit_logger_t* al, const audit_event_t* ev)
         strncpy(slot->trace_id, ev->trace_id, sizeof(slot->trace_id) - 1);
         strncpy(slot->client_ip, ev->client_ip, sizeof(slot->client_ip) - 1);
         strncpy(slot->model, ev->model, sizeof(slot->model) - 1);
-        strncpy(slot->routed_model, ev->model, sizeof(slot->routed_model) - 1);
+        if (ev->routed_model[0] != '\0') {
+            strncpy(slot->routed_model, ev->routed_model, sizeof(slot->routed_model) - 1);
+        } else {
+            strncpy(slot->routed_model, ev->model, sizeof(slot->routed_model) - 1);
+        }
         strncpy(slot->provider, ev->provider, sizeof(slot->provider) - 1);
         slot->http_status = ev->http_status;
         slot->prompt_tokens = ev->prompt_tokens;
@@ -861,6 +871,7 @@ audit_logger_record(audit_logger_t* al, const audit_event_t* ev)
         slot->severity = ev->severity;
         strncpy(slot->violation_type, ev->violation_type, sizeof(slot->violation_type) - 1);
         strncpy(slot->rule_detail, ev->rule_detail, sizeof(slot->rule_detail) - 1);
+        strncpy(slot->fallback_reason, ev->fallback_reason, sizeof(slot->fallback_reason) - 1);
         if (ev->prompt_snapshot != NULL) {
             strncpy(slot->prompt_snippet, ev->prompt_snapshot, sizeof(slot->prompt_snippet) - 1);
         }

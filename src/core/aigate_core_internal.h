@@ -79,6 +79,10 @@ typedef struct chat_req {
     uint32_t                 upstream_cached_tokens; /**< Upstream cached prompt tokens read. */
     uint32_t                 upstream_prompt_tokens; /**< Upstream total prompt tokens. */
     double upstream_cache_savings_usd;               /**< Upstream prompt cache dollar savings. */
+    bool   is_fallback;         /**< True if SLA fallback routing was applied. */
+    char   fallback_reason[32]; /**< Fallback trigger reason (e.g. SLA_TTFT_EXCEEDED). */
+    char   routed_model[64];    /**< Routed model name buffer. */
+    char   requested_model[64]; /**< Client requested model name buffer. */
 } chat_req_t;
 
 /**

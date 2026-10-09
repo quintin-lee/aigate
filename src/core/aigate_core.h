@@ -186,4 +186,26 @@ void aigate_record_audit(aigate_core*     ac,
                          const char*      prompt_raw,
                          size_t           prompt_len);
 
+/**
+ * @brief Extended audit event recording including fallback routing details.
+ */
+void aigate_record_audit_ex(aigate_core*     ac,
+                            const char*      trace_id,
+                            const char*      client_ip,
+                            int64_t          key_id,
+                            const char*      model,
+                            const char*      routed_model,
+                            const char*      provider,
+                            int              http_status,
+                            uint32_t         prompt_tokens,
+                            uint32_t         completion_tokens,
+                            uint64_t         latency_ns,
+                            uint64_t         ttft_ns,
+                            audit_severity_t severity,
+                            const char*      violation_type,
+                            const char*      rule_detail,
+                            const char*      fallback_reason,
+                            const char*      prompt_raw,
+                            size_t           prompt_len);
+
 #endif /* AIGATE_CORE_H */

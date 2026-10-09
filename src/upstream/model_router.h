@@ -135,4 +135,22 @@ void model_router_reset_concurrency(void);
  */
 int model_router_snapshot_in_flight(char (*endpoints)[512], int* in_flight, int cap);
 
+/** @brief Resolve requested model considering SLA soft degradation.
+ *  @param cb                 Circuit breaker handle (optional).
+ *  @param requested_model    Client requested model name.
+ *  @param out_routed_model   Buffer to receive target routed model name.
+ *  @param routed_model_sz    Capacity of out_routed_model buffer.
+ *  @param out_is_fallback    Output boolean, true if SLA degraded fallback occurred.
+ *  @param out_fallback_reason Output buffer for fallback reason string (e.g. "SLA_TTFT_EXCEEDED").
+ *  @param reason_sz          Capacity of out_fallback_reason buffer.
+ *  @return 0 on success, negative on error.
+ */
+int model_router_resolve_with_sla(circuit_breaker_t* cb,
+                                  const char*        requested_model,
+                                  char*              out_routed_model,
+                                  size_t             routed_model_sz,
+                                  bool*              out_is_fallback,
+                                  char*              out_fallback_reason,
+                                  size_t             reason_sz);
+
 #endif /* AIGATE_MODEL_ROUTER_H */

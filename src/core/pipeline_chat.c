@@ -704,6 +704,14 @@ handle_chat_sync(chat_req_t* q)
         if (q->ac->lt != NULL && lat > 0) {
             latency_tracker_record(q->ac->lt, q->model, target->endpoint, lat);
         }
+        if (q->ac->cb != NULL && lat > 0) {
+            uint32_t ttft_ms = (uint32_t)(lat / 1000000ULL);
+            cb_record_sla_sample(q->ac->cb,
+                                 (q->requested_model[0] != '\0') ? q->requested_model : q->model,
+                                 target->endpoint,
+                                 ttft_ms,
+                                 ttft_ms);
+        }
         free(merged);
 
         bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
@@ -777,24 +785,26 @@ handle_chat_sync(chat_req_t* q)
                                    target->provider,
                                    q->guardrail_act,
                                    req_cost);
-            aigate_record_audit(q->ac,
-                                q->trace_ctx.trace_id,
-                                (q->rq != NULL) ? q->rq->client_ip : NULL,
-                                q->krec.key_id,
-                                q->model,
-                                target->provider,
-                                parsed_status,
-                                (uint32_t)ptok,
-                                (uint32_t)ctok,
-                                total_lat,
-                                0,
-                                (parsed_status < 400)
-                                    ? AUDIT_SEV_INFO
-                                    : (parsed_status == 429 ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR),
-                                "",
-                                "",
-                                NULL,
-                                0);
+            aigate_record_audit_ex(q->ac,
+                                   q->trace_ctx.trace_id,
+                                   (q->rq != NULL) ? q->rq->client_ip : NULL,
+                                   q->krec.key_id,
+                                   (q->requested_model[0] != '\0') ? q->requested_model : q->model,
+                                   (q->routed_model[0] != '\0') ? q->routed_model : q->model,
+                                   target->provider,
+                                   parsed_status,
+                                   (uint32_t)ptok,
+                                   (uint32_t)ctok,
+                                   total_lat,
+                                   0,
+                                   (parsed_status < 400)
+                                       ? AUDIT_SEV_INFO
+                                       : (parsed_status == 429 ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR),
+                                   "",
+                                   "",
+                                   q->fallback_reason,
+                                   NULL,
+                                   0);
             if (q->ac->be != NULL) {
                 budget_enforce_record(
                     q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
@@ -1063,6 +1073,15 @@ stream_feed_wrapper_fn(void* ctx, const void* chunk, size_t len)
         if (w->lt != NULL && ttft_ns > 0) {
             latency_tracker_record(w->lt, w->model, w->endpoint, ttft_ns);
         }
+        if (w->q != NULL && w->q->ac != NULL && w->q->ac->cb != NULL && ttft_ns > 0) {
+            uint32_t ttft_ms = (uint32_t)(ttft_ns / 1000000ULL);
+            cb_record_sla_sample(w->q->ac->cb,
+                                 (w->q->requested_model[0] != '\0') ? w->q->requested_model
+                                                                    : w->q->model,
+                                 w->endpoint,
+                                 ttft_ms,
+                                 ttft_ms);
+        }
         if (w->provider != NULL && ttft_ns > 0) {
             metrics_record_upstream_ttft(w->provider, ttft_ns);
         }
@@ -1318,23 +1337,25 @@ handle_chat_stream(chat_req_t* q)
                                target->provider,
                                q->guardrail_act,
                                req_cost);
-        aigate_record_audit(q->ac,
-                            q->trace_ctx.trace_id,
-                            (q->rq != NULL) ? q->rq->client_ip : NULL,
-                            q->krec.key_id,
-                            q->model,
-                            target->provider,
-                            status > 0 ? status : 200,
-                            (uint32_t)ptok,
-                            (uint32_t)ctok,
-                            total_lat,
-                            0,
-                            (status < 400) ? AUDIT_SEV_INFO
-                                           : (status == 429 ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR),
-                            "",
-                            "",
-                            NULL,
-                            0);
+        aigate_record_audit_ex(q->ac,
+                               q->trace_ctx.trace_id,
+                               (q->rq != NULL) ? q->rq->client_ip : NULL,
+                               q->krec.key_id,
+                               (q->requested_model[0] != '\0') ? q->requested_model : q->model,
+                               (q->routed_model[0] != '\0') ? q->routed_model : q->model,
+                               target->provider,
+                               status > 0 ? status : 200,
+                               (uint32_t)ptok,
+                               (uint32_t)ctok,
+                               total_lat,
+                               0,
+                               (status < 400) ? AUDIT_SEV_INFO
+                                              : (status == 429 ? AUDIT_SEV_WARN : AUDIT_SEV_ERROR),
+                               "",
+                               "",
+                               q->fallback_reason,
+                               NULL,
+                               0);
         if (q->ac->be != NULL) {
             budget_enforce_record(
                 q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);

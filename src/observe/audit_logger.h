@@ -34,17 +34,19 @@ typedef enum {
  */
 typedef struct audit_event {
     /* 1. Request metadata */
-    char     trace_id[64];      /**< W3C Trace ID or unique request ID. */
-    int64_t  timestamp_ms;      /**< Milliseconds epoch timestamp. */
-    int64_t  key_id;            /**< Authenticated API key identifier. */
-    char     client_ip[48];     /**< Client real IP address. */
-    char     model[64];         /**< Model name requested. */
-    char     provider[32];      /**< Actual upstream provider used. */
-    int      http_status;       /**< Final HTTP status code returned. */
-    uint32_t prompt_tokens;     /**< Inbound prompt token count. */
-    uint32_t completion_tokens; /**< Outbound completion token count. */
-    uint64_t latency_ns;        /**< Total round-trip latency in nanoseconds. */
-    uint64_t ttft_ns;           /**< Time to first token in nanoseconds (streaming). */
+    char     trace_id[64];        /**< W3C Trace ID or unique request ID. */
+    int64_t  timestamp_ms;        /**< Milliseconds epoch timestamp. */
+    int64_t  key_id;              /**< Authenticated API key identifier. */
+    char     client_ip[48];       /**< Client real IP address. */
+    char     model[64];           /**< Model name requested. */
+    char     routed_model[64];    /**< Actual model routed (if fallback occurred). */
+    char     fallback_reason[32]; /**< Fallback trigger reason. */
+    char     provider[32];        /**< Actual upstream provider used. */
+    int      http_status;         /**< Final HTTP status code returned. */
+    uint32_t prompt_tokens;       /**< Inbound prompt token count. */
+    uint32_t completion_tokens;   /**< Outbound completion token count. */
+    uint64_t latency_ns;          /**< Total round-trip latency in nanoseconds. */
+    uint64_t ttft_ns;             /**< Time to first token in nanoseconds (streaming). */
 
     /* 2. Audit classification & violation details */
     audit_severity_t severity;           /**< Severity classification. */

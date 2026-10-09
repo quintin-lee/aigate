@@ -678,6 +678,10 @@ main(int argc, char** argv)
     extern void test_sla_degradation_state_machine(void);
     test_register("sla_degradation_state_machine", test_sla_degradation_state_machine);
 
+    extern void test_model_router_sla_fallback_redirection(void);
+    test_register("model_router_sla_fallback_redirection",
+                  test_model_router_sla_fallback_redirection);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

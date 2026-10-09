@@ -791,3 +791,54 @@ model_router_apply_canary(model_router_t*      mr,
 
     return 0;
 }
+
+int
+model_router_resolve_with_sla(circuit_breaker_t* cb,
+                              const char*        requested_model,
+                              char*              out_routed_model,
+                              size_t             routed_model_sz,
+                              bool*              out_is_fallback,
+                              char*              out_fallback_reason,
+                              size_t             reason_sz)
+{
+    if (requested_model == NULL || out_routed_model == NULL || routed_model_sz == 0) {
+        return -1;
+    }
+
+    if (out_is_fallback != NULL) {
+        *out_is_fallback = false;
+    }
+    if (out_fallback_reason != NULL && reason_sz > 0) {
+        out_fallback_reason[0] = '\0';
+    }
+
+    if (cb == NULL) {
+        snprintf(out_routed_model, routed_model_sz, "%s", requested_model);
+        return 0;
+    }
+
+    char       fallback[64] = {0};
+    cb_state_t st = cb_get_sla_state(cb, requested_model, NULL, fallback, sizeof(fallback));
+    if (st == CB_SLA_DEGRADED && fallback[0] != '\0') {
+        /* Anti-loop / degradation check for fallback target */
+        char       second_fb[64] = {0};
+        cb_state_t fb_st = cb_get_sla_state(cb, fallback, NULL, second_fb, sizeof(second_fb));
+        if (fb_st == CB_OPEN || fb_st == CB_SLA_DEGRADED) {
+            /* Fallback model is also unhealthy; do not fallback to degraded/open model */
+            snprintf(out_routed_model, routed_model_sz, "%s", requested_model);
+            return -1;
+        }
+
+        snprintf(out_routed_model, routed_model_sz, "%s", fallback);
+        if (out_is_fallback != NULL) {
+            *out_is_fallback = true;
+        }
+        if (out_fallback_reason != NULL && reason_sz > 0) {
+            snprintf(out_fallback_reason, reason_sz, "SLA_TTFT_EXCEEDED");
+        }
+        return 0;
+    }
+
+    snprintf(out_routed_model, routed_model_sz, "%s", requested_model);
+    return 0;
+}
