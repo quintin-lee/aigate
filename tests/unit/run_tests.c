@@ -726,6 +726,12 @@ main(int argc, char** argv)
     extern void test_audit_hash_chain_deletion_detection(void);
     test_register("audit_hash_chain_deletion_detection", test_audit_hash_chain_deletion_detection);
 
+    extern void test_admin_watermark_decode_endpoint(void);
+    test_register("admin_watermark_decode_endpoint", test_admin_watermark_decode_endpoint);
+
+    extern void test_admin_audit_chain_verify_endpoint(void);
+    test_register("admin_audit_chain_verify_endpoint", test_admin_audit_chain_verify_endpoint);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

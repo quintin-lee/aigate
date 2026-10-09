@@ -31,6 +31,8 @@
 #include "policy/shadow.h"
 #include "policy/prompt_compressor.h"
 #include "policy/cache_optimizer.h"
+#include "policy/watermark_engine.h"
+#include "observe/audit_hash_chain.h"
 
 #include <jansson.h>
 #include <limits.h>
@@ -5301,6 +5303,114 @@ admin_model_sla_override(admin_ctx_t* adm,
     return finish_json(status, body, len, 200, out);
 }
 
+/** @brief POST /admin/v1/watermark/decode: decode steganographic zero-width watermark from text. */
+static int
+admin_watermark_decode_post(
+    admin_ctx_t* adm, const void* body, size_t body_len, int* status, char** out_body, size_t* len)
+{
+    (void)adm;
+    if (body == NULL || body_len == 0) {
+        return finish_error(status, out_body, len, 400, "bad_request", "Missing request body");
+    }
+
+    json_error_t err;
+    json_t*      jbody = json_loads((const char*)body, 0, &err);
+    if (jbody == NULL || !json_is_object(jbody)) {
+        if (jbody != NULL) {
+            json_decref(jbody);
+        }
+        return finish_error(status, out_body, len, 400, "bad_request", "Invalid JSON payload");
+    }
+
+    const char* text = json_string_value(json_object_get(jbody, "text"));
+    if (text == NULL) {
+        json_decref(jbody);
+        return finish_error(status, out_body, len, 400, "bad_request", "Missing 'text' field");
+    }
+
+    watermark_payload_t wp;
+    memset(&wp, 0, sizeof(wp));
+    int rc = watermark_decode(text, strlen(text), &wp);
+    json_decref(jbody);
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("ok"));
+
+    if (rc == 0 && wp.crc_valid) {
+        json_object_set_new(resp, "found", json_true());
+        json_t* wm_obj = json_object();
+        json_object_set_new(wm_obj, "key_id", json_integer((json_int_t)wp.key_id));
+        json_object_set_new(wm_obj, "timestamp", json_integer((json_int_t)wp.timestamp));
+
+        char      iso_buf[32];
+        time_t    t = (time_t)wp.timestamp;
+        struct tm tm_buf;
+        gmtime_r(&t, &tm_buf);
+        strftime(iso_buf, sizeof(iso_buf), "%Y-%m-%dT%H:%M:%SZ", &tm_buf);
+        json_object_set_new(wm_obj, "timestamp_iso", json_string(iso_buf));
+
+        char trace_hex[32];
+        snprintf(trace_hex, sizeof(trace_hex), "%016llx", (unsigned long long)wp.short_trace);
+        json_object_set_new(wm_obj, "short_trace", json_string(trace_hex));
+        json_object_set_new(wm_obj, "crc_valid", json_true());
+        json_object_set_new(resp, "watermark", wm_obj);
+    } else {
+        json_object_set_new(resp, "found", json_false());
+        json_object_set_new(resp, "message", json_string("No valid zero-width watermark detected"));
+    }
+
+    return finish_json(status, out_body, len, 200, resp);
+}
+
+/** @brief POST /admin/v1/audit/chain/verify: verify cryptographic hash chain integrity of audit logs. */
+static int
+admin_audit_chain_verify_post(admin_ctx_t* adm, int* status, char** out_body, size_t* len)
+{
+    audit_hash_chain_ctx_t* chain = NULL;
+    const char*             log_file = NULL;
+
+    if (adm->ac != NULL && adm->ac->audit != NULL) {
+        chain = (audit_hash_chain_ctx_t*)audit_logger_get_chain(adm->ac->audit);
+        log_file = audit_logger_get_log_filepath(adm->ac->audit);
+    }
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("ok"));
+
+    if (chain == NULL || log_file == NULL || log_file[0] == '\0') {
+        json_object_set_new(resp, "valid", json_true());
+        json_object_set_new(resp, "total_records", json_integer(0));
+        json_object_set_new(resp, "head_seq", json_integer(0));
+        json_object_set_new(resp, "head_hash", json_string(""));
+        json_object_set_new(resp, "broken_seq", json_integer(0));
+        json_object_set_new(resp, "broken_reason", json_null());
+    } else {
+        uint64_t verified = 0;
+        uint64_t broken = 0;
+        char     errmsg[256] = {0};
+        int      rc = audit_hash_chain_verify_file(
+            chain, log_file, &verified, &broken, errmsg, sizeof(errmsg));
+
+        if (rc == 0) {
+            json_object_set_new(resp, "valid", json_true());
+            json_object_set_new(resp, "total_records", json_integer((json_int_t)verified));
+            json_object_set_new(resp, "head_seq", json_integer((json_int_t)chain->current_seq));
+            json_object_set_new(resp, "head_hash", json_string(chain->last_hash));
+            json_object_set_new(resp, "broken_seq", json_integer(0));
+            json_object_set_new(resp, "broken_reason", json_null());
+        } else {
+            json_object_set_new(resp, "valid", json_false());
+            json_object_set_new(resp, "total_records", json_integer((json_int_t)verified));
+            json_object_set_new(resp, "head_seq", json_integer((json_int_t)chain->current_seq));
+            json_object_set_new(resp, "head_hash", json_string(chain->last_hash));
+            json_object_set_new(resp, "broken_seq", json_integer((json_int_t)broken));
+            json_object_set_new(resp, "broken_reason", json_string(errmsg));
+        }
+    }
+
+    return finish_json(status, out_body, len, 200, resp);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -5591,6 +5701,13 @@ admin_dispatch(admin_ctx_t* adm,
         }
         if (strcmp(rest, "audit/violations") == 0 && strcmp(method, "GET") == 0) {
             return admin_audit_violations_get(adm, out_status, out_body, out_len, query);
+        }
+        if (strcmp(rest, "audit/chain/verify") == 0 && strcmp(method, "POST") == 0) {
+            return admin_audit_chain_verify_post(adm, out_status, out_body, out_len);
+        }
+    } else if (strncmp(rest, "watermark", 9) == 0) {
+        if (strcmp(rest, "watermark/decode") == 0 && strcmp(method, "POST") == 0) {
+            return admin_watermark_decode_post(adm, body, body_len, out_status, out_body, out_len);
         }
     }
 
