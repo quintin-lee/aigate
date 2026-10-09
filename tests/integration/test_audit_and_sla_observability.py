@@ -104,7 +104,9 @@ def test_audit_live_ring_stream_and_incremental_polling(audit_sla_env):
     events = data.get("events", [])
     assert len(events) >= 1
 
-    last_event = events[0]
+    model_events = [e for e in events if e.get("requested_model") == model]
+    assert len(model_events) >= 1
+    last_event = model_events[-1]
     assert "seq_id" in last_event
     assert "trace_id" in last_event
     assert last_event.get("requested_model") == model

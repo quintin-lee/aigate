@@ -662,7 +662,7 @@ git commit -m "feat(ui): rebuild audit workbench with live stream, forensic draw
 **Files:**
 - Create: `tests/integration/test_audit_and_sla_observability.py`
 
-- [ ] **Step 1: 编写 Python 端到端集成测试脚本**
+- [x] **Step 1: 编写 Python 端到端集成测试脚本**
 
 在 `tests/integration/test_audit_and_sla_observability.py` 实现：
 1. 启动网关服务；
@@ -671,12 +671,12 @@ git commit -m "feat(ui): rebuild audit workbench with live stream, forensic draw
 4. 模拟上游注入高 TTFT（> 3000ms），验证网关自动置位 `SLA_DEGRADED` 并切换路由至 Fallback 模型，且响应头包含 `X-AIGate-Fallback: true`；
 5. 调用 `POST /admin/v1/models/{id}/sla/override` 验证手动切回与复位。
 
-- [ ] **Step 2: 执行集成测试**
+- [x] **Step 2: 执行集成测试**
 
 Run: `python3 -m pytest tests/integration/test_audit_and_sla_observability.py -v`
 Expected: 4/4 passed.
 
-- [ ] **Step 3: Git Commit**
+- [x] **Step 3: Git Commit**
 
 ```bash
 git add tests/integration/test_audit_and_sla_observability.py
@@ -691,23 +691,23 @@ git commit -m "test(integration): add end-to-end integration test suite for audi
 - Modify: `docs/CONFIGURATION.md`
 - Run regression suites
 
-- [ ] **Step 1: 运行全部 C 单元测试**
+- [x] **Step 1: 运行全部 C 单元测试**
 
 Run: `ctest --test-dir build --output-on-failure`
 Expected: 100% tests pass.
 
-- [ ] **Step 2: 运行全部现有 Python 集成测试**
+- [x] **Step 2: 运行全部现有 Python 集成测试**
 
 Run: `python3 -m pytest tests/integration/ -v`
 Expected: All suites pass.
 
-- [ ] **Step 3: 更新配置与接口文档**
+- [x] **Step 3: 更新配置与接口文档**
 
 在 `docs/CONFIGURATION.md` 记录：
 - SLA 熔断与降级配置参数（`AIGATE_SLA_TTFT_MAX_MS`, `AIGATE_SLA_WINDOW_SIZE` 等）
 - Web Console 审计工作台与取证抽屉的使用说明
 
-- [ ] **Step 4: Git Commit**
+- [x] **Step 4: Git Commit**
 
 ```bash
 git add docs/CONFIGURATION.md
