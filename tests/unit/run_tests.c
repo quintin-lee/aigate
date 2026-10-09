@@ -689,6 +689,14 @@ main(int argc, char** argv)
     test_register("admin_ui_contains_audit_forensic_drawer",
                   test_admin_ui_contains_audit_forensic_drawer);
 
+    extern void test_jailbreak_detector_instruction_override(void);
+    test_register("jailbreak_detector_instruction_override",
+                  test_jailbreak_detector_instruction_override);
+
+    extern void test_jailbreak_detector_persona_and_obfuscation(void);
+    test_register("jailbreak_detector_persona_and_obfuscation",
+                  test_jailbreak_detector_persona_and_obfuscation);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {
