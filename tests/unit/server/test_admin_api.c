@@ -280,6 +280,9 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
             if (mask & KMASK_PROMPT_MODE) {
                 fk->k.prompt_mode = k->prompt_mode;
             }
+            if (mask & KMASK_CANARY) {
+                fk->k.is_canary = k->is_canary;
+            }
             return 0;
         }
     }
@@ -1124,15 +1127,15 @@ TEST_CASE(test_admin_keys_lifecycle)
     const char* req = "{\"name\":\"alice\",\"allowed_models\":[\"gpt-4o\"],\"rate_qps\":5,\"daily_"
                       "token_quota\":1000}";
     int         rc = admin_dispatch(&adm,
-                            "/admin/v1/keys",
-                            "POST",
-                            NULL,
-                            "admin-secret-token",
-                            req,
-                            strlen(req),
-                            &status,
-                            &body,
-                            &len);
+                                    "/admin/v1/keys",
+                                    "POST",
+                                    NULL,
+                                    "admin-secret-token",
+                                    req,
+                                    strlen(req),
+                                    &status,
+                                    &body,
+                                    &len);
     TEST_ASSERT(rc == 0 && status == 201, "create key -> 201");
     TEST_ASSERT(body != NULL, "create key body present");
 
@@ -1226,15 +1229,15 @@ TEST_CASE(test_admin_models_lifecycle)
     const char* req = "{\"name\":\"gpt-4o\",\"provider\":\"openai\",\"endpoint\":\"https://"
                       "api.openai.com/v1\",\"default_params\":{\"temperature\":0.7}}";
     int         rc = admin_dispatch(&adm,
-                            "/admin/v1/models",
-                            "POST",
-                            NULL,
-                            "admin-secret-token",
-                            req,
-                            strlen(req),
-                            &status,
-                            &body,
-                            &len);
+                                    "/admin/v1/models",
+                                    "POST",
+                                    NULL,
+                                    "admin-secret-token",
+                                    req,
+                                    strlen(req),
+                                    &status,
+                                    &body,
+                                    &len);
     TEST_ASSERT(rc == 0 && status == 201, "create model -> 201");
     free(body);
 
@@ -1419,15 +1422,15 @@ TEST_CASE(test_admin_models_multi_target)
                       "ep2\",\"upstream_key_ref\":\"k2\",\"weight\":1,\"priority\":1}"
                       "]}";
     int         rc = admin_dispatch(&adm,
-                            "/admin/v1/models",
-                            "POST",
-                            NULL,
-                            "admin-secret-token",
-                            req,
-                            strlen(req),
-                            &status,
-                            &body,
-                            &len);
+                                    "/admin/v1/models",
+                                    "POST",
+                                    NULL,
+                                    "admin-secret-token",
+                                    req,
+                                    strlen(req),
+                                    &status,
+                                    &body,
+                                    &len);
     TEST_ASSERT(rc == 0 && status == 201, "create multi-target model -> 201");
     free(body);
 
@@ -1747,15 +1750,15 @@ TEST_CASE(test_admin_provider_sync_failed_reported)
                       "api.openai.com/v1\","
                       "\"api_key\":\"sk-test\",\"models\":[\"m-one\",\"m-two\"]}";
     int         rc = admin_dispatch(&adm,
-                            "/admin/v1/providers",
-                            "POST",
-                            NULL,
-                            "admin-secret-token",
-                            req,
-                            strlen(req),
-                            &status,
-                            &body,
-                            &len);
+                                    "/admin/v1/providers",
+                                    "POST",
+                                    NULL,
+                                    "admin-secret-token",
+                                    req,
+                                    strlen(req),
+                                    &status,
+                                    &body,
+                                    &len);
     TEST_ASSERT(rc == 0 && status == 201, "create still 201, got %d", status);
     json_t* res = json_loads(body, 0, NULL);
     free(body);
@@ -2142,15 +2145,15 @@ admin_create_probe_provider(admin_ctx_t* adm,
     char*  body = NULL;
     size_t len = 0;
     int    rc = admin_dispatch(adm,
-                            "/admin/v1/providers",
-                            "POST",
-                            NULL,
-                            "admin-secret-token",
-                            req,
-                            strlen(req),
-                            &status,
-                            &body,
-                            &len);
+                               "/admin/v1/providers",
+                               "POST",
+                               NULL,
+                               "admin-secret-token",
+                               req,
+                               strlen(req),
+                               &status,
+                               &body,
+                               &len);
     if (rc != 0 || status != 201) {
         free(body);
         return -1;
@@ -4428,6 +4431,92 @@ TEST_CASE(test_admin_cache_optimizer_endpoints)
                 "cache optimizer rules empty after delete");
     free(body);
     body = NULL;
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_key_is_canary_field)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. Create canary honey-token key */
+    const char* req = "{\"name\":\"honey_token\",\"is_canary\":true}";
+    int         rc = admin_dispatch(&adm,
+                                    "/admin/v1/keys",
+                                    "POST",
+                                    NULL,
+                                    "admin-secret-token",
+                                    req,
+                                    strlen(req),
+                                    &status,
+                                    &body,
+                                    &len);
+    TEST_ASSERT(rc == 0 && status == 201, "create canary key -> 201");
+    json_t* j = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(j != NULL, "parsed json");
+    TEST_ASSERT(json_is_true(json_object_get(j, "is_canary")), "is_canary must be true");
+    long key_id = json_integer_value(json_object_get(j, "key_id"));
+    json_decref(j);
+
+    /* 2. List keys - verify is_canary in response */
+    body = NULL;
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "list keys -> 200");
+    j = json_loads(body, 0, NULL);
+    free(body);
+    json_t* arr = json_object_get(j, "keys");
+    TEST_ASSERT(arr != NULL && json_array_size(arr) == 1, "1 key listed");
+    TEST_ASSERT(json_is_true(json_object_get(json_array_get(arr, 0), "is_canary")),
+                "is_canary is true in list");
+    json_decref(j);
+
+    /* 3. Patch key is_canary to false */
+    char patch_uri[64];
+    snprintf(patch_uri, sizeof(patch_uri), "/admin/v1/keys/%ld", key_id);
+    const char* preq = "{\"is_canary\":false}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        patch_uri,
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        preq,
+                        strlen(preq),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "patch is_canary -> 200");
+    j = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(j != NULL, "parsed json");
+    TEST_ASSERT(json_is_true(json_object_get(j, "updated")), "updated is true");
+    json_decref(j);
+
+    /* 4. List keys again - verify is_canary is now false */
+    body = NULL;
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
+    TEST_ASSERT(rc == 0 && status == 200, "list keys -> 200");
+    j = json_loads(body, 0, NULL);
+    free(body);
+    arr = json_object_get(j, "keys");
+    TEST_ASSERT(arr != NULL && json_array_size(arr) == 1, "1 key listed");
+    TEST_ASSERT(json_is_false(json_object_get(json_array_get(arr, 0), "is_canary")),
+                "is_canary updated to false");
+    json_decref(j);
 
     teardown_admin(ps, &core, &db);
 }

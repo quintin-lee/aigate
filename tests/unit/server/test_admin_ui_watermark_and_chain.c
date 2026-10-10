@@ -24,4 +24,16 @@ TEST_CASE(test_admin_ui_watermark_and_chain_elements)
                 "Embedded admin UI should contain btn-verify-chain element");
     TEST_ASSERT(strstr(html, "chain-status-badge") != NULL,
                 "Embedded admin UI should contain chain-status-badge element");
+
+    /* AI Threat Defense v2 UI Elements */
+    TEST_ASSERT(strstr(html, "kFormIsCanary") != NULL,
+                "Embedded admin UI should contain kFormIsCanary checkbox");
+    TEST_ASSERT(strstr(html, "ip-bans-table") != NULL,
+                "Embedded admin UI should contain ip-bans-table");
+    TEST_ASSERT(strstr(html, "btn-ban-ip") != NULL,
+                "Embedded admin UI should contain btn-ban-ip element");
+    TEST_ASSERT(strstr(html, "threat-whitelists-table") != NULL,
+                "Embedded admin UI should contain threat-whitelists-table");
+    TEST_ASSERT(strstr(html, "btn-add-threat-whitelist") != NULL,
+                "Embedded admin UI should contain btn-add-threat-whitelist element");
 }

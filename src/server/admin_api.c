@@ -32,6 +32,8 @@
 #include "policy/prompt_compressor.h"
 #include "policy/cache_optimizer.h"
 #include "policy/watermark_engine.h"
+#include "policy/ip_ban_table.h"
+#include "policy/threat_whitelist.h"
 #include "observe/audit_hash_chain.h"
 
 #include <jansson.h>
@@ -606,6 +608,11 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     if (jwm != NULL && json_is_boolean(jwm)) {
         k.watermark_enabled = json_is_true(jwm) ? 1 : 0;
     }
+    k.is_canary = 0;
+    json_t* jcan = json_object_get(jbody, "is_canary");
+    if (jcan != NULL && json_is_boolean(jcan)) {
+        k.is_canary = json_is_true(jcan) ? 1 : 0;
+    }
     json_t* jcost_b = json_object_get(jbody, "monthly_cost_budget");
     if (jcost_b != NULL && json_is_number(jcost_b)) {
         k.monthly_cost_budget = json_number_value(jcost_b);
@@ -654,6 +661,7 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     json_object_set_new(out, "group_id", k.group_id > 0 ? json_integer(k.group_id) : json_null());
     json_object_set_new(out, "guardrails_enabled", json_boolean(k.guardrails_enabled));
     json_object_set_new(out, "watermark_enabled", json_boolean(k.watermark_enabled));
+    json_object_set_new(out, "is_canary", json_boolean(k.is_canary));
     json_object_set_new(out, "monthly_cost_budget", json_real(k.monthly_cost_budget));
     json_object_set_new(out, "monthly_token_budget", json_integer(k.monthly_token_budget));
     json_object_set_new(out,
@@ -711,6 +719,7 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* qu
             o, "group_id", recs[i].group_id > 0 ? json_integer(recs[i].group_id) : json_null());
         json_object_set_new(o, "guardrails_enabled", json_boolean(recs[i].guardrails_enabled));
         json_object_set_new(o, "watermark_enabled", json_boolean(recs[i].watermark_enabled));
+        json_object_set_new(o, "is_canary", json_boolean(recs[i].is_canary));
         json_object_set_new(o, "monthly_cost_budget", json_real(recs[i].monthly_cost_budget));
         json_object_set_new(o, "monthly_token_budget", json_integer(recs[i].monthly_token_budget));
         json_object_set_new(o,
@@ -876,6 +885,17 @@ key_patch(
             json_decref(jbody);
             return finish_error(
                 status, body, len, 400, "bad_request", "watermark_enabled must be boolean");
+        }
+    }
+    v = json_object_get(jbody, "is_canary");
+    if (v != NULL) {
+        if (json_is_boolean(v)) {
+            k.is_canary = json_is_true(v) ? 1 : 0;
+            mask |= KMASK_CANARY;
+        } else {
+            key_rec_free(&k);
+            json_decref(jbody);
+            return finish_error(status, body, len, 400, "bad_request", "is_canary must be boolean");
         }
     }
     v = json_object_get(jbody, "monthly_cost_budget");
@@ -2628,12 +2648,12 @@ cost_from_rows_paginated(const cost_row_t*  rows,
             json_t*   o = json_object();
             long long cost_cents = 0;
             int       has_cost = calculate_model_cost(aggs[k].model,
-                                                models,
-                                                n_models,
-                                                aggs[k].prompt,
-                                                aggs[k].completion,
-                                                aggs[k].cached,
-                                                &cost_cents);
+                                                      models,
+                                                      n_models,
+                                                      aggs[k].prompt,
+                                                      aggs[k].completion,
+                                                      aggs[k].cached,
+                                                      &cost_cents);
             json_object_set_new(o, "group_id", json_integer(aggs[k].group_id));
             json_object_set_new(o, "group_name", json_string(aggs[k].group_name));
             json_object_set_new(o, "model", json_string(aggs[k].model));
@@ -2662,12 +2682,12 @@ cost_from_rows_paginated(const cost_row_t*  rows,
             }
             long long   cost_cents = 0;
             int         has_cost = calculate_model_cost(rows[i].model,
-                                                models,
-                                                n_models,
-                                                rows[i].prompt,
-                                                rows[i].completion,
-                                                rows[i].cached,
-                                                &cost_cents);
+                                                        models,
+                                                        n_models,
+                                                        rows[i].prompt,
+                                                        rows[i].completion,
+                                                        rows[i].cached,
+                                                        &cost_cents);
             const char* gname = lookup_group_name(rows[i].group_id, groups, n_groups);
             json_object_set_new(o, "date", json_string(day_str));
             json_object_set_new(o, "bucket_day", json_integer((int64_t)rows[i].bucket_day));
@@ -5109,7 +5129,7 @@ admin_audit_violations_get(
         audit_violation_record_t recs[200];
         int                      total = 0;
         int                      returned = 0;
-        int                      rc = pg_store_list_audit_violations(adm->ps,
+        int rc = pg_store_list_audit_violations(adm->ps,
                                                 tenant_id[0] ? tenant_id : NULL,
                                                 rule_tag[0] ? rule_tag : NULL,
                                                 trace_id[0] ? trace_id : NULL,
@@ -5430,6 +5450,290 @@ admin_audit_chain_verify_post(admin_ctx_t* adm, int* status, char** out_body, si
     return finish_json(status, out_body, len, 200, resp);
 }
 
+/** @brief GET /admin/v1/bans: list in-memory banned IPs. */
+static int
+admin_bans_get(admin_ctx_t* adm, int* status, char** out_body, size_t* len)
+{
+    json_t* root = json_object();
+    json_t* arr = json_array();
+
+    if (adm->ac != NULL && adm->ac->ip_ban_tbl != NULL) {
+        ip_ban_info_t entries[512];
+        size_t        n = ip_ban_table_list(adm->ac->ip_ban_tbl, entries, 512);
+        time_t        now = time(NULL);
+        for (size_t i = 0; i < n; i++) {
+            json_t* it = json_object();
+            json_object_set_new(it, "ip", json_string(entries[i].ip));
+            json_object_set_new(it, "reason", json_string(entries[i].reason));
+            json_object_set_new(
+                it, "expires_at", json_integer((json_int_t)entries[i].expires_at_sec));
+            json_object_set_new(it, "hit_count", json_integer((json_int_t)entries[i].hit_count));
+            int64_t rem = (int64_t)entries[i].expires_at_sec - (int64_t)now;
+            if (rem < 0) {
+                rem = 0;
+            }
+            json_object_set_new(it, "remaining_ttl_s", json_integer((json_int_t)rem));
+            json_array_append_new(arr, it);
+        }
+    }
+
+    json_object_set_new(root, "bans", arr);
+    return finish_json(status, out_body, len, 200, root);
+}
+
+/** @brief POST /admin/v1/bans: manually add an IP to the ban table. */
+static int
+admin_bans_post(admin_ctx_t* adm,
+                const void*  req_body,
+                size_t       req_len,
+                int*         status,
+                char**       out_body,
+                size_t*      len)
+{
+    if (adm->ac == NULL || adm->ac->ip_ban_tbl == NULL) {
+        return finish_error(
+            status, out_body, len, 500, "internal_error", "ip ban table unavailable");
+    }
+    json_error_t jerr;
+    json_t*      root = json_loadb((const char*)req_body, req_len, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid json body");
+    }
+    json_t* jip = json_object_get(root, "ip");
+    if (jip == NULL || !json_is_string(jip)) {
+        json_decref(root);
+        return finish_error(status, out_body, len, 400, "bad_request", "ip field is required");
+    }
+    char ip_buf[48];
+    snprintf(ip_buf, sizeof(ip_buf), "%s", json_string_value(jip));
+    char reason_buf[64];
+    snprintf(reason_buf, sizeof(reason_buf), "manual_ban");
+    json_t* jreason = json_object_get(root, "reason");
+    if (jreason != NULL && json_is_string(jreason)) {
+        snprintf(reason_buf, sizeof(reason_buf), "%s", json_string_value(jreason));
+    }
+    uint32_t ttl_s = 86400; /* default 24h */
+    json_t*  jttl = json_object_get(root, "ttl_seconds");
+    if (jttl != NULL && json_is_integer(jttl)) {
+        ttl_s = (uint32_t)json_integer_value(jttl);
+    }
+
+    json_decref(root);
+
+    int rc = ip_ban_table_ban(adm->ac->ip_ban_tbl, ip_buf, (int64_t)ttl_s, reason_buf);
+    if (rc != 0) {
+        return finish_error(status, out_body, len, 500, "internal_error", "failed to ban ip");
+    }
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("banned"));
+    json_object_set_new(resp, "ip", json_string(ip_buf));
+    json_object_set_new(resp, "reason", json_string(reason_buf));
+    json_object_set_new(resp, "ttl_seconds", json_integer((json_int_t)ttl_s));
+    return finish_json(status, out_body, len, 200, resp);
+}
+
+/** @brief DELETE /admin/v1/bans/<ip>: unban an IP. */
+static int
+admin_bans_delete(admin_ctx_t* adm, const char* ip, int* status, char** out_body, size_t* len)
+{
+    if (adm->ac == NULL || adm->ac->ip_ban_tbl == NULL) {
+        return finish_error(
+            status, out_body, len, 500, "internal_error", "ip ban table unavailable");
+    }
+    if (ip == NULL || ip[0] == '\0') {
+        return finish_error(status, out_body, len, 400, "bad_request", "ip parameter required");
+    }
+    int rc = ip_ban_table_unban(adm->ac->ip_ban_tbl, ip);
+    if (rc != 0) {
+        return finish_error(
+            status, out_body, len, 404, "not_found", "ip was not found in ban table");
+    }
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("unbanned"));
+    json_object_set_new(resp, "ip", json_string(ip));
+    return finish_json(status, out_body, len, 200, resp);
+}
+
+/** @brief GET /admin/v1/threat-whitelists: list threat defense whitelists. */
+static int
+admin_threat_whitelists_get(admin_ctx_t* adm, int* status, char** out_body, size_t* len)
+{
+    json_t* root = json_object();
+    json_t* arr = json_array();
+
+    if (adm->ps != NULL && pg_store_ops(adm->ps) != NULL &&
+        pg_store_ops(adm->ps)->list_threat_whitelists != NULL) {
+        threat_whitelist_rec_t* recs = NULL;
+        size_t                  count = 0;
+        if (pg_store_ops(adm->ps)->list_threat_whitelists(
+                pg_store_ops(adm->ps)->ctx, &recs, &count) == 0) {
+            for (size_t i = 0; i < count; i++) {
+                json_t* it = json_object();
+                json_object_set_new(it, "rule_id", json_integer((json_int_t)recs[i].rule_id));
+                json_object_set_new(it, "name", json_string(recs[i].name));
+                json_object_set_new(
+                    it, "match_key_id", json_integer((json_int_t)recs[i].match_key_id));
+                json_object_set_new(it, "match_model", json_string(recs[i].match_model));
+                json_object_set_new(it, "bypass_rule_tag", json_string(recs[i].bypass_rule_tag));
+                json_object_set_new(it, "reason", json_string(recs[i].reason));
+                json_object_set_new(it, "expires_at", json_integer((json_int_t)recs[i].expires_at));
+                json_object_set_new(it, "enabled", json_boolean(recs[i].enabled));
+                json_array_append_new(arr, it);
+            }
+            if (recs != NULL) {
+                free(recs);
+            }
+        }
+    } else if (adm->ac != NULL && adm->ac->threat_whitelist != NULL) {
+        threat_whitelist_rec_t recs[256];
+        int                    n = 0;
+        if (threat_whitelist_list(adm->ac->threat_whitelist, recs, 256, &n) == 0) {
+            for (int i = 0; i < n; i++) {
+                json_t* it = json_object();
+                json_object_set_new(it, "rule_id", json_integer((json_int_t)recs[i].rule_id));
+                json_object_set_new(it, "name", json_string(recs[i].name));
+                json_object_set_new(
+                    it, "match_key_id", json_integer((json_int_t)recs[i].match_key_id));
+                json_object_set_new(it, "match_model", json_string(recs[i].match_model));
+                json_object_set_new(it, "bypass_rule_tag", json_string(recs[i].bypass_rule_tag));
+                json_object_set_new(it, "reason", json_string(recs[i].reason));
+                json_object_set_new(it, "expires_at", json_integer((json_int_t)recs[i].expires_at));
+                json_object_set_new(it, "enabled", json_boolean(recs[i].enabled));
+                json_array_append_new(arr, it);
+            }
+        }
+    }
+
+    json_object_set_new(root, "whitelists", arr);
+    return finish_json(status, out_body, len, 200, root);
+}
+
+/** @brief POST /admin/v1/threat-whitelists: create threat defense whitelist. */
+static int
+admin_threat_whitelists_post(admin_ctx_t* adm,
+                             const void*  req_body,
+                             size_t       req_len,
+                             int*         status,
+                             char**       out_body,
+                             size_t*      len)
+{
+    json_error_t jerr;
+    json_t*      root = json_loadb((const char*)req_body, req_len, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid json body");
+    }
+
+    threat_whitelist_rec_t rec;
+    memset(&rec, 0, sizeof(rec));
+
+    json_t* jname = json_object_get(root, "name");
+    if (jname != NULL && json_is_string(jname)) {
+        snprintf(rec.name, sizeof(rec.name), "%s", json_string_value(jname));
+    } else {
+        snprintf(rec.name, sizeof(rec.name), "whitelist_rule");
+    }
+
+    json_t* jkey = json_object_get(root, "match_key_id");
+    if (jkey != NULL && json_is_integer(jkey)) {
+        rec.match_key_id = (uint64_t)json_integer_value(jkey);
+    }
+
+    json_t* jmodel = json_object_get(root, "match_model");
+    if (jmodel != NULL && json_is_string(jmodel)) {
+        snprintf(rec.match_model, sizeof(rec.match_model), "%s", json_string_value(jmodel));
+    } else {
+        snprintf(rec.match_model, sizeof(rec.match_model), "*");
+    }
+
+    json_t* jtag = json_object_get(root, "bypass_rule_tag");
+    if (jtag != NULL && json_is_string(jtag)) {
+        snprintf(rec.bypass_rule_tag, sizeof(rec.bypass_rule_tag), "%s", json_string_value(jtag));
+    } else {
+        snprintf(rec.bypass_rule_tag, sizeof(rec.bypass_rule_tag), "*");
+    }
+
+    json_t* jreason = json_object_get(root, "reason");
+    if (jreason != NULL && json_is_string(jreason)) {
+        snprintf(rec.reason, sizeof(rec.reason), "%s", json_string_value(jreason));
+    }
+
+    json_t* jexp = json_object_get(root, "expires_at");
+    if (jexp != NULL && json_is_integer(jexp)) {
+        rec.expires_at = (int64_t)json_integer_value(jexp);
+    }
+
+    rec.enabled = true;
+    json_t* jenabled = json_object_get(root, "enabled");
+    if (jenabled != NULL && json_is_boolean(jenabled)) {
+        rec.enabled = json_is_true(jenabled);
+    }
+
+    json_decref(root);
+
+    int64_t out_id = 0;
+    if (adm->ps != NULL && pg_store_ops(adm->ps) != NULL &&
+        pg_store_ops(adm->ps)->create_threat_whitelist != NULL) {
+        if (pg_store_ops(adm->ps)->create_threat_whitelist(
+                pg_store_ops(adm->ps)->ctx, &rec, &out_id) != 0) {
+            return finish_error(
+                status, out_body, len, 500, "internal_error", "failed to create threat whitelist");
+        }
+        if (adm->ac != NULL) {
+            aigate_core_reload_threat_whitelist(adm->ac);
+        }
+    } else if (adm->ac != NULL && adm->ac->threat_whitelist != NULL) {
+        static int64_t s_local_id = 1000;
+        out_id = ++s_local_id;
+        rec.rule_id = out_id;
+        threat_whitelist_add(adm->ac->threat_whitelist, &rec);
+    }
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("created"));
+    json_object_set_new(resp, "rule_id", json_integer((json_int_t)out_id));
+    return finish_json(status, out_body, len, 201, resp);
+}
+
+/** @brief DELETE /admin/v1/threat-whitelists/<id>: delete threat defense whitelist. */
+static int
+admin_threat_whitelists_delete(
+    admin_ctx_t* adm, const char* id_str, int* status, char** out_body, size_t* len)
+{
+    if (id_str == NULL || id_str[0] == '\0') {
+        return finish_error(status, out_body, len, 400, "bad_request", "rule_id required");
+    }
+    int64_t rule_id = (int64_t)atoll(id_str);
+    if (rule_id <= 0) {
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid rule_id");
+    }
+
+    if (adm->ps != NULL && pg_store_ops(adm->ps) != NULL &&
+        pg_store_ops(adm->ps)->delete_threat_whitelist != NULL) {
+        if (pg_store_ops(adm->ps)->delete_threat_whitelist(pg_store_ops(adm->ps)->ctx, rule_id) !=
+            0) {
+            return finish_error(
+                status, out_body, len, 500, "internal_error", "failed to delete threat whitelist");
+        }
+        if (adm->ac != NULL) {
+            aigate_core_reload_threat_whitelist(adm->ac);
+        }
+    } else if (adm->ac != NULL && adm->ac->threat_whitelist != NULL) {
+        threat_whitelist_remove(adm->ac->threat_whitelist, rule_id);
+    }
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("deleted"));
+    json_object_set_new(resp, "rule_id", json_integer((json_int_t)rule_id));
+    return finish_json(status, out_body, len, 200, resp);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -5727,6 +6031,31 @@ admin_dispatch(admin_ctx_t* adm,
     } else if (strncmp(rest, "watermark", 9) == 0) {
         if (strcmp(rest, "watermark/decode") == 0 && strcmp(method, "POST") == 0) {
             return admin_watermark_decode_post(adm, body, body_len, out_status, out_body, out_len);
+        }
+    } else if (strncmp(rest, "bans", 4) == 0) {
+        if (strcmp(rest, "bans") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                return admin_bans_get(adm, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "POST") == 0) {
+                return admin_bans_post(adm, body, body_len, out_status, out_body, out_len);
+            }
+        }
+        if (strncmp(rest, "bans/", 5) == 0 && strcmp(method, "DELETE") == 0) {
+            return admin_bans_delete(adm, rest + 5, out_status, out_body, out_len);
+        }
+    } else if (strncmp(rest, "threat-whitelists", 17) == 0) {
+        if (strcmp(rest, "threat-whitelists") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                return admin_threat_whitelists_get(adm, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "POST") == 0) {
+                return admin_threat_whitelists_post(
+                    adm, body, body_len, out_status, out_body, out_len);
+            }
+        }
+        if (strncmp(rest, "threat-whitelists/", 18) == 0 && strcmp(method, "DELETE") == 0) {
+            return admin_threat_whitelists_delete(adm, rest + 18, out_status, out_body, out_len);
         }
     }
 

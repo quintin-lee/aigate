@@ -764,7 +764,8 @@ main(int argc, char** argv)
     test_register("threat_whitelist_concurrency", test_threat_whitelist_concurrency);
 
     extern void test_filter_chain_threat_whitelist_bypass(void);
-    test_register("filter_chain_threat_whitelist_bypass", test_filter_chain_threat_whitelist_bypass);
+    test_register("filter_chain_threat_whitelist_bypass",
+                  test_filter_chain_threat_whitelist_bypass);
 
     extern void test_watermark_multi_tile_injection_and_sliding_decode(void);
     test_register("watermark_multi_tile_injection_and_sliding_decode",
@@ -785,6 +786,15 @@ main(int argc, char** argv)
     extern void test_stream_watermark_no_punctuation_fallback(void);
     test_register("stream_watermark_no_punctuation_fallback",
                   test_stream_watermark_no_punctuation_fallback);
+
+    extern void test_admin_bans_crud(void);
+    test_register("admin_bans_crud", test_admin_bans_crud);
+
+    extern void test_admin_threat_whitelists_crud(void);
+    test_register("admin_threat_whitelists_crud", test_admin_threat_whitelists_crud);
+
+    extern void test_admin_key_is_canary_field(void);
+    test_register("admin_key_is_canary_field", test_admin_key_is_canary_field);
 
     int ran = 0;
     int failed = 0;
