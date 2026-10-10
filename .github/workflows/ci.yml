@@ -31,6 +31,7 @@ jobs:
             libssl-dev \
             libpq-dev \
             libjansson-dev \
+            libhiredis-dev \
             clang-format \
             clang
 
