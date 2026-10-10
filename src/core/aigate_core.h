@@ -30,6 +30,7 @@
 #include "policy/prompt_compressor.h"
 #include "policy/cache_optimizer.h"
 #include "policy/ip_ban_table.h"
+#include "policy/threat_whitelist.h"
 
 /** @brief Normalized inbound request (transport fills, pipeline reads). */
 typedef struct aigate_request_ctx {
@@ -100,8 +101,9 @@ typedef struct aigate_core {
     cache_optimizer_rule_t cache_opt_rules[64];  /**< Cached prompt cache optimizer rules */
     int                    n_cache_opt_rules;    /**< Number of active cache optimizer rules */
     pthread_mutex_t        cache_opt_rules_lock; /**< Mutex protecting cache_opt_rules */
-    audit_logger_t*        audit; /**< Dual-channel audit logger, may be NULL (disabled) */
-    ip_ban_table_t*        ip_ban_tbl; /**< In-memory IP ban table */
+    audit_logger_t*        audit;            /**< Dual-channel audit logger, may be NULL (disabled) */
+    ip_ban_table_t*        ip_ban_tbl;       /**< In-memory IP ban table */
+    threat_whitelist_t*    threat_whitelist; /**< Dynamic threat defense whitelist engine */
 } aigate_core;
 
 /** @brief Type alias for gateway pipeline context. */
@@ -122,6 +124,13 @@ int aigate_core_reload_compressor_rules(aigate_core* ac);
  * @return 0 on success, -1 on error.
  */
 int aigate_core_reload_cache_optimizer_rules(aigate_core* ac);
+
+/**
+ * @brief Reload dynamic threat defense whitelists from backing storage.
+ * @param ac Core context.
+ * @return 0 on success, -1 on error.
+ */
+int aigate_core_reload_threat_whitelist(aigate_core* ac);
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */
 int aigate_core_init(aigate_core*   ac,

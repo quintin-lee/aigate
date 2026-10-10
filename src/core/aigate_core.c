@@ -114,6 +114,28 @@ aigate_core_reload_cache_optimizer_rules(aigate_core* ac)
     return 0;
 }
 
+int
+aigate_core_reload_threat_whitelist(aigate_core* ac)
+{
+    if (ac == NULL || ac->threat_whitelist == NULL) {
+        return -1;
+    }
+    if (ac->ps != NULL) {
+        const pg_ops_t* ops = pg_store_ops(ac->ps);
+        if (ops != NULL && ops->list_threat_whitelists != NULL) {
+            threat_whitelist_rec_t* recs = NULL;
+            size_t                  count = 0;
+            if (ops->list_threat_whitelists(ops->ctx, &recs, &count) == 0) {
+                threat_whitelist_load(ac->threat_whitelist, recs, count);
+                if (recs != NULL) {
+                    free(recs);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
 /** @brief Extract prompt preview snippet from parsed JSON body. */
 static void
 extract_prompt_snippet(json_t* jbody, char* out, size_t out_sz)
@@ -444,8 +466,18 @@ aigate_core_init(aigate_core*   ac,
     ac->tracer_cfg.otlp_endpoint[0] = '\0';
     ac->trace_rb = trace_ring_buffer_create(TRACE_RING_BUFFER_DEFAULT_CAPACITY);
     ac->ip_ban_tbl = ip_ban_table_create();
+    ac->threat_whitelist = threat_whitelist_create();
+    aigate_core_reload_threat_whitelist(ac);
 
     if (auth_key_init(&ac->keys, ps) != 0) {
+        if (ac->threat_whitelist != NULL) {
+            threat_whitelist_destroy(ac->threat_whitelist);
+            ac->threat_whitelist = NULL;
+        }
+        if (ac->ip_ban_tbl != NULL) {
+            ip_ban_table_destroy(ac->ip_ban_tbl);
+            ac->ip_ban_tbl = NULL;
+        }
         if (ac->trace_rb != NULL) {
             trace_ring_buffer_destroy(ac->trace_rb);
             ac->trace_rb = NULL;
@@ -522,6 +554,10 @@ aigate_core_init(aigate_core*   ac,
         if (ac->ip_ban_tbl != NULL) {
             ip_ban_table_destroy(ac->ip_ban_tbl);
             ac->ip_ban_tbl = NULL;
+        }
+        if (ac->threat_whitelist != NULL) {
+            threat_whitelist_destroy(ac->threat_whitelist);
+            ac->threat_whitelist = NULL;
         }
         if (ac->lt != NULL) {
             latency_tracker_destroy(ac->lt);
@@ -638,6 +674,10 @@ aigate_core_shutdown(aigate_core* ac)
     if (ac->ip_ban_tbl != NULL) {
         ip_ban_table_destroy(ac->ip_ban_tbl);
         ac->ip_ban_tbl = NULL;
+    }
+    if (ac->threat_whitelist != NULL) {
+        threat_whitelist_destroy(ac->threat_whitelist);
+        ac->threat_whitelist = NULL;
     }
     auth_key_shutdown(&ac->keys);
 }

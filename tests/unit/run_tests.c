@@ -754,6 +754,18 @@ main(int argc, char** argv)
     extern void test_ip_ban_table_concurrency(void);
     test_register("ip_ban_table_concurrency", test_ip_ban_table_concurrency);
 
+    extern void test_threat_whitelist_lifecycle(void);
+    test_register("threat_whitelist_lifecycle", test_threat_whitelist_lifecycle);
+
+    extern void test_threat_whitelist_matching(void);
+    test_register("threat_whitelist_matching", test_threat_whitelist_matching);
+
+    extern void test_threat_whitelist_concurrency(void);
+    test_register("threat_whitelist_concurrency", test_threat_whitelist_concurrency);
+
+    extern void test_filter_chain_threat_whitelist_bypass(void);
+    test_register("filter_chain_threat_whitelist_bypass", test_filter_chain_threat_whitelist_bypass);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

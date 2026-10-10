@@ -2,7 +2,9 @@
 #include "guardrails.h"
 #include "prompt_template.h"
 #include "jailbreak_detector.h"
+#include "threat_whitelist.h"
 #include "watermark_engine.h"
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -187,6 +189,19 @@ filter_jailbreak(chat_req_t* q)
         jailbreak_detector_inspect(NULL, (const char*)q->eff_body, q->eff_len, &res);
 
     if (act == JAILBREAK_ACTION_BLOCK) {
+        if (q->ac != NULL && q->ac->threat_whitelist != NULL &&
+            threat_whitelist_is_bypassed(
+                q->ac->threat_whitelist, q->krec.key_id, q->model, res.rule_tag, NULL)) {
+            AIGATE_LOG_INFO(
+                "jailbreak block bypassed by threat whitelist (key_id=%" PRIu64
+                ", model=%s, tag=%s)",
+                q->krec.key_id,
+                q->model ? q->model : "*",
+                res.rule_tag[0] ? res.rule_tag : "*");
+            snprintf(q->guardrail_act, sizeof q->guardrail_act, "whitelisted");
+            return FILTER_CONTINUE;
+        }
+
         char block_msg[256];
         snprintf(block_msg,
                  sizeof block_msg,
