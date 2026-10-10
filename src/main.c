@@ -151,10 +151,10 @@ main(int argc, char** argv)
     {
         audit_config_t acfg;
         memset(&acfg, 0, sizeof(acfg));
-        strncpy(acfg.log_file, cfg.audit_log_file, sizeof(acfg.log_file) - 1);
+        snprintf(acfg.log_file, sizeof(acfg.log_file), "%s", cfg.audit_log_file);
         acfg.max_size_mb = cfg.audit_max_size_mb;
         acfg.max_backups = cfg.audit_max_backups;
-        strncpy(acfg.webhook_url, cfg.audit_webhook_url, sizeof(acfg.webhook_url) - 1);
+        snprintf(acfg.webhook_url, sizeof(acfg.webhook_url), "%s", cfg.audit_webhook_url);
         if (strcmp(cfg.audit_webhook_format, "feishu") == 0) {
             acfg.webhook_format = AUDIT_HOOK_FEISHU;
         } else if (strcmp(cfg.audit_webhook_format, "dingtalk") == 0) {

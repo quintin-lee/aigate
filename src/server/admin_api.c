@@ -2628,12 +2628,12 @@ cost_from_rows_paginated(const cost_row_t*  rows,
             json_t*   o = json_object();
             long long cost_cents = 0;
             int       has_cost = calculate_model_cost(aggs[k].model,
-                                                      models,
-                                                      n_models,
-                                                      aggs[k].prompt,
-                                                      aggs[k].completion,
-                                                      aggs[k].cached,
-                                                      &cost_cents);
+                                                models,
+                                                n_models,
+                                                aggs[k].prompt,
+                                                aggs[k].completion,
+                                                aggs[k].cached,
+                                                &cost_cents);
             json_object_set_new(o, "group_id", json_integer(aggs[k].group_id));
             json_object_set_new(o, "group_name", json_string(aggs[k].group_name));
             json_object_set_new(o, "model", json_string(aggs[k].model));
@@ -2662,12 +2662,12 @@ cost_from_rows_paginated(const cost_row_t*  rows,
             }
             long long   cost_cents = 0;
             int         has_cost = calculate_model_cost(rows[i].model,
-                                                        models,
-                                                        n_models,
-                                                        rows[i].prompt,
-                                                        rows[i].completion,
-                                                        rows[i].cached,
-                                                        &cost_cents);
+                                                models,
+                                                n_models,
+                                                rows[i].prompt,
+                                                rows[i].completion,
+                                                rows[i].cached,
+                                                &cost_cents);
             const char* gname = lookup_group_name(rows[i].group_id, groups, n_groups);
             json_object_set_new(o, "date", json_string(day_str));
             json_object_set_new(o, "bucket_day", json_integer((int64_t)rows[i].bucket_day));
@@ -5109,7 +5109,7 @@ admin_audit_violations_get(
         audit_violation_record_t recs[200];
         int                      total = 0;
         int                      returned = 0;
-        int rc = pg_store_list_audit_violations(adm->ps,
+        int                      rc = pg_store_list_audit_violations(adm->ps,
                                                 tenant_id[0] ? tenant_id : NULL,
                                                 rule_tag[0] ? rule_tag : NULL,
                                                 trace_id[0] ? trace_id : NULL,

@@ -1124,15 +1124,15 @@ TEST_CASE(test_admin_keys_lifecycle)
     const char* req = "{\"name\":\"alice\",\"allowed_models\":[\"gpt-4o\"],\"rate_qps\":5,\"daily_"
                       "token_quota\":1000}";
     int         rc = admin_dispatch(&adm,
-                                    "/admin/v1/keys",
-                                    "POST",
-                                    NULL,
-                                    "admin-secret-token",
-                                    req,
-                                    strlen(req),
-                                    &status,
-                                    &body,
-                                    &len);
+                            "/admin/v1/keys",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create key -> 201");
     TEST_ASSERT(body != NULL, "create key body present");
 
@@ -1226,15 +1226,15 @@ TEST_CASE(test_admin_models_lifecycle)
     const char* req = "{\"name\":\"gpt-4o\",\"provider\":\"openai\",\"endpoint\":\"https://"
                       "api.openai.com/v1\",\"default_params\":{\"temperature\":0.7}}";
     int         rc = admin_dispatch(&adm,
-                                    "/admin/v1/models",
-                                    "POST",
-                                    NULL,
-                                    "admin-secret-token",
-                                    req,
-                                    strlen(req),
-                                    &status,
-                                    &body,
-                                    &len);
+                            "/admin/v1/models",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create model -> 201");
     free(body);
 
@@ -1419,15 +1419,15 @@ TEST_CASE(test_admin_models_multi_target)
                       "ep2\",\"upstream_key_ref\":\"k2\",\"weight\":1,\"priority\":1}"
                       "]}";
     int         rc = admin_dispatch(&adm,
-                                    "/admin/v1/models",
-                                    "POST",
-                                    NULL,
-                                    "admin-secret-token",
-                                    req,
-                                    strlen(req),
-                                    &status,
-                                    &body,
-                                    &len);
+                            "/admin/v1/models",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create multi-target model -> 201");
     free(body);
 
@@ -1747,15 +1747,15 @@ TEST_CASE(test_admin_provider_sync_failed_reported)
                       "api.openai.com/v1\","
                       "\"api_key\":\"sk-test\",\"models\":[\"m-one\",\"m-two\"]}";
     int         rc = admin_dispatch(&adm,
-                                    "/admin/v1/providers",
-                                    "POST",
-                                    NULL,
-                                    "admin-secret-token",
-                                    req,
-                                    strlen(req),
-                                    &status,
-                                    &body,
-                                    &len);
+                            "/admin/v1/providers",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     TEST_ASSERT(rc == 0 && status == 201, "create still 201, got %d", status);
     json_t* res = json_loads(body, 0, NULL);
     free(body);
@@ -2142,15 +2142,15 @@ admin_create_probe_provider(admin_ctx_t* adm,
     char*  body = NULL;
     size_t len = 0;
     int    rc = admin_dispatch(adm,
-                               "/admin/v1/providers",
-                               "POST",
-                               NULL,
-                               "admin-secret-token",
-                               req,
-                               strlen(req),
-                               &status,
-                               &body,
-                               &len);
+                            "/admin/v1/providers",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            req,
+                            strlen(req),
+                            &status,
+                            &body,
+                            &len);
     if (rc != 0 || status != 201) {
         free(body);
         return -1;

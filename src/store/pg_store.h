@@ -252,7 +252,7 @@ typedef struct pg_ops {
     int (*list_keys)(void*      ctx,
                      key_rec_t* out,
                      int        cap,
-                     int*       n);       /**< List keys (out capacity cap, n returns the count). */
+                     int*       n);             /**< List keys (out capacity cap, n returns the count). */
     int (*get_key_by_id)(void*      ctx,
                          long       key_id,
                          key_rec_t* out); /**< Look up a key by numeric id. */
@@ -266,19 +266,19 @@ typedef struct pg_ops {
                       long* out_key_id); /**< Create a key, out_key_id returns the primary key. */
     int (*update_key)(void*            ctx,
                       const key_rec_t* k,
-                      int              mask);             /**< Update key fields by KMASK_* mask. */
+                      int              mask);         /**< Update key fields by KMASK_* mask. */
     int (*revoke_key)(void* ctx, long key_id);            /**< Revoke a key. */
 
     int (*create_model)(void* ctx, const model_rec_t* m); /**< Create a model route. */
     int (*update_model)(void*              ctx,
                         const model_rec_t* m,
-                        int                mask);     /**< Update a model route by MMASK_* mask. */
+                        int                mask);                    /**< Update a model route by MMASK_* mask. */
     int (*delete_model)(void* ctx, const char* name); /**< Delete a route by model name. */
 
     int (*list_providers)(void*           ctx,
                           provider_rec_t* out,
                           int             cap,
-                          int*            n); /**< List upstream providers. */
+                          int*            n);            /**< List upstream providers. */
     int (*get_provider)(void*           ctx,
                         long            id,
                         provider_rec_t* out); /**< Look up a provider by numeric id. */
@@ -287,8 +287,8 @@ typedef struct pg_ops {
                            long* out_id); /**< Create a provider, out_id returns the primary key. */
     int (*update_provider)(void*                 ctx,
                            const provider_rec_t* p,
-                           int                   mask); /**< Update a provider by PMASK_* mask. */
-    int (*delete_provider)(void* ctx, long id);         /**< Delete a provider by numeric id. */
+                           int                   mask);     /**< Update a provider by PMASK_* mask. */
+    int (*delete_provider)(void* ctx, long id); /**< Delete a provider by numeric id. */
 
     int (*flush_usage)(void*              ctx,
                        const usage_row_t* rows,
@@ -300,7 +300,7 @@ typedef struct pg_ops {
                        time_t       to,
                        usage_row_t* out,
                        int          cap,
-                       int*         n); /**< Query daily usage by key/model/time range. */
+                       int*         n);         /**< Query daily usage by key/model/time range. */
     int (*flush_usage_requests)(void*                      ctx,
                                 const usage_request_row_t* rows,
                                 int n); /**< Batch-persist per-request audit rows. */
@@ -338,14 +338,14 @@ typedef struct pg_ops {
         long* out_id); /**< Create a guardrails rule, out_id returns the primary key. */
     int (*update_guardrails_rule)(
         void*                   ctx,
-        const guardrail_rule_t* rule);       /**< Full-field update of a guardrails rule by id. */
+        const guardrail_rule_t* rule);      /**< Full-field update of a guardrails rule by id. */
     int (*delete_guardrails_rule)(void* ctx,
                                   long  id); /**< Delete a guardrails rule by numeric id. */
 
     int (*list_shadow_rules)(void*          ctx,
                              shadow_rule_t* out,
                              int            cap,
-                             int*           n); /**< List traffic shadow/canary rules. */
+                             int*           n);        /**< List traffic shadow/canary rules. */
     int (*create_shadow_rule)(void*                ctx,
                               const shadow_rule_t* rule,
                               long* out_id); /**< Create shadow rule, out_id returns primary key. */
@@ -356,7 +356,7 @@ typedef struct pg_ops {
     int (*list_compressor_rules)(void*              ctx,
                                  compressor_rule_t* out,
                                  int                cap,
-                                 int*               n); /**< List prompt compressor rules. */
+                                 int*               n);          /**< List prompt compressor rules. */
     int (*upsert_compressor_rule)(
         void* ctx, const compressor_rule_t* rule); /**< Upsert prompt compressor rule by UUID id. */
     int (*delete_compressor_rule)(void*       ctx,

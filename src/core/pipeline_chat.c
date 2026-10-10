@@ -650,15 +650,15 @@ handle_chat_sync(chat_req_t* q)
         size_t   ulen = 0;
         uint64_t t0 = mono_ns();
         int      urc = upstream_call_ext(url,
-                                         cur_route.upstream_key,
-                                         extra_hdrs,
-                                         n_extra_hdrs,
-                                         merged,
-                                         mlen,
-                                         q->ac->default_timeout_ms,
-                                         &status,
-                                         &ubody,
-                                         &ulen);
+                                    cur_route.upstream_key,
+                                    extra_hdrs,
+                                    n_extra_hdrs,
+                                    merged,
+                                    mlen,
+                                    q->ac->default_timeout_ms,
+                                    &status,
+                                    &ubody,
+                                    &ulen);
 
         if (q->n_candidates == 1 && urc == 0 && status >= 500) {
             free(ubody);
@@ -1043,17 +1043,17 @@ handle_stream_preheaders(chat_req_t*               q,
 typedef struct stream_feed_wrapper {
     int (*real_feed)(void*       bridge,
                      const void* chunk,
-                     size_t      len); /**< Underlying stream bridge feed callback. */
-    void*              real_bridge;    /**< Underlying bridge instance. */
-    latency_tracker_t* lt;             /**< Latency tracker instance (optional). */
-    const char*        model;          /**< Target model name for metrics. */
-    const char*        endpoint;       /**< Target upstream endpoint address. */
-    const char*        provider;       /**< Target upstream provider name. */
-    uint64_t           t0;             /**< Timestamp when request was dispatched. */
-    bool        first_chunk_recorded;  /**< True if first non-empty chunk has been observed. */
-    chat_req_t* q;                     /**< Request context for OpenTelemetry span tracking. */
-    int         chunk_count;           /**< Number of streaming chunks observed. */
-    size_t      total_bytes;           /**< Total chunk bytes observed. */
+                     size_t      len);     /**< Underlying stream bridge feed callback. */
+    void*              real_bridge;   /**< Underlying bridge instance. */
+    latency_tracker_t* lt;            /**< Latency tracker instance (optional). */
+    const char*        model;         /**< Target model name for metrics. */
+    const char*        endpoint;      /**< Target upstream endpoint address. */
+    const char*        provider;      /**< Target upstream provider name. */
+    uint64_t           t0;            /**< Timestamp when request was dispatched. */
+    bool        first_chunk_recorded; /**< True if first non-empty chunk has been observed. */
+    chat_req_t* q;                    /**< Request context for OpenTelemetry span tracking. */
+    int         chunk_count;          /**< Number of streaming chunks observed. */
+    size_t      total_bytes;          /**< Total chunk bytes observed. */
 } stream_feed_wrapper_t;
 
 static int
@@ -1198,17 +1198,17 @@ handle_chat_stream(chat_req_t* q)
         };
 
         int  urc = upstream_stream_call(url,
-                                        cur_route.upstream_key,
-                                        extra_hdrs,
-                                        n_extra_hdrs,
-                                        merged,
-                                        mlen,
-                                        silence_timeout_ms,
-                                        (upstream_chunk_fn)stream_feed_wrapper_fn,
-                                        &feed_wrapper,
-                                        &status,
-                                        &sbody,
-                                        &slen);
+                                       cur_route.upstream_key,
+                                       extra_hdrs,
+                                       n_extra_hdrs,
+                                       merged,
+                                       mlen,
+                                       silence_timeout_ms,
+                                       (upstream_chunk_fn)stream_feed_wrapper_fn,
+                                       &feed_wrapper,
+                                       &status,
+                                       &sbody,
+                                       &slen);
         bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
 
         if (q->n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {

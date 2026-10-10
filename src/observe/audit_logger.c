@@ -121,16 +121,20 @@ format_iso8601_ms(int64_t timestamp_ms, char* out_buf, size_t cap)
     }
     struct tm tm_buf;
     gmtime_r(&sec, &tm_buf);
+    int year = tm_buf.tm_year + 1900;
+    if (year < 1970 || year > 9999) {
+        year = 1970;
+    }
     snprintf(out_buf,
              cap,
              "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ",
-             tm_buf.tm_year + 1900,
-             tm_buf.tm_mon + 1,
-             tm_buf.tm_mday,
-             tm_buf.tm_hour,
-             tm_buf.tm_min,
-             tm_buf.tm_sec,
-             ms);
+             year,
+             (tm_buf.tm_mon % 12) + 1,
+             tm_buf.tm_mday % 32,
+             tm_buf.tm_hour % 24,
+             tm_buf.tm_min % 60,
+             tm_buf.tm_sec % 61,
+             ms % 1000);
 }
 
 char*
@@ -140,7 +144,7 @@ audit_event_to_ndjson(const audit_event_t* ev)
         return NULL;
     }
 
-    char ts_buf[32];
+    char ts_buf[64];
     format_iso8601_ms(ev->timestamp_ms, ts_buf, sizeof(ts_buf));
 
     json_t* root = json_object();
@@ -188,7 +192,7 @@ audit_event_to_webhook_payload(const audit_event_t* ev, audit_webhook_format_t f
         return NULL;
     }
 
-    char ts_buf[32];
+    char ts_buf[64];
     format_iso8601_ms(ev->timestamp_ms, ts_buf, sizeof(ts_buf));
     const char* sev_str = severity_to_str(ev->severity);
     const char* prompt_str = (ev->prompt_snapshot != NULL) ? ev->prompt_snapshot : "";
@@ -873,26 +877,26 @@ audit_logger_record(audit_logger_t* al, const audit_event_t* ev)
         audit_live_event_t* slot = &al->live_ring[idx];
         memset(slot, 0, sizeof(*slot));
         slot->seq_id = al->next_seq_id++;
-        strncpy(slot->trace_id, ev->trace_id, sizeof(slot->trace_id) - 1);
-        strncpy(slot->client_ip, ev->client_ip, sizeof(slot->client_ip) - 1);
-        strncpy(slot->model, ev->model, sizeof(slot->model) - 1);
+        snprintf(slot->trace_id, sizeof(slot->trace_id), "%s", ev->trace_id);
+        snprintf(slot->client_ip, sizeof(slot->client_ip), "%s", ev->client_ip);
+        snprintf(slot->model, sizeof(slot->model), "%s", ev->model);
         if (ev->routed_model[0] != '\0') {
-            strncpy(slot->routed_model, ev->routed_model, sizeof(slot->routed_model) - 1);
+            snprintf(slot->routed_model, sizeof(slot->routed_model), "%s", ev->routed_model);
         } else {
-            strncpy(slot->routed_model, ev->model, sizeof(slot->routed_model) - 1);
+            snprintf(slot->routed_model, sizeof(slot->routed_model), "%s", ev->model);
         }
-        strncpy(slot->provider, ev->provider, sizeof(slot->provider) - 1);
+        snprintf(slot->provider, sizeof(slot->provider), "%s", ev->provider);
         slot->http_status = ev->http_status;
         slot->prompt_tokens = ev->prompt_tokens;
         slot->completion_tokens = ev->completion_tokens;
         slot->ttft_ms = (uint32_t)(ev->ttft_ns / 1000000ULL);
         slot->total_latency_ms = (uint32_t)(ev->latency_ns / 1000000ULL);
         slot->severity = ev->severity;
-        strncpy(slot->violation_type, ev->violation_type, sizeof(slot->violation_type) - 1);
-        strncpy(slot->rule_detail, ev->rule_detail, sizeof(slot->rule_detail) - 1);
-        strncpy(slot->fallback_reason, ev->fallback_reason, sizeof(slot->fallback_reason) - 1);
+        snprintf(slot->violation_type, sizeof(slot->violation_type), "%s", ev->violation_type);
+        snprintf(slot->rule_detail, sizeof(slot->rule_detail), "%s", ev->rule_detail);
+        snprintf(slot->fallback_reason, sizeof(slot->fallback_reason), "%s", ev->fallback_reason);
         if (ev->prompt_snapshot != NULL) {
-            strncpy(slot->prompt_snippet, ev->prompt_snapshot, sizeof(slot->prompt_snippet) - 1);
+            snprintf(slot->prompt_snippet, sizeof(slot->prompt_snippet), "%s", ev->prompt_snapshot);
         }
         slot->timestamp_ms = ev->timestamp_ms;
     }

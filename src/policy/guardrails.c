@@ -990,11 +990,11 @@ guardrails_inspect_inbound_with_pii(guardrails_ctx_t*  ctx,
             int          c_changed = 0;
             pii_action_t item_act = PII_ACTION_OFF;
             char*        masked = guardrails_transform_pii_text(ctx,
-                                                                json_string_value(j_prompt),
-                                                                strlen(json_string_value(j_prompt)),
-                                                                pii_map,
-                                                                &item_act,
-                                                                &c_changed);
+                                                         json_string_value(j_prompt),
+                                                         strlen(json_string_value(j_prompt)),
+                                                         pii_map,
+                                                         &item_act,
+                                                         &c_changed);
             if (item_act == PII_ACTION_BLOCK) {
                 free(masked);
                 json_decref(root);
@@ -1022,11 +1022,11 @@ guardrails_inspect_inbound_with_pii(guardrails_ctx_t*  ctx,
             int          c_changed = 0;
             pii_action_t item_act = PII_ACTION_OFF;
             char*        masked = guardrails_transform_pii_text(ctx,
-                                                                json_string_value(j_sys),
-                                                                strlen(json_string_value(j_sys)),
-                                                                pii_map,
-                                                                &item_act,
-                                                                &c_changed);
+                                                         json_string_value(j_sys),
+                                                         strlen(json_string_value(j_sys)),
+                                                         pii_map,
+                                                         &item_act,
+                                                         &c_changed);
             if (item_act == PII_ACTION_BLOCK) {
                 free(masked);
                 json_decref(root);

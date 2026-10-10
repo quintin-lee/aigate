@@ -44,8 +44,8 @@ TEST_CASE(test_watermark_mixed_chinese_and_truncation)
     in_p.crc_valid = false;
 
     const char* origin = "你好，这是企业内部核心模型输出的敏感分析结果。请妥善保管！";
-    size_t      out_len = 0;
-    char*       watermarked = watermark_inject(origin, strlen(origin), &in_p, &out_len);
+    size_t out_len = 0;
+    char*  watermarked = watermark_inject(origin, strlen(origin), &in_p, &out_len);
     TEST_ASSERT(watermarked != NULL, "watermark_inject failed for chinese text");
 
     /* 完整解码验证 */

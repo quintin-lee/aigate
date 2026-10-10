@@ -959,7 +959,7 @@ serialize_targets_json(const model_rec_t* m)
     } else {
         for (int i = 0; i < m->n_targets && i < MAX_TARGETS_PER_MODEL; i++) {
             const upstream_target_t* tgt = &m->targets[i];
-            json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i, s:i}",
+            json_t*                  item = json_pack("{s:s, s:s, s:s, s:i, s:i, s:i}",
                                      "provider",
                                      tgt->provider[0] != '\0' ? tgt->provider : "openai",
                                      "endpoint",
@@ -2090,7 +2090,7 @@ pq_create_guardrails_rule(void* vctx, const guardrail_rule_t* rule, long* out_id
                            timeout_str,
                            fail_mode_str,
                            phase_str};
-    int         plens[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    int plens[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     pq_lock(px);
     PGresult* res = PQexecParams(px->db, q, 9, NULL, vals, plens, NULL, 0);
@@ -3377,7 +3377,7 @@ pg_store_rotate_master_key(pg_store_t*   ps,
                 const char* vals[3] = {new_kref[0] != '\0' ? new_kref : NULL,
                                        new_targets_str != NULL ? new_targets_str : targets_json,
                                        mname};
-                PGresult*   ures = PQexecParams(px->db, upd_sql, 3, NULL, vals, NULL, NULL, 0);
+                PGresult* ures = PQexecParams(px->db, upd_sql, 3, NULL, vals, NULL, NULL, 0);
                 if (ures == NULL || PQresultStatus(ures) != PGRES_COMMAND_OK) {
                     AIGATE_LOG_ERROR("pg rotate_master_key: update model %s failed: %s",
                                      mname,

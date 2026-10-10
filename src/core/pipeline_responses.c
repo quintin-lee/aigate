@@ -303,17 +303,17 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
             long     silence_timeout_ms =
                 ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
             int  urc = upstream_stream_call(url,
-                                            cur_route.upstream_key,
-                                            extra_hdrs,
-                                            n_extra_hdrs,
-                                            out_body,
-                                            out_body_len,
-                                            silence_timeout_ms,
-                                            (upstream_chunk_fn)adapter->stream_bridge_feed,
-                                            bridge,
-                                            &status,
-                                            &sbody,
-                                            &slen);
+                                           cur_route.upstream_key,
+                                           extra_hdrs,
+                                           n_extra_hdrs,
+                                           out_body,
+                                           out_body_len,
+                                           silence_timeout_ms,
+                                           (upstream_chunk_fn)adapter->stream_bridge_feed,
+                                           bridge,
+                                           &status,
+                                           &sbody,
+                                           &slen);
             bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
 
             if (n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {
@@ -573,15 +573,15 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
         size_t   ulen = 0;
         uint64_t t0 = mono_ns();
         int      urc = upstream_call_ext(url,
-                                         cur_route.upstream_key,
-                                         extra_hdrs,
-                                         n_extra_hdrs,
-                                         out_body,
-                                         out_body_len,
-                                         ac->default_timeout_ms,
-                                         &status,
-                                         &ubody,
-                                         &ulen);
+                                    cur_route.upstream_key,
+                                    extra_hdrs,
+                                    n_extra_hdrs,
+                                    out_body,
+                                    out_body_len,
+                                    ac->default_timeout_ms,
+                                    &status,
+                                    &ubody,
+                                    &ulen);
 
         if (n_candidates == 1 && urc == 0 && status >= 500) {
             free(ubody);

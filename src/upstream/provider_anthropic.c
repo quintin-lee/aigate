@@ -717,19 +717,19 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
                 if (jt != NULL && json_is_string(jt)) {
                     const char* text = json_string_value(jt);
                     json_t*     cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
-                                               "id",
-                                               id_buf,
-                                               "object",
-                                               "chat.completion.chunk",
-                                               "model",
-                                               b->model,
-                                               "choices",
-                                               "index",
-                                               0,
-                                               "delta",
-                                               "content",
-                                               text,
-                                               "finish_reason");
+                                           "id",
+                                           id_buf,
+                                           "object",
+                                           "chat.completion.chunk",
+                                           "model",
+                                           b->model,
+                                           "choices",
+                                           "index",
+                                           0,
+                                           "delta",
+                                           "content",
+                                           text,
+                                           "finish_reason");
                     char*       pd = json_dumps(cd, JSON_COMPACT);
                     json_decref(cd);
                     if (pd != NULL) {

@@ -345,7 +345,7 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
     if (um != NULL) {
         char provs[16][32];
         long counts[16];
-        int  nprov = um_provider_names(um, (char (*)[32])provs, 16);
+        int  nprov = um_provider_names(um, (char(*)[32])provs, 16);
         int  nlive = 0;
         for (int i = 0; i < nprov; i++) {
             counts[i] = um_provider_sampled(um, provs[i]);

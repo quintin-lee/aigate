@@ -32,13 +32,13 @@ audit_hash_chain_create(const char* secret)
         return NULL;
     }
 
-    strncpy(ctx->secret_key, secret, sizeof(ctx->secret_key) - 1);
+    snprintf(ctx->secret_key, sizeof(ctx->secret_key), "%s", secret);
     pthread_mutex_init(&ctx->lock, NULL);
 
     /* Compute genesis hash H0 */
     compute_hmac_hex(
         ctx->secret_key, "AIGATE_AUDIT_GENESIS", strlen("AIGATE_AUDIT_GENESIS"), ctx->genesis_hash);
-    strncpy(ctx->last_hash, ctx->genesis_hash, sizeof(ctx->last_hash) - 1);
+    memcpy(ctx->last_hash, ctx->genesis_hash, sizeof(ctx->last_hash));
     ctx->current_seq = 0;
 
     return ctx;

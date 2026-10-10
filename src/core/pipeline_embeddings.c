@@ -82,15 +82,15 @@ handle_embeddings(chat_req_t* q)
         size_t   ulen = 0;
         uint64_t t0 = mono_ns();
         int      urc = upstream_call_ext(url,
-                                         cur_route.upstream_key,
-                                         extra_hdrs,
-                                         n_extra_hdrs,
-                                         merged,
-                                         mlen,
-                                         q->ac->default_timeout_ms,
-                                         &status,
-                                         &ubody,
-                                         &ulen);
+                                    cur_route.upstream_key,
+                                    extra_hdrs,
+                                    n_extra_hdrs,
+                                    merged,
+                                    mlen,
+                                    q->ac->default_timeout_ms,
+                                    &status,
+                                    &ubody,
+                                    &ulen);
 
         if (q->n_candidates == 1 && urc == 0 && status >= 500) {
             free(ubody);

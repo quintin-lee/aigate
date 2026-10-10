@@ -320,6 +320,7 @@ filter_chain_execute_outbound(
         int         p_changed = 0;
         char* restored = guardrails_restore_pii_text(cur_body, cur_len, &q->pii_map, &p_changed);
         if (p_changed && restored != NULL) {
+            size_t restored_len = strlen(restored);
             if (out_body != NULL && *out_body != NULL) {
                 free(*out_body);
             }
@@ -329,7 +330,7 @@ filter_chain_execute_outbound(
                 free(restored);
             }
             if (out_len != NULL) {
-                *out_len = strlen(restored);
+                *out_len = restored_len;
             }
         }
     }
