@@ -1280,18 +1280,38 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
     acc->orig_rc->status = 200;
     acc->orig_rc->headers_sent = true;
     int rv = 0;
+
+    const void* eff_buf = buf;
+    size_t      eff_len = len;
+    char        wm_stack_buf[4096];
+    char*       wm_buf = NULL;
+
+    if (acc->wm_state.enabled) {
+        size_t wm_needed = len + 1024;
+        wm_buf = (wm_needed <= sizeof(wm_stack_buf)) ? wm_stack_buf : malloc(wm_needed);
+        if (wm_buf != NULL) {
+            size_t out_wlen = 0;
+            if (watermark_stream_feed(
+                    &acc->wm_state, (const char*)buf, len, fin, wm_buf, wm_needed, &out_wlen) ==
+                0) {
+                eff_buf = wm_buf;
+                eff_len = out_wlen;
+            }
+        }
+    }
+
     /* Step 1: Forward chunk to downstream client (de-anonymizing tokens if active) */
     if (acc->orig_rc->write != NULL) {
         if (acc->pii_sf.map != NULL && acc->pii_sf.map->count > 0) {
-            size_t needed = len + 128;
+            size_t needed = eff_len + 128;
             char   stack_buf[4096];
             char*  filt_buf = (needed <= sizeof(stack_buf)) ? stack_buf : malloc(needed);
             if (filt_buf == NULL) {
-                rv = acc->orig_rc->write(acc->orig_rc->impl, buf, len, fin);
+                rv = acc->orig_rc->write(acc->orig_rc->impl, eff_buf, eff_len, fin);
             } else {
                 size_t filt_len = 0;
                 guardrails_stream_filter_feed(
-                    &acc->pii_sf, (const char*)buf, len, filt_buf, needed, &filt_len);
+                    &acc->pii_sf, (const char*)eff_buf, eff_len, filt_buf, needed, &filt_len);
                 if (filt_len > 0) {
                     rv = acc->orig_rc->write(
                         acc->orig_rc->impl, filt_buf, filt_len, fin && acc->pii_sf.win_len == 0);
@@ -1310,16 +1330,19 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
                 }
             }
         } else {
-            rv = acc->orig_rc->write(acc->orig_rc->impl, buf, len, fin);
+            rv = acc->orig_rc->write(acc->orig_rc->impl, eff_buf, eff_len, fin);
         }
     }
     /* If stream overflowed or empty, bypass accumulation and continue passthrough only */
-    if (len == 0 || buf == NULL || acc->overflow) {
+    if (eff_len == 0 || eff_buf == NULL || acc->overflow) {
+        if (wm_buf != NULL && wm_buf != wm_stack_buf) {
+            free(wm_buf);
+        }
         return rv;
     }
 
-    const char* p = (const char*)buf;
-    const char* end = p + len;
+    const char* p = (const char*)eff_buf;
+    const char* end = p + eff_len;
     /* Step 2: Split incoming chunks across newline delimiters (\n), handling cross-frame splits */
     while (p < end) {
         const char* nl = memchr(p, '\n', (size_t)(end - p));
@@ -1347,6 +1370,9 @@ stream_cache_acc_write(void* impl, const void* buf, size_t len, bool fin)
             }
             p = end;
         }
+    }
+    if (wm_buf != NULL && wm_buf != wm_stack_buf) {
+        free(wm_buf);
     }
     return rv;
 }

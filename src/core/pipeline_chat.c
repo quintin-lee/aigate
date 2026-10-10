@@ -1163,6 +1163,27 @@ handle_chat_stream(chat_req_t* q)
         memset(&acc, 0, sizeof(acc));
         acc.orig_rc = q->rc;
         guardrails_stream_filter_init(&acc.pii_sf, &q->pii_map);
+        if (q->krec.watermark_enabled) {
+            watermark_payload_t wp;
+            memset(&wp, 0, sizeof(wp));
+            wp.timestamp = (uint32_t)time(NULL);
+            wp.key_id = (uint32_t)q->krec.key_id;
+            if (q->trace_ctx.trace_id[0] != '\0') {
+                wp.short_trace = strtoull(q->trace_ctx.trace_id, NULL, 16);
+                if (wp.short_trace == 0) {
+                    for (const char* p = q->trace_ctx.trace_id; *p; p++) {
+                        wp.short_trace = (wp.short_trace * 31) + (unsigned char)*p;
+                    }
+                }
+            } else {
+                wp.short_trace = (uint64_t)rand();
+            }
+            const char* fmt = "openai";
+            if (q->rq != NULL && q->rq->path != NULL && strstr(q->rq->path, "/messages") != NULL) {
+                fmt = "anthropic";
+            }
+            watermark_stream_init(&acc.wm_state, &wp, fmt, 100);
+        }
 
         aigate_response_ctx proxy_rc = *q->rc;
         proxy_rc.impl = &acc;

@@ -774,6 +774,18 @@ main(int argc, char** argv)
     test_register("watermark_chinese_punctuation_anchoring",
                   test_watermark_chinese_punctuation_anchoring);
 
+    extern void test_stream_watermark_openai_sse_injection(void);
+    test_register("stream_watermark_openai_sse_injection",
+                  test_stream_watermark_openai_sse_injection);
+
+    extern void test_stream_watermark_anthropic_sse_injection(void);
+    test_register("stream_watermark_anthropic_sse_injection",
+                  test_stream_watermark_anthropic_sse_injection);
+
+    extern void test_stream_watermark_no_punctuation_fallback(void);
+    test_register("stream_watermark_no_punctuation_fallback",
+                  test_stream_watermark_no_punctuation_fallback);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

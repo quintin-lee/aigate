@@ -8,6 +8,7 @@
 #include "aigate_core.h"
 #include "aigate_log.h"
 #include "guardrails.h"
+#include "policy/watermark_engine.h"
 #include "response_cache.h"
 #include "observe/tracer.h"
 #include <jansson.h>
@@ -39,6 +40,7 @@ typedef struct stream_cache_acc {
     long                 created;       /**< Response created timestamp. */
     bool                 overflow;      /**< Over-limit/alloc failure: passthrough only. */
     pii_stream_filter_t  pii_sf; /**< Streaming PII de-anonymization sliding window filter. */
+    stream_watermark_state_t wm_state; /**< Streaming watermark state machine. */
 } stream_cache_acc_t;
 
 /**

@@ -338,3 +338,190 @@ watermark_decode(const char* text, size_t len, watermark_payload_t* out_payload)
     int cnt = 0;
     return watermark_decode_all(text, len, out_payload, 1, &cnt);
 }
+
+void
+watermark_stream_init(stream_watermark_state_t*   state,
+                      const watermark_payload_t* payload,
+                      const char*                format,
+                      size_t                     min_interval)
+{
+    if (state == NULL) {
+        return;
+    }
+    memset(state, 0, sizeof(*state));
+    if (payload != NULL) {
+        state->payload = *payload;
+        state->enabled = true;
+        encode_payload_to_utf8(payload, state->wm_utf8);
+    }
+    state->min_interval = min_interval > 0 ? min_interval : 100;
+    if (format != NULL && format[0] != '\0') {
+        snprintf(state->format, sizeof(state->format), "%s", format);
+    } else {
+        snprintf(state->format, sizeof(state->format), "openai");
+    }
+    state->chars_since_last_tile = 0;
+    state->tile_injected = false;
+}
+
+int
+watermark_stream_feed(stream_watermark_state_t* state,
+                      const char*              in_buf,
+                      size_t                   in_len,
+                      bool                     is_final,
+                      char*                    out_buf,
+                      size_t                   out_cap,
+                      size_t*                  out_len)
+{
+    if (state == NULL || out_buf == NULL || out_len == NULL) {
+        return -1;
+    }
+    if (!state->enabled) {
+        if (out_cap < in_len) {
+            return -1;
+        }
+        if (in_buf != NULL && in_len > 0) {
+            memcpy(out_buf, in_buf, in_len);
+        }
+        *out_len = in_len;
+        return 0;
+    }
+
+    bool is_anthropic = (strcmp(state->format, "anthropic") == 0);
+
+    /* 1. Check if we need to inject an end-of-stream fallback tile */
+    bool is_stream_end = is_final ||
+                         (in_buf != NULL &&
+                          (strstr(in_buf, "data: [DONE]") != NULL ||
+                           (is_anthropic && strstr(in_buf, "message_stop") != NULL)));
+
+    /* Build synthetic delta event if needed */
+    char   synth_event[512];
+    size_t synth_len = 0;
+
+    if (is_stream_end && !state->tile_injected) {
+        if (is_anthropic) {
+            synth_len = (size_t)snprintf(
+                synth_event,
+                sizeof(synth_event),
+                "event: content_block_delta\n"
+                "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"%.*s\"}}\n\n",
+                WATERMARK_UTF8_BYTES,
+                state->wm_utf8);
+        } else {
+            synth_len = (size_t)snprintf(
+                synth_event,
+                sizeof(synth_event),
+                "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"%.*s\"}}]}\n\n",
+                WATERMARK_UTF8_BYTES,
+                state->wm_utf8);
+        }
+        state->tile_injected = true;
+    }
+
+    /* 2. Check if in_buf contains a mid-stream punctuation anchor */
+    const char* punct_pos = NULL;
+
+    if (synth_len == 0 && in_buf != NULL && in_len > 0) {
+        const char* val_start = NULL;
+        if (is_anthropic) {
+            val_start = strstr(in_buf, "\"text\":\"");
+            if (val_start != NULL) {
+                val_start += 8;
+            }
+        } else {
+            val_start = strstr(in_buf, "\"content\":\"");
+            if (val_start != NULL) {
+                val_start += 11;
+            }
+        }
+
+        if (val_start != NULL && (size_t)(val_start - in_buf) < in_len) {
+            size_t val_rem = in_len - (size_t)(val_start - in_buf);
+            for (size_t idx = 0; idx < val_rem; idx++) {
+                if (val_start[idx] == '\"' && (idx == 0 || val_start[idx - 1] != '\\')) {
+                    break; /* End of JSON string */
+                }
+                size_t a = 0;
+                if (is_punctuation_anchor(val_start, idx, val_rem, &a)) {
+                    state->chars_since_last_tile += idx;
+                    if (state->chars_since_last_tile >= state->min_interval) {
+                        punct_pos = val_start + idx + a;
+                        break;
+                    }
+                }
+            }
+            if (punct_pos == NULL) {
+                state->chars_since_last_tile += val_rem;
+            }
+        }
+    }
+
+    /* 3. Output assembly */
+    if (punct_pos != NULL) {
+        /* Inject inside the punctuation token of this chunk */
+        size_t prefix_len = (size_t)(punct_pos - in_buf);
+        size_t suffix_len = in_len - prefix_len;
+        size_t needed = prefix_len + WATERMARK_UTF8_BYTES + suffix_len;
+        if (needed > out_cap) {
+            return -1;
+        }
+        memcpy(out_buf, in_buf, prefix_len);
+        memcpy(out_buf + prefix_len, state->wm_utf8, WATERMARK_UTF8_BYTES);
+        memcpy(out_buf + prefix_len + WATERMARK_UTF8_BYTES, punct_pos, suffix_len);
+        *out_len = needed;
+        state->chars_since_last_tile = 0;
+        state->tile_injected = true;
+        return 0;
+    }
+
+    if (synth_len > 0) {
+        /* Insert synthetic event right before [DONE] or message_stop if present */
+        const char* split_point = NULL;
+        if (in_buf != NULL) {
+            if (is_anthropic) {
+                split_point = strstr(in_buf, "event: message_stop");
+            } else {
+                split_point = strstr(in_buf, "data: [DONE]");
+            }
+        }
+
+        if (split_point != NULL) {
+            size_t head_len = (size_t)(split_point - in_buf);
+            size_t tail_len = in_len - head_len;
+            size_t needed = head_len + synth_len + tail_len;
+            if (needed > out_cap) {
+                return -1;
+            }
+            if (head_len > 0) {
+                memcpy(out_buf, in_buf, head_len);
+            }
+            memcpy(out_buf + head_len, synth_event, synth_len);
+            memcpy(out_buf + head_len + synth_len, split_point, tail_len);
+            *out_len = needed;
+            return 0;
+        } else {
+            /* Append synth_event after in_buf */
+            size_t needed = in_len + synth_len;
+            if (needed > out_cap) {
+                return -1;
+            }
+            if (in_len > 0 && in_buf != NULL) {
+                memcpy(out_buf, in_buf, in_len);
+            }
+            memcpy(out_buf + in_len, synth_event, synth_len);
+            *out_len = needed;
+            return 0;
+        }
+    }
+
+    /* Standard passthrough */
+    if (in_len > out_cap) {
+        return -1;
+    }
+    if (in_buf != NULL && in_len > 0) {
+        memcpy(out_buf, in_buf, in_len);
+    }
+    *out_len = in_len;
+    return 0;
+}

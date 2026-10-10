@@ -75,6 +75,48 @@ int watermark_decode_all(const char*          text,
                          int                  cap,
                          int*                 out_count);
 
+/** @brief Streaming chunk-level watermark state machine context. */
+typedef struct stream_watermark_state {
+    watermark_payload_t payload;
+    char                wm_utf8[WATERMARK_UTF8_BYTES];
+    bool                enabled;
+    bool                tile_injected;
+    size_t              chars_since_last_tile;
+    size_t              min_interval;
+    char                format[16]; /**< "openai" | "anthropic" | "raw" */
+} stream_watermark_state_t;
+
+/**
+ * @brief Initialize streaming chunk watermark state machine.
+ * @param state State machine context to initialize.
+ * @param payload Watermark metadata to embed.
+ * @param format Output SSE format ("openai", "anthropic", or "raw").
+ * @param min_interval Minimum character spacing between tiles (e.g. 50~100).
+ */
+void watermark_stream_init(stream_watermark_state_t*   state,
+                           const watermark_payload_t* payload,
+                           const char*                format,
+                           size_t                     min_interval);
+
+/**
+ * @brief Feed a streaming chunk through the watermark state machine.
+ * @param state State machine context.
+ * @param in_buf Incoming stream chunk.
+ * @param in_len Length of in_buf.
+ * @param is_final True if this is the final stream chunk.
+ * @param out_buf Destination buffer for processed chunk.
+ * @param out_cap Capacity of out_buf.
+ * @param[out] out_len Written with number of bytes in out_buf.
+ * @return 0 on success, -1 on buffer overflow or error.
+ */
+int watermark_stream_feed(stream_watermark_state_t* state,
+                          const char*              in_buf,
+                          size_t                   in_len,
+                          bool                     is_final,
+                          char*                    out_buf,
+                          size_t                   out_cap,
+                          size_t*                  out_len);
+
 #ifdef __cplusplus
 }
 #endif
