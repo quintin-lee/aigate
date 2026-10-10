@@ -262,3 +262,48 @@ TEST_CASE(test_credential_extraction_variants)
     const char* k6 = extract_credential_from_headers(NULL, NULL, NULL, NULL);
     TEST_ASSERT(k6 != NULL && k6[0] == '\0', "empty fallback");
 }
+
+TEST_CASE(test_auth_key_canary_detection)
+{
+    struct akg_db db;
+    memset(&db, 0, sizeof db);
+
+    key_rec_t canary;
+    memset(&canary, 0, sizeof canary);
+    canary.key_id = 777;
+    sha256_hex("honey-token-xyz", strlen("honey-token-xyz"), canary.key_hash);
+    canary.is_canary = 1;
+    snprintf(canary.name, sizeof canary.name, "canary-honeypot");
+
+    db.recs[0] = canary;
+    db.n = 1;
+
+    pg_ops_t ops = build_akg_ops(&db);
+    pg_store_t* ps = pg_store_open("unused", &ops);
+    auth_key_cache akc;
+    auth_key_init(&akc, ps);
+
+    key_rec_t out;
+    memset(&out, 0, sizeof out);
+
+    /* 1. First resolve hits DB and returns AUTH_KEY_ERR_CANARY (-4) */
+    int rc = auth_key_resolve(&akc, "honey-token-xyz", &out);
+    TEST_ASSERT(rc == AUTH_KEY_ERR_CANARY,
+                "canary returns AUTH_KEY_ERR_CANARY (-4, got %d)",
+                rc);
+    TEST_ASSERT(out.key_id == 777, "out populated with canary key_id");
+    TEST_ASSERT(out.is_canary == 1, "out has is_canary = 1");
+    key_rec_free(&out);
+
+    /* 2. Second resolve hits cache and returns AUTH_KEY_ERR_CANARY (-4) without extra store calls */
+    int prev_calls = db.get_calls;
+    rc = auth_key_resolve(&akc, "honey-token-xyz", &out);
+    TEST_ASSERT(rc == AUTH_KEY_ERR_CANARY,
+                "cached canary returns AUTH_KEY_ERR_CANARY (-4, got %d)",
+                rc);
+    TEST_ASSERT(db.get_calls == prev_calls, "cached canary served from LRU");
+    key_rec_free(&out);
+
+    auth_key_shutdown(&akc);
+    pg_store_close(ps);
+}

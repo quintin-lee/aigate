@@ -79,6 +79,9 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
     key_rec_t krec;
     int       arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
     if (arc != 0) {
+        if (arc == AUTH_KEY_ERR_CANARY) {
+            aigate_core_handle_canary_hit(ac, rq->client_ip, krec.key_id, "anthropic:canary");
+        }
         aigate_write_anthropic_error(rc, 401, "authentication_error", "invalid api key");
         key_rec_free(&krec);
         return 0;
@@ -672,6 +675,9 @@ handle_gemini_generate(aigate_core* ac, aigate_request_ctx* rq, aigate_response_
     key_rec_t krec;
     int       arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
     if (arc != 0) {
+        if (arc == AUTH_KEY_ERR_CANARY) {
+            aigate_core_handle_canary_hit(ac, rq->client_ip, krec.key_id, "gemini:canary");
+        }
         aigate_write_gemini_error(rc, 401, "UNAUTHENTICATED", "invalid api key");
         key_rec_free(&krec);
         return 0;

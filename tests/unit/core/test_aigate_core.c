@@ -280,6 +280,14 @@ fkey_set_budget(struct fdb* db, int slot, double cost_budget, long token_budget)
     db->keys[slot].k.monthly_cost_budget = cost_budget;
     db->keys[slot].k.monthly_token_budget = token_budget;
 }
+
+/** @brief Set the canary honey-token switch of the in-memory key slot. */
+static void
+fkey_set_canary(struct fdb* db, int slot, int is_canary)
+{
+    db->keys[slot].k.is_canary = is_canary;
+}
+
 /** @brief Free allowlists allocated by fkey_add (called at test teardown). */
 static void
 freed_db(struct fdb* db)
@@ -1606,4 +1614,49 @@ TEST_CASE(test_pipeline_cache_optimizer_and_headers)
     pg_store_close(ps);
     freed_db(&db);
     mock_upstream_stop(mu);
+}
+
+TEST_CASE(test_core_canary_auto_ban)
+{
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 888, "canary-token-123", 0, 0, NULL);
+    fkey_set_canary(&db, 0, 1);
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    /* Request using canary token */
+    aigate_request_ctx rq;
+    memset(&rq, 0, sizeof rq);
+    rq.method = "POST";
+    rq.path = "/v1/chat/completions";
+    rq.bearer = "canary-token-123";
+    rq.client_ip = "198.51.100.42";
+    rq.body = "{\"model\":\"gpt-4o\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+    rq.body_len = strlen(rq.body);
+
+    struct cap c;
+    memset(&c, 0, sizeof c);
+    aigate_response_ctx rc = cap_rc(&c);
+
+    int res = aigate_handle_request(&ac, &rq, &rc);
+    TEST_ASSERT(res == 0, "handle_request returned 0 for canary response written");
+    TEST_ASSERT(rc.status == 401, "status is 401 decoy error (got %d)", rc.status);
+    TEST_ASSERT(strstr(c.body, "invalid api key") != NULL, "decoy 401 body returned");
+
+    /* Verify client IP was automatically banned in ac.ip_ban_tbl */
+    char ban_reason[64] = {0};
+    TEST_ASSERT(ip_ban_table_is_banned(ac.ip_ban_tbl, "198.51.100.42", ban_reason, sizeof(ban_reason)),
+                "client IP 198.51.100.42 is now banned in ip_ban_tbl");
+    TEST_ASSERT(strcmp(ban_reason, "canary_token_compromised") == 0, "ban reason matches");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
 }

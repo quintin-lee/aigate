@@ -23,6 +23,9 @@ handle_responses(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* r
     key_rec_t krec;
     int       arc = auth_key_resolve(&ac->keys, rq->bearer, &krec);
     if (arc != 0) {
+        if (arc == AUTH_KEY_ERR_CANARY) {
+            aigate_core_handle_canary_hit(ac, rq->client_ip, krec.key_id, "responses:canary");
+        }
         aigate_write_error(rc, PIPE_AUTH, "auth_error", "invalid api key");
         key_rec_free(&krec);
         return 0;

@@ -97,6 +97,9 @@ auth_key_resolve(auth_key_cache* akc, const char* bearer, key_rec_t* out)
         if (deep_copy_rec(out, cached) != 0) {
             return -1;
         }
+        if (cached->is_canary) {
+            return AUTH_KEY_ERR_CANARY;
+        }
         if (cached->revoked) {
             return -2;
         }
@@ -138,13 +141,15 @@ auth_key_resolve(auth_key_cache* akc, const char* bearer, key_rec_t* out)
     /* Resolve the outcome from the stack record while it still fully owns
    * its fields; negative results are not cached. */
     int result = 0;
-    if (fresh.revoked) {
+    if (fresh.is_canary) {
+        result = AUTH_KEY_ERR_CANARY;
+    } else if (fresh.revoked) {
         result = -2;
     } else if (fresh.has_expiry && fresh.expires_at < time(NULL)) {
         result = -3;
     }
 
-    if (result == 0) {
+    if (result == 0 || result == AUTH_KEY_ERR_CANARY) {
         if (deep_copy_rec(out, &fresh) != 0) {
             key_rec_free(&fresh);
             free(copy);
@@ -155,7 +160,7 @@ auth_key_resolve(auth_key_cache* akc, const char* bearer, key_rec_t* out)
         fresh.n_allowed = 0;
         /* The LRU owns copy; a same-key replacement frees the old value. */
         lru_put(akc->recs, hash, copy);
-        return 0;
+        return result;
     }
 
     /* revoked / expired: release both records, do not cache the negative. */

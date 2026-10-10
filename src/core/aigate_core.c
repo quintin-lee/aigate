@@ -806,6 +806,32 @@ chat_req_cleanup(chat_req_t* q)
     cache_optimizer_result_cleanup(&q->cache_opt_result);
 }
 
+void
+aigate_core_handle_canary_hit(aigate_core* ac, const char* client_ip, long key_id, const char* model)
+{
+    if (ac == NULL) {
+        return;
+    }
+    if (ac->ip_ban_tbl != NULL && client_ip != NULL && client_ip[0] != '\0') {
+        ip_ban_table_ban(ac->ip_ban_tbl, client_ip, 3600, "canary_token_compromised");
+    }
+    if (ac->audit != NULL) {
+        audit_event_t ev;
+        memset(&ev, 0, sizeof(ev));
+        ev.timestamp_ms = (int64_t)time(NULL) * 1000;
+        ev.key_id = key_id;
+        snprintf(ev.client_ip, sizeof(ev.client_ip), "%s", client_ip ? client_ip : "");
+        snprintf(ev.model, sizeof(ev.model), "%s", model ? model : "");
+        ev.severity = AUDIT_SEV_ERROR;
+        snprintf(ev.violation_type, sizeof(ev.violation_type), "canary_token");
+        snprintf(ev.rule_detail,
+                 sizeof(ev.rule_detail),
+                 "Honey-token utilized; source IP automatically banned");
+        ev.http_status = 401;
+        audit_logger_record(ac->audit, &ev);
+    }
+}
+
 /** @brief Auth → QPS → daily quota → monthly budget gates.
  *  @return 0 when all gates pass; non-zero when an error was already written. */
 int
@@ -821,6 +847,9 @@ gate_request(chat_req_t* q)
     /* --- auth --- */
     int arc = auth_key_resolve(&ac->keys, rq->bearer, &q->krec);
     if (arc != 0) {
+        if (arc == AUTH_KEY_ERR_CANARY) {
+            aigate_core_handle_canary_hit(ac, rq->client_ip, q->krec.key_id, "canary");
+        }
         tracer_span_end(&q->trace_ctx, "auth_and_limits", SPAN_STATUS_ERROR, "invalid api key");
         aigate_write_error(rc, PIPE_AUTH, "auth_error", "invalid api key");
         return -1;

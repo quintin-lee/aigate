@@ -29,11 +29,17 @@ int auth_key_init(auth_key_cache* akc, pg_store_t* ps);
 /** @brief Tear down; frees the LRU and any cached key records. */
 void auth_key_shutdown(auth_key_cache* akc);
 
+#define AUTH_KEY_OK 0
+#define AUTH_KEY_ERR_UNKNOWN -1
+#define AUTH_KEY_ERR_REVOKED -2
+#define AUTH_KEY_ERR_EXPIRED -3
+#define AUTH_KEY_ERR_CANARY -4
+
 /** @brief Resolve a Bearer token to a key record.
  * @return 0 + @p out filled; @p out is a deep copy owned by the caller
  *         (release with key_rec_free).
- * @return -1 unknown key or allocation failure; -2 revoked; -3 expired.
- * @invariant out is zeroed on every return; on -1/-2/-3 the caller may
+ * @return -1 unknown key or allocation failure; -2 revoked; -3 expired; -4 canary honey-token.
+ * @invariant out is zeroed on every return; on -1/-2/-3/-4 the caller may
  *            still key_rec_free(out) safely. */
 int auth_key_resolve(auth_key_cache* akc, const char* bearer, key_rec_t* out);
 

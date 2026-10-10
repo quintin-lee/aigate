@@ -92,6 +92,7 @@ main(int argc, char** argv)
     extern void test_auth_key_unknown_neg_cache(void);
     extern void test_key_allows_model(void);
     extern void test_credential_extraction_variants(void);
+    extern void test_auth_key_canary_detection(void);
     extern void test_rl_qps_boundary(void);
     extern void test_rl_unlimited(void);
     extern void test_rl_daily_quota(void);
@@ -128,6 +129,7 @@ main(int argc, char** argv)
     extern void test_core_guardrail_block(void);
     extern void test_core_guardrail_pii_masking(void);
     extern void test_core_monthly_budget_cost_limit(void);
+    extern void test_core_canary_auto_ban(void);
     extern void test_provider_azure_build(void);
     extern void test_provider_default_params_merge(void);
     test_register("log_smoke", test_log_smoke);
@@ -186,6 +188,7 @@ main(int argc, char** argv)
     test_register("auth_key_neg_cache", test_auth_key_unknown_neg_cache);
     test_register("key_allows_model", test_key_allows_model);
     test_register("credential_extraction_variants", test_credential_extraction_variants);
+    test_register("auth_key_canary_detection", test_auth_key_canary_detection);
     test_register("rl_qps_boundary", test_rl_qps_boundary);
     test_register("rl_unlimited", test_rl_unlimited);
     test_register("rl_daily_quota", test_rl_daily_quota);
@@ -223,6 +226,7 @@ main(int argc, char** argv)
     test_register("core_guardrail_block", test_core_guardrail_block);
     test_register("core_guardrail_pii_masking", test_core_guardrail_pii_masking);
     test_register("core_monthly_budget_cost_limit", test_core_monthly_budget_cost_limit);
+    test_register("core_canary_auto_ban", test_core_canary_auto_ban);
 
     extern void test_responses_non_openai_400(void);
     extern void test_responses_pipeline_200(void);

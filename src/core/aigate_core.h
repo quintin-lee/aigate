@@ -143,6 +143,15 @@ int aigate_core_reload_shadow_rules(aigate_core* ac);
  *  or error) has been written. */
 int aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_ctx* rc);
 
+/**
+ * @brief Handle a detected canary honey-token request: bans source IP and records CRITICAL audit event.
+ * @param ac Core context.
+ * @param client_ip Client IP address string.
+ * @param key_id Canary key ID.
+ * @param model Model requested.
+ */
+void aigate_core_handle_canary_hit(aigate_core* ac, const char* client_ip, long key_id, const char* model);
+
 /** @brief Write a JSON body with a status. Allocates the HTTP header
  *  block (Content-Type/Length) and one fin write. */
 int aigate_write_json(aigate_response_ctx* rc, int status, const char* body, size_t len);
