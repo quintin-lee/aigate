@@ -766,6 +766,14 @@ main(int argc, char** argv)
     extern void test_filter_chain_threat_whitelist_bypass(void);
     test_register("filter_chain_threat_whitelist_bypass", test_filter_chain_threat_whitelist_bypass);
 
+    extern void test_watermark_multi_tile_injection_and_sliding_decode(void);
+    test_register("watermark_multi_tile_injection_and_sliding_decode",
+                  test_watermark_multi_tile_injection_and_sliding_decode);
+
+    extern void test_watermark_chinese_punctuation_anchoring(void);
+    test_register("watermark_chinese_punctuation_anchoring",
+                  test_watermark_chinese_punctuation_anchoring);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

@@ -37,6 +37,21 @@ char*
 watermark_inject(const char* text, size_t len, const watermark_payload_t* payload, size_t* out_len);
 
 /**
+ * @brief Inject multi-tile zero-width steganographic watermark frames anchored at punctuation boundaries.
+ * @param text Original source text.
+ * @param len Byte length of source text.
+ * @param payload Metadata payload to encode.
+ * @param min_interval Minimum text byte distance between consecutive watermark tiles (e.g. 70~100 bytes).
+ * @param[out] out_len Written with new byte length.
+ * @return Newly allocated watermarked string (caller frees), or NULL on OOM.
+ */
+char* watermark_inject_multi_tile(const char*                text,
+                                 size_t                     len,
+                                 const watermark_payload_t* payload,
+                                 size_t                     min_interval,
+                                 size_t*                    out_len);
+
+/**
  * @brief Scan and decode steganographic zero-width watermark from arbitrary text.
  * @param text Analyzed text containing potential zero-width characters.
  * @param len Byte length of text.
@@ -44,6 +59,21 @@ watermark_inject(const char* text, size_t len, const watermark_payload_t* payloa
  * @return 0 on successful decode with valid CRC; -1 if no valid frame found.
  */
 int watermark_decode(const char* text, size_t len, watermark_payload_t* out_payload);
+
+/**
+ * @brief Scan and extract all valid zero-width watermark tiles from arbitrary text.
+ * @param text Analyzed text containing potential zero-width characters.
+ * @param len Byte length of text.
+ * @param[out] out_payloads Array to receive decoded payloads.
+ * @param cap Maximum capacity of out_payloads array.
+ * @param[out] out_count Written with number of valid frames decoded.
+ * @return 0 on success; -1 if no valid frame found or error.
+ */
+int watermark_decode_all(const char*          text,
+                         size_t               len,
+                         watermark_payload_t* out_payloads,
+                         int                  cap,
+                         int*                 out_count);
 
 #ifdef __cplusplus
 }
