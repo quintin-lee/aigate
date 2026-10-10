@@ -240,3 +240,9 @@ CREATE TABLE IF NOT EXISTS audit_violations (
 CREATE INDEX IF NOT EXISTS idx_audit_violations_search ON audit_violations (tenant_id, model, rule_tag, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_violations_trace ON audit_violations (trace_id);
 INSERT INTO schema_migrations(version) VALUES (16) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v17: zero-width watermark enabling on api_keys
+ALTER TABLE api_keys
+  ADD COLUMN IF NOT EXISTS watermark_enabled BOOLEAN NOT NULL DEFAULT false;
+
+INSERT INTO schema_migrations(version) VALUES (17) ON CONFLICT (version) DO NOTHING;

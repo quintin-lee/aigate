@@ -1334,7 +1334,7 @@ TEST_CASE(test_admin_default_params_oversize_rejected)
     /* Oversize patch of a fresh model: 400 and stored row untouched */
     const char* preq_small =
         "{\"name\":\"ok-model\",\"provider\":\"openai\",\"endpoint\":\"https://api.openai.com/"
-        "v1\",\"default_params\":{\"temperature\":0.2}}";
+        "v1\",\"default_params\":{\"max_tokens\":100}}";
     body = NULL;
     rc = admin_dispatch(&adm,
                         "/admin/v1/models",
@@ -1368,11 +1368,11 @@ TEST_CASE(test_admin_default_params_oversize_rejected)
 
     model_rec_t m;
     TEST_ASSERT(fake_get_model(&db, "ok-model", &m) == 0, "get model ok");
-    TEST_ASSERT(strcmp(m.default_params_json, "{\"temperature\":0.2}") == 0,
+    TEST_ASSERT(strcmp(m.default_params_json, "{\"max_tokens\":100}") == 0,
                 "stored params untouched after rejected patch");
 
     /* small patch still lands */
-    const char* ok_patch = "{\"default_params\":{\"top_p\":0.9}}";
+    const char* ok_patch = "{\"default_params\":{\"max_tokens\":200}}";
     body = NULL;
     rc = admin_dispatch(&adm,
                         "/admin/v1/models/ok-model",
@@ -1387,7 +1387,7 @@ TEST_CASE(test_admin_default_params_oversize_rejected)
     TEST_ASSERT(rc == 0 && status == 200, "small patch -> 200, got %d", status);
     free(body);
     TEST_ASSERT(fake_get_model(&db, "ok-model", &m) == 0, "get model ok (2)");
-    TEST_ASSERT(strcmp(m.default_params_json, "{\"top_p\":0.9}") == 0, "params updated");
+    TEST_ASSERT(strcmp(m.default_params_json, "{\"max_tokens\":200}") == 0, "params updated");
 
     teardown_admin(ps, &core, &db);
 }
