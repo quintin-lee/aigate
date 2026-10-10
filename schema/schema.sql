@@ -246,3 +246,30 @@ ALTER TABLE api_keys
   ADD COLUMN IF NOT EXISTS watermark_enabled BOOLEAN NOT NULL DEFAULT false;
 
 INSERT INTO schema_migrations(version) VALUES (17) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v18: Canary honey-tokens and dynamic threat defense whitelists
+ALTER TABLE api_keys
+  ADD COLUMN IF NOT EXISTS is_canary BOOLEAN NOT NULL DEFAULT false;
+
+CREATE TABLE IF NOT EXISTS threat_rule_whitelists (
+  rule_id         BIGSERIAL PRIMARY KEY,
+  name            VARCHAR(64) NOT NULL,
+  match_key_id    BIGINT NOT NULL DEFAULT 0,
+  match_model     VARCHAR(64) NOT NULL DEFAULT '',
+  bypass_rule_tag VARCHAR(64) NOT NULL DEFAULT '*',
+  reason          TEXT NOT NULL DEFAULT '',
+  enabled         BOOLEAN NOT NULL DEFAULT true,
+  expires_at      TIMESTAMPTZ,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_threat_whitelists_lookup 
+  ON threat_rule_whitelists (match_key_id, match_model, enabled);
+
+CREATE TABLE IF NOT EXISTS ip_bans_persistent (
+  ip              VARCHAR(48) PRIMARY KEY,
+  reason          VARCHAR(64) NOT NULL,
+  expires_at      TIMESTAMPTZ NOT NULL,
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+INSERT INTO schema_migrations(version) VALUES (18) ON CONFLICT (version) DO NOTHING;

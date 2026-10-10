@@ -6,6 +6,7 @@
  */
 #include "run_tests.h"
 #include "pg_store.h"
+#include "schema_sql.h"
 #include "secrets.h"
 #include <stdlib.h>
 #include <string.h>
@@ -1681,6 +1682,117 @@ TEST_CASE(test_pg_store_rotate_master_key)
     TEST_ASSERT(plain_len == strlen(raw_secret) && strcmp(plain, raw_secret) == 0,
                 "decrypted provider secret matches original");
     provider_rec_free(&p_rot);
+
+    pg_store_close(ps);
+}
+
+struct fake_wl_db {
+    threat_whitelist_rec_t items[16];
+    size_t                 count;
+};
+
+static int
+fake_list_threat_whitelists(void* ctx, threat_whitelist_rec_t** out_recs, size_t* out_count)
+{
+    struct fake_wl_db* db = ctx;
+    if (db->count == 0) {
+        *out_recs = NULL;
+        *out_count = 0;
+        return 0;
+    }
+    threat_whitelist_rec_t* recs = calloc(db->count, sizeof(threat_whitelist_rec_t));
+    if (!recs) {
+        return -1;
+    }
+    for (size_t i = 0; i < db->count; i++) {
+        recs[i] = db->items[i];
+    }
+    *out_recs = recs;
+    *out_count = db->count;
+    return 0;
+}
+
+static int
+fake_create_threat_whitelist(void* ctx, const threat_whitelist_rec_t* rec, int64_t* out_id)
+{
+    struct fake_wl_db* db = ctx;
+    if (db->count >= 16) {
+        return -1;
+    }
+    db->items[db->count] = *rec;
+    db->items[db->count].rule_id = (int64_t)(db->count + 1);
+    *out_id = db->items[db->count].rule_id;
+    db->count++;
+    return 0;
+}
+
+static int
+fake_delete_threat_whitelist(void* ctx, int64_t rule_id)
+{
+    struct fake_wl_db* db = ctx;
+    for (size_t i = 0; i < db->count; i++) {
+        if (db->items[i].rule_id == rule_id) {
+            for (size_t j = i; j + 1 < db->count; j++) {
+                db->items[j] = db->items[j + 1];
+            }
+            db->count--;
+            return 0;
+        }
+    }
+    return -1;
+}
+
+TEST_CASE(test_pg_store_schema_v18_models)
+{
+    TEST_ASSERT(AIGATE_SCHEMA_VERSION == 18, "schema version should be 18");
+
+    key_rec_t k;
+    memset(&k, 0, sizeof k);
+    k.is_canary = 1;
+    TEST_ASSERT(k.is_canary == 1, "is_canary set");
+    TEST_ASSERT((KMASK_CANARY & (1 << 11)) != 0, "KMASK_CANARY defined");
+
+    struct fake_wl_db db;
+    memset(&db, 0, sizeof db);
+    pg_ops_t ops;
+    memset(&ops, 0, sizeof ops);
+    ops.ctx = &db;
+    ops.list_threat_whitelists = fake_list_threat_whitelists;
+    ops.create_threat_whitelist = fake_create_threat_whitelist;
+    ops.delete_threat_whitelist = fake_delete_threat_whitelist;
+
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "open fake store for whitelists");
+
+    threat_whitelist_rec_t rec;
+    memset(&rec, 0, sizeof rec);
+    snprintf(rec.name, sizeof rec.name, "research-exemption");
+    rec.match_key_id = 42;
+    snprintf(rec.match_model, sizeof rec.match_model, "gpt-4o");
+    snprintf(rec.bypass_rule_tag, sizeof rec.bypass_rule_tag, "JAILBREAK_OVERRIDE");
+    snprintf(rec.reason, sizeof rec.reason, "Security team redteaming");
+    rec.enabled = true;
+    rec.expires_at = 1893456000;
+
+    int64_t rule_id = 0;
+    TEST_ASSERT(pg_store_create_threat_whitelist(ps, &rec, &rule_id) == 0, "create whitelist");
+    TEST_ASSERT(rule_id == 1, "rule_id is 1");
+
+    threat_whitelist_rec_t* out_recs = NULL;
+    size_t                  count = 0;
+    TEST_ASSERT(pg_store_list_threat_whitelists(ps, &out_recs, &count) == 0, "list whitelists");
+    TEST_ASSERT(count == 1 && out_recs != NULL, "count is 1");
+    TEST_ASSERT(strcmp(out_recs[0].name, "research-exemption") == 0, "matches name");
+    TEST_ASSERT(out_recs[0].match_key_id == 42, "matches key id");
+    TEST_ASSERT(strcmp(out_recs[0].bypass_rule_tag, "JAILBREAK_OVERRIDE") == 0, "matches rule tag");
+    free(out_recs);
+
+    TEST_ASSERT(pg_store_delete_threat_whitelist(ps, rule_id) == 0, "delete whitelist");
+    count = 0;
+    out_recs = NULL;
+    TEST_ASSERT(pg_store_list_threat_whitelists(ps, &out_recs, &count) == 0,
+                "list whitelists empty");
+    TEST_ASSERT(count == 0 && out_recs == NULL, "empty after delete");
 
     pg_store_close(ps);
 }

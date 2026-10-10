@@ -24,7 +24,7 @@ def main():
 #ifndef AIGATE_SCHEMA_SQL_H
 #define AIGATE_SCHEMA_SQL_H
 
-#define AIGATE_SCHEMA_VERSION 17
+#define AIGATE_SCHEMA_VERSION 18
 
 static const char SCHEMA_SQL[] =
 """

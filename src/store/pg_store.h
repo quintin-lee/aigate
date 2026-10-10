@@ -39,6 +39,7 @@ typedef struct key_rec {
     char   system_prompt[4096];  /**< Optional prompt template */
     int    prompt_mode;          /**< 0=prepend, 1=append, 2=override */
     int    watermark_enabled;    /**< 1 = watermark enabled, 0 = disabled */
+    int    is_canary;            /**< 1 = canary honey-token, 0 = normal */
 } key_rec_t;
 
 /** @brief Per-model multi-target cap. */
@@ -163,6 +164,8 @@ typedef struct cost_row {
 #define KMASK_PROMPT_MODE (1 << 9)
 /** @brief Key update mask: zero-width watermark enabling. */
 #define KMASK_WATERMARK (1 << 10)
+/** @brief Key update mask: canary honey-token flag. */
+#define KMASK_CANARY (1 << 11)
 
 /** @brief Model update mask: endpoint. */
 #define MMASK_ENDPOINT (1 << 0)
@@ -233,6 +236,18 @@ typedef struct audit_violation_record {
     char*   completion_snapshot; /**< Heap allocated completion snapshot */
     char    created_at[64];      /**< ISO-8601 created timestamp */
 } audit_violation_record_t;
+
+/** @brief Dynamic threat whitelist record (threat_rule_whitelists row). */
+typedef struct {
+    int64_t  rule_id;
+    char     name[64];
+    uint64_t match_key_id;
+    char     match_model[64];
+    char     bypass_rule_tag[64];
+    char     reason[128];
+    int64_t  expires_at;
+    bool     enabled;
+} threat_whitelist_rec_t;
 
 /** @brief Uniform persistence operations; real libpq or in-memory fakes.
  *
@@ -385,6 +400,13 @@ typedef struct pg_ops {
         int                       cap,
         int*                      total_count,
         int* returned_count); /**< List audit violations with filtering and pagination. */
+
+    int (*list_threat_whitelists)(
+        void* ctx, threat_whitelist_rec_t** out_recs, size_t* out_count); /**< List threat defense whitelists. */
+    int (*create_threat_whitelist)(
+        void* ctx, const threat_whitelist_rec_t* rec, int64_t* out_id); /**< Create threat defense whitelist. */
+    int (*delete_threat_whitelist)(
+        void* ctx, int64_t rule_id); /**< Delete threat defense whitelist by ID. */
 } pg_ops_t;
 
 /** @brief Storage handle (opaque; holder of a libpq connection or a fake context). */
@@ -552,5 +574,25 @@ int pg_store_list_audit_violations(const pg_store_t*         ps,
 
 /** @brief Free heap allocations in audit_violation_record_t. */
 void audit_violation_record_free(audit_violation_record_t* rec);
+
+/** @brief List dynamic threat defense whitelists.
+ *  @param ps        Storage handle.
+ *  @param out_recs  Heap-allocated array of whitelist records; caller must free(*out_recs).
+ *  @param out_count Number of records returned.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_list_threat_whitelists(pg_store_t* ps, threat_whitelist_rec_t** out_recs, size_t* out_count);
+
+/** @brief Create a new dynamic threat defense whitelist rule.
+ *  @param ps      Storage handle.
+ *  @param rec     Whitelist rule record.
+ *  @param out_id  Receives newly generated rule_id.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_create_threat_whitelist(pg_store_t* ps, const threat_whitelist_rec_t* rec, int64_t* out_id);
+
+/** @brief Delete a threat defense whitelist rule by ID.
+ *  @param ps       Storage handle.
+ *  @param rule_id  Rule primary key.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_delete_threat_whitelist(pg_store_t* ps, int64_t rule_id);
 
 #endif /* AIGATE_PG_STORE_H */

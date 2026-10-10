@@ -284,7 +284,7 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
         "COALESCE(group_id, 0), COALESCE(guardrails_enabled, true), "
         "COALESCE(monthly_cost_budget, 0.0), COALESCE(monthly_token_budget, 0), "
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
-        "COALESCE(watermark_enabled, false) "
+        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false) "
         "FROM api_keys WHERE key_hash = $1";
     const char* val[1] = {key_hash};
     int         plen[1] = {0};
@@ -347,6 +347,14 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
                      (strcmp(wm, "t") == 0 || strcmp(wm, "1") == 0 || strcmp(wm, "true") == 0));
             } else {
                 out->watermark_enabled = 0;
+            }
+            if (PQnfields(res) > 15) {
+                const char* can = PQgetvalue(res, 0, 15);
+                out->is_canary =
+                    (can != NULL &&
+                     (strcmp(can, "t") == 0 || strcmp(can, "1") == 0 || strcmp(can, "true") == 0));
+            } else {
+                out->is_canary = 0;
             }
             rc = 0;
         } else {
@@ -412,6 +420,13 @@ fill_key_row(PGresult* res, int row, key_rec_t* out)
     } else {
         out->watermark_enabled = 0;
     }
+    if (PQnfields(res) > 15) {
+        const char* can = PQgetvalue(res, row, 15);
+        out->is_canary = (can != NULL && (strcmp(can, "t") == 0 || strcmp(can, "1") == 0 ||
+                                          strcmp(can, "true") == 0));
+    } else {
+        out->is_canary = 0;
+    }
 }
 
 /** @brief libpq implementation of pg_ops.list_keys: 0 on success, -1 on error (@p n always written with the actual count). */
@@ -426,7 +441,7 @@ pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
         "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
         "COALESCE(monthly_token_budget, 0), "
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
-        "COALESCE(watermark_enabled, false) "
+        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false) "
         "FROM api_keys ORDER BY key_id";
     *n = 0;
 
@@ -463,7 +478,7 @@ pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
         "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
         "COALESCE(monthly_token_budget, 0), "
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
-        "COALESCE(watermark_enabled, false) "
+        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false) "
         "FROM api_keys WHERE key_id = $1";
     char        id[32];
     const char* val[1] = {0};
@@ -680,19 +695,20 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     static const char q[] =
         "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
         "daily_token_quota, expires_at, group_id, guardrails_enabled, monthly_cost_budget, "
-        "monthly_token_budget, system_prompt, prompt_mode, watermark_enabled) "
+        "monthly_token_budget, system_prompt, prompt_mode, watermark_enabled, is_canary) "
         "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
         "ELSE string_to_array($3, '|') END, $4, $5, "
         "CASE WHEN $6 = 'null' THEN NULL "
         "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END, "
         "CASE WHEN $7 = '0' THEN NULL ELSE ($7)::bigint END, $8, $9, $10, "
-        "CASE WHEN $11 = '' THEN NULL ELSE $11 END, $12, $13) RETURNING key_id";
+        "CASE WHEN $11 = '' THEN NULL ELSE $11 END, $12, $13, $14) RETURNING key_id";
     char        joined[512], rate[16], quota[32], exp[32], gid_str[32], mcb_str[32], mtb_str[32];
     char        pm_str[16];
     const char* ge_str = k->guardrails_enabled ? "true" : "false";
     const char* wm_str = k->watermark_enabled ? "true" : "false";
-    const char* vals[13];
-    int         plens[13] = {0};
+    const char* can_str = k->is_canary ? "true" : "false";
+    const char* vals[14];
+    int         plens[14] = {0};
     long        id = -1;
 
     if (join_model_list(k, joined, sizeof joined) != 0) {
@@ -722,9 +738,10 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     vals[10] = k->system_prompt;
     vals[11] = pm_str;
     vals[12] = wm_str;
+    vals[13] = can_str;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 13, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 14, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
         id = atol(PQgetvalue(res, 0, 0));
@@ -777,6 +794,7 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
     snprintf(pm_str, sizeof pm_str, "%d", k->prompt_mode);
     const char* ge_str = k->guardrails_enabled ? "true" : "false";
     const char* wm_str = k->watermark_enabled ? "true" : "false";
+    const char* can_str = k->is_canary ? "true" : "false";
 
     off = snprintf(sql, sizeof sql, "UPDATE api_keys SET ");
     if (mask & KMASK_RATE) {
@@ -876,6 +894,15 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
                         nv > 1 ? ", " : "",
                         nv);
         vals[nv - 1] = wm_str;
+    }
+    if (mask & KMASK_CANARY) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sis_canary = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = can_str;
     }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE key_id = $%d", nv);
@@ -2778,6 +2805,150 @@ pq_list_audit_violations(void*                     vctx,
     return 0;
 }
 
+/** @brief libpq implementation of pg_ops.list_threat_whitelists: 0 on success, -1 on error. */
+static int
+pq_list_threat_whitelists(void* vctx, threat_whitelist_rec_t** out_recs, size_t* out_count)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT rule_id, name, match_key_id, match_model, bypass_rule_tag, reason, enabled, "
+        "COALESCE(EXTRACT(EPOCH FROM expires_at)::bigint, 0) "
+        "FROM threat_rule_whitelists ORDER BY rule_id";
+
+    if (out_recs != NULL) {
+        *out_recs = NULL;
+    }
+    if (out_count != NULL) {
+        *out_count = 0;
+    }
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_threat_whitelists: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    int nt = PQntuples(res);
+    if (nt == 0) {
+        PQclear(res);
+        return 0;
+    }
+
+    threat_whitelist_rec_t* recs = calloc((size_t)nt, sizeof(threat_whitelist_rec_t));
+    if (recs == NULL) {
+        PQclear(res);
+        return -1;
+    }
+
+    for (int i = 0; i < nt; i++) {
+        recs[i].rule_id = atoll(PQgetvalue(res, i, 0));
+        copy_field(recs[i].name, sizeof(recs[i].name), PQgetvalue(res, i, 1));
+        const char* kid_str = PQgetvalue(res, i, 2);
+        recs[i].match_key_id = (kid_str != NULL && kid_str[0] != '\0')
+                                   ? (uint64_t)strtoull(kid_str, NULL, 10)
+                                   : 0;
+        copy_field(recs[i].match_model, sizeof(recs[i].match_model), PQgetvalue(res, i, 3));
+        copy_field(recs[i].bypass_rule_tag, sizeof(recs[i].bypass_rule_tag), PQgetvalue(res, i, 4));
+        copy_field(recs[i].reason, sizeof(recs[i].reason), PQgetvalue(res, i, 5));
+        const char* en_str = PQgetvalue(res, i, 6);
+        recs[i].enabled = (en_str != NULL && (strcmp(en_str, "t") == 0 || strcmp(en_str, "1") == 0 ||
+                                              strcmp(en_str, "true") == 0));
+        const char* exp_str = PQgetvalue(res, i, 7);
+        recs[i].expires_at = (exp_str != NULL && exp_str[0] != '\0') ? atoll(exp_str) : 0;
+    }
+
+    PQclear(res);
+    if (out_recs != NULL) {
+        *out_recs = recs;
+    } else {
+        free(recs);
+    }
+    if (out_count != NULL) {
+        *out_count = (size_t)nt;
+    }
+    return 0;
+}
+
+/** @brief libpq implementation of pg_ops.create_threat_whitelist: 0 on success, -1 on error. */
+static int
+pq_create_threat_whitelist(void* vctx, const threat_whitelist_rec_t* rec, int64_t* out_id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO threat_rule_whitelists(name, match_key_id, match_model, "
+        "bypass_rule_tag, reason, enabled, expires_at) "
+        "VALUES($1, $2, $3, $4, $5, $6, CASE WHEN $7 = '0' THEN NULL "
+        "ELSE to_timestamp(($7)::double precision) END) RETURNING rule_id";
+
+    char match_key_str[32], exp_str[32];
+    snprintf(match_key_str, sizeof(match_key_str), "%lu", (unsigned long)rec->match_key_id);
+    snprintf(exp_str, sizeof(exp_str), "%ld", (long)rec->expires_at);
+    const char* en_str = rec->enabled ? "true" : "false";
+
+    const char* vals[7] = {
+        rec->name,
+        match_key_str,
+        rec->match_model,
+        rec->bypass_rule_tag,
+        rec->reason,
+        en_str,
+        exp_str,
+    };
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 7, NULL, vals, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
+        AIGATE_LOG_ERROR("pg create_threat_whitelist: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    if (out_id != NULL) {
+        *out_id = atoll(PQgetvalue(res, 0, 0));
+    }
+    PQclear(res);
+    return 0;
+}
+
+/** @brief libpq implementation of pg_ops.delete_threat_whitelist: 0 on success, -1 on error. */
+static int
+pq_delete_threat_whitelist(void* vctx, int64_t rule_id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "DELETE FROM threat_rule_whitelists WHERE rule_id = $1";
+    char              id_str[32];
+    snprintf(id_str, sizeof(id_str), "%ld", (long)rule_id);
+    const char* vals[1] = {id_str};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
+        AIGATE_LOG_ERROR("pg delete_threat_whitelist: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    PQclear(res);
+    return 0;
+}
+
 /* ------------------------------------------------------- store lifecycle */
 
 pg_store_t*
@@ -2880,6 +3051,9 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.delete_cache_optimizer_rule = pq_delete_cache_optimizer_rule;
     ps->ops.insert_audit_violation = pq_insert_audit_violation;
     ps->ops.list_audit_violations = pq_list_audit_violations;
+    ps->ops.list_threat_whitelists = pq_list_threat_whitelists;
+    ps->ops.create_threat_whitelist = pq_create_threat_whitelist;
+    ps->ops.delete_threat_whitelist = pq_delete_threat_whitelist;
     ps->ops.ctx = px;
     ps->ctx = px;
     ps->owns_ctx = 1;
@@ -3177,6 +3351,33 @@ audit_violation_record_free(audit_violation_record_t* rec)
         free(rec->completion_snapshot);
         rec->completion_snapshot = NULL;
     }
+}
+
+int
+pg_store_list_threat_whitelists(pg_store_t* ps, threat_whitelist_rec_t** out_recs, size_t* out_count)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->list_threat_whitelists != NULL)
+               ? ops->list_threat_whitelists(ops->ctx, out_recs, out_count)
+               : -1;
+}
+
+int
+pg_store_create_threat_whitelist(pg_store_t* ps, const threat_whitelist_rec_t* rec, int64_t* out_id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->create_threat_whitelist != NULL)
+               ? ops->create_threat_whitelist(ops->ctx, rec, out_id)
+               : -1;
+}
+
+int
+pg_store_delete_threat_whitelist(pg_store_t* ps, int64_t rule_id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->delete_threat_whitelist != NULL)
+               ? ops->delete_threat_whitelist(ops->ctx, rule_id)
+               : -1;
 }
 
 int
