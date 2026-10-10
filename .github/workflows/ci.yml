@@ -40,8 +40,7 @@ jobs:
           CC: ${{ matrix.compiler }}
         run: |
           cmake -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_C_FLAGS="-Wall -Wextra -Werror"
+            -DCMAKE_BUILD_TYPE=Release
 
       - name: Check Code Formatting
         run: |

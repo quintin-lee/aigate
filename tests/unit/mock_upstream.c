@@ -40,6 +40,14 @@ struct mock_upstream {
     pthread_mutex_t mtx; /* guards recorded fields + flag reads */
 };
 
+static inline void
+mock_write(int fd, const void* buf, size_t count)
+{
+    if (write(fd, buf, count) < 0) {
+        /* ignore error on closed mock socket */
+    }
+}
+
 /** @brief Accept loop: return canned responses by request path, and record the last request's path and body for assertions. */
 static void*
 server_thread(void* arg)
@@ -146,7 +154,7 @@ server_thread(void* arg)
                                 mstatus,
                                 strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
             close(cfd);
             continue;
         }
@@ -166,7 +174,7 @@ server_thread(void* arg)
                                 status_text,
                                 (int)strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
         } else if (strcmp(path, "/slow") == 0) {
             struct timespec ts = {2, 0};
             nanosleep(&ts, NULL);
@@ -178,37 +186,37 @@ server_thread(void* arg)
                                         "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                 (int)strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
         } else if (strcmp(path, "/v1/messages") == 0 || strcmp(path, "/messages") == 0) {
             if (is_streaming_req) {
                 const char* hdr = "HTTP/1.1 200 OK\r\nContent-Type: "
                                   "text/event-stream\r\nConnection: close\r\n\r\n";
-                write(cfd, hdr, strlen(hdr));
+                mock_write(cfd, hdr, strlen(hdr));
                 const char* c1 =
                     "event: message_start\r\ndata: "
                     "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_mock_stream\",\"type\":"
                     "\"message\",\"role\":\"assistant\",\"model\":\"claude-3-5-sonnet-20241022\","
                     "\"usage\":{\"input_tokens\":12,\"output_tokens\":1}}}\r\n\r\n";
-                write(cfd, c1, strlen(c1));
+                mock_write(cfd, c1, strlen(c1));
                 struct timespec sl = {0, 10 * 1000000};
                 nanosleep(&sl, NULL);
                 const char* c2 = "event: content_block_delta\r\ndata: "
                                  "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{"
                                  "\"type\":\"text_delta\",\"text\":\"Hello \"}}\r\n\r\n";
-                write(cfd, c2, strlen(c2));
+                mock_write(cfd, c2, strlen(c2));
                 nanosleep(&sl, NULL);
                 const char* c3 = "event: content_block_delta\r\ndata: "
                                  "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{"
                                  "\"type\":\"text_delta\",\"text\":\"from Claude\"}}\r\n\r\n";
-                write(cfd, c3, strlen(c3));
+                mock_write(cfd, c3, strlen(c3));
                 nanosleep(&sl, NULL);
                 const char* c4 = "event: message_delta\r\ndata: "
                                  "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_"
                                  "turn\"},\"usage\":{\"output_tokens\":18}}\r\n\r\n";
-                write(cfd, c4, strlen(c4));
+                mock_write(cfd, c4, strlen(c4));
                 nanosleep(&sl, NULL);
                 const char* c5 = "event: message_stop\r\ndata: {\"type\":\"message_stop\"}\r\n\r\n";
-                write(cfd, c5, strlen(c5));
+                mock_write(cfd, c5, strlen(c5));
             } else {
                 const char* body =
                     "{\"id\":\"msg_mock_123\",\"type\":\"message\",\"role\":\"assistant\","
@@ -222,39 +230,39 @@ server_thread(void* arg)
                                      "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                     (int)strlen(body),
                                     body);
-                write(cfd, resp, (size_t)blen);
+                mock_write(cfd, resp, (size_t)blen);
             }
         } else if (strcmp(path, "/mock/stream-slow") == 0 || (is_streaming_req && is_slow)) {
             const char* hdr =
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-            write(cfd, hdr, strlen(hdr));
+            mock_write(cfd, hdr, strlen(hdr));
             const char* c1 =
                 "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"start\"}}]}\n\n";
-            write(cfd, c1, strlen(c1));
+            mock_write(cfd, c1, strlen(c1));
             struct timespec sl = {1, 200 * 1000000}; /* 1200ms */
             nanosleep(&sl, NULL);
             const char* c2 = "data: [DONE]\n\n";
-            write(cfd, c2, strlen(c2));
+            mock_write(cfd, c2, strlen(c2));
         } else if (strcmp(path, "/mock/stream") == 0 || is_streaming_req) {
             const char* hdr =
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-            write(cfd, hdr, strlen(hdr));
+            mock_write(cfd, hdr, strlen(hdr));
             const char* c1 =
                 "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\"hello\"}}]}\n\n";
-            write(cfd, c1, strlen(c1));
+            mock_write(cfd, c1, strlen(c1));
             struct timespec sl = {0, 10 * 1000000}; /* 10ms */
             nanosleep(&sl, NULL);
             const char* c2 =
                 "data: {\"id\":\"1\",\"choices\":[{\"delta\":{\"content\":\" world\"}}]}\n\n";
-            write(cfd, c2, strlen(c2));
+            mock_write(cfd, c2, strlen(c2));
             nanosleep(&sl, NULL);
             const char* c3 =
                 "data: "
                 "{\"choices\":[],\"usage\":{\"prompt_tokens\":5,\"completion_tokens\":7}}\n\n";
-            write(cfd, c3, strlen(c3));
+            mock_write(cfd, c3, strlen(c3));
             nanosleep(&sl, NULL);
             const char* c4 = "data: [DONE]\n\n";
-            write(cfd, c4, strlen(c4));
+            mock_write(cfd, c4, strlen(c4));
         } else if (strcmp(path, "/v1/embeddings") == 0 || strcmp(path, "/embeddings") == 0) {
             const char* body = "{\"object\":\"list\",\"data\":[{\"object\":\"embedding\",\"index\":"
                                "0,\"embedding\":[0.1,0.2,0.3]}],\"model\":\"text-embedding-3-"
@@ -266,7 +274,7 @@ server_thread(void* arg)
                                         "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                 (int)strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
         } else if (strstr(path, ":embedContent") != NULL) {
             const char* body = "{\"embedding\":{\"values\":[0.05,0.15,0.25]},\"usageMetadata\":{"
                                "\"promptTokenCount\":6}}";
@@ -277,7 +285,7 @@ server_thread(void* arg)
                                         "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                 (int)strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
         } else if (strstr(path, ":batchEmbedContents") != NULL) {
             const char* body = "{\"embeddings\":[{\"values\":[0.05,0.15]},{\"values\":[0.25,0.35]}]"
                                ",\"usageMetadata\":{\"promptTokenCount\":12}}";
@@ -288,7 +296,7 @@ server_thread(void* arg)
                                         "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                 (int)strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
         } else if (strstr(path, ":generateContent") != NULL && strstr(path, "alt=sse") == NULL) {
             const char* body = "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello from "
                                "Gemini\"}],\"role\":\"model\"},\"finishReason\":\"STOP\",\"index\":"
@@ -301,15 +309,15 @@ server_thread(void* arg)
                                         "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                 (int)strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
         } else if (strstr(path, ":streamGenerateContent") != NULL ||
                    strstr(path, "alt=sse") != NULL) {
             const char* hdr =
                 "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\n";
-            write(cfd, hdr, strlen(hdr));
+            mock_write(cfd, hdr, strlen(hdr));
             const char* c1 = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello "
                              "\"}],\"role\":\"model\"},\"index\":0}]}\n\n";
-            write(cfd, c1, strlen(c1));
+            mock_write(cfd, c1, strlen(c1));
             struct timespec sl = {0, 10 * 1000000};
             nanosleep(&sl, NULL);
             const char* c2 =
@@ -317,7 +325,7 @@ server_thread(void* arg)
                 "SSE\"}],\"role\":\"model\"},\"finishReason\":\"STOP\",\"index\":0}],"
                 "\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":6,"
                 "\"totalTokenCount\":16}}\n\n";
-            write(cfd, c2, strlen(c2));
+            mock_write(cfd, c2, strlen(c2));
         } else if (strcmp(path, "/v1/responses") == 0 || strcmp(path, "/responses") == 0) {
             const char* body =
                 "{\"id\":\"resp_mock_unit_1\",\"object\":\"response\",\"status\":\"completed\","
@@ -332,7 +340,7 @@ server_thread(void* arg)
                                  "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                 (int)strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
         } else { /* /chat, /chat/completions, default */
             const char* body = "{\"id\":\"chatcmpl-1\",\"object\":\"chat.completion\","
                                "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\","
@@ -346,7 +354,7 @@ server_thread(void* arg)
                                         "Content-Length: %d\r\nConnection: close\r\n\r\n%s",
                                 (int)strlen(body),
                                 body);
-            write(cfd, resp, (size_t)blen);
+            mock_write(cfd, resp, (size_t)blen);
         }
         close(cfd);
     }
