@@ -748,9 +748,17 @@ begin_request_handler(struct mg_connection* conn)
     transport_civetweb_extract_client_ip(
         conn, ri->remote_addr, trusted_proxies, client_ip, sizeof(client_ip));
 
+    /* Management/admin endpoints are authenticated via bearer tokens and remain
+     * accessible so operators can review ban tables and unban IPs. */
+    if (ri->local_uri != NULL &&
+        (strncmp(ri->local_uri, "/admin/", 7) == 0 || strcmp(ri->local_uri, "/admin") == 0)) {
+        return 0;
+    }
+
     char ban_reason[64] = {0};
     if (ip_ban_table_is_banned(cw->ac->ip_ban_tbl, client_ip, ban_reason, sizeof(ban_reason))) {
-        mg_send_http_error(conn, 403, "Access Forbidden: IP temporarily blocked by security policy");
+        mg_send_http_error(
+            conn, 403, "Access Forbidden: IP temporarily blocked by security policy");
         return 1;
     }
 
