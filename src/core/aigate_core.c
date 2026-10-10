@@ -443,6 +443,7 @@ aigate_core_init(aigate_core*   ac,
     ac->tracer_cfg.slow_threshold_ms = 2000;
     ac->tracer_cfg.otlp_endpoint[0] = '\0';
     ac->trace_rb = trace_ring_buffer_create(TRACE_RING_BUFFER_DEFAULT_CAPACITY);
+    ac->ip_ban_tbl = ip_ban_table_create();
 
     if (auth_key_init(&ac->keys, ps) != 0) {
         if (ac->trace_rb != NULL) {
@@ -517,6 +518,10 @@ aigate_core_init(aigate_core*   ac,
         if (ac->trace_rb != NULL) {
             trace_ring_buffer_destroy(ac->trace_rb);
             ac->trace_rb = NULL;
+        }
+        if (ac->ip_ban_tbl != NULL) {
+            ip_ban_table_destroy(ac->ip_ban_tbl);
+            ac->ip_ban_tbl = NULL;
         }
         if (ac->lt != NULL) {
             latency_tracker_destroy(ac->lt);
@@ -629,6 +634,10 @@ aigate_core_shutdown(aigate_core* ac)
     if (ac->audit != NULL) {
         audit_logger_destroy(ac->audit);
         ac->audit = NULL;
+    }
+    if (ac->ip_ban_tbl != NULL) {
+        ip_ban_table_destroy(ac->ip_ban_tbl);
+        ac->ip_ban_tbl = NULL;
     }
     auth_key_shutdown(&ac->keys);
 }

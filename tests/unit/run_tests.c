@@ -648,6 +648,9 @@ main(int argc, char** argv)
     extern void test_transport_dynamic_config_reload(void);
     test_register("transport_dynamic_config_reload", test_transport_dynamic_config_reload);
 
+    extern void test_transport_ip_ban_interception(void);
+    test_register("transport_ip_ban_interception", test_transport_ip_ban_interception);
+
     extern void test_audit_event_serialization_and_snapshots(void);
     test_register("audit_event_serialization_and_snapshots",
                   test_audit_event_serialization_and_snapshots);
@@ -737,6 +740,15 @@ main(int argc, char** argv)
     extern void test_admin_ui_watermark_and_chain_elements(void);
     test_register("admin_ui_watermark_and_chain_elements",
                   test_admin_ui_watermark_and_chain_elements);
+
+    extern void test_ip_ban_table_lifecycle(void);
+    test_register("ip_ban_table_lifecycle", test_ip_ban_table_lifecycle);
+
+    extern void test_ip_ban_table_expiration(void);
+    test_register("ip_ban_table_expiration", test_ip_ban_table_expiration);
+
+    extern void test_ip_ban_table_concurrency(void);
+    test_register("ip_ban_table_concurrency", test_ip_ban_table_concurrency);
 
     int ran = 0;
     int failed = 0;

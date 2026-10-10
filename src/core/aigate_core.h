@@ -29,6 +29,7 @@
 #include "observe/audit_logger.h"
 #include "policy/prompt_compressor.h"
 #include "policy/cache_optimizer.h"
+#include "policy/ip_ban_table.h"
 
 /** @brief Normalized inbound request (transport fills, pipeline reads). */
 typedef struct aigate_request_ctx {
@@ -100,6 +101,7 @@ typedef struct aigate_core {
     int                    n_cache_opt_rules;    /**< Number of active cache optimizer rules */
     pthread_mutex_t        cache_opt_rules_lock; /**< Mutex protecting cache_opt_rules */
     audit_logger_t*        audit; /**< Dual-channel audit logger, may be NULL (disabled) */
+    ip_ban_table_t*        ip_ban_tbl; /**< In-memory IP ban table */
 } aigate_core;
 
 /** @brief Type alias for gateway pipeline context. */

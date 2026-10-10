@@ -725,6 +725,38 @@ prepare_ssl_pem(const char* ssl_cert, const char* ssl_key, bool* out_is_temp)
     return strdup(tmppath);
 }
 
+/** @brief CivetWeb callback to intercept banned IPs with fast 403 Forbidden. */
+static int
+begin_request_handler(struct mg_connection* conn)
+{
+    transport_civetweb_t* cw = (transport_civetweb_t*)mg_get_user_context_data(conn);
+    if (cw == NULL || cw->ac == NULL || cw->ac->ip_ban_tbl == NULL) {
+        return 0;
+    }
+
+    const struct mg_request_info* ri = mg_get_request_info(conn);
+    if (ri == NULL) {
+        return 0;
+    }
+
+    char trusted_proxies[256];
+    pthread_mutex_lock(&cw->cfg_mtx);
+    snprintf(trusted_proxies, sizeof(trusted_proxies), "%s", cw->trusted_proxies);
+    pthread_mutex_unlock(&cw->cfg_mtx);
+
+    char client_ip[64];
+    transport_civetweb_extract_client_ip(
+        conn, ri->remote_addr, trusted_proxies, client_ip, sizeof(client_ip));
+
+    char ban_reason[64] = {0};
+    if (ip_ban_table_is_banned(cw->ac->ip_ban_tbl, client_ip, ban_reason, sizeof(ban_reason))) {
+        mg_send_http_error(conn, 403, "Access Forbidden: IP temporarily blocked by security policy");
+        return 1;
+    }
+
+    return 0;
+}
+
 transport_civetweb_t*
 transport_civetweb_start_tls(aigate_core* ac,
                              pg_store_t*  ps,
@@ -823,7 +855,11 @@ transport_civetweb_start_tls(aigate_core* ac,
 
     pthread_mutex_init(&cw->cfg_mtx, NULL);
 
-    cw->ctx = mg_start(NULL, NULL, options);
+    struct mg_callbacks callbacks;
+    memset(&callbacks, 0, sizeof(callbacks));
+    callbacks.begin_request = begin_request_handler;
+
+    cw->ctx = mg_start(&callbacks, cw, options);
     if (cw->ctx == NULL) {
         AIGATE_LOG_ERROR("transport_civetweb: failed to bind on %s", port_spec);
         if (cw->ssl_combined_pem != NULL) {

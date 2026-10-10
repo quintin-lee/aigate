@@ -458,3 +458,56 @@ TEST_CASE(test_transport_dynamic_config_reload)
     aigate_core_shutdown(&core);
     pg_store_close(ps);
 }
+
+TEST_CASE(test_transport_ip_ban_interception)
+{
+    pg_ops_t ops;
+    memset(&ops, 0, sizeof ops);
+    ops.list_shadow_rules = (int (*)(void*, shadow_rule_t*, int, int*))stub_zero;
+    ops.list_compressor_rules = (int (*)(void*, compressor_rule_t*, int, int*))stub_zero;
+    ops.list_cache_optimizer_rules = (int (*)(void*, cache_optimizer_rule_t*, int, int*))stub_zero;
+    ops.list_models = (int (*)(void*, model_rec_t*, int, int*))stub_zero;
+    ops.get_key_by_hash = (int (*)(void*, const char*, key_rec_t*))stub_one;
+
+    pg_store_t* ps = pg_store_open("unused", &ops);
+    aigate_core core;
+    aigate_core_init(&core, ps, NULL, 60000, 5);
+
+    /* Start transport on port 18099 */
+    transport_civetweb_t* cw = transport_civetweb_start(&core,
+                                                        ps,
+                                                        "dummy_hash",
+                                                        "127.0.0.1:18099",
+                                                        "127.0.0.1",
+                                                        1048576,
+                                                        16,
+                                                        5000,
+                                                        "127.0.0.1",
+                                                        "*");
+    TEST_ASSERT(cw != NULL, "transport started on port 18099");
+
+    char body[1024];
+
+    /* 1. Normal request passes */
+    long status = do_http_get("http://127.0.0.1:18099/healthz", NULL, body, sizeof(body));
+    TEST_ASSERT(status == 200, "healthz initially 200 (got %ld)", status);
+
+    /* 2. Ban client IP 127.0.0.1 */
+    ip_ban_table_ban(core.ip_ban_tbl, "127.0.0.1", 3600, "honeypot_triggered");
+
+    /* 3. Request from banned IP gets dropped with 403 Forbidden */
+    status = do_http_get("http://127.0.0.1:18099/healthz", NULL, body, sizeof(body));
+    TEST_ASSERT(status == 403, "healthz returns 403 when banned (got %ld)", status);
+    TEST_ASSERT(strstr(body, "Access Forbidden") != NULL, "response body indicates access forbidden");
+
+    /* 4. Unban 127.0.0.1 */
+    ip_ban_table_unban(core.ip_ban_tbl, "127.0.0.1");
+
+    /* 5. Request immediately succeeds again */
+    status = do_http_get("http://127.0.0.1:18099/healthz", NULL, body, sizeof(body));
+    TEST_ASSERT(status == 200, "healthz 200 after unban (got %ld)", status);
+
+    transport_civetweb_stop(cw);
+    aigate_core_shutdown(&core);
+    pg_store_close(ps);
+}
