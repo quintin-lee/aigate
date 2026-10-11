@@ -93,6 +93,50 @@ TEST_CASE(test_reasoning_tag_emulation_parsing)
     TEST_ASSERT(cfg.tag_emulation == true, "thinking_format tag detected");
 }
 
+TEST_CASE(test_reasoning_tag_emulation_3tier_hierarchy)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+
+    reasoning_config_t cfg;
+    json_t* req_tag = json_pack("{s:s}", "thinking_format", "tag");
+    json_t* req_raw = json_pack("{s:s}", "thinking_format", "raw");
+    json_t* req_none = json_pack("{s:s}", "model", "test-model");
+
+    /* Case 1: Tier 1 (Header "raw") beats Tier 2 (Body "tag") */
+    route.tag_emulation_default = true;
+    int rc = parse_reasoning_config_ext(req_tag, &route, "raw", &cfg);
+    TEST_ASSERT(rc == 0 && cfg.tag_emulation == false, "Header raw overrides body tag");
+
+    /* Case 2: Tier 1 (Header "tag") beats Tier 2 (Body "raw") */
+    route.tag_emulation_default = false;
+    rc = parse_reasoning_config_ext(req_raw, &route, "tag", &cfg);
+    TEST_ASSERT(rc == 0 && cfg.tag_emulation == true, "Header tag overrides body raw");
+
+    /* Case 3: Tier 2 (Body "raw") beats Tier 3 (Route default true) */
+    route.tag_emulation_default = true;
+    rc = parse_reasoning_config_ext(req_raw, &route, NULL, &cfg);
+    TEST_ASSERT(rc == 0 && cfg.tag_emulation == false, "Body raw overrides route true");
+
+    /* Case 4: Tier 2 (Body "tag") beats Tier 3 (Route default false) */
+    route.tag_emulation_default = false;
+    rc = parse_reasoning_config_ext(req_tag, &route, NULL, &cfg);
+    TEST_ASSERT(rc == 0 && cfg.tag_emulation == true, "Body tag overrides route false");
+
+    /* Case 5: Tier 3 fallback when no header and no body format */
+    route.tag_emulation_default = true;
+    rc = parse_reasoning_config_ext(req_none, &route, NULL, &cfg);
+    TEST_ASSERT(rc == 0 && cfg.tag_emulation == true, "Route true takes effect when no header/body");
+
+    route.tag_emulation_default = false;
+    rc = parse_reasoning_config_ext(req_none, &route, NULL, &cfg);
+    TEST_ASSERT(rc == 0 && cfg.tag_emulation == false, "Route false takes effect when no header/body");
+
+    json_decref(req_tag);
+    json_decref(req_raw);
+    json_decref(req_none);
+}
+
 #include "provider_anthropic.h"
 #include "provider_gemini.h"
 

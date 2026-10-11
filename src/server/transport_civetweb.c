@@ -367,6 +367,7 @@ handle_v1(struct mg_connection* conn, void* cbdata)
     rq.traceparent = mg_get_header(conn, "traceparent");
     rq.compress_control = mg_get_header(conn, "X-Aigate-Compress");
     rq.prompt_cache_control = mg_get_header(conn, "X-Aigate-Prompt-Cache");
+    rq.thinking_format = mg_get_header(conn, "X-Thinking-Format");
 
     aigate_handle_request(cw->ac, &rq, &rc);
 

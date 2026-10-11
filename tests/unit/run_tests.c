@@ -818,6 +818,9 @@ main(int argc, char** argv)
     extern void test_reasoning_tag_emulation_parsing(void);
     test_register("reasoning_tag_emulation_parsing", test_reasoning_tag_emulation_parsing);
 
+    extern void test_reasoning_tag_emulation_3tier_hierarchy(void);
+    test_register("reasoning_tag_emulation_3tier_hierarchy", test_reasoning_tag_emulation_3tier_hierarchy);
+
     extern void test_anthropic_thinking_inbound_max_tokens_autolift(void);
     test_register("anthropic_thinking_inbound_max_tokens_autolift", test_anthropic_thinking_inbound_max_tokens_autolift);
 

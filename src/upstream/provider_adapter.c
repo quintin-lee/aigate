@@ -69,25 +69,54 @@ provider_probe_plan(const char* provider_type, const char* endpoint, provider_pr
 }
 
 int
-parse_reasoning_config(json_t* req_body, const model_rec_t* route, reasoning_config_t* out_cfg)
+parse_reasoning_config_ext(json_t*            req_body,
+                           const model_rec_t* route,
+                           const char*        header_format,
+                           reasoning_config_t* out_cfg)
 {
     if (out_cfg == NULL) {
         return -1;
     }
     memset(out_cfg, 0, sizeof(*out_cfg));
 
-    if (req_body != NULL && json_is_object(req_body)) {
-        /* Check tag emulation configuration */
+    /* 3-tier tag emulation resolution */
+    int resolved = 0;
+    if (header_format != NULL) {
+        if (strcasecmp(header_format, "tag") == 0) {
+            out_cfg->tag_emulation = true;
+            resolved = 1;
+        } else if (strcasecmp(header_format, "raw") == 0) {
+            out_cfg->tag_emulation = false;
+            resolved = 1;
+        }
+    }
+
+    if (!resolved && req_body != NULL && json_is_object(req_body)) {
         json_t* jtm = json_object_get(req_body, "thinking_mode");
         if (jtm == NULL) {
             jtm = json_object_get(req_body, "thinking_format");
         }
         if (jtm != NULL && json_is_string(jtm)) {
-            if (strcasecmp(json_string_value(jtm), "tag") == 0) {
+            const char* s = json_string_value(jtm);
+            if (strcasecmp(s, "tag") == 0) {
                 out_cfg->tag_emulation = true;
+                resolved = 1;
+            } else if (strcasecmp(s, "raw") == 0) {
+                out_cfg->tag_emulation = false;
+                resolved = 1;
             }
         }
+    }
 
+    if (!resolved) {
+        if (route != NULL) {
+            out_cfg->tag_emulation = route->tag_emulation_default;
+        } else {
+            out_cfg->tag_emulation = false;
+        }
+    }
+
+    if (req_body != NULL && json_is_object(req_body)) {
         /* 1. Explicit Anthropic thinking object */
         json_t* jth = json_object_get(req_body, "thinking");
         if (jth != NULL && json_is_object(jth)) {
@@ -140,4 +169,10 @@ parse_reasoning_config(json_t* req_body, const model_rec_t* route, reasoning_con
     }
 
     return 0;
+}
+
+int
+parse_reasoning_config(json_t* req_body, const model_rec_t* route, reasoning_config_t* out_cfg)
+{
+    return parse_reasoning_config_ext(req_body, route, NULL, out_cfg);
 }

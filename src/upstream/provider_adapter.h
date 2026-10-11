@@ -32,6 +32,16 @@ typedef enum stream_thinking_state {
     THINK_STATE_DONE          /**< Stream terminated */
 } stream_thinking_state_t;
 
+/** @brief Parse reasoning parameters with 3-tier resolution:
+ *  Tier 1: Request Header (header_format: "tag" or "raw")
+ *  Tier 2: Request Body ("thinking_format" or "thinking_mode": "tag" or "raw")
+ *  Tier 3: Route default (route->tag_emulation_default: true or false)
+ *  @return 0 on success (out_cfg filled), -1 on error. */
+int parse_reasoning_config_ext(json_t*            req_body,
+                               const model_rec_t* route,
+                               const char*        header_format,
+                               reasoning_config_t* out_cfg);
+
 /** @brief Parse reasoning parameters from inbound request or route defaults.
  *  @return 0 on success (out_cfg filled), -1 on error. */
 int parse_reasoning_config(json_t* req_body, const model_rec_t* route, reasoning_config_t* out_cfg);

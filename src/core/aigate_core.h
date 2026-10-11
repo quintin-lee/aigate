@@ -48,6 +48,8 @@ typedef struct aigate_request_ctx {
         compress_control; /**< Inbound X-Aigate-Compress override ("off", "none", "moderate", "aggressive"), may be NULL */
     const char*
         prompt_cache_control; /**< Inbound X-Aigate-Prompt-Cache override ("auto", "on", "off"), may be NULL */
+    const char*
+        thinking_format; /**< Inbound X-Thinking-Format header ("tag", "raw"), may be NULL */
 } aigate_request_ctx;
 
 /** @brief Outbound response sink (transport implements callbacks). */

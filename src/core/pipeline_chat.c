@@ -6,6 +6,8 @@
 #include "pg_store.h"
 #include "provider_adapter.h"
 #include "provider_openai.h"
+#include "provider_anthropic.h"
+#include "provider_gemini.h"
 #include "response_cache.h"
 #include "upstream_client.h"
 #include "upstream_hedged.h"
@@ -269,6 +271,53 @@ extract_reasoning_tokens_from_json(const char* body, size_t len)
     return tok;
 }
 
+static int
+chat_parse_upstream_response(chat_req_t*               q,
+                             const model_rec_t*        route,
+                             const char*               provider,
+                             const provider_adapter_t* adapter,
+                             const char*               ubody,
+                             size_t                    ulen,
+                             int*                      parsed_status,
+                             char**                    parsed_body,
+                             size_t*                   parsed_len,
+                             long*                     ptok,
+                             long*                     ctok,
+                             long*                     cached_tok)
+{
+    reasoning_config_t rcfg;
+    parse_reasoning_config_ext(
+        q->jbody, route, q->rq ? q->rq->thinking_format : NULL, &rcfg);
+
+    if (rcfg.tag_emulation && strcmp(provider, "anthropic") == 0) {
+        (void)ulen;
+        if (cached_tok) {
+            *cached_tok = 0;
+        }
+        *parsed_status = 200;
+        return provider_anthropic_resp_to_openai_ext(
+            ubody ? ubody : "", q->model, true, parsed_body, parsed_len, ptok, ctok);
+    }
+    if (rcfg.tag_emulation && strcmp(provider, "gemini") == 0) {
+        (void)ulen;
+        if (cached_tok) {
+            *cached_tok = 0;
+        }
+        *parsed_status = 200;
+        return provider_gemini_resp_to_openai_ext(
+            ubody ? ubody : "", q->model, true, parsed_body, parsed_len, ptok, ctok);
+    }
+    return adapter->parse_chat_response(ubody ? ubody : "",
+                                        ulen,
+                                        q->model,
+                                        parsed_status,
+                                        parsed_body,
+                                        parsed_len,
+                                        ptok,
+                                        ctok,
+                                        cached_tok);
+}
+
 /** @brief /v1/chat/completions non-streaming failover loop. @return transport rc. */
 int
 handle_chat_sync(chat_req_t* q)
@@ -458,15 +507,18 @@ handle_chat_sync(chat_req_t* q)
                     size_t parsed_len = 0;
                     long   ptok = 0, ctok = 0, cached_tok = 0;
                     int    parsed_status = status;
-                    if (win_adapter->parse_chat_response(ubody ? ubody : "",
-                                                         ulen,
-                                                         q->model,
-                                                         &parsed_status,
-                                                         &parsed_body,
-                                                         &parsed_len,
-                                                         &ptok,
-                                                         &ctok,
-                                                         &cached_tok) != 0) {
+                    if (chat_parse_upstream_response(q,
+                                                     &q->route,
+                                                     win_target->provider,
+                                                     win_adapter,
+                                                     ubody ? ubody : "",
+                                                     ulen,
+                                                     &parsed_status,
+                                                     &parsed_body,
+                                                     &parsed_len,
+                                                     &ptok,
+                                                     &ctok,
+                                                     &cached_tok) != 0) {
                         free(ubody);
                         aigate_write_error(
                             q->rc, 502, "upstream_error", "failed to parse upstream response");
@@ -749,9 +801,12 @@ handle_chat_sync(chat_req_t* q)
             size_t parsed_len = 0;
             long   ptok = 0, ctok = 0, cached_tok = 0;
             int    parsed_status = status;
-            if (adapter->parse_chat_response(ubody ? ubody : "",
+            if (chat_parse_upstream_response(q,
+                                             &cur_route,
+                                             target->provider,
+                                             adapter,
+                                             ubody ? ubody : "",
                                              ulen,
-                                             q->model,
                                              &parsed_status,
                                              &parsed_body,
                                              &parsed_len,
@@ -1227,6 +1282,17 @@ handle_chat_stream(chat_req_t* q)
             continue;
         }
 
+        reasoning_config_t rcfg;
+        parse_reasoning_config_ext(
+            q->jbody, &cur_route, q->rq ? q->rq->thinking_format : NULL, &rcfg);
+        if (rcfg.tag_emulation) {
+            if (strcmp(target->provider, "anthropic") == 0) {
+                ((anthropic_bridge_t*)bridge)->tag_emulation = true;
+            } else if (strcmp(target->provider, "gemini") == 0) {
+                ((gemini_bridge_t*)bridge)->tag_emulation = true;
+            }
+        }
+
         int      status = 0;
         char*    sbody = NULL;
         size_t   slen = 0;
@@ -1344,6 +1410,8 @@ handle_chat_stream(chat_req_t* q)
         adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
         if (strcmp(target->provider, "openai") == 0) {
             provider_openai_bridge_get_tokens(bridge, NULL, NULL, NULL, &reasoning_tok);
+        } else if (strcmp(target->provider, "gemini") == 0) {
+            provider_gemini_bridge_get_tokens(bridge, NULL, NULL, NULL, &reasoning_tok);
         }
         tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ptok);
         tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ctok);
