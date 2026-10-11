@@ -84,6 +84,23 @@ TEST_CASE(test_rl_reset_day)
     ratelimit_free(rl);
 }
 
+TEST_CASE(test_rl_daily_reasoning_quota)
+{
+    ratelimit_t* rl = ratelimit_new();
+    TEST_ASSERT(rl != NULL, "new");
+    TEST_ASSERT(rl_remaining_daily_reasoning(rl, 5, 1000) == 1000, "initial 1000 remaining");
+    TEST_ASSERT(rl_reserve_reasoning_tokens(rl, 5, 1000, 400) == 0, "reserve 400 reasoning");
+    TEST_ASSERT(rl_remaining_daily_reasoning(rl, 5, 1000) == 600, "600 remaining");
+    TEST_ASSERT(rl_reserve_reasoning_tokens(rl, 5, 1000, 700) == -1, "reserve 700 over quota");
+    TEST_ASSERT(rl_remaining_daily_reasoning(rl, 5, 1000) == -100, "-100 remaining after 1100 consumed");
+    TEST_ASSERT(rl_remaining_daily_reasoning(rl, 5, 0) == LONG_MAX, "0 quota is unlimited");
+
+    /* reset day restores quota */
+    rl_reset_day(rl, 1234567890);
+    TEST_ASSERT(rl_remaining_daily_reasoning(rl, 5, 1000) == 1000, "reset day clears daily reasoning usage");
+    ratelimit_free(rl);
+}
+
 struct cc_arg {
     ratelimit_t* rl;
     int          iters;

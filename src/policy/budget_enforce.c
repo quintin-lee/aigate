@@ -22,10 +22,11 @@ typedef struct key_spend_node {
 
 /** @brief Per-group monthly total: group id/spent cost/budget cap/link. */
 typedef struct group_spend_node {
-    int64_t                  group_id;   /**< Group id. */
-    double                   spent_cost; /**< Spent cost (USD). */
-    double                   budget_usd; /**< Monthly budget cap (USD). */
-    struct group_spend_node* next;       /**< Intra-bucket link. */
+    int64_t                  group_id;              /**< Group id. */
+    double                   spent_cost;            /**< Spent cost (USD). */
+    double                   budget_usd;            /**< Monthly budget cap (USD). */
+    int64_t                  daily_reasoning_quota; /**< Daily reasoning token quota. */
+    struct group_spend_node* next;                  /**< Intra-bucket link. */
 } group_spend_node_t;
 
 /** @brief Budget enforcer instance: store/Redis/lock/current year-month/event bus/shard buckets. */
@@ -364,6 +365,52 @@ budget_enforce_set_group_budget(budget_enforce_mgr_t* mgr, int64_t group_id, dou
     pthread_mutex_unlock(&mgr->mtx);
 }
 
+void
+budget_enforce_set_group_reasoning_quota(budget_enforce_mgr_t* mgr, int64_t group_id, int64_t reasoning_quota)
+{
+    if (mgr == NULL || group_id <= 0) {
+        return;
+    }
+    pthread_mutex_lock(&mgr->mtx);
+    size_t              h = hash_id(group_id);
+    group_spend_node_t* curr = mgr->group_buckets[h];
+    while (curr != NULL && curr->group_id != group_id) {
+        curr = curr->next;
+    }
+    if (curr == NULL) {
+        curr = calloc(1, sizeof(*curr));
+        if (curr != NULL) {
+            curr->group_id = group_id;
+            curr->daily_reasoning_quota = reasoning_quota;
+            curr->next = mgr->group_buckets[h];
+            mgr->group_buckets[h] = curr;
+        }
+    } else {
+        curr->daily_reasoning_quota = reasoning_quota;
+    }
+    pthread_mutex_unlock(&mgr->mtx);
+}
+
+int64_t
+budget_enforce_get_group_reasoning_quota(budget_enforce_mgr_t* mgr, int64_t group_id)
+{
+    if (mgr == NULL || group_id <= 0) {
+        return 0;
+    }
+    int64_t q = 0;
+    pthread_mutex_lock(&mgr->mtx);
+    size_t              h = hash_id(group_id);
+    group_spend_node_t* curr = mgr->group_buckets[h];
+    while (curr != NULL && curr->group_id != group_id) {
+        curr = curr->next;
+    }
+    if (curr != NULL) {
+        q = curr->daily_reasoning_quota;
+    }
+    pthread_mutex_unlock(&mgr->mtx);
+    return q;
+}
+
 int
 budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
 {
@@ -381,6 +428,7 @@ budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
         if (ops->list_groups(ops->ctx, glist, 256, &gn) == 0) {
             for (int i = 0; i < gn; i++) {
                 budget_enforce_set_group_budget(mgr, glist[i].id, glist[i].monthly_budget_usd);
+                budget_enforce_set_group_reasoning_quota(mgr, glist[i].id, glist[i].daily_reasoning_quota);
             }
         }
     }

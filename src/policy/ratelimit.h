@@ -49,6 +49,17 @@ int rl_reserve_tokens(ratelimit_t* rl, long key_id, long daily_quota, long token
 /** @brief Remaining daily tokens; LONG_MAX when unlimited or unused yet. */
 long rl_remaining_daily(ratelimit_t* rl, long key_id, long daily_quota);
 
+/** @brief Consume @p tokens of the key's daily reasoning quota after upstream usage.
+ * @param rl the limiter instance.
+ * @param key_id the key whose reasoning quota is consumed.
+ * @param daily_reasoning_quota 0 = unlimited.
+ * @param tokens reasoning token count to consume.
+ * @return 0 within quota (or unlimited); -1 over quota or allocation failure. */
+int rl_reserve_reasoning_tokens(ratelimit_t* rl, long key_id, long daily_reasoning_quota, long tokens);
+
+/** @brief Remaining daily reasoning tokens; LONG_MAX when unlimited or unused yet. */
+long rl_remaining_daily_reasoning(ratelimit_t* rl, long key_id, long daily_reasoning_quota);
+
 /** @brief Reset daily counters for @p now (flush worker calls on rollover). */
 void rl_reset_day(ratelimit_t* rl, time_t now);
 

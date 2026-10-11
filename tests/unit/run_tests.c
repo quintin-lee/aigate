@@ -872,6 +872,12 @@ main(int argc, char** argv)
     extern void test_pricing_reasoning_more_than_completion_clamp(void);
     test_register("pricing_reasoning_more_than_completion_clamp", test_pricing_reasoning_more_than_completion_clamp);
 
+    extern void test_rl_daily_reasoning_quota(void);
+    test_register("rl_daily_reasoning_quota", test_rl_daily_reasoning_quota);
+
+    extern void test_pipeline_reasoning_graceful_degradation(void);
+    test_register("pipeline_reasoning_graceful_degradation", test_pipeline_reasoning_graceful_degradation);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

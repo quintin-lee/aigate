@@ -1816,6 +1816,8 @@ aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_response_c
         return handle_embeddings(&chatq);
     }
 
+    chat_apply_reasoning_quota_and_degradation(&chatq);
+
     bool is_streaming = false;
     int  cache_handled = prepare_chat_cache(&chatq, &is_streaming);
     if (cache_handled != 0) {

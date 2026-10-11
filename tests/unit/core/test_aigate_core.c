@@ -1709,3 +1709,55 @@ TEST_CASE(test_pricing_reasoning_more_than_completion_clamp)
     double cost = calc_req_cost_ext(&route, 0, 100, 0, 150);
     TEST_ASSERT(fabs(cost - 0.001) < 1e-9, "cost clamped when reasoning > completion, got %f", cost);
 }
+
+TEST_CASE(test_pipeline_reasoning_graceful_degradation)
+{
+    mock_upstream_t* mu = mock_upstream_start();
+    TEST_ASSERT(mu != NULL, "mock start");
+
+    struct fdb db;
+    memset(&db, 0, sizeof db);
+    fkey_add(&db, 0, 1, "reasoning-key", 0, 0, NULL);
+    db.keys[0].k.daily_reasoning_quota = 100;
+
+    snprintf(db.models[0].name, sizeof db.models[0].name, "%s", "gemini-flash-thinking");
+    snprintf(db.models[0].provider, sizeof db.models[0].provider, "%s", "openai");
+    snprintf(db.models[0].endpoint, sizeof db.models[0].endpoint, "%s", mock_upstream_base(mu));
+    db.models[0].enabled = 1;
+    db.models[0].supports_reasoning = true;
+    db.models[0].default_thinking_budget = 2048;
+    db.n_models = 1;
+
+    pg_ops_t ops;
+    fbuild_ops(&db, &ops);
+    pg_store_t* ps = pg_store_open(NULL, &ops);
+    TEST_ASSERT(ps != NULL, "fake store");
+
+    aigate_core ac;
+    TEST_ASSERT(aigate_core_init(&ac, ps, NULL, 5000, 0) == 0, "core init");
+
+    /* Request 1: Quota has 100 tokens remaining. Not degraded. */
+    struct cap c1;
+    memset(&c1, 0, sizeof c1);
+    run(&ac, "reasoning-key", "gemini-flash-thinking", &c1);
+    TEST_ASSERT(c1.status == 200, "status 200, got %d", c1.status);
+    TEST_ASSERT(!cap_has_header(&c1, "X-Aigate-Reasoning-Degraded"), "not degraded on first request");
+
+    /* Exhaust daily reasoning quota via reservation of 150 tokens (> 100 quota) */
+    TEST_ASSERT(rl_reserve_reasoning_tokens(ac.rl, 1, 100, 150) == -1, "exceeded quota");
+    TEST_ASSERT(rl_remaining_daily_reasoning(ac.rl, 1, 100) < 0, "remaining is negative");
+
+    /* Request 2: Quota exceeded. Gracefully degraded: returns 200 and injects degradation header */
+    struct cap c2;
+    memset(&c2, 0, sizeof c2);
+    run(&ac, "reasoning-key", "gemini-flash-thinking", &c2);
+    TEST_ASSERT(c2.status == 200, "status 200 on degraded request, got %d", c2.status);
+    TEST_ASSERT(cap_has_header(&c2, "X-Aigate-Reasoning-Degraded: quota_exceeded"),
+                "X-Aigate-Reasoning-Degraded header present");
+
+    aigate_core_shutdown(&ac);
+    pg_store_close(ps);
+    freed_db(&db);
+    mock_upstream_stop(mu);
+}
+

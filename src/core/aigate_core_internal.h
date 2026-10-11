@@ -85,6 +85,7 @@ typedef struct chat_req {
     char   fallback_reason[32]; /**< Fallback trigger reason (e.g. SLA_TTFT_EXCEEDED). */
     char   routed_model[64];    /**< Routed model name buffer. */
     char   requested_model[64]; /**< Client requested model name buffer. */
+    bool   reasoning_degraded;  /**< True if daily reasoning quota exceeded and gracefully degraded. */
 } chat_req_t;
 
 /**
@@ -189,6 +190,12 @@ int gate_request(chat_req_t* q);
  * @return 0 on success; non-zero HTTP error code on failure.
  */
 int resolve_chat_target(chat_req_t* q);
+
+/**
+ * @brief Enforce daily reasoning token quota and gracefully degrade if exhausted.
+ * @param[in,out] q Request processing context.
+ */
+void chat_apply_reasoning_quota_and_degradation(chat_req_t* q);
 
 /**
  * @brief Clean up allocated request resources in chat_req_t.

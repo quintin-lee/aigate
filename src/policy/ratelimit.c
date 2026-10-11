@@ -24,8 +24,9 @@ struct bucket {
     double   tokens;         /**< available request tokens */
     double   capacity;       /**< Bucket capacity (QPS ceiling). */
     uint64_t last_refill_ns; /**< CLOCK_MONOTONIC */
-    long     daily_used;     /**< Tokens consumed today. */
-    time_t   day;            /**< UTC midnight of the accounting window */
+    long     daily_used;           /**< Tokens consumed today. */
+    long     daily_reasoning_used; /**< Reasoning tokens consumed today. */
+    time_t   day;                  /**< UTC midnight of the accounting window */
 };
 
 /** @brief Limiter instance: lock/open-addressing bucket table/capacity/count/Redis pool/Lua SHA cache. */
@@ -458,6 +459,152 @@ rl_remaining_daily(ratelimit_t* rl, long key_id, long daily_quota)
     return rl_remaining_daily_local(rl, key_id, daily_quota);
 }
 
+static int
+rl_reserve_reasoning_tokens_local(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
+{
+    struct bucket* bt;
+    int            rc = 0;
+    pthread_mutex_lock(&rl->mtx);
+    bt = find_or_make(rl, key_id);
+    if (bt == NULL) {
+        rc = -1;
+    } else {
+        bt->daily_reasoning_used += tokens;
+        rc = (daily_quota > 0 && bt->daily_reasoning_used > daily_quota) ? -1 : 0;
+    }
+    pthread_mutex_unlock(&rl->mtx);
+    return rc;
+}
+
+int
+rl_reserve_reasoning_tokens(ratelimit_t* rl, long key_id, long daily_quota, long tokens)
+{
+    if (rl == NULL) {
+        return -1;
+    }
+
+    if (rl->pool != NULL) {
+        if (daily_quota <= 0 && tokens <= 0) {
+            return 0;
+        }
+        redisContext* c = redis_pool_acquire(rl->pool);
+        if (c == NULL) {
+            if (rl->fail_open) {
+                AIGATE_LOG_WARN(
+                    "ratelimit: redis acquire failed in reserve_reasoning_tokens, fallback to local");
+                return rl_reserve_reasoning_tokens_local(rl, key_id, daily_quota, tokens);
+            }
+            return -1;
+        }
+
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        time_t day_epoch = ts.tv_sec - (ts.tv_sec % 86400);
+
+        char key_buf[64];
+        snprintf(
+            key_buf, sizeof(key_buf), "aigate:quota_reasoning:%ld:%ld", key_id, (long)day_epoch);
+        const char* keys[1] = {key_buf};
+
+        char tokens_buf[32], quota_buf[32], ttl_buf[16];
+        snprintf(tokens_buf, sizeof(tokens_buf), "%ld", tokens);
+        snprintf(quota_buf, sizeof(quota_buf), "%ld", daily_quota);
+        snprintf(ttl_buf, sizeof(ttl_buf), "90000");
+        const char* argv[3] = {tokens_buf, quota_buf, ttl_buf};
+
+        redisReply* reply = (redisReply*)
+            redis_eval_sha(c, rl->sha_quota, SCRIPT_DAILY_QUOTA_CONSUME, 1, keys, argv, 3);
+        if (reply == NULL || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||
+            reply->element[0]->type != REDIS_REPLY_INTEGER) {
+            if (reply != NULL) {
+                freeReplyObject(reply);
+            }
+            redis_pool_release(rl->pool, c);
+            if (rl->fail_open) {
+                AIGATE_LOG_WARN(
+                    "ratelimit: redis eval failed in reserve_reasoning_tokens, fallback to local");
+                return rl_reserve_reasoning_tokens_local(rl, key_id, daily_quota, tokens);
+            }
+            return -1;
+        }
+
+        long status = reply->element[0]->integer;
+        freeReplyObject(reply);
+        redis_pool_release(rl->pool, c);
+        return (status == 0) ? 0 : -1;
+    }
+
+    return rl_reserve_reasoning_tokens_local(rl, key_id, daily_quota, tokens);
+}
+
+static long
+rl_remaining_daily_reasoning_local(ratelimit_t* rl, long key_id, long daily_quota)
+{
+    struct bucket* bt;
+    long           rem;
+    pthread_mutex_lock(&rl->mtx);
+    bt = find_or_make(rl, key_id);
+    if (bt == NULL || daily_quota <= 0) {
+        rem = LONG_MAX;
+    } else {
+        rem = daily_quota - bt->daily_reasoning_used;
+    }
+    pthread_mutex_unlock(&rl->mtx);
+    return rem;
+}
+
+long
+rl_remaining_daily_reasoning(ratelimit_t* rl, long key_id, long daily_quota)
+{
+    if (rl == NULL) {
+        return LONG_MIN;
+    }
+
+    if (rl->pool != NULL) {
+        if (daily_quota <= 0) {
+            return LONG_MAX;
+        }
+        redisContext* c = redis_pool_acquire(rl->pool);
+        if (c == NULL) {
+            if (rl->fail_open) {
+                return rl_remaining_daily_reasoning_local(rl, key_id, daily_quota);
+            }
+            return LONG_MIN;
+        }
+
+        struct timespec ts;
+        clock_gettime(CLOCK_REALTIME, &ts);
+        time_t day_epoch = ts.tv_sec - (ts.tv_sec % 86400);
+
+        char key_buf[64];
+        snprintf(
+            key_buf, sizeof(key_buf), "aigate:quota_reasoning:%ld:%ld", key_id, (long)day_epoch);
+
+        redisReply* reply = (redisReply*)redisCommand(c, "GET %s", key_buf);
+        if (reply == NULL || reply->type == REDIS_REPLY_ERROR) {
+            if (reply != NULL) {
+                freeReplyObject(reply);
+            }
+            redis_pool_release(rl->pool, c);
+            if (rl->fail_open) {
+                return rl_remaining_daily_reasoning_local(rl, key_id, daily_quota);
+            }
+            return LONG_MIN;
+        }
+
+        long rem = daily_quota;
+        if (reply->type == REDIS_REPLY_STRING) {
+            long used = strtol(reply->str, NULL, 10);
+            rem = daily_quota - used;
+        }
+        freeReplyObject(reply);
+        redis_pool_release(rl->pool, c);
+        return rem;
+    }
+
+    return rl_remaining_daily_reasoning_local(rl, key_id, daily_quota);
+}
+
 void
 rl_reset_day(ratelimit_t* rl, time_t now)
 {
@@ -468,6 +615,7 @@ rl_reset_day(ratelimit_t* rl, time_t now)
         if (bt->in_use && bt->day != mid) {
             bt->day = mid;
             bt->daily_used = 0;
+            bt->daily_reasoning_used = 0;
         }
     }
     pthread_mutex_unlock(&rl->mtx);

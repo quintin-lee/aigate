@@ -318,10 +318,79 @@ chat_parse_upstream_response(chat_req_t*               q,
                                         cached_tok);
 }
 
+void
+chat_apply_reasoning_quota_and_degradation(chat_req_t* q)
+{
+    if (q == NULL || q->ac == NULL || q->ac->rl == NULL || q->reasoning_degraded) {
+        return;
+    }
+    long effective_quota = q->krec.daily_reasoning_quota;
+    if (effective_quota <= 0 && q->ac->be != NULL && q->krec.group_id > 0) {
+        effective_quota = (long)budget_enforce_get_group_reasoning_quota(q->ac->be, q->krec.group_id);
+    }
+    if (effective_quota <= 0) {
+        return; /* unlimited */
+    }
+
+    long remaining = rl_remaining_daily_reasoning(q->ac->rl, q->krec.key_id, effective_quota);
+    if (remaining > 0) {
+        return; /* quota not exceeded */
+    }
+
+    /* Daily reasoning quota exceeded: gracefully degrade reasoning */
+    q->reasoning_degraded = true;
+    if (q->rc != NULL && q->rc->set_header != NULL) {
+        q->rc->set_header(q->rc->impl, "X-Aigate-Reasoning-Degraded", "quota_exceeded");
+    }
+
+    /* Override model route thinking budget */
+    q->route.default_thinking_budget = 0;
+
+    /* Mutate request body to suppress reasoning */
+    if (q->jbody != NULL && json_is_object(q->jbody)) {
+        json_t* jth = json_object();
+        json_object_set_new(jth, "type", json_string("enabled"));
+        json_object_set_new(jth, "budget_tokens", json_integer(0));
+        json_object_set_new(q->jbody, "thinking", jth);
+
+        json_object_del(q->jbody, "reasoning_effort");
+        json_object_del(q->jbody, "max_thinking_tokens");
+
+        char* dumped = json_dumps(q->jbody, JSON_COMPACT);
+        if (dumped != NULL) {
+            if (q->sanitized_body != NULL) {
+                free(q->sanitized_body);
+            }
+            q->sanitized_body = dumped;
+            q->sanitized_len = strlen(dumped);
+            q->eff_body = q->sanitized_body;
+            q->eff_len = q->sanitized_len;
+        }
+    }
+}
+
+static void
+chat_record_tokens_and_reasoning(chat_req_t* q, long total_tokens, long reasoning_tok)
+{
+    if (q == NULL || q->ac == NULL || q->ac->rl == NULL) {
+        return;
+    }
+    rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, total_tokens);
+    if (reasoning_tok > 0) {
+        long effective_quota = q->krec.daily_reasoning_quota;
+        if (effective_quota <= 0 && q->ac->be != NULL && q->krec.group_id > 0) {
+            effective_quota = (long)budget_enforce_get_group_reasoning_quota(q->ac->be, q->krec.group_id);
+        }
+        rl_reserve_reasoning_tokens(q->ac->rl, q->krec.key_id, effective_quota, reasoning_tok);
+    }
+}
+
 /** @brief /v1/chat/completions non-streaming failover loop. @return transport rc. */
 int
 handle_chat_sync(chat_req_t* q)
 {
+    chat_apply_reasoning_quota_and_degradation(q);
+
     /* --- upstream non-streaming call with failover loop --- */
     uint64_t    total_lat = 0;
     const char* last_provider = q->route.provider;
@@ -603,8 +672,7 @@ handle_chat_sync(chat_req_t* q)
                         budget_enforce_record(
                             q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
                     }
-                    rl_reserve_tokens(
-                        q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
+                    chat_record_tokens_and_reasoning(q, ptok + ctok, reasoning_tok);
 
                     if (q->ac->rc != NULL && q->cache_key[0] != '\0' && parsed_status == 200 &&
                         parsed_body != NULL && !q->no_store && parsed_len <= 1048576) {
@@ -896,7 +964,7 @@ handle_chat_sync(chat_req_t* q)
                 budget_enforce_record(
                     q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
             }
-            rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
+            chat_record_tokens_and_reasoning(q, ptok + ctok, reasoning_tok);
 
             if (q->has_shadow && q->ac != NULL && q->ac->shadow_eng != NULL) {
                 char snippet[512] = {0};
@@ -1196,6 +1264,8 @@ stream_feed_wrapper_fn(void* ctx, const void* chunk, size_t len)
 int
 handle_chat_stream(chat_req_t* q)
 {
+    chat_apply_reasoning_quota_and_degradation(q);
+
     uint64_t    total_lat = 0;
     const char* last_provider = q->route.provider;
 
@@ -1437,6 +1507,7 @@ handle_chat_stream(chat_req_t* q)
                 calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
             settle_success(
                 q, PIPE_UPSTREAM, ptok, ctok, cached_tok, total_lat, target->provider, req_cost);
+            chat_record_tokens_and_reasoning(q, 0, reasoning_tok);
             adapter->stream_bridge_free(bridge);
             if (acc.accum_content != NULL) {
                 free(acc.accum_content);
@@ -1486,7 +1557,7 @@ handle_chat_stream(chat_req_t* q)
             budget_enforce_record(
                 q->ac->be, q->krec.key_id, q->krec.group_id, req_cost, ptok + ctok);
         }
-        rl_reserve_tokens(q->ac->rl, q->krec.key_id, q->krec.daily_token_quota, ptok + ctok);
+        chat_record_tokens_and_reasoning(q, ptok + ctok, reasoning_tok);
 
         if (q->has_shadow && q->ac != NULL && q->ac->shadow_eng != NULL) {
             char snippet[512] = {0};
