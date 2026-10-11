@@ -40,8 +40,58 @@
     .custom-scroll::-webkit-scrollbar-thumb { background: rgba(148, 163, 184, 0.2); border-radius: 3px; }
     .custom-scroll::-webkit-scrollbar-thumb:hover { background: rgba(148, 163, 184, 0.4); }
     .typewriter-cursor::after { content: "▋"; animation: blink 1s infinite; color: #6366f1; }
-    @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
     .hidden { display: none; }
+
+    /* Reasoning Process & Badges */
+    .reasoning-accordion {
+      margin-bottom: 0.5rem;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+      background-color: rgba(168, 85, 247, 0.05);
+      border-radius: 0.75rem;
+      overflow: hidden;
+    }
+    .reasoning-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.35rem 0.65rem;
+      cursor: pointer;
+      font-size: 11px;
+      font-weight: 600;
+      color: #c084fc;
+      background: rgba(168, 85, 247, 0.1);
+      user-select: none;
+    }
+    .reasoning-header:hover {
+      background: rgba(168, 85, 247, 0.18);
+    }
+    .reasoning-toggle-icon {
+      transition: transform 0.2s ease;
+      font-size: 10px;
+    }
+    .reasoning-body {
+      padding: 0.5rem 0.65rem;
+      font-size: 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      color: #e9d5ff;
+      white-space: pre-wrap;
+      word-break: break-word;
+      max-height: 280px;
+      overflow-y: auto;
+      border-top: 1px solid rgba(168, 85, 247, 0.15);
+      margin: 0;
+    }
+    .reasoning-accordion.collapsed .reasoning-body {
+      display: none;
+    }
+    .reasoning-accordion.collapsed .reasoning-toggle-icon {
+      transform: rotate(-90deg);
+    }
+    .badge-purple {
+      background-color: rgba(168, 85, 247, 0.15);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.3);
+    }
 
     /* Visual redesign palette tokens */
     :root {
@@ -402,8 +452,8 @@
 
     <!-- ==================== Tab 1: Overview ==================== -->
     <div id="tab-overview" class="tab-content space-y-6">
-      <!-- 4 stat cards -->
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <!-- 5 stat cards -->
+      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
         <!-- Card 1 -->
         <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition">
           <div class="flex items-center justify-between">
@@ -461,6 +511,21 @@
           </div>
           <div class="mt-3 text-xs text-slate-400 flex items-center space-x-1">
             <span id="statTokensBreakdown">0 输入 / 0 输出</span>
+          </div>
+        </div>
+
+        <!-- Card 5: Reasoning Tokens -->
+        <div class="glass-panel p-5 rounded-2xl relative overflow-hidden group hover:border-slate-700 transition" id="cardReasoningTokens">
+          <div class="flex items-center justify-between">
+            <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">思考 Token (Reasoning)</div>
+            <span class="stat-ico pu text-purple-400">💭</span>
+          </div>
+          <div class="mt-2 flex items-baseline justify-between">
+            <div id="statReasoningTokens" class="text-3xl font-extrabold text-purple-400">0</div>
+            <div class="text-xs px-2 py-0.5 rounded-full bg-purple-500/10 text-purple-400 border border-purple-500/20">Reasoning</div>
+          </div>
+          <div class="mt-3 text-xs text-slate-400 flex items-center space-x-1">
+            <span id="statReasoningMetricLabel" class="font-mono text-[10px] text-slate-500 truncate" title="aigate_tokens_reasoning_total">aigate_tokens_reasoning_total</span>
           </div>
         </div>
       </div>
@@ -3672,6 +3737,34 @@
           <p class="text-[10px] text-slate-500 mt-1">缺省不填则仅统计 Token 消耗量，报表中不折算美元金额。</p>
         </div>
 
+        <!-- Reasoning / Thinking config -->
+        <div class="border-t border-slate-800/80 pt-3 space-y-2">
+          <div class="flex items-center justify-between">
+            <div>
+              <span class="font-semibold text-slate-200">支持深度思考 (supports_reasoning)</span>
+              <span class="text-[11px] text-slate-500 ml-1.5">（DeepSeek-R1 / QwQ / o-series / Claude Thinking 思考链）</span>
+            </div>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="mFormSupportsReasoning" name="m-supports-reasoning" data-testid="m-supports-reasoning" class="sr-only peer">
+              <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-purple-600"></div>
+            </label>
+          </div>
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="block text-[11px] text-slate-400">默认思考预算 (default_thinking_budget, 0 为不限制)</label>
+              <div class="flex items-center space-x-1">
+                <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=2048" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">2048</button>
+                <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=4096" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">4096</button>
+                <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=8192" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">8192</button>
+                <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=16384" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">16K</button>
+                <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=32768" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">32K</button>
+              </div>
+            </div>
+            <input type="number" min="0" step="1024" id="mFormThinkingBudget" name="m-default-thinking-budget" data-testid="m-default-thinking-budget" placeholder="0" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
+          </div>
+          <p class="text-[10px] text-slate-500">启用后网关支持 Anthropic/OpenAI 原生思考协议双向桥接及 &lt;think&gt; 标签流式仿真封装。</p>
+        </div>
+
         <div class="flex items-center space-x-2 pt-1">
           <input type="checkbox" id="mFormEnabled" checked class="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500 w-4 h-4">
           <label for="mFormEnabled" class="text-xs text-slate-300 font-medium">启用模型</label>
@@ -4631,8 +4724,22 @@
     }
 
     // --- Overview Logic ---
+    async function fetchReasoningTokensMetric() {
+      try {
+        const resp = await fetch("/metrics");
+        if (resp.ok) {
+          const txt = await resp.text();
+          const match = txt.match(/aigate_tokens_reasoning_total\s+(\d+)/);
+          if (match && document.getElementById("statReasoningTokens")) {
+            const val = parseInt(match[1], 10) || 0;
+            document.getElementById("statReasoningTokens").innerText = val.toLocaleString();
+          }
+        }
+      } catch (_) {}
+    }
+
     async function fetchOverviewData() {
-      await Promise.all([fetchModels(), fetchProviders(), fetchKeys(), fetchGroups(), fetchUsageData(true)]);
+      await Promise.all([fetchModels(), fetchProviders(), fetchKeys(), fetchGroups(), fetchUsageData(true), fetchReasoningTokensMetric()]);
       renderOverviewStats();
     }
 
@@ -5088,6 +5195,12 @@
           hedgedBadge = `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-rose-500/10 text-rose-400 border border-rose-500/20" title="对冲延迟: ${delayText}, 预算上限: ${m.hedge_budget_pct || 15}%">🚀 对冲 (${delayText})</span>`;
         }
 
+        let reasoningBadge = "";
+        if (m.supports_reasoning || (m.default_thinking_budget && m.default_thinking_budget > 0)) {
+          const budgetTxt = (m.default_thinking_budget && m.default_thinking_budget > 0) ? ` (${m.default_thinking_budget})` : "";
+          reasoningBadge = `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 badge badge-purple" title="支持深度思考 / 思考预算: ${m.default_thinking_budget || '默认'}">💭 Reasoning${budgetTxt}</span>`;
+        }
+
         let tgts = (m.targets && m.targets.length > 0) ? m.targets : [];
         if (tgts.length === 0 && m.endpoint) {
           tgts = [{
@@ -5161,6 +5274,7 @@
           <td class="py-3 px-4 whitespace-nowrap">
             ${policyBadge}
             ${hedgedBadge}
+            ${reasoningBadge}
             ${targetCountBadge}
           </td>
           <td class="py-3 px-4">
@@ -5352,6 +5466,16 @@
           fHedgeBudget.value = 15;
         }
 
+        const fSR = document.getElementById("mFormSupportsReasoning") || document.getElementById("m-supports-reasoning");
+        const fTB = document.getElementById("mFormThinkingBudget") || document.getElementById("m-default-thinking-budget");
+        if (m) {
+          if (fSR) fSR.checked = !!m.supports_reasoning;
+          if (fTB) fTB.value = (m.default_thinking_budget != null && m.default_thinking_budget > 0) ? m.default_thinking_budget : "";
+        } else {
+          if (fSR) fSR.checked = false;
+          if (fTB) fTB.value = "";
+        }
+
         let tgts = (m && m.targets && m.targets.length > 0) ? m.targets : [];
         if (tgts.length === 0 && m && m.endpoint) {
           tgts = [{
@@ -5380,6 +5504,10 @@
         document.getElementById("mFormHedgedEnabled").checked = false;
         document.getElementById("mFormHedgedDelay").value = "";
         document.getElementById("mFormHedgeBudget").value = 15;
+        const fSR = document.getElementById("mFormSupportsReasoning") || document.getElementById("m-supports-reasoning");
+        const fTB = document.getElementById("mFormThinkingBudget") || document.getElementById("m-default-thinking-budget");
+        if (fSR) fSR.checked = false;
+        if (fTB) fTB.value = "";
         addTargetRow({
           provider: "openai",
           endpoint: "https://api.openai.com",
@@ -5409,6 +5537,12 @@
       const hedgedDelay = (!isNaN(rawDelay) && rawDelay >= 0) ? rawDelay : 0;
       const rawBudget = parseInt(document.getElementById("mFormHedgeBudget").value, 10);
       const hedgeBudget = (!isNaN(rawBudget) && rawBudget >= 1 && rawBudget <= 100) ? rawBudget : 15;
+
+      const elSR = document.getElementById("mFormSupportsReasoning") || document.getElementById("m-supports-reasoning");
+      const supportsReasoning = elSR ? elSR.checked : false;
+      const elTB = document.getElementById("mFormThinkingBudget") || document.getElementById("m-default-thinking-budget");
+      const rawReasoningBudget = elTB ? parseInt(elTB.value, 10) : 0;
+      const thinkingBudget = (!isNaN(rawReasoningBudget) && rawReasoningBudget >= 0) ? rawReasoningBudget : 0;
 
       let defaultParams = {};
       try {
@@ -5451,6 +5585,8 @@
         hedged_enabled: hedgedEnabled,
         hedged_delay_ms: hedgedDelay,
         hedge_budget_pct: hedgeBudget,
+        supports_reasoning: supportsReasoning,
+        default_thinking_budget: thinkingBudget,
         targets: targets,
         default_params: defaultParams,
         enabled: enabled
@@ -9266,6 +9402,13 @@
       });
     }
 
+    function toggleReasoning(btn) {
+      const box = btn ? (btn.closest ? btn.closest(".reasoning-accordion") : document.getElementById("reasoning-box")) : document.getElementById("reasoning-box");
+      if (box) {
+        box.classList.toggle("collapsed");
+      }
+    }
+
     function updatePlaygroundTokenUsage(usage, modelName, latencyMs) {
       if (!usage) return;
       const pTokens = usage.prompt_tokens || 0;
@@ -9324,6 +9467,13 @@
           </span>
           <button onclick="copyPlaygroundMessage(this)" title="复制内容" class="text-slate-400 hover:text-white transition px-1.5 py-0.5 rounded hover:bg-slate-800">📋 复制</button>
         </div>
+        <div class="reasoning-accordion hidden" id="reasoning-box">
+          <div class="reasoning-header" onclick="toggleReasoning(this)">
+            <span>💭 深度思考过程</span>
+            <span class="reasoning-toggle-icon">▼</span>
+          </div>
+          <pre class="reasoning-body" id="reasoning-stream-content"></pre>
+        </div>
         <div class="assistant-msg-text font-sans whitespace-pre-wrap word-break text-slate-300"><span class="text-slate-500 italic">思考中…</span></div>`;
       assistantContainer.appendChild(assistantBubble);
       history.appendChild(assistantContainer);
@@ -9367,8 +9517,13 @@
       playState.tFirstToken = 0;
       playState.completionTokens = 0;
       playState.activeStreamText = "";
+      playState.activeReasoningText = "";
+      playState.inThinkTag = false;
+      playState.seenText = false;
 
       const msgTextEl = assistantBubble.querySelector(".assistant-msg-text");
+      const reasoningBox = assistantBubble.querySelector(".reasoning-accordion");
+      const reasoningStreamEl = assistantBubble.querySelector(".reasoning-body");
       const provTagEl = assistantBubble.querySelector(".assistant-provider-tag");
 
       try {
@@ -9407,9 +9562,26 @@
           document.getElementById("playStatLatency").innerText = `${latency}ms`;
           document.getElementById("playStatTTFT").innerText = `${latency}ms`;
 
-          const reply = (json.choices && json.choices[0] && json.choices[0].message)
-            ? json.choices[0].message.content
+          const choice0 = (json.choices && json.choices[0]) ? json.choices[0] : null;
+          let reply = (choice0 && choice0.message)
+            ? (choice0.message.content || "")
             : JSON.stringify(json, null, 2);
+          let reasoning = (choice0 && choice0.message && choice0.message.reasoning_content)
+            ? choice0.message.reasoning_content
+            : "";
+
+          if (!reasoning && reply && reply.startsWith("<think>")) {
+            const thinkEnd = reply.indexOf("</think>");
+            if (thinkEnd !== -1) {
+              reasoning = reply.substring(7, thinkEnd).trim();
+              reply = reply.substring(thinkEnd + 8).trimStart();
+            }
+          }
+
+          if (reasoning && reasoningBox && reasoningStreamEl) {
+            reasoningBox.classList.remove("hidden");
+            reasoningStreamEl.innerText = reasoning;
+          }
 
           msgTextEl.innerText = reply;
           playState.messages.push({ role: "assistant", content: reply });
@@ -9449,12 +9621,44 @@
                 if (dataPart === "[DONE]") continue;
                 try {
                   const parsed = JSON.parse(dataPart);
-                  if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta && parsed.choices[0].delta.content) {
-                    const delta = parsed.choices[0].delta.content;
-                    playState.activeStreamText += delta;
-                    msgTextEl.innerText = playState.activeStreamText;
-                    history.scrollTop = history.scrollHeight;
-                    playState.completionTokens++;
+                  if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
+                    const delta = parsed.choices[0].delta;
+                    if (delta.reasoning_content) {
+                      playState.activeReasoningText += delta.reasoning_content;
+                      if (reasoningBox && reasoningStreamEl) {
+                        reasoningBox.classList.remove("hidden");
+                        reasoningStreamEl.innerText = playState.activeReasoningText;
+                      }
+                      history.scrollTop = history.scrollHeight;
+                    }
+                    if (delta.content) {
+                      if (!playState.seenText && (playState.inThinkTag || delta.content.includes("<think>"))) {
+                        playState.inThinkTag = true;
+                        playState.activeReasoningText += delta.content.replace("<think>", "");
+                        const closeIdx = playState.activeReasoningText.indexOf("</think>");
+                        if (closeIdx !== -1) {
+                          const remaining = playState.activeReasoningText.substring(closeIdx + 8);
+                          playState.activeReasoningText = playState.activeReasoningText.substring(0, closeIdx).trim();
+                          playState.inThinkTag = false;
+                          playState.seenText = true;
+                          if (remaining) {
+                            playState.activeStreamText += remaining.trimStart();
+                            msgTextEl.innerText = playState.activeStreamText;
+                          }
+                        }
+                        if (reasoningBox && reasoningStreamEl) {
+                          reasoningBox.classList.remove("hidden");
+                          reasoningStreamEl.innerText = playState.activeReasoningText;
+                        }
+                        history.scrollTop = history.scrollHeight;
+                      } else {
+                        playState.seenText = true;
+                        playState.activeStreamText += delta.content;
+                        msgTextEl.innerText = playState.activeStreamText;
+                        history.scrollTop = history.scrollHeight;
+                        playState.completionTokens++;
+                      }
+                    }
                   }
                   if (parsed.usage) {
                     updatePlaygroundTokenUsage(parsed.usage, model, Math.round(performance.now() - playState.t0));

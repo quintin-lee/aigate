@@ -53,4 +53,16 @@ TEST_CASE(admin_ui_content)
     TEST_ASSERT(strstr(html, "id=\"cacheOptKpiLatency\"") != NULL, "missing cacheOptKpiLatency");
     TEST_ASSERT(strstr(html, "id=\"cacheOptRuleModal\"") != NULL, "missing cacheOptRuleModal");
     TEST_ASSERT(strstr(html, "id=\"cacheOptDetailModal\"") != NULL, "missing cacheOptDetailModal");
+    TEST_ASSERT(strstr(html, "id=\"mFormSupportsReasoning\"") != NULL,
+                "missing mFormSupportsReasoning");
+    TEST_ASSERT(strstr(html, "id=\"mFormThinkingBudget\"") != NULL,
+                "missing mFormThinkingBudget");
+    TEST_ASSERT(strstr(html, "aigate_tokens_reasoning_total") != NULL,
+                "missing aigate_tokens_reasoning_total");
+    TEST_ASSERT(strstr(html, "reasoning-accordion") != NULL,
+                "missing reasoning-accordion");
+    TEST_ASSERT(strstr(html, "id=\"reasoning-box\"") != NULL,
+                "missing reasoning-box");
+    TEST_ASSERT(strstr(html, "badge-purple") != NULL,
+                "missing badge-purple");
 }
