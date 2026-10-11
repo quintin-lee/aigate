@@ -798,6 +798,15 @@ main(int argc, char** argv)
     extern void test_admin_key_is_canary_field(void);
     test_register("admin_key_is_canary_field", test_admin_key_is_canary_field);
 
+    extern void test_reasoning_budget_parsing_explicit(void);
+    test_register("reasoning_budget_parsing_explicit", test_reasoning_budget_parsing_explicit);
+
+    extern void test_reasoning_budget_parsing_effort(void);
+    test_register("reasoning_budget_parsing_effort", test_reasoning_budget_parsing_effort);
+
+    extern void test_reasoning_budget_parsing_route_fallback(void);
+    test_register("reasoning_budget_parsing_route_fallback", test_reasoning_budget_parsing_route_fallback);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

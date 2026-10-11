@@ -12,8 +12,28 @@
 #include "aigate_core.h"
 #include "pg_store.h"
 
+#include <jansson.h>
 #include <stdbool.h>
 #include <stddef.h>
+
+/** @brief Reasoning budget and configuration options */
+typedef struct reasoning_config {
+    bool     enabled;         /**< True if reasoning/thinking is active */
+    long     budget_tokens;   /**< Reasoning token budget cap (0 = unlimited / model default) */
+    char     effort[16];      /**< low | medium | high | none */
+} reasoning_config_t;
+
+/** @brief SSE streaming thinking state machine state */
+typedef enum stream_thinking_state {
+    THINK_STATE_INIT = 0,     /**< Initial state, awaiting first payload */
+    THINK_STATE_THINKING,     /**< Receiving/emitting thinking process */
+    THINK_STATE_CONTENT,      /**< Receiving/emitting final content text */
+    THINK_STATE_DONE          /**< Stream terminated */
+} stream_thinking_state_t;
+
+/** @brief Parse reasoning parameters from inbound request or route defaults.
+ *  @return 0 on success (out_cfg filled), -1 on error. */
+int parse_reasoning_config(json_t* req_body, const model_rec_t* route, reasoning_config_t* out_cfg);
 
 /** @brief Opaque streaming bridge (provider-defined state machine). */
 typedef struct stream_bridge stream_bridge_t;

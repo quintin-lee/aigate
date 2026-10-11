@@ -67,3 +67,66 @@ provider_probe_plan(const char* provider_type, const char* endpoint, provider_pr
     }
     return 0;
 }
+
+int
+parse_reasoning_config(json_t* req_body, const model_rec_t* route, reasoning_config_t* out_cfg)
+{
+    if (out_cfg == NULL) {
+        return -1;
+    }
+    memset(out_cfg, 0, sizeof(*out_cfg));
+
+    if (req_body != NULL && json_is_object(req_body)) {
+        /* 1. Explicit Anthropic thinking object */
+        json_t* jth = json_object_get(req_body, "thinking");
+        if (jth != NULL && json_is_object(jth)) {
+            json_t* jtype = json_object_get(jth, "type");
+            json_t* jb = json_object_get(jth, "budget_tokens");
+            if (jtype != NULL && json_is_string(jtype) && strcmp(json_string_value(jtype), "enabled") == 0) {
+                out_cfg->enabled = true;
+                if (jb != NULL && json_is_integer(jb)) {
+                    out_cfg->budget_tokens = json_integer_value(jb);
+                }
+                return 0;
+            }
+        }
+
+        /* 2. max_thinking_tokens parameter */
+        json_t* jmtt = json_object_get(req_body, "max_thinking_tokens");
+        if (jmtt != NULL && json_is_integer(jmtt)) {
+            out_cfg->enabled = true;
+            out_cfg->budget_tokens = json_integer_value(jmtt);
+            return 0;
+        }
+
+        /* 3. OpenAI reasoning_effort parameter */
+        json_t* jeff = json_object_get(req_body, "reasoning_effort");
+        if (jeff != NULL && json_is_string(jeff)) {
+            const char* eff = json_string_value(jeff);
+            snprintf(out_cfg->effort, sizeof(out_cfg->effort), "%s", eff);
+            out_cfg->enabled = true;
+            if (strcmp(eff, "low") == 0) {
+                out_cfg->budget_tokens = 1024;
+            } else if (strcmp(eff, "medium") == 0) {
+                out_cfg->budget_tokens = 4096;
+            } else if (strcmp(eff, "high") == 0) {
+                out_cfg->budget_tokens = 16384;
+            } else if (strcmp(eff, "none") == 0) {
+                out_cfg->enabled = false;
+                out_cfg->budget_tokens = 0;
+            } else {
+                out_cfg->budget_tokens = 4096;
+            }
+            return 0;
+        }
+    }
+
+    /* 4. Model route fallback */
+    if (route != NULL && route->supports_reasoning && route->default_thinking_budget > 0) {
+        out_cfg->enabled = true;
+        out_cfg->budget_tokens = route->default_thinking_budget;
+        return 0;
+    }
+
+    return 0;
+}
