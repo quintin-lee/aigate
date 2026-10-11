@@ -878,6 +878,9 @@ main(int argc, char** argv)
     extern void test_pipeline_reasoning_graceful_degradation(void);
     test_register("pipeline_reasoning_graceful_degradation", test_pipeline_reasoning_graceful_degradation);
 
+    extern void test_admin_key_and_group_reasoning_quota_crud(void);
+    test_register("admin_key_and_group_reasoning_quota_crud", test_admin_key_and_group_reasoning_quota_crud);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

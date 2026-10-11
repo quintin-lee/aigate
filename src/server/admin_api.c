@@ -589,6 +589,10 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     if (jquota != NULL && json_is_integer(jquota)) {
         k.daily_token_quota = json_integer_value(jquota);
     }
+    json_t* jdrq = json_object_get(jbody, "daily_reasoning_quota");
+    if (jdrq != NULL && json_is_integer(jdrq)) {
+        k.daily_reasoning_quota = json_integer_value(jdrq);
+    }
     json_t* jexp = json_object_get(jbody, "expires_at");
     if (jexp != NULL && json_is_integer(jexp)) {
         k.expires_at = (time_t)json_integer_value(jexp);
@@ -664,6 +668,7 @@ key_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* 
     json_object_set_new(out, "is_canary", json_boolean(k.is_canary));
     json_object_set_new(out, "monthly_cost_budget", json_real(k.monthly_cost_budget));
     json_object_set_new(out, "monthly_token_budget", json_integer(k.monthly_token_budget));
+    json_object_set_new(out, "daily_reasoning_quota", json_integer(k.daily_reasoning_quota));
     json_object_set_new(out,
                         "system_prompt",
                         k.system_prompt[0] != '\0' ? json_string(k.system_prompt) : json_null());
@@ -722,6 +727,7 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* qu
         json_object_set_new(o, "is_canary", json_boolean(recs[i].is_canary));
         json_object_set_new(o, "monthly_cost_budget", json_real(recs[i].monthly_cost_budget));
         json_object_set_new(o, "monthly_token_budget", json_integer(recs[i].monthly_token_budget));
+        json_object_set_new(o, "daily_reasoning_quota", json_integer(recs[i].daily_reasoning_quota));
         json_object_set_new(o,
                             "system_prompt",
                             recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt)
@@ -941,6 +947,11 @@ key_patch(
     if (v != NULL) {
         k.prompt_mode = parse_prompt_mode(v, 0);
         mask |= KMASK_PROMPT_MODE;
+    }
+    v = json_object_get(jbody, "daily_reasoning_quota");
+    if (v != NULL && json_is_integer(v)) {
+        k.daily_reasoning_quota = json_integer_value(v);
+        mask |= KMASK_REASONING_QUOTA;
     }
     json_decref(jbody);
 
@@ -1186,6 +1197,10 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
             m.default_thinking_budget = budget;
         }
     }
+    json_t* jted = json_object_get(jbody, "tag_emulation_default");
+    if (jted != NULL && json_is_boolean(jted)) {
+        m.tag_emulation_default = json_is_true(jted);
+    }
     m.enabled = 1;
 
     int rc = pg_store_ops(adm->ps)->create_key != NULL
@@ -1211,6 +1226,7 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     json_object_set_new(out, "max_concurrent", json_integer(m.max_concurrent));
     json_object_set_new(out, "supports_reasoning", json_boolean(m.supports_reasoning));
     json_object_set_new(out, "default_thinking_budget", json_integer(m.default_thinking_budget));
+    json_object_set_new(out, "tag_emulation_default", json_boolean(m.tag_emulation_default));
     json_object_set_new(out,
                         "system_prompt",
                         m.system_prompt[0] != '\0' ? json_string(m.system_prompt) : json_null());
@@ -1303,6 +1319,7 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
         json_object_set_new(o, "prompt_mode", json_string(prompt_mode_str(recs[i].prompt_mode)));
         json_object_set_new(o, "supports_reasoning", json_boolean(recs[i].supports_reasoning));
         json_object_set_new(o, "default_thinking_budget", json_integer(recs[i].default_thinking_budget));
+        json_object_set_new(o, "tag_emulation_default", json_boolean(recs[i].tag_emulation_default));
 
         json_array_append_new(arr, o);
         model_rec_free(&recs[i]);
@@ -1474,6 +1491,11 @@ model_patch(
             m.default_thinking_budget = budget;
             mask |= MMASK_THINKING_BUDGET;
         }
+    }
+    v = json_object_get(jbody, "tag_emulation_default");
+    if (v != NULL && json_is_boolean(v)) {
+        m.tag_emulation_default = json_is_true(v);
+        mask |= MMASK_TAG_EMULATION_DEFAULT;
     }
     json_decref(jbody);
 
@@ -2346,6 +2368,17 @@ group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
                 status, body, len, 400, "bad_request", "monthly_budget_usd must be a number");
         }
     }
+    long daily_reasoning_quota = 0;
+    json_t* jdrq = json_object_get(jbody, "daily_reasoning_quota");
+    if (jdrq != NULL) {
+        if (json_is_integer(jdrq)) {
+            daily_reasoning_quota = json_integer_value(jdrq);
+        } else {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "daily_reasoning_quota must be an integer");
+        }
+    }
     char group_name[128];
     snprintf(group_name, sizeof group_name, "%s", name);
     long            id = 0;
@@ -2364,10 +2397,17 @@ group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
             budget_enforce_set_group_budget(adm->ac->be, id, monthly_budget_usd);
         }
     }
+    if (daily_reasoning_quota > 0) {
+        ops->patch_group_reasoning_quota(ops->ctx, id, daily_reasoning_quota);
+        if (adm->ac != NULL && adm->ac->be != NULL) {
+            budget_enforce_set_group_reasoning_quota(adm->ac->be, id, daily_reasoning_quota);
+        }
+    }
     json_t* out = json_object();
     json_object_set_new(out, "id", json_integer(id));
     json_object_set_new(out, "name", json_string(group_name));
     json_object_set_new(out, "monthly_budget_usd", json_real(monthly_budget_usd));
+    json_object_set_new(out, "daily_reasoning_quota", json_integer(daily_reasoning_quota));
     return finish_json(status, body, len, 201, out);
 }
 
@@ -2403,6 +2443,7 @@ group_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
         json_object_set_new(o, "name", json_string(recs[i].name));
         json_object_set_new(o, "key_count", json_integer(recs[i].key_count));
         json_object_set_new(o, "monthly_budget_usd", json_real(recs[i].monthly_budget_usd));
+        json_object_set_new(o, "daily_reasoning_quota", json_integer(recs[i].daily_reasoning_quota));
         if (recs[i].created_at > 0) {
             char      ts_iso[32];
             struct tm tmv;
@@ -2442,10 +2483,11 @@ group_patch(
     }
     const char* name = jstring(jbody, "name", NULL);
     json_t*     jbudget = json_object_get(jbody, "monthly_budget_usd");
-    if ((name == NULL || name[0] == '\0') && jbudget == NULL) {
+    json_t*     jdrq = json_object_get(jbody, "daily_reasoning_quota");
+    if ((name == NULL || name[0] == '\0') && jbudget == NULL && jdrq == NULL) {
         json_decref(jbody);
         return finish_error(
-            status, body, len, 400, "bad_request", "name or monthly_budget_usd is required");
+            status, body, len, 400, "bad_request", "name, monthly_budget_usd or daily_reasoning_quota is required");
     }
     char            group_name[128] = {0};
     const pg_ops_t* ops = pg_store_ops(adm->ps);
@@ -2495,6 +2537,32 @@ group_patch(
         }
         if (adm->ac != NULL && adm->ac->be != NULL) {
             budget_enforce_set_group_budget(adm->ac->be, id, budget);
+        }
+    }
+    if (jdrq != NULL) {
+        if (!json_is_integer(jdrq)) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "daily_reasoning_quota must be an integer");
+        }
+        long rquota = json_integer_value(jdrq);
+        if (rquota < 0) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 400, "bad_request", "daily_reasoning_quota must be non-negative");
+        }
+        int rc = ops->patch_group_reasoning_quota(ops->ctx, id, rquota);
+        if (rc == 1) {
+            json_decref(jbody);
+            return finish_error(status, body, len, 404, "group_not_found", "group not found");
+        }
+        if (rc != 0) {
+            json_decref(jbody);
+            return finish_error(
+                status, body, len, 500, "internal_error", "group reasoning quota patch failed");
+        }
+        if (adm->ac != NULL && adm->ac->be != NULL) {
+            budget_enforce_set_group_reasoning_quota(adm->ac->be, id, rquota);
         }
     }
     json_decref(jbody);
@@ -5762,6 +5830,75 @@ admin_threat_whitelists_delete(
     return finish_json(status, out_body, len, 200, resp);
 }
 
+/** @brief GET /admin/v1/reasoning/status: query reasoning status and quotas. */
+static int
+admin_reasoning_status_get(admin_ctx_t* adm, int* status, char** out_body, size_t* len, const char* query)
+{
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL) {
+        return finish_error(status, out_body, len, 500, "internal_error", "store ops unavailable");
+    }
+
+    long key_id = 0;
+    if (query != NULL) {
+        const char* p = strstr(query, "key_id=");
+        if (p != NULL) {
+            key_id = atol(p + 7);
+        }
+    }
+
+    json_t* root = json_object();
+    if (key_id > 0) {
+        key_rec_t k;
+        if (ops->get_key_by_id(ops->ctx, key_id, &k) == 0) {
+            long effective_quota = k.daily_reasoning_quota;
+            if (effective_quota <= 0 && adm->ac != NULL && adm->ac->be != NULL && k.group_id > 0) {
+                effective_quota = (long)budget_enforce_get_group_reasoning_quota(adm->ac->be, k.group_id);
+            }
+            long remaining = LONG_MAX;
+            bool degraded = false;
+            if (adm->ac != NULL && adm->ac->rl != NULL && effective_quota > 0) {
+                remaining = rl_remaining_daily_reasoning(adm->ac->rl, key_id, effective_quota);
+                degraded = (remaining <= 0);
+            }
+            json_object_set_new(root, "key_id", json_integer(key_id));
+            json_object_set_new(root, "daily_reasoning_quota", json_integer(effective_quota));
+            json_object_set_new(root, "remaining_reasoning_tokens", json_integer(remaining));
+            json_object_set_new(root, "degraded", json_boolean(degraded));
+            key_rec_free(&k);
+            return finish_json(status, out_body, len, 200, root);
+        } else {
+            json_decref(root);
+            return finish_error(status, out_body, len, 404, "not_found", "key not found");
+        }
+    }
+
+    /* General status: list models supporting reasoning */
+    model_rec_t* recs = calloc(MODEL_LIST_CAP, sizeof(model_rec_t));
+    if (recs == NULL) {
+        json_decref(root);
+        return finish_error(status, out_body, len, 500, "internal_error", "out of memory");
+    }
+    int n = 0;
+    if (ops->list_models(ops->ctx, recs, MODEL_LIST_CAP, &n) == 0) {
+        json_t* arr = json_array();
+        for (int i = 0; i < n; i++) {
+            if (recs[i].supports_reasoning) {
+                json_t* mo = json_object();
+                json_object_set_new(mo, "name", json_string(recs[i].name));
+                json_object_set_new(mo, "supports_reasoning", json_true());
+                json_object_set_new(mo, "default_thinking_budget", json_integer(recs[i].default_thinking_budget));
+                json_object_set_new(mo, "tag_emulation_default", json_boolean(recs[i].tag_emulation_default));
+                json_array_append_new(arr, mo);
+            }
+            model_rec_free(&recs[i]);
+        }
+        json_object_set_new(root, "reasoning_models", arr);
+    }
+    free(recs);
+    return finish_json(status, out_body, len, 200, root);
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -5909,6 +6046,8 @@ admin_dispatch(admin_ctx_t* adm,
         return usage_requests_query(adm, out_status, out_body, out_len, query);
     } else if (strcmp(rest, "usage") == 0 && strcmp(method, "GET") == 0) {
         return usage_query(adm, out_status, out_body, out_len, query);
+    } else if ((strcmp(rest, "reasoning/status") == 0 || strcmp(rest, "reasoning_status") == 0) && strcmp(method, "GET") == 0) {
+        return admin_reasoning_status_get(adm, out_status, out_body, out_len, query);
     } else if (strncmp(rest, "guardrails", 10) == 0) {
         if (strcmp(rest, "guardrails") == 0) {
             if (strcmp(method, "POST") == 0) {

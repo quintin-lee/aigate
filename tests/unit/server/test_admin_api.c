@@ -4559,10 +4559,10 @@ TEST_CASE(test_admin_model_reasoning_crud)
 
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
-    /* 1. POST /admin/v1/models with supports_reasoning=true, default_thinking_budget=4096 */
+    /* 1. POST /admin/v1/models with supports_reasoning=true, default_thinking_budget=4096, tag_emulation_default=true */
     const char* post_body =
         "{\"name\":\"deepseek-r1\",\"provider\":\"openai\",\"endpoint\":\"https://api.deepseek.com/v1\","
-        "\"supports_reasoning\":true,\"default_thinking_budget\":4096}";
+        "\"supports_reasoning\":true,\"default_thinking_budget\":4096,\"tag_emulation_default\":true}";
     int    status = 0;
     char*  body = NULL;
     size_t len = 0;
@@ -4579,7 +4579,7 @@ TEST_CASE(test_admin_model_reasoning_crud)
     TEST_ASSERT(rc == 0 && status == 201, "POST /models -> 201, got %d", status);
     free(body);
 
-    /* 2. GET /admin/v1/models: verify both fields */
+    /* 2. GET /admin/v1/models: verify fields */
     body = NULL;
     rc = admin_dispatch(&adm,
                         "/admin/v1/models",
@@ -4602,10 +4602,12 @@ TEST_CASE(test_admin_model_reasoning_crud)
     TEST_ASSERT(jsr != NULL && json_is_true(jsr), "supports_reasoning true");
     json_t* jtb = json_object_get(m0, "default_thinking_budget");
     TEST_ASSERT(jtb != NULL && json_integer_value(jtb) == 4096, "default_thinking_budget 4096");
+    json_t* jted = json_object_get(m0, "tag_emulation_default");
+    TEST_ASSERT(jted != NULL && json_is_true(jted), "tag_emulation_default true");
     json_decref(root);
 
-    /* 3. PATCH /admin/v1/models/deepseek-r1: update default_thinking_budget to 8192 */
-    const char* patch_body = "{\"default_thinking_budget\":8192}";
+    /* 3. PATCH /admin/v1/models/deepseek-r1: update default_thinking_budget to 8192 and tag_emulation_default to false */
+    const char* patch_body = "{\"default_thinking_budget\":8192,\"tag_emulation_default\":false}";
     body = NULL;
     rc = admin_dispatch(&adm,
                         "/admin/v1/models/deepseek-r1",
@@ -4620,7 +4622,7 @@ TEST_CASE(test_admin_model_reasoning_crud)
     TEST_ASSERT(rc == 0 && status == 200, "PATCH /models/deepseek-r1 -> 200, got %d", status);
     free(body);
 
-    /* 4. GET again and verify updated budget */
+    /* 4. GET again and verify updated budget & tag emulation */
     body = NULL;
     rc = admin_dispatch(&adm,
                         "/admin/v1/models",
@@ -4640,7 +4642,173 @@ TEST_CASE(test_admin_model_reasoning_crud)
     jtb = json_object_get(m0, "default_thinking_budget");
     TEST_ASSERT(jtb != NULL && json_integer_value(jtb) == 8192,
                 "default_thinking_budget updated to 8192");
+    jted = json_object_get(m0, "tag_emulation_default");
+    TEST_ASSERT(jted != NULL && json_is_false(jted), "tag_emulation_default updated to false");
     json_decref(root);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_key_and_group_reasoning_quota_crud)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    /* 1. POST /admin/v1/groups with daily_reasoning_quota=50000 */
+    const char* group_post = "{\"name\":\"dev-team\",\"daily_reasoning_quota\":50000}";
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+    int    rc = admin_dispatch(&adm,
+                               "/admin/v1/groups",
+                               "POST",
+                               NULL,
+                               "admin-secret-token",
+                               group_post,
+                               strlen(group_post),
+                               &status,
+                               &body,
+                               &len);
+    TEST_ASSERT(rc == 0 && status == 201, "POST /groups -> 201, got %d", status);
+    json_t* gj = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(gj != NULL, "group create json valid");
+    long gid = (long)json_integer_value(json_object_get(gj, "id"));
+    TEST_ASSERT(json_integer_value(json_object_get(gj, "daily_reasoning_quota")) == 50000,
+                "group create response contains daily_reasoning_quota=50000");
+    json_decref(gj);
+
+    /* 2. GET /admin/v1/groups: verify daily_reasoning_quota */
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/groups",
+                        "GET",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "GET /groups -> 200, got %d", status);
+    json_t* glist = json_loads(body, 0, NULL);
+    free(body);
+    json_t* garr = json_object_get(glist, "groups");
+    TEST_ASSERT(json_is_array(garr) && json_array_size(garr) == 1, "1 group returned");
+    json_t* g0 = json_array_get(garr, 0);
+    TEST_ASSERT(json_integer_value(json_object_get(g0, "daily_reasoning_quota")) == 50000,
+                "GET /groups contains daily_reasoning_quota=50000");
+    json_decref(glist);
+
+    /* 3. PATCH /admin/v1/groups/:id with daily_reasoning_quota=80000 */
+    char patch_uri[64];
+    snprintf(patch_uri, sizeof(patch_uri), "/admin/v1/groups/%ld", gid);
+    const char* g_patch = "{\"daily_reasoning_quota\":80000}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        patch_uri,
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        g_patch,
+                        strlen(g_patch),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "PATCH /groups/:id -> 200, got %d", status);
+    free(body);
+
+    /* 4. POST /admin/v1/keys with group_id and daily_reasoning_quota=20000 */
+    char key_post[256];
+    snprintf(key_post, sizeof(key_post),
+             "{\"name\":\"alice-key\",\"group_id\":%ld,\"daily_reasoning_quota\":20000}", gid);
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/keys",
+                        "POST",
+                        NULL,
+                        "admin-secret-token",
+                        key_post,
+                        strlen(key_post),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 201, "POST /keys -> 201, got %d", status);
+    json_t* kj = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(kj != NULL, "key create json valid");
+    long kid = (long)json_integer_value(json_object_get(kj, "key_id"));
+    TEST_ASSERT(json_integer_value(json_object_get(kj, "daily_reasoning_quota")) == 20000,
+                "key create response contains daily_reasoning_quota=20000");
+    json_decref(kj);
+
+    /* 5. GET /admin/v1/keys: verify daily_reasoning_quota */
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/keys",
+                        "GET",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "GET /keys -> 200, got %d", status);
+    json_t* klist = json_loads(body, 0, NULL);
+    free(body);
+    json_t* karr = json_object_get(klist, "keys");
+    json_t* k0 = json_array_get(karr, 0);
+    TEST_ASSERT(json_integer_value(json_object_get(k0, "daily_reasoning_quota")) == 20000,
+                "GET /keys contains daily_reasoning_quota=20000");
+    json_decref(klist);
+
+    /* 6. PATCH /admin/v1/keys/:id with daily_reasoning_quota=30000 */
+    char k_patch_uri[64];
+    snprintf(k_patch_uri, sizeof(k_patch_uri), "/admin/v1/keys/%ld", kid);
+    const char* k_patch = "{\"daily_reasoning_quota\":30000}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        k_patch_uri,
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        k_patch,
+                        strlen(k_patch),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "PATCH /keys/:id -> 200, got %d", status);
+    free(body);
+
+    /* 7. GET /admin/v1/reasoning/status?key_id=:id: query key quota & degradation status */
+    char status_uri[64];
+    snprintf(status_uri, sizeof(status_uri), "/admin/v1/reasoning/status?key_id=%ld", kid);
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        status_uri,
+                        "GET",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "GET /reasoning/status -> 200, got %d", status);
+    json_t* sj = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(sj != NULL, "reasoning status json valid");
+    TEST_ASSERT(json_integer_value(json_object_get(sj, "daily_reasoning_quota")) == 30000,
+                "reasoning status reports daily_reasoning_quota=30000");
+    TEST_ASSERT(json_is_false(json_object_get(sj, "degraded")), "degraded is false initially");
+    json_decref(sj);
 
     teardown_admin(ps, &core, &db);
 }
