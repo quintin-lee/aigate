@@ -728,9 +728,39 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
                 if (strcmp(type_str, "thinking") == 0) {
                     b->in_thinking = true;
                     b->in_tool_use = false;
+                    if (b->tag_emulation && !b->tag_opened) {
+                        json_t* cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                               "id", id_buf, "object", "chat.completion.chunk",
+                                               "model", b->model, "choices", "index", 0,
+                                               "delta", "content", "<think>\n", "finish_reason");
+                        char* pd = json_dumps(cd, JSON_COMPACT);
+                        json_decref(cd);
+                        if (pd != NULL) {
+                            char sse[8192];
+                            snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                            bridge_send_chunk(b, sse);
+                            free(pd);
+                        }
+                        b->tag_opened = true;
+                    }
                 } else if (strcmp(type_str, "text") == 0) {
                     b->in_thinking = false;
                     b->in_tool_use = false;
+                    if (b->tag_emulation && b->tag_opened && !b->tag_closed) {
+                        json_t* cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                               "id", id_buf, "object", "chat.completion.chunk",
+                                               "model", b->model, "choices", "index", 0,
+                                               "delta", "content", "\n</think>\n\n", "finish_reason");
+                        char* pd = json_dumps(cd, JSON_COMPACT);
+                        json_decref(cd);
+                        if (pd != NULL) {
+                            char sse[8192];
+                            snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                            bridge_send_chunk(b, sse);
+                            free(pd);
+                        }
+                        b->tag_closed = true;
+                    }
                 } else if (strcmp(type_str, "tool_use") == 0) {
                     b->in_thinking = false;
                     b->in_tool_use = true;
@@ -766,33 +796,65 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
                 }
                 if (jth != NULL && json_is_string(jth)) {
                     const char* text = json_string_value(jth);
-                    json_t*     cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
-                                               "id",
-                                               id_buf,
-                                               "object",
-                                               "chat.completion.chunk",
-                                               "model",
-                                               b->model,
-                                               "choices",
-                                               "index",
-                                               0,
-                                               "delta",
-                                               "reasoning_content",
-                                               text,
-                                               "finish_reason");
-                    char*       pd = json_dumps(cd, JSON_COMPACT);
-                    json_decref(cd);
-                    if (pd != NULL) {
-                        char sse[8192];
-                        int  w = snprintf(sse, sizeof sse, "data: %s\n\n", pd);
-                        if (w >= (int)sizeof sse) {
-                            AIGATE_LOG_WARN("stream sse chunk truncated for model %s", b->model);
+                    if (b->tag_emulation) {
+                        if (!b->tag_opened) {
+                            json_t* co = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                                   "id", id_buf, "object", "chat.completion.chunk",
+                                                   "model", b->model, "choices", "index", 0,
+                                                   "delta", "content", "<think>\n", "finish_reason");
+                            char* po = json_dumps(co, JSON_COMPACT);
+                            json_decref(co);
+                            if (po != NULL) {
+                                char sse[8192];
+                                snprintf(sse, sizeof sse, "data: %s\n\n", po);
+                                bridge_send_chunk(b, sse);
+                                free(po);
+                            }
+                            b->tag_opened = true;
                         }
-                        bridge_send_chunk(b, sse);
-                        free(pd);
+                        json_t* cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                               "id", id_buf, "object", "chat.completion.chunk",
+                                               "model", b->model, "choices", "index", 0,
+                                               "delta", "content", text, "finish_reason");
+                        char* pd = json_dumps(cd, JSON_COMPACT);
+                        json_decref(cd);
+                        if (pd != NULL) {
+                            char sse[8192];
+                            snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                            bridge_send_chunk(b, sse);
+                            free(pd);
+                        }
+                    } else {
+                        json_t* cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                               "id", id_buf, "object", "chat.completion.chunk",
+                                               "model", b->model, "choices", "index", 0,
+                                               "delta", "reasoning_content", text, "finish_reason");
+                        char* pd = json_dumps(cd, JSON_COMPACT);
+                        json_decref(cd);
+                        if (pd != NULL) {
+                            char sse[8192];
+                            snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                            bridge_send_chunk(b, sse);
+                            free(pd);
+                        }
                     }
                 }
             } else if (strcmp(dtype, "text_delta") == 0 || strcmp(dtype, "") == 0) {
+                if (b->tag_emulation && b->tag_opened && !b->tag_closed) {
+                    json_t* cc = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                           "id", id_buf, "object", "chat.completion.chunk",
+                                           "model", b->model, "choices", "index", 0,
+                                           "delta", "content", "\n</think>\n\n", "finish_reason");
+                    char* pc = json_dumps(cc, JSON_COMPACT);
+                    json_decref(cc);
+                    if (pc != NULL) {
+                        char sse[8192];
+                        snprintf(sse, sizeof sse, "data: %s\n\n", pc);
+                        bridge_send_chunk(b, sse);
+                        free(pc);
+                    }
+                    b->tag_closed = true;
+                }
                 /* text delta (may be keyed "text" or "value") */
                 json_t* jt = json_object_get(jdel, "text");
                 if (jt != NULL && json_is_string(jt)) {
@@ -846,6 +908,21 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
     } else if (strcmp(b->current_event, "content_block_stop") == 0) {
         if (b->in_thinking) {
             b->in_thinking = false;
+            if (b->tag_emulation && b->tag_opened && !b->tag_closed) {
+                json_t* cc = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                       "id", id_buf, "object", "chat.completion.chunk",
+                                       "model", b->model, "choices", "index", 0,
+                                       "delta", "content", "\n</think>\n\n", "finish_reason");
+                char* pc = json_dumps(cc, JSON_COMPACT);
+                json_decref(cc);
+                if (pc != NULL) {
+                    char sse[8192];
+                    snprintf(sse, sizeof sse, "data: %s\n\n", pc);
+                    bridge_send_chunk(b, sse);
+                    free(pc);
+                }
+                b->tag_closed = true;
+            }
         }
         /* Emit tool_calls chunk when a tool_use block completes */
         if (b->in_tool_use && b->tool_id[0] != '\0') {
@@ -964,6 +1041,21 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
             free(pu);
         }
     } else if (strcmp(b->current_event, "message_stop") == 0) {
+        if (b->tag_emulation && b->tag_opened && !b->tag_closed) {
+            json_t* cc = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                   "id", id_buf, "object", "chat.completion.chunk",
+                                   "model", b->model, "choices", "index", 0,
+                                   "delta", "content", "\n</think>\n\n", "finish_reason");
+            char* pc = json_dumps(cc, JSON_COMPACT);
+            json_decref(cc);
+            if (pc != NULL) {
+                char sse[8192];
+                snprintf(sse, sizeof sse, "data: %s\n\n", pc);
+                bridge_send_chunk(b, sse);
+                free(pc);
+            }
+            b->tag_closed = true;
+        }
         bridge_send_chunk(b, "data: [DONE]\n\n");
         b->done_emitted = true;
     } else if (strcmp(b->current_event, "error") == 0) {
@@ -1034,6 +1126,23 @@ anthropic_bridge_feed(anthropic_bridge_t* b, const void* chunk, size_t len)
 int
 anthropic_bridge_finish(anthropic_bridge_t* b)
 {
+    if (b->tag_emulation && b->tag_opened && !b->tag_closed) {
+        char id_buf[128];
+        snprintf(id_buf, sizeof id_buf, "chatcmpl-%s", b->msg_id[0] ? b->msg_id : "claude");
+        json_t* cc = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                               "id", id_buf, "object", "chat.completion.chunk",
+                               "model", b->model, "choices", "index", 0,
+                               "delta", "content", "\n</think>\n\n", "finish_reason");
+        char* pc = json_dumps(cc, JSON_COMPACT);
+        json_decref(cc);
+        if (pc != NULL) {
+            char sse[8192];
+            snprintf(sse, sizeof sse, "data: %s\n\n", pc);
+            bridge_send_chunk(b, sse);
+            free(pc);
+        }
+        b->tag_closed = true;
+    }
     if (!b->done_emitted) {
         bridge_send_chunk(b, "data: [DONE]\n\n");
         b->done_emitted = true;

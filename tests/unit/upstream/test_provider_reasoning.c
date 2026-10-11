@@ -266,6 +266,48 @@ TEST_CASE(test_anthropic_thinking_outbound_stream)
                 "content emitted in SSE chunk");
 }
 
+TEST_CASE(test_anthropic_thinking_stream_tag_emulation)
+{
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc;
+    memset(&rc, 0, sizeof(rc));
+    rc.write = mock_stream_write;
+    rc.impl = &sink;
+
+    stream_bridge_t* bridge = g_provider_anthropic.stream_bridge_new(&rc, "claude-3-7-sonnet");
+    TEST_ASSERT(bridge != NULL, "bridge created");
+    anthropic_bridge_t* ab = (anthropic_bridge_t*)bridge;
+    ab->tag_emulation = true;
+
+    /* Feed content_block_start with thinking */
+    const char* c1 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c1, strlen(c1));
+
+    /* Feed thinking_delta */
+    const char* c2 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Reasoning step 1...\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c2, strlen(c2));
+
+    /* Feed content_block_stop */
+    const char* c3 = "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c3, strlen(c3));
+
+    /* Feed text content */
+    const char* c4 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c4, strlen(c4));
+    const char* c5 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello world!\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c5, strlen(c5));
+
+    g_provider_anthropic.stream_bridge_finish(bridge);
+    g_provider_anthropic.stream_bridge_free(bridge);
+
+    /* Verify <think> tag emitted in delta.content */
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"<think>\\n\"") != NULL, "<think> open emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Reasoning step 1...\"") != NULL, "thinking delta in content");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"\\n</think>\\n\\n\"") != NULL, "</think> close emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Hello world!\"") != NULL, "final text emitted");
+}
+
 #include "watermark_engine.h"
 
 TEST_CASE(test_thinking_watermark_clean_pass)
