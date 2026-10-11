@@ -284,7 +284,8 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
         "COALESCE(group_id, 0), COALESCE(guardrails_enabled, true), "
         "COALESCE(monthly_cost_budget, 0.0), COALESCE(monthly_token_budget, 0), "
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
-        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false) "
+        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false), "
+        "COALESCE(daily_reasoning_quota, 0) "
         "FROM api_keys WHERE key_hash = $1";
     const char* val[1] = {key_hash};
     int         plen[1] = {0};
@@ -355,6 +356,12 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
                      (strcmp(can, "t") == 0 || strcmp(can, "1") == 0 || strcmp(can, "true") == 0));
             } else {
                 out->is_canary = 0;
+            }
+            if (PQnfields(res) > 16) {
+                const char* drq = PQgetvalue(res, 0, 16);
+                out->daily_reasoning_quota = (drq != NULL && drq[0] != '\0') ? atol(drq) : 0;
+            } else {
+                out->daily_reasoning_quota = 0;
             }
             rc = 0;
         } else {
@@ -427,6 +434,12 @@ fill_key_row(PGresult* res, int row, key_rec_t* out)
     } else {
         out->is_canary = 0;
     }
+    if (PQnfields(res) > 16) {
+        const char* drq = PQgetvalue(res, row, 16);
+        out->daily_reasoning_quota = (drq != NULL && drq[0] != '\0') ? atol(drq) : 0;
+    } else {
+        out->daily_reasoning_quota = 0;
+    }
 }
 
 /** @brief libpq implementation of pg_ops.list_keys: 0 on success, -1 on error (@p n always written with the actual count). */
@@ -441,7 +454,8 @@ pq_list_keys(void* vctx, key_rec_t* out, int cap, int* n)
         "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
         "COALESCE(monthly_token_budget, 0), "
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
-        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false) "
+        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false), "
+        "COALESCE(daily_reasoning_quota, 0) "
         "FROM api_keys ORDER BY key_id";
     *n = 0;
 
@@ -478,7 +492,8 @@ pq_get_key_by_id(void* vctx, long key_id, key_rec_t* out)
         "COALESCE(guardrails_enabled, true), COALESCE(monthly_cost_budget, 0.0), "
         "COALESCE(monthly_token_budget, 0), "
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
-        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false) "
+        "COALESCE(watermark_enabled, false), COALESCE(is_canary, false), "
+        "COALESCE(daily_reasoning_quota, 0) "
         "FROM api_keys WHERE key_id = $1";
     char        id[32];
     const char* val[1] = {0};
@@ -607,6 +622,10 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
         const char* sr = PQgetvalue(res, row, 15);
         out->supports_reasoning = (sr != NULL && (strcmp(sr, "t") == 0 || strcmp(sr, "true") == 0));
     }
+    if (nfields > 16) {
+        const char* ted = PQgetvalue(res, row, 16);
+        out->tag_emulation_default = (ted != NULL && (strcmp(ted, "t") == 0 || strcmp(ted, "true") == 0));
+    }
 
     /* Fallback: if no targets configured, synthesize targets[0] from primary fields */
     if (out->n_targets == 0) {
@@ -636,7 +655,8 @@ pq_get_model(void* vctx, const char* name, model_rec_t* out)
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
         "COALESCE(hedged_delay_ms, 0), COALESCE(hedge_budget_pct, 15), COALESCE(hedged_enabled, "
         "false), "
-        "COALESCE(default_thinking_budget, 0), COALESCE(supports_reasoning, false) "
+        "COALESCE(default_thinking_budget, 0), COALESCE(supports_reasoning, false), "
+        "COALESCE(tag_emulation_default, false) "
         "FROM models WHERE model_name = $1 AND enabled = true";
     const char* val[1] = {name};
     int         plen[1] = {0};
@@ -672,7 +692,8 @@ pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
         "COALESCE(hedged_delay_ms, 0), COALESCE(hedge_budget_pct, 15), COALESCE(hedged_enabled, "
         "false), "
-        "COALESCE(default_thinking_budget, 0), COALESCE(supports_reasoning, false) "
+        "COALESCE(default_thinking_budget, 0), COALESCE(supports_reasoning, false), "
+        "COALESCE(tag_emulation_default, false) "
         "FROM models ORDER BY model_name";
     *n = 0;
 
@@ -705,20 +726,20 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     static const char q[] =
         "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
         "daily_token_quota, expires_at, group_id, guardrails_enabled, monthly_cost_budget, "
-        "monthly_token_budget, system_prompt, prompt_mode, watermark_enabled, is_canary) "
+        "monthly_token_budget, system_prompt, prompt_mode, watermark_enabled, is_canary, daily_reasoning_quota) "
         "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
         "ELSE string_to_array($3, '|') END, $4, $5, "
         "CASE WHEN $6 = 'null' THEN NULL "
         "ELSE to_timestamp(($6)::double precision)::timestamp with time zone END, "
         "CASE WHEN $7 = '0' THEN NULL ELSE ($7)::bigint END, $8, $9, $10, "
-        "CASE WHEN $11 = '' THEN NULL ELSE $11 END, $12, $13, $14) RETURNING key_id";
+        "CASE WHEN $11 = '' THEN NULL ELSE $11 END, $12, $13, $14, $15) RETURNING key_id";
     char        joined[512], rate[16], quota[32], exp[32], gid_str[32], mcb_str[32], mtb_str[32];
-    char        pm_str[16];
+    char        pm_str[16], drq_str[32];
     const char* ge_str = k->guardrails_enabled ? "true" : "false";
     const char* wm_str = k->watermark_enabled ? "true" : "false";
     const char* can_str = k->is_canary ? "true" : "false";
-    const char* vals[14];
-    int         plens[14] = {0};
+    const char* vals[15];
+    int         plens[15] = {0};
     long        id = -1;
 
     if (join_model_list(k, joined, sizeof joined) != 0) {
@@ -735,6 +756,7 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     snprintf(mcb_str, sizeof mcb_str, "%.4f", k->monthly_cost_budget);
     snprintf(mtb_str, sizeof mtb_str, "%ld", k->monthly_token_budget);
     snprintf(pm_str, sizeof pm_str, "%d", k->prompt_mode);
+    snprintf(drq_str, sizeof drq_str, "%ld", k->daily_reasoning_quota);
     vals[0] = k->key_hash;
     vals[1] = k->name;
     vals[2] = joined;
@@ -749,9 +771,10 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     vals[11] = pm_str;
     vals[12] = wm_str;
     vals[13] = can_str;
+    vals[14] = drq_str;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 14, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 15, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (res != NULL && PQresultStatus(res) == PGRES_TUPLES_OK && PQntuples(res) > 0) {
         id = atol(PQgetvalue(res, 0, 0));
@@ -779,9 +802,9 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
 {
     struct pq_ctx* px = vctx;
     char           sql[1024], joined[512], rate[16], quota[32], exp[32], id[32], gid_str[32];
-    char           mcb_str[32], mtb_str[32], pm_str[16];
-    const char*    vals[16];
-    int            plens[16] = {0};
+    char           mcb_str[32], mtb_str[32], pm_str[16], drq_str[32];
+    const char*    vals[20];
+    int            plens[20] = {0};
     int            nv = 0, off;
 
     if (mask == 0) {
@@ -792,6 +815,7 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
     }
     snprintf(rate, sizeof rate, "%d", k->rate_qps);
     snprintf(quota, sizeof quota, "%ld", k->daily_token_quota);
+    snprintf(drq_str, sizeof drq_str, "%ld", k->daily_reasoning_quota);
     if (k->has_expiry) {
         snprintf(exp, sizeof exp, "%ld", (long)k->expires_at);
     } else {
@@ -914,6 +938,15 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
                         nv);
         vals[nv - 1] = can_str;
     }
+    if (mask & KMASK_REASONING_QUOTA) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sdaily_reasoning_quota = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = drq_str;
+    }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE key_id = $%d", nv);
     vals[nv - 1] = id;
@@ -1028,14 +1061,15 @@ pq_create_model(void* vctx, const model_rec_t* m)
         "INSERT INTO models(model_name, provider, endpoint, upstream_key_ref, "
         "default_params, targets, lb_policy, pricing, system_prompt, prompt_mode, "
         "hedged_delay_ms, hedge_budget_pct, hedged_enabled, "
-        "default_thinking_budget, supports_reasoning) "
+        "default_thinking_budget, supports_reasoning, tag_emulation_default) "
         "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb, $6::jsonb, $7, "
-        "$8::jsonb, CASE WHEN $9 = '' THEN NULL ELSE $9 END, $10, $11, $12, $13, $14, $15)";
-    const char* vals[15];
-    int         plens[15] = {0};
+        "$8::jsonb, CASE WHEN $9 = '' THEN NULL ELSE $9 END, $10, $11, $12, $13, $14, $15, $16)";
+    const char* vals[16];
+    int         plens[16] = {0};
     char        pm_str[16], hd_str[16], hb_str[16], dtb_str[32];
     const char* he_str = m->hedged_enabled ? "true" : "false";
     const char* sr_str = m->supports_reasoning ? "true" : "false";
+    const char* ted_str = m->tag_emulation_default ? "true" : "false";
 
     char*       targets_json = serialize_targets_json(m);
     const char* t_str = targets_json ? targets_json : "[]";
@@ -1069,9 +1103,10 @@ pq_create_model(void* vctx, const model_rec_t* m)
     vals[12] = he_str;
     vals[13] = dtb_str;
     vals[14] = sr_str;
+    vals[15] = ted_str;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 15, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 16, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (targets_json != NULL) {
         free(targets_json);
@@ -1211,6 +1246,15 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
                         nv > 1 ? ", " : "",
                         nv);
         vals[nv - 1] = m->supports_reasoning ? "true" : "false";
+    }
+    if (mask & MMASK_TAG_EMULATION_DEFAULT) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%stag_emulation_default = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = m->tag_emulation_default ? "true" : "false";
     }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE model_name = $%d", nv);
@@ -1871,10 +1915,10 @@ pq_list_groups(void* vctx, group_rec_t* out, int cap, int* n)
     struct pq_ctx*    px = vctx;
     static const char q[] =
         "SELECT g.id, g.name, EXTRACT(EPOCH FROM g.created_at)::bigint, COUNT(k.key_id), "
-        "COALESCE(g.monthly_budget_usd, 0.0) "
+        "COALESCE(g.monthly_budget_usd, 0.0), COALESCE(g.daily_reasoning_quota, 0) "
         "FROM groups g "
         "LEFT JOIN api_keys k ON k.group_id = g.id "
-        "GROUP BY g.id, g.name, g.created_at, g.monthly_budget_usd "
+        "GROUP BY g.id, g.name, g.created_at, g.monthly_budget_usd, g.daily_reasoning_quota "
         "ORDER BY g.id";
     *n = 0;
 
@@ -1899,6 +1943,9 @@ pq_list_groups(void* vctx, group_rec_t* out, int cap, int* n)
         out[i].monthly_budget_usd = (PQnfields(res) > 4 && PQgetvalue(res, i, 4)[0] != '\0')
                                         ? atof(PQgetvalue(res, i, 4))
                                         : 0.0;
+        out[i].daily_reasoning_quota = (PQnfields(res) > 5 && PQgetvalue(res, i, 5)[0] != '\0')
+                                           ? atol(PQgetvalue(res, i, 5))
+                                           : 0;
     }
     *n = nt;
     PQclear(res);
@@ -2077,6 +2124,35 @@ pq_patch_group_budget(void* vctx, long id, double budget)
         PQclear(res);
     } else {
         AIGATE_LOG_ERROR("pg patch_group_budget: query alloc failed");
+    }
+    return -1;
+}
+
+/** @brief libpq implementation of pg_ops.patch_group_reasoning_quota: change daily reasoning quota by id, 0 on success, -1 on error. */
+static int
+pq_patch_group_reasoning_quota(void* vctx, long id, long quota)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "UPDATE groups SET daily_reasoning_quota = $1 WHERE id = $2";
+    char              id_str[32], q_str[32];
+    snprintf(id_str, sizeof id_str, "%ld", id);
+    snprintf(q_str, sizeof q_str, "%ld", quota);
+    const char* vals[2] = {q_str, id_str};
+    int         plens[2] = {0, 0};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 2, NULL, vals, plens, NULL, 0);
+    pq_unlock(px);
+    if (res != NULL && PQresultStatus(res) == PGRES_COMMAND_OK) {
+        int rows = atoi(PQcmdTuples(res));
+        PQclear(res);
+        return rows > 0 ? 0 : 1;
+    }
+    if (res != NULL) {
+        AIGATE_LOG_ERROR("pg patch_group_reasoning_quota: %s", PQerrorMessage(px->db));
+        PQclear(res);
+    } else {
+        AIGATE_LOG_ERROR("pg patch_group_reasoning_quota: query alloc failed");
     }
     return -1;
 }
@@ -3066,6 +3142,7 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.list_groups = pq_list_groups;
     ps->ops.patch_group = pq_patch_group;
     ps->ops.patch_group_budget = pq_patch_group_budget;
+    ps->ops.patch_group_reasoning_quota = pq_patch_group_reasoning_quota;
     ps->ops.delete_group = pq_delete_group;
     ps->ops.count_keys_in_group = pq_count_keys_in_group;
     ps->ops.query_cost = pq_query_cost;

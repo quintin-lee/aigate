@@ -283,6 +283,9 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
         if (mask & KMASK_PROMPT_MODE) {
             fk->k.prompt_mode = k->prompt_mode;
         }
+        if (mask & KMASK_REASONING_QUOTA) {
+            fk->k.daily_reasoning_quota = k->daily_reasoning_quota;
+        }
         return 0;
     }
     return -1;
@@ -359,6 +362,9 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
         }
         if (mask & MMASK_PROMPT_MODE) {
             db->models[i].prompt_mode = m->prompt_mode;
+        }
+        if (mask & MMASK_TAG_EMULATION_DEFAULT) {
+            db->models[i].tag_emulation_default = m->tag_emulation_default;
         }
         return 0;
     }
@@ -669,6 +675,20 @@ fake_patch_group_budget(void* ctx, long id, double budget)
     return 1;
 }
 
+/** @brief Fake group reasoning quota update. */
+static int
+fake_patch_group_reasoning_quota(void* ctx, long id, long quota)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && db->groups[i].g.id == id) {
+            db->groups[i].g.daily_reasoning_quota = quota;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /** @brief Fake group deletion. */
 static int
 fake_delete_group(void* ctx, long id)
@@ -803,6 +823,7 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->list_groups = fake_list_groups;
     ops->patch_group = fake_patch_group;
     ops->patch_group_budget = fake_patch_group_budget;
+    ops->patch_group_reasoning_quota = fake_patch_group_reasoning_quota;
     ops->delete_group = fake_delete_group;
     ops->count_keys_in_group = fake_count_keys_in_group;
     ops->query_cost = fake_query_cost;
@@ -1799,7 +1820,7 @@ TEST_CASE(test_pg_store_schema_v18_models)
 
 TEST_CASE(test_pg_store_schema_v19_models)
 {
-    TEST_ASSERT(AIGATE_SCHEMA_VERSION == 19, "schema version should be 19");
+    TEST_ASSERT(AIGATE_SCHEMA_VERSION >= 19, "schema version should be at least 19");
 
     model_rec_t m;
     memset(&m, 0, sizeof m);
@@ -1807,4 +1828,30 @@ TEST_CASE(test_pg_store_schema_v19_models)
     m.supports_reasoning = true;
     TEST_ASSERT(m.default_thinking_budget == 4096, "default_thinking_budget stored");
     TEST_ASSERT(m.supports_reasoning == true, "supports_reasoning stored");
+}
+
+TEST_CASE(test_pg_store_schema_v20_models)
+{
+    TEST_ASSERT(AIGATE_SCHEMA_VERSION >= 20, "schema version should be at least 20");
+
+    model_rec_t m;
+    memset(&m, 0, sizeof m);
+    m.default_thinking_budget = 4096;
+    m.supports_reasoning = true;
+    m.tag_emulation_default = true;
+    TEST_ASSERT(m.default_thinking_budget == 4096, "default_thinking_budget stored");
+    TEST_ASSERT(m.supports_reasoning == true, "supports_reasoning stored");
+    TEST_ASSERT(m.tag_emulation_default == true, "tag_emulation_default stored");
+    TEST_ASSERT((MMASK_TAG_EMULATION_DEFAULT & (1 << 15)) != 0, "MMASK_TAG_EMULATION_DEFAULT defined");
+
+    key_rec_t k;
+    memset(&k, 0, sizeof k);
+    k.daily_reasoning_quota = 50000;
+    TEST_ASSERT(k.daily_reasoning_quota == 50000, "daily_reasoning_quota stored on key");
+    TEST_ASSERT((KMASK_REASONING_QUOTA & (1 << 12)) != 0, "KMASK_REASONING_QUOTA defined");
+
+    group_rec_t g;
+    memset(&g, 0, sizeof g);
+    g.daily_reasoning_quota = 100000;
+    TEST_ASSERT(g.daily_reasoning_quota == 100000, "daily_reasoning_quota stored on group");
 }

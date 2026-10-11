@@ -4,7 +4,7 @@
 #ifndef AIGATE_SCHEMA_SQL_H
 #define AIGATE_SCHEMA_SQL_H
 
-#define AIGATE_SCHEMA_VERSION 19
+#define AIGATE_SCHEMA_VERSION 20
 
 static const char SCHEMA_SQL[] =
     "-- aigate schema (version 1); applied by pg_store_migrate() in one transaction.\n"
@@ -286,6 +286,12 @@ static const char SCHEMA_SQL[] =
     "-- Migration v19: reasoning models and extended thinking budget\n"
     "ALTER TABLE models ADD COLUMN IF NOT EXISTS default_thinking_budget BIGINT NOT NULL DEFAULT 0;\n"
     "ALTER TABLE models ADD COLUMN IF NOT EXISTS supports_reasoning BOOLEAN NOT NULL DEFAULT FALSE;\n"
-    "INSERT INTO schema_migrations(version) VALUES (19) ON CONFLICT (version) DO NOTHING;\n";
+    "INSERT INTO schema_migrations(version) VALUES (19) ON CONFLICT (version) DO NOTHING;\n"
+    "\n"
+    "-- Migration v20: reasoning ecosystem v3: default tag emulation and daily reasoning quota\n"
+    "ALTER TABLE models ADD COLUMN IF NOT EXISTS tag_emulation_default BOOLEAN NOT NULL DEFAULT FALSE;\n"
+    "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS daily_reasoning_quota BIGINT NOT NULL DEFAULT 0;\n"
+    "ALTER TABLE groups ADD COLUMN IF NOT EXISTS daily_reasoning_quota BIGINT NOT NULL DEFAULT 0;\n"
+    "INSERT INTO schema_migrations(version) VALUES (20) ON CONFLICT (version) DO NOTHING;\n";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

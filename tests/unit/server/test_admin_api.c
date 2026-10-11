@@ -283,6 +283,9 @@ fake_update_key(void* ctx, const key_rec_t* k, int mask)
             if (mask & KMASK_CANARY) {
                 fk->k.is_canary = k->is_canary;
             }
+            if (mask & KMASK_REASONING_QUOTA) {
+                fk->k.daily_reasoning_quota = k->daily_reasoning_quota;
+            }
             return 0;
         }
     }
@@ -405,6 +408,9 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
             }
             if (mask & MMASK_SUPPORTS_REASONING) {
                 db->models[i].supports_reasoning = m->supports_reasoning;
+            }
+            if (mask & MMASK_TAG_EMULATION_DEFAULT) {
+                db->models[i].tag_emulation_default = m->tag_emulation_default;
             }
             return 0;
         }
@@ -752,6 +758,20 @@ fake_patch_group_budget(void* ctx, long id, double budget)
     return 1;
 }
 
+/** @brief Fake group reasoning quota update. */
+static int
+fake_patch_group_reasoning_quota(void* ctx, long id, long quota)
+{
+    struct fake_db* db = ctx;
+    for (int i = 0; i < FAKE_CAP; i++) {
+        if (db->groups[i].in_use && db->groups[i].g.id == id) {
+            db->groups[i].g.daily_reasoning_quota = quota;
+            return 0;
+        }
+    }
+    return 1;
+}
+
 /** @brief Fake paginated guardrail-rule listing. */
 static int
 fake_list_guardrails_rules(void* ctx, guardrail_rule_t* out, int cap, int* n)
@@ -1013,6 +1033,7 @@ build_fake_ops(struct fake_db* db, pg_ops_t* ops)
     ops->list_groups = fake_list_groups;
     ops->patch_group = fake_patch_group;
     ops->patch_group_budget = fake_patch_group_budget;
+    ops->patch_group_reasoning_quota = fake_patch_group_reasoning_quota;
     ops->delete_group = fake_delete_group;
     ops->count_keys_in_group = fake_count_keys_in_group;
     ops->query_cost = fake_query_cost;

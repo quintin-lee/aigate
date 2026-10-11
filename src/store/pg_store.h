@@ -40,6 +40,7 @@ typedef struct key_rec {
     int    prompt_mode;          /**< 0=prepend, 1=append, 2=override */
     int    watermark_enabled;    /**< 1 = watermark enabled, 0 = disabled */
     int    is_canary;            /**< 1 = canary honey-token, 0 = normal */
+    long   daily_reasoning_quota; /**< Daily reasoning token quota (0 = unlimited) */
 } key_rec_t;
 
 /** @brief Per-model multi-target cap. */
@@ -79,6 +80,7 @@ typedef struct model_rec {
     int  max_concurrent;      /**< 0 = unlimited, >0 max in-flight requests */
     long default_thinking_budget; /**< Default thinking token budget (0 = disabled/unset) */
     bool supports_reasoning;      /**< True if model supports reasoning / extended thinking */
+    bool tag_emulation_default;   /**< True to default to <think> tag emulation */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
@@ -115,6 +117,7 @@ typedef struct group_rec {
     long   key_count;          /**< Key count in the group */
     time_t created_at;         /**< Creation timestamp */
     double monthly_budget_usd; /**< 0.0 = unlimited */
+    long   daily_reasoning_quota; /**< Daily reasoning token quota (0 = unlimited) */
 } group_rec_t;
 
 /** @brief Guardrail rule record (guardrails_rules row). */
@@ -168,6 +171,8 @@ typedef struct cost_row {
 #define KMASK_WATERMARK (1 << 10)
 /** @brief Key update mask: canary honey-token flag. */
 #define KMASK_CANARY (1 << 11)
+/** @brief Key update mask: daily reasoning token quota. */
+#define KMASK_REASONING_QUOTA (1 << 12)
 
 /** @brief Model update mask: endpoint. */
 #define MMASK_ENDPOINT (1 << 0)
@@ -199,6 +204,8 @@ typedef struct cost_row {
 #define MMASK_THINKING_BUDGET (1 << 13)
 /** @brief Model update mask: supports reasoning model. */
 #define MMASK_SUPPORTS_REASONING (1 << 14)
+/** @brief Model update mask: default <think> tag emulation. */
+#define MMASK_TAG_EMULATION_DEFAULT (1 << 15)
 
 /** @brief Provider update mask: provider type. */
 #define PMASK_TYPE (1 << 0)
@@ -340,6 +347,9 @@ typedef struct pg_ops {
     int (*patch_group_budget)(void*  ctx,
                               long   id,
                               double budget); /**< Change a group's monthly budget by numeric id. */
+    int (*patch_group_reasoning_quota)(void* ctx,
+                                       long  id,
+                                       long  quota); /**< Change a group's daily reasoning quota by numeric id. */
     int (*delete_group)(void* ctx, long id);  /**< Delete a group by numeric id. */
     int (*count_keys_in_group)(void* ctx, long group_id, long* n); /**< Count keys in a group. */
     int (*query_cost)(void*       ctx,
