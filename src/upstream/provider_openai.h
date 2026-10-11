@@ -86,4 +86,12 @@ void provider_openai_bridge_get_tokens(stream_bridge_t* b,
                                        long*            out_cached_tok,
                                        long*            out_reasoning_tok);
 
+/** @brief Translate OpenAI non-streaming response JSON to Anthropic /v1/messages format, mapping reasoning_content to thinking blocks. */
+int provider_openai_resp_to_anthropic(const char* oai_resp,
+                                      const char* req_model,
+                                      char**      out_anthropic,
+                                      size_t*     out_anthropic_len,
+                                      long*       out_ptok,
+                                      long*       out_ctok);
+
 #endif /* AIGATE_PROVIDER_OPENAI_H */

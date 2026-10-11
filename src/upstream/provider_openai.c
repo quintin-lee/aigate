@@ -665,6 +665,197 @@ provider_openai_parse_responses_usage(const char* body,
     return 0;
 }
 
+int
+provider_openai_resp_to_anthropic(const char* oai_resp,
+                                  const char* req_model,
+                                  char**      out_anthropic,
+                                  size_t*     out_anthropic_len,
+                                  long*       out_ptok,
+                                  long*       out_ctok)
+{
+    if (out_ptok) {
+        *out_ptok = 0;
+    }
+    if (out_ctok) {
+        *out_ctok = 0;
+    }
+    if (out_anthropic == NULL) {
+        return -1;
+    }
+    *out_anthropic = NULL;
+    if (out_anthropic_len != NULL) {
+        *out_anthropic_len = 0;
+    }
+
+    if (oai_resp == NULL) {
+        return -1;
+    }
+
+    json_error_t err;
+    json_t* root = json_loads(oai_resp, 0, &err);
+    if (root == NULL) {
+        return -1;
+    }
+
+    /* ID */
+    const char* oai_id = "unknown";
+    json_t* jid = json_object_get(root, "id");
+    if (jid != NULL && json_is_string(jid)) {
+        oai_id = json_string_value(jid);
+    }
+    char ant_id[128];
+    if (strncmp(oai_id, "chatcmpl-", 9) == 0) {
+        snprintf(ant_id, sizeof(ant_id), "msg_%s", oai_id + 9);
+    } else {
+        snprintf(ant_id, sizeof(ant_id), "msg_%s", oai_id);
+    }
+
+    /* Model */
+    const char* model = req_model ? req_model : "unknown";
+    json_t* jm = json_object_get(root, "model");
+    if (jm != NULL && json_is_string(jm)) {
+        model = json_string_value(jm);
+    }
+
+    /* Choices */
+    json_t* choices = json_object_get(root, "choices");
+    json_t* c0 = (choices != NULL && json_is_array(choices)) ? json_array_get(choices, 0) : NULL;
+    const char* finish_reason = "end_turn";
+    const char* reasoning_text = NULL;
+    const char* content_text = NULL;
+    json_t* tool_calls = NULL;
+
+    if (c0 != NULL && json_is_object(c0)) {
+        json_t* jfr = json_object_get(c0, "finish_reason");
+        if (jfr != NULL && json_is_string(jfr)) {
+            const char* fr = json_string_value(jfr);
+            if (strcmp(fr, "length") == 0) {
+                finish_reason = "max_tokens";
+            } else if (strcmp(fr, "tool_calls") == 0) {
+                finish_reason = "tool_use";
+            } else {
+                finish_reason = "end_turn";
+            }
+        }
+        json_t* jmsg = json_object_get(c0, "message");
+        if (jmsg != NULL && json_is_object(jmsg)) {
+            json_t* jrc = json_object_get(jmsg, "reasoning_content");
+            if (jrc != NULL && json_is_string(jrc)) {
+                reasoning_text = json_string_value(jrc);
+            }
+            json_t* jc = json_object_get(jmsg, "content");
+            if (jc != NULL && json_is_string(jc)) {
+                content_text = json_string_value(jc);
+            }
+            tool_calls = json_object_get(jmsg, "tool_calls");
+        }
+    }
+
+    /* Content array */
+    json_t* ant_content = json_array();
+
+    /* Thinking block (if present) */
+    if (reasoning_text != NULL && reasoning_text[0] != '\0') {
+        json_t* tb = json_object();
+        json_object_set_new(tb, "type", json_string("thinking"));
+        json_object_set_new(tb, "thinking", json_string(reasoning_text));
+        json_array_append_new(ant_content, tb);
+    }
+
+    /* Text block (if present) */
+    if (content_text != NULL && content_text[0] != '\0') {
+        json_t* tb = json_object();
+        json_object_set_new(tb, "type", json_string("text"));
+        json_object_set_new(tb, "text", json_string(content_text));
+        json_array_append_new(ant_content, tb);
+    }
+
+    /* Tool calls blocks (if present) */
+    if (tool_calls != NULL && json_is_array(tool_calls)) {
+        size_t ti;
+        json_t* tc;
+        json_array_foreach(tool_calls, ti, tc) {
+            json_t* jtcid = json_object_get(tc, "id");
+            json_t* jfn = json_object_get(tc, "function");
+            if (jfn == NULL || !json_is_object(jfn)) {
+                continue;
+            }
+            json_t* jname = json_object_get(jfn, "name");
+            json_t* jargs = json_object_get(jfn, "arguments");
+            const char* tcid = (jtcid && json_is_string(jtcid)) ? json_string_value(jtcid) : "";
+            const char* name = (jname && json_is_string(jname)) ? json_string_value(jname) : "";
+            const char* args_str = (jargs && json_is_string(jargs)) ? json_string_value(jargs) : "{}";
+
+            json_t* input_obj = json_loads(args_str, 0, NULL);
+            if (input_obj == NULL) {
+                input_obj = json_object();
+            }
+
+            json_t* tub = json_object();
+            json_object_set_new(tub, "type", json_string("tool_use"));
+            json_object_set_new(tub, "id", json_string(tcid));
+            json_object_set_new(tub, "name", json_string(name));
+            json_object_set_new(tub, "input", input_obj);
+            json_array_append_new(ant_content, tub);
+        }
+    }
+
+    /* Usage */
+    long ptok = 0, ctok = 0;
+    json_t* jusage = json_object_get(root, "usage");
+    if (jusage != NULL && json_is_object(jusage)) {
+        json_t* jpin = json_object_get(jusage, "prompt_tokens");
+        if (jpin == NULL) {
+            jpin = json_object_get(jusage, "input_tokens");
+        }
+        if (jpin != NULL && json_is_integer(jpin)) {
+            ptok = json_integer_value(jpin);
+        }
+        json_t* jcout = json_object_get(jusage, "completion_tokens");
+        if (jcout == NULL) {
+            jcout = json_object_get(jusage, "output_tokens");
+        }
+        if (jcout != NULL && json_is_integer(jcout)) {
+            ctok = json_integer_value(jcout);
+        }
+    }
+    if (out_ptok) {
+        *out_ptok = ptok;
+    }
+    if (out_ctok) {
+        *out_ctok = ctok;
+    }
+
+    /* Construct Anthropic response */
+    json_t* ant = json_object();
+    json_object_set_new(ant, "id", json_string(ant_id));
+    json_object_set_new(ant, "type", json_string("message"));
+    json_object_set_new(ant, "role", json_string("assistant"));
+    json_object_set_new(ant, "model", json_string(model));
+    json_object_set_new(ant, "content", ant_content);
+    json_object_set_new(ant, "stop_reason", json_string(finish_reason));
+    json_object_set_new(ant, "stop_sequence", json_null());
+
+    json_t* usage_obj = json_object();
+    json_object_set_new(usage_obj, "input_tokens", json_integer(ptok));
+    json_object_set_new(usage_obj, "output_tokens", json_integer(ctok));
+    json_object_set_new(ant, "usage", usage_obj);
+
+    json_decref(root);
+
+    char* packed = json_dumps(ant, JSON_COMPACT);
+    json_decref(ant);
+    if (packed == NULL) {
+        return -1;
+    }
+
+    *out_anthropic = packed;
+    if (out_anthropic_len != NULL) {
+        *out_anthropic_len = strlen(packed);
+    }
+    return 0;
+}
+
 /** @brief OpenAI-compatible provider vtable instance (see the provider_adapter vtable). */
 const provider_adapter_t g_provider_openai = {
     .name = "openai",

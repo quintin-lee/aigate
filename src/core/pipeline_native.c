@@ -5,6 +5,7 @@
 #include "metrics.h"
 #include "provider_anthropic.h"
 #include "provider_gemini.h"
+#include "provider_openai.h"
 #include "upstream_client.h"
 
 #include <jansson.h>
@@ -36,6 +37,150 @@ build_anthropic_url(const char* endpoint, char* url_out, size_t url_cap)
     } else {
         snprintf(url_out, url_cap, "%s/v1/messages", base_ep);
     }
+}
+
+/** @brief Build OpenAI upstream chat completions URL. */
+static void
+build_openai_chat_url(const char* endpoint, char* url_out, size_t url_cap)
+{
+    const char* ep = (endpoint && endpoint[0] && strcmp(endpoint, "/") != 0) ? endpoint : "https://api.openai.com";
+    char base_ep[512];
+    snprintf(base_ep, sizeof base_ep, "%s", ep);
+    size_t elen = strlen(base_ep);
+    while (elen > 0 && base_ep[elen - 1] == '/') {
+        base_ep[--elen] = '\0';
+    }
+    if (elen >= 3 && strcmp(base_ep + elen - 3, "/v1") == 0) {
+        snprintf(url_out, url_cap, "%s/chat/completions", base_ep);
+    } else {
+        snprintf(url_out, url_cap, "%s/v1/chat/completions", base_ep);
+    }
+}
+
+/** @brief Translate Anthropic messages request JSON to OpenAI chat completions format. */
+static int
+anthropic_req_to_openai(json_t* ant_req, const char* model, char** out_body, size_t* out_len)
+{
+    if (ant_req == NULL || !json_is_object(ant_req)) {
+        return -1;
+    }
+    json_t* oai = json_object();
+    json_object_set_new(oai, "model", json_string(model));
+
+    /* Messages array */
+    json_t* oai_msgs = json_array();
+
+    /* System prompt (if any) */
+    json_t* jsys = json_object_get(ant_req, "system");
+    if (jsys != NULL) {
+        if (json_is_string(jsys)) {
+            json_t* sm = json_object();
+            json_object_set_new(sm, "role", json_string("system"));
+            json_object_set(sm, "content", jsys);
+            json_array_append_new(oai_msgs, sm);
+        } else if (json_is_array(jsys)) {
+            char*  sbuf = NULL;
+            size_t slen = 0;
+            size_t bi;
+            json_t* blk;
+            json_array_foreach(jsys, bi, blk) {
+                json_t* bt = json_object_get(blk, "text");
+                if (bt && json_is_string(bt)) {
+                    const char* s = json_string_value(bt);
+                    size_t l = strlen(s);
+                    char* nb = realloc(sbuf, slen + l + 1);
+                    if (nb) {
+                        sbuf = nb;
+                        memcpy(sbuf + slen, s, l);
+                        slen += l;
+                        sbuf[slen] = '\0';
+                    }
+                }
+            }
+            if (sbuf) {
+                json_t* sm = json_object();
+                json_object_set_new(sm, "role", json_string("system"));
+                json_object_set_new(sm, "content", json_string(sbuf));
+                json_array_append_new(oai_msgs, sm);
+                free(sbuf);
+            }
+        }
+    }
+
+    /* Inbound messages */
+    json_t* amsgs = json_object_get(ant_req, "messages");
+    if (amsgs != NULL && json_is_array(amsgs)) {
+        size_t mi;
+        json_t* am;
+        json_array_foreach(amsgs, mi, am) {
+            json_t* jrole = json_object_get(am, "role");
+            const char* role = (jrole && json_is_string(jrole)) ? json_string_value(jrole) : "user";
+            json_t* jcontent = json_object_get(am, "content");
+            if (jcontent && json_is_string(jcontent)) {
+                json_t* om = json_object();
+                json_object_set_new(om, "role", json_string(role));
+                json_object_set(om, "content", jcontent);
+                json_array_append_new(oai_msgs, om);
+            } else if (jcontent && json_is_array(jcontent)) {
+                char*  cbuf = NULL;
+                size_t clen = 0;
+                size_t bi;
+                json_t* blk;
+                json_array_foreach(jcontent, bi, blk) {
+                    json_t* bt = json_object_get(blk, "text");
+                    if (bt && json_is_string(bt)) {
+                        const char* s = json_string_value(bt);
+                        size_t l = strlen(s);
+                        char* nb = realloc(cbuf, clen + l + 1);
+                        if (nb) {
+                            cbuf = nb;
+                            memcpy(cbuf + clen, s, l);
+                            clen += l;
+                            cbuf[clen] = '\0';
+                        }
+                    }
+                }
+                json_t* om = json_object();
+                json_object_set_new(om, "role", json_string(role));
+                json_object_set_new(om, "content", json_string(cbuf ? cbuf : ""));
+                json_array_append_new(oai_msgs, om);
+                free(cbuf);
+            }
+        }
+    }
+    json_object_set_new(oai, "messages", oai_msgs);
+
+    /* max_tokens */
+    json_t* jmt = json_object_get(ant_req, "max_tokens");
+    if (jmt && json_is_integer(jmt)) {
+        json_object_set(oai, "max_tokens", jmt);
+    }
+    /* temperature */
+    json_t* jtemp = json_object_get(ant_req, "temperature");
+    if (jtemp && json_is_number(jtemp)) {
+        json_object_set(oai, "temperature", jtemp);
+    }
+    /* top_p */
+    json_t* jtp = json_object_get(ant_req, "top_p");
+    if (jtp && json_is_number(jtp)) {
+        json_object_set(oai, "top_p", jtp);
+    }
+    /* stream */
+    json_t* jstream = json_object_get(ant_req, "stream");
+    if (jstream && json_is_boolean(jstream)) {
+        json_object_set(oai, "stream", jstream);
+    }
+
+    char* packed = json_dumps(oai, JSON_COMPACT);
+    json_decref(oai);
+    if (packed == NULL) {
+        return -1;
+    }
+    *out_body = packed;
+    if (out_len) {
+        *out_len = strlen(packed);
+    }
+    return 0;
 }
 
 /** @brief Anthropic streaming callback context: first chunk writes SSE headers and passes through chunks, feeds usage sniffer. */
@@ -186,7 +331,9 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
     }
 
     /* --- strict provider check --- */
-    if (strcmp(route.provider, "anthropic") != 0) {
+    bool is_anthropic_prov = (strcmp(route.provider, "anthropic") == 0);
+    bool is_openai_reasoning = (strcmp(route.provider, "openai") == 0 && route.supports_reasoning);
+    if (!is_anthropic_prov && !is_openai_reasoning) {
         aigate_write_anthropic_error(
             rc,
             400,
@@ -444,19 +591,40 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
                  target->upstream_key);
         last_provider = target->provider;
 
+        bool is_openai = (strcmp(cur_route.provider, "openai") == 0);
         char url[1024];
-        build_anthropic_url(cur_route.endpoint, url, sizeof url);
-
         const char* extra_hdrs[4][2] = {{0}};
         int         n_extra_hdrs = 0;
-        if (cur_route.upstream_key[0] != '\0') {
-            extra_hdrs[n_extra_hdrs][0] = "x-api-key";
-            extra_hdrs[n_extra_hdrs][1] = cur_route.upstream_key;
+        char        auth_hdr[1100];
+        char*       eff_body = (char*)raw_body;
+        size_t      eff_len = raw_len;
+        char*       oai_converted_body = NULL;
+
+        if (is_openai) {
+            build_openai_chat_url(cur_route.endpoint, url, sizeof url);
+            if (cur_route.upstream_key[0] != '\0') {
+                snprintf(auth_hdr, sizeof auth_hdr, "Bearer %s", cur_route.upstream_key);
+                extra_hdrs[n_extra_hdrs][0] = "Authorization";
+                extra_hdrs[n_extra_hdrs][1] = auth_hdr;
+                n_extra_hdrs++;
+            }
+            extra_hdrs[n_extra_hdrs][0] = "Content-Type";
+            extra_hdrs[n_extra_hdrs][1] = "application/json";
+            n_extra_hdrs++;
+            if (anthropic_req_to_openai(jbody, model, &oai_converted_body, &eff_len) == 0) {
+                eff_body = oai_converted_body;
+            }
+        } else {
+            build_anthropic_url(cur_route.endpoint, url, sizeof url);
+            if (cur_route.upstream_key[0] != '\0') {
+                extra_hdrs[n_extra_hdrs][0] = "x-api-key";
+                extra_hdrs[n_extra_hdrs][1] = cur_route.upstream_key;
+                n_extra_hdrs++;
+            }
+            extra_hdrs[n_extra_hdrs][0] = "anthropic-version";
+            extra_hdrs[n_extra_hdrs][1] = "2023-06-01";
             n_extra_hdrs++;
         }
-        extra_hdrs[n_extra_hdrs][0] = "anthropic-version";
-        extra_hdrs[n_extra_hdrs][1] = "2023-06-01";
-        n_extra_hdrs++;
 
         int      status = 0;
         char*    ubody = NULL;
@@ -466,8 +634,8 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
                                     cur_route.upstream_key,
                                     extra_hdrs,
                                     n_extra_hdrs,
-                                    raw_body,
-                                    raw_len,
+                                    eff_body,
+                                    eff_len,
                                     ac->default_timeout_ms,
                                     &status,
                                     &ubody,
@@ -482,12 +650,16 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
                                     cur_route.upstream_key,
                                     extra_hdrs,
                                     n_extra_hdrs,
-                                    raw_body,
-                                    raw_len,
+                                    eff_body,
+                                    eff_len,
                                     ac->default_timeout_ms,
                                     &status,
                                     &ubody,
                                     &ulen);
+        }
+        if (oai_converted_body != NULL) {
+            free(oai_converted_body);
+            oai_converted_body = NULL;
         }
         uint64_t lat = mono_ns() - t0;
         total_lat += lat;
@@ -496,7 +668,21 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
         if (!is_failover && status < 400) {
             cb_record_success(ac->cb, model, target->endpoint);
             long ptok = 0, ctok = 0, cached_tok = 0;
-            anthropic_sniff_usage_json(ubody ? ubody : "", &ptok, &ctok, &cached_tok);
+            char*  resp_body_to_send = ubody;
+            size_t resp_len_to_send = ulen;
+            char*  ant_converted_resp = NULL;
+
+            if (is_openai) {
+                size_t ant_len = 0;
+                if (provider_openai_resp_to_anthropic(
+                        ubody ? ubody : "", model, &ant_converted_resp, &ant_len, &ptok, &ctok) ==
+                    0) {
+                    resp_body_to_send = ant_converted_resp;
+                    resp_len_to_send = ant_len;
+                }
+            } else {
+                anthropic_sniff_usage_json(ubody ? ubody : "", &ptok, &ctok, &cached_tok);
+            }
 
             double req_cost = calc_req_cost(&route, ptok, ctok, cached_tok);
             record_usage_and_event(ac,
@@ -519,7 +705,9 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
             if (rc->set_header != NULL) {
                 rc->set_header(rc->impl, "X-Upstream-Provider", target->provider);
             }
-            int rv = aigate_write_json(rc, status, ubody ? ubody : "", ulen);
+            int rv = aigate_write_json(
+                rc, status, resp_body_to_send ? resp_body_to_send : "", resp_len_to_send);
+            free(ant_converted_resp);
             free(ubody);
             json_decref(jbody);
             key_rec_free(&krec);

@@ -3,6 +3,7 @@
  */
 #include "run_tests.h"
 #include "provider_adapter.h"
+#include "provider_openai.h"
 #include <jansson.h>
 #include <string.h>
 
@@ -334,6 +335,43 @@ TEST_CASE(test_anthropic_thinking_sync_tag_emulation)
     const char* content = json_string_value(json_object_get(msg, "content"));
     TEST_ASSERT(strstr(content, "<think>\nStep-by-step reasoning.\n</think>\n\n42 is the answer.") != NULL,
                 "<think> wrapped content present");
+
+    json_decref(root);
+}
+
+TEST_CASE(test_openai_to_anthropic_thinking_sync)
+{
+    const char* oai_resp =
+        "{\"id\":\"chatcmpl-r1\",\"object\":\"chat.completion\",\"model\":\"deepseek-r1\","
+        "\"choices\":[{\"index\":0,\"message\":{"
+        "\"role\":\"assistant\","
+        "\"reasoning_content\":\"Proof of irrationality of sqrt(2).\","
+        "\"content\":\"Assume p/q is irreducible...\""
+        "},\"finish_reason\":\"stop\"}],"
+        "\"usage\":{\"prompt_tokens\":50,\"completion_tokens\":100}}";
+
+    char*  ant_resp = NULL;
+    size_t ant_len = 0;
+    long   ptok = 0, ctok = 0;
+    int rc = provider_openai_resp_to_anthropic(oai_resp, "deepseek-r1", &ant_resp, &ant_len, &ptok, &ctok);
+    TEST_ASSERT(rc == 0, "converted ok");
+
+    json_t* root = json_loads(ant_resp, 0, NULL);
+    free(ant_resp);
+    TEST_ASSERT(root != NULL, "json valid");
+
+    json_t* content = json_object_get(root, "content");
+    TEST_ASSERT(json_is_array(content) && json_array_size(content) == 2, "2 content blocks");
+
+    json_t* b0 = json_array_get(content, 0);
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(b0, "type")), "thinking") == 0, "b0 is thinking");
+    TEST_ASSERT(strstr(json_string_value(json_object_get(b0, "thinking")), "Proof of irrationality") != NULL,
+                "thinking text matches");
+
+    json_t* b1 = json_array_get(content, 1);
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(b1, "type")), "text") == 0, "b1 is text");
+    TEST_ASSERT(strstr(json_string_value(json_object_get(b1, "text")), "Assume p/q") != NULL,
+                "answer text matches");
 
     json_decref(root);
 }
