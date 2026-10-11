@@ -428,12 +428,13 @@ provider_anthropic_build(const model_rec_t* route,
 }
 
 int
-provider_anthropic_resp_to_openai(const char* anthropic_resp,
-                                  const char* req_model,
-                                  char**      out_openai,
-                                  size_t*     out_openai_len,
-                                  long*       out_ptok,
-                                  long*       out_ctok)
+provider_anthropic_resp_to_openai_ext(const char* anthropic_resp,
+                                      const char* req_model,
+                                      bool        tag_emulation,
+                                      char**      out_openai,
+                                      size_t*     out_openai_len,
+                                      long*       out_ptok,
+                                      long*       out_ctok)
 {
     *out_ptok = 0;
     *out_ctok = 0;
@@ -570,13 +571,30 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
     json_object_set_new(msg, "role", json_string("assistant"));
     if (thinking_text != NULL) {
         json_object_set_new(msg, "reasoning_content", json_string(thinking_text));
-        free(thinking_text);
     }
-    /* content: text if present, null if pure tool_calls */
-    if (content_text && content_text[0] != '\0') {
-        json_object_set_new(msg, "content", json_string(content_text));
+    if (tag_emulation && thinking_text != NULL && thinking_text[0] != '\0') {
+        const char* ct = (content_text && content_text[0] != '\0') ? content_text : "";
+        size_t      full_len = strlen(thinking_text) + strlen(ct) + 32;
+        char*       full_content = malloc(full_len);
+        if (full_content != NULL) {
+            snprintf(full_content, full_len, "<think>\n%s\n</think>\n\n%s", thinking_text, ct);
+            json_object_set_new(msg, "content", json_string(full_content));
+            free(full_content);
+        } else if (content_text && content_text[0] != '\0') {
+            json_object_set_new(msg, "content", json_string(content_text));
+        } else {
+            json_object_set_new(msg, "content", json_null());
+        }
     } else {
-        json_object_set_new(msg, "content", json_null());
+        /* content: text if present, null if pure tool_calls */
+        if (content_text && content_text[0] != '\0') {
+            json_object_set_new(msg, "content", json_string(content_text));
+        } else {
+            json_object_set_new(msg, "content", json_null());
+        }
+    }
+    if (thinking_text != NULL) {
+        free(thinking_text);
     }
     if (json_array_size(tool_calls_arr) > 0) {
         json_object_set_new(msg, "tool_calls", tool_calls_arr);
@@ -609,6 +627,23 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
         *out_openai_len = strlen(packed);
     }
     return 0;
+}
+
+int
+provider_anthropic_resp_to_openai(const char* anthropic_resp,
+                                  const char* req_model,
+                                  char**      out_openai,
+                                  size_t*     out_openai_len,
+                                  long*       out_ptok,
+                                  long*       out_ctok)
+{
+    return provider_anthropic_resp_to_openai_ext(anthropic_resp,
+                                                 req_model,
+                                                 false,
+                                                 out_openai,
+                                                 out_openai_len,
+                                                 out_ptok,
+                                                 out_ctok);
 }
 
 void

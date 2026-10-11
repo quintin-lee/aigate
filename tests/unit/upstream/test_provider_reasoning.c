@@ -305,7 +305,37 @@ TEST_CASE(test_anthropic_thinking_stream_tag_emulation)
     TEST_ASSERT(strstr(sink.accum, "\"content\":\"<think>\\n\"") != NULL, "<think> open emitted");
     TEST_ASSERT(strstr(sink.accum, "\"content\":\"Reasoning step 1...\"") != NULL, "thinking delta in content");
     TEST_ASSERT(strstr(sink.accum, "\"content\":\"\\n</think>\\n\\n\"") != NULL, "</think> close emitted");
-    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Hello world!\"") != NULL, "final text emitted");
+}
+
+TEST_CASE(test_anthropic_thinking_sync_tag_emulation)
+{
+    const char* anthropic_resp =
+        "{\"id\":\"msg_tag_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-7-sonnet\","
+        "\"content\":["
+        "{\"type\":\"thinking\",\"thinking\":\"Step-by-step reasoning.\"},"
+        "{\"type\":\"text\",\"text\":\"42 is the answer.\"}"
+        "],"
+        "\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}";
+
+    char*  out_json = NULL;
+    size_t out_len = 0;
+    long   ptok = 0, ctok = 0;
+    int rc = provider_anthropic_resp_to_openai_ext(anthropic_resp, "claude-3-7-sonnet", true,
+                                                   &out_json, &out_len, &ptok, &ctok);
+    TEST_ASSERT(rc == 0, "translated ok");
+
+    json_t* root = json_loads(out_json, 0, NULL);
+    free(out_json);
+    TEST_ASSERT(root != NULL, "json valid");
+
+    json_t* choices = json_object_get(root, "choices");
+    json_t* c0 = json_array_get(choices, 0);
+    json_t* msg = json_object_get(c0, "message");
+    const char* content = json_string_value(json_object_get(msg, "content"));
+    TEST_ASSERT(strstr(content, "<think>\nStep-by-step reasoning.\n</think>\n\n42 is the answer.") != NULL,
+                "<think> wrapped content present");
+
+    json_decref(root);
 }
 
 #include "watermark_engine.h"

@@ -53,6 +53,15 @@ int provider_anthropic_resp_to_openai(const char* anthropic_resp,
                                       long*       out_ptok,
                                       long*       out_ctok);
 
+/** @brief Translate Anthropic non-streaming response JSON to OpenAI format with optional <think> tag emulation. */
+int provider_anthropic_resp_to_openai_ext(const char* anthropic_resp,
+                                          const char* req_model,
+                                          bool        tag_emulation,
+                                          char**      out_openai,
+                                          size_t*     out_openai_len,
+                                          long*       out_ptok,
+                                          long*       out_ctok);
+
 /** @brief State machine for streaming Anthropic SSE to OpenAI SSE chunks. */
 typedef struct anthropic_bridge {
     aigate_response_ctx* rc;                /**< Downstream response context (borrowed). */
