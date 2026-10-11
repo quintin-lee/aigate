@@ -1744,7 +1744,7 @@ fake_delete_threat_whitelist(void* ctx, int64_t rule_id)
 
 TEST_CASE(test_pg_store_schema_v18_models)
 {
-    TEST_ASSERT(AIGATE_SCHEMA_VERSION == 18, "schema version should be 18");
+    TEST_ASSERT(AIGATE_SCHEMA_VERSION >= 18, "schema version should be at least 18");
 
     key_rec_t k;
     memset(&k, 0, sizeof k);

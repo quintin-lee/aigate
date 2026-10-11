@@ -123,6 +123,7 @@ main(int argc, char** argv)
     extern void test_metrics_failover(void);
     extern void test_metrics_ttft(void);
     extern void test_metrics_concurrency_rejection_and_alloc(void);
+    extern void test_metrics_reasoning_tokens_counter(void);
     extern void test_core_pipeline(void);
     extern void test_core_models_rate_limited(void);
     extern void test_core_models_list_failure_503(void);
@@ -221,6 +222,8 @@ main(int argc, char** argv)
     test_register("metrics_ttft", test_metrics_ttft);
     test_register("metrics_concurrency_rejection_and_alloc",
                   test_metrics_concurrency_rejection_and_alloc);
+    test_register("metrics_reasoning_tokens_counter",
+                  test_metrics_reasoning_tokens_counter);
     test_register("core_pipeline", test_core_pipeline);
     test_register("core_models_rate_limited", test_core_models_rate_limited);
     test_register("core_models_503", test_core_models_list_failure_503);

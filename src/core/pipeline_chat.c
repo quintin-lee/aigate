@@ -5,6 +5,7 @@
 #include "metrics.h"
 #include "pg_store.h"
 #include "provider_adapter.h"
+#include "provider_openai.h"
 #include "response_cache.h"
 #include "upstream_client.h"
 #include "upstream_hedged.h"
@@ -241,6 +242,31 @@ handle_prompt_cache_accounting_and_headers(chat_req_t* q, long ptok, long cached
         snap.tools_sorted = q->cache_opt_result.tools_sorted;
         cache_optimizer_cache_record(q->ac->cache_opt_cache, &snap);
     }
+}
+
+/** @brief Extract reasoning tokens from parsed chat response JSON (e.g. DeepSeek/OpenAI). */
+static long
+extract_reasoning_tokens_from_json(const char* body, size_t len)
+{
+    if (body == NULL || len == 0) {
+        return 0;
+    }
+    long    tok = 0;
+    json_t* root = json_loads(body, 0, NULL);
+    if (root != NULL) {
+        json_t* jusage = json_object_get(root, "usage");
+        if (jusage != NULL && json_is_object(jusage)) {
+            json_t* jdet = json_object_get(jusage, "completion_tokens_details");
+            if (jdet != NULL && json_is_object(jdet)) {
+                json_t* jrt = json_object_get(jdet, "reasoning_tokens");
+                if (jrt != NULL && json_is_integer(jrt)) {
+                    tok = (long)json_integer_value(jrt);
+                }
+            }
+        }
+        json_decref(root);
+    }
+    return tok;
 }
 
 /** @brief /v1/chat/completions non-streaming failover loop. @return transport rc. */
@@ -487,6 +513,8 @@ handle_chat_sync(chat_req_t* q)
                     handle_prompt_cache_accounting_and_headers(q, ptok, cached_tok);
 
                     double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
+                    long   reasoning_tok =
+                        extract_reasoning_tokens_from_json(parsed_body, parsed_len);
                     record_usage_and_event(q->ac,
                                            q->krec.key_id,
                                            q->model,
@@ -494,7 +522,7 @@ handle_chat_sync(chat_req_t* q)
                                            ptok,
                                            ctok,
                                            cached_tok,
-                                           0,
+                                           reasoning_tok,
                                            total_lat,
                                            win_target->provider,
                                            q->guardrail_act,
@@ -773,6 +801,8 @@ handle_chat_sync(chat_req_t* q)
             handle_prompt_cache_accounting_and_headers(q, ptok, cached_tok);
 
             double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
+            long   reasoning_tok =
+                extract_reasoning_tokens_from_json(parsed_body, parsed_len);
             record_usage_and_event(q->ac,
                                    q->krec.key_id,
                                    q->model,
@@ -780,7 +810,7 @@ handle_chat_sync(chat_req_t* q)
                                    ptok,
                                    ctok,
                                    cached_tok,
-                                   0,
+                                   reasoning_tok,
                                    total_lat,
                                    target->provider,
                                    q->guardrail_act,
@@ -1310,8 +1340,11 @@ handle_chat_stream(chat_req_t* q)
             break;
         }
 
-        long ptok = 0, ctok = 0, cached_tok = 0;
+        long ptok = 0, ctok = 0, cached_tok = 0, reasoning_tok = 0;
         adapter->stream_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok);
+        if (strcmp(target->provider, "openai") == 0) {
+            provider_openai_bridge_get_tokens(bridge, NULL, NULL, NULL, &reasoning_tok);
+        }
         tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.prompt_tokens", ptok);
         tracer_span_set_attr_int(&q->trace_ctx, "root", "gen_ai.usage.completion_tokens", ctok);
 
@@ -1353,7 +1386,7 @@ handle_chat_stream(chat_req_t* q)
                                ptok,
                                ctok,
                                cached_tok,
-                               0,
+                               reasoning_tok,
                                total_lat,
                                target->provider,
                                q->guardrail_act,

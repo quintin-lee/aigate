@@ -256,7 +256,7 @@ TEST_CASE(test_audit_metrics_exposition)
     metrics_inc_audit_webhook_success();
     metrics_inc_audit_webhook_failure();
 
-    char buf[4096];
+    char buf[16384];
     int  rc = metrics_render(NULL, buf, sizeof(buf));
     TEST_ASSERT(rc == 0, "metrics_render failed");
     TEST_ASSERT(strstr(buf, "# TYPE aigate_audit_events_total counter") != NULL,

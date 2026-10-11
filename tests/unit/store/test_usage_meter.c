@@ -439,3 +439,30 @@ TEST_CASE(test_metrics_concurrency_rejection_and_alloc)
     metrics_reset_concurrency_rejected();
     TEST_ASSERT(metrics_get_concurrency_rejected("gpt-4o") == 0, "reset ok");
 }
+
+TEST_CASE(test_metrics_reasoning_tokens_counter)
+{
+    struct um_db db;
+    memset(&db, 0, sizeof db);
+    pg_store_t* ps = open_um_store(&db);
+    TEST_ASSERT(ps != NULL, "open ps");
+    usage_meter_t* um = usage_meter_new(ps, NULL, 0);
+    TEST_ASSERT(um != NULL, "um created");
+
+    /* Record request with 100 prompt tokens, 50 completion tokens, 40 reasoning tokens */
+    um_record_full(um, 1, "claude-3-7-sonnet", 200, 100, 50, 0, 40, 150000000ULL, "anthropic", "");
+
+    TEST_ASSERT(um_total_reasoning_tokens(um) == 40, "total reasoning tokens is 40");
+
+    char buf[16384];
+    int rc = metrics_render(um, buf, sizeof(buf));
+    TEST_ASSERT(rc == 0, "metrics rendered");
+
+    TEST_ASSERT(strstr(buf, "# HELP aigate_tokens_reasoning_total Total reasoning / thinking tokens.") != NULL,
+                "reasoning tokens help string present");
+    TEST_ASSERT(strstr(buf, "aigate_tokens_reasoning_total 40") != NULL,
+                "aigate_tokens_reasoning_total 40 present");
+
+    usage_meter_free(um);
+    pg_store_close(ps);
+}

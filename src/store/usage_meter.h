@@ -72,6 +72,8 @@ long um_total_errors(usage_meter_t* um);
 long um_total_tokens(usage_meter_t* um);
 /** @brief Lifetime cached prompt tokens. */
 long um_total_cached_tokens(usage_meter_t* um);
+/** @brief Lifetime reasoning tokens. */
+long um_total_reasoning_tokens(usage_meter_t* um);
 
 /** @brief Drain the daily accumulator map into @p out (up to @p cap rows),
  *  then flush via pg_ops->flush_usage. Empty map → *n_out = 0, ok.

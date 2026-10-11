@@ -309,6 +309,7 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
     long total_errs = um != NULL ? um_total_errors(um) : 0;
     long total_toks = um != NULL ? um_total_tokens(um) : 0;
     long total_cached = um != NULL ? um_total_cached_tokens(um) : 0;
+    long total_reasoning = um != NULL ? um_total_reasoning_tokens(um) : 0;
 
     n = snprintf(w,
                  rem,
@@ -324,6 +325,9 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
                  "# HELP aigate_tokens_cached_total Total cached prompt tokens.\n"
                  "# TYPE aigate_tokens_cached_total counter\n"
                  "aigate_tokens_cached_total %ld\n"
+                 "# HELP aigate_tokens_reasoning_total Total reasoning / thinking tokens.\n"
+                 "# TYPE aigate_tokens_reasoning_total counter\n"
+                 "aigate_tokens_reasoning_total %ld\n"
                  "# HELP aigate_hedged_requests_total Total hedged backup requests issued.\n"
                  "# TYPE aigate_hedged_requests_total counter\n"
                  "aigate_hedged_requests_total %ld\n"
@@ -334,6 +338,7 @@ metrics_render(usage_meter_t* um, char* out, size_t cap)
                  total_errs,
                  total_toks,
                  total_cached,
+                 total_reasoning,
                  metrics_total_hedged_requests(),
                  metrics_total_hedged_won());
     if (n < 0 || (size_t)n >= rem) {

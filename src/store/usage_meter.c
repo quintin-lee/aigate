@@ -53,6 +53,7 @@ struct usage_meter {
     atomic_long     errs;                /**< Lifetime error count. */
     atomic_long     toks;                /**< Lifetime token count. */
     atomic_long     cached_toks;         /**< Lifetime cached-token count. */
+    atomic_long     reasoning_toks;      /**< Lifetime reasoning-token count. */
     pthread_t       worker;              /**< Background flush thread handle. */
     int             have_worker;         /**< Whether the thread has been created. */
     int             flush_interval_s; /**< Flush interval in seconds (<=0 disables the thread). */
@@ -298,6 +299,7 @@ um_record_full(usage_meter_t* um,
     }
     atomic_fetch_add(&um->toks, toks);
     atomic_fetch_add(&um->cached_toks, cached_prompt_tokens);
+    atomic_fetch_add(&um->reasoning_toks, reasoning_tokens);
 
     pthread_mutex_lock(&um->mtx);
     um_prov_t* pv = prov_slot(um, provider);
@@ -596,7 +598,13 @@ um_total_tokens(usage_meter_t* um)
 long
 um_total_cached_tokens(usage_meter_t* um)
 {
-    return atomic_load(&um->cached_toks);
+    return um == NULL ? 0 : atomic_load(&um->cached_toks);
+}
+
+long
+um_total_reasoning_tokens(usage_meter_t* um)
+{
+    return um == NULL ? 0 : atomic_load(&um->reasoning_toks);
 }
 
 int
