@@ -807,6 +807,12 @@ main(int argc, char** argv)
     extern void test_reasoning_budget_parsing_route_fallback(void);
     test_register("reasoning_budget_parsing_route_fallback", test_reasoning_budget_parsing_route_fallback);
 
+    extern void test_anthropic_thinking_inbound_max_tokens_autolift(void);
+    test_register("anthropic_thinking_inbound_max_tokens_autolift", test_anthropic_thinking_inbound_max_tokens_autolift);
+
+    extern void test_gemini_thinking_inbound_budget(void);
+    test_register("gemini_thinking_inbound_budget", test_gemini_thinking_inbound_budget);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

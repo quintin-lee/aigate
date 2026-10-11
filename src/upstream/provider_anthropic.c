@@ -290,13 +290,30 @@ provider_anthropic_build(const model_rec_t* route,
     }
     json_object_set_new(out, "messages", ant_msgs);
 
+    /* Parse reasoning / thinking config */
+    reasoning_config_t rcfg;
+    parse_reasoning_config(in_req, route, &rcfg);
+
     /* Max tokens: default 4096 if not specified */
+    long max_tokens = 4096;
     json_t* jmt = json_object_get(in_req, "max_tokens");
     if (jmt != NULL && json_is_integer(jmt)) {
-        json_object_set(out, "max_tokens", jmt);
-    } else {
-        json_object_set_new(out, "max_tokens", json_integer(4096));
+        max_tokens = json_integer_value(jmt);
     }
+
+    if (rcfg.enabled && rcfg.budget_tokens > 0) {
+        json_t* th_obj = json_object();
+        json_object_set_new(th_obj, "type", json_string("enabled"));
+        json_object_set_new(th_obj, "budget_tokens", json_integer(rcfg.budget_tokens));
+        json_object_set_new(out, "thinking", th_obj);
+
+        /* Anthropic safety rule: max_tokens MUST be strictly greater than budget_tokens */
+        if (max_tokens <= rcfg.budget_tokens) {
+            max_tokens = rcfg.budget_tokens + 4096;
+        }
+    }
+
+    json_object_set_new(out, "max_tokens", json_integer(max_tokens));
 
     /* Temperature */
     json_t* jtemp = json_object_get(in_req, "temperature");

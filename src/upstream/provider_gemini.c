@@ -346,6 +346,14 @@ provider_gemini_build(const model_rec_t* route,
             json_object_set(gen_cfg, "stopSequences", jstop);
         }
     }
+    reasoning_config_t rcfg;
+    parse_reasoning_config(in_req, route, &rcfg);
+    if (rcfg.enabled && rcfg.budget_tokens > 0) {
+        json_t* th_cfg = json_object();
+        json_object_set_new(th_cfg, "thinkingBudget", json_integer(rcfg.budget_tokens));
+        json_object_set_new(gen_cfg, "thinkingConfig", th_cfg);
+    }
+
     if (json_object_size(gen_cfg) > 0) {
         json_object_set_new(out_req, "generationConfig", gen_cfg);
     } else {
