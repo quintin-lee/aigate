@@ -94,4 +94,14 @@ int provider_openai_resp_to_anthropic(const char* oai_resp,
                                       long*       out_ptok,
                                       long*       out_ctok);
 
+/** @brief Create a streaming bridge that translates OpenAI SSE chunks into Anthropic SSE events. */
+stream_bridge_t* provider_openai_to_anthropic_bridge_new(aigate_response_ctx* rc, const char* model);
+int provider_openai_to_anthropic_bridge_feed(stream_bridge_t* b, const void* chunk, size_t len);
+int provider_openai_to_anthropic_bridge_finish(stream_bridge_t* b);
+void provider_openai_to_anthropic_bridge_free(stream_bridge_t* b);
+void provider_openai_to_anthropic_bridge_get_tokens(stream_bridge_t* b,
+                                                    long*            out_ptok,
+                                                    long*            out_ctok,
+                                                    long*            out_cached_tok);
+
 #endif /* AIGATE_PROVIDER_OPENAI_H */

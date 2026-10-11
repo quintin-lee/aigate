@@ -834,6 +834,9 @@ main(int argc, char** argv)
     extern void test_openai_to_anthropic_thinking_sync(void);
     test_register("openai_to_anthropic_thinking_sync", test_openai_to_anthropic_thinking_sync);
 
+    extern void test_openai_to_anthropic_thinking_stream(void);
+    test_register("openai_to_anthropic_thinking_stream", test_openai_to_anthropic_thinking_stream);
+
     extern void test_thinking_watermark_clean_pass(void);
     test_register("thinking_watermark_clean_pass", test_thinking_watermark_clean_pass);
 

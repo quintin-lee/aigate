@@ -215,6 +215,14 @@ anthropic_stream_chunk_cb(void* user_data, const void* chunk, size_t len)
     return 0;
 }
 
+/** @brief OpenAI-to-Anthropic streaming upstream callback: feeds chunks into the translation bridge. */
+static int
+openai_to_anthropic_stream_chunk_cb(void* user_data, const void* chunk, size_t len)
+{
+    stream_bridge_t* b = (stream_bridge_t*)user_data;
+    return provider_openai_to_anthropic_bridge_feed(b, chunk, len);
+}
+
 /** @brief Anthropic /v1/messages end-to-end pipeline (stages same as handle_responses, error body is Anthropic-shaped).
  *  @return Always 0; errors written directly to @p rc. */
 int
@@ -391,11 +399,37 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
                      target->upstream_key);
             last_provider = target->provider;
 
-            char url[1024];
-            build_anthropic_url(cur_route.endpoint, url, sizeof url);
+        bool is_openai = (strcmp(cur_route.provider, "openai") == 0);
+        char url[1024];
+        const char* extra_hdrs[4][2] = {{0}};
+        int         n_extra_hdrs = 0;
+        char        auth_hdr[1100];
+        char*       eff_body = (char*)raw_body;
+        size_t      eff_len = raw_len;
+        char*       oai_converted_body = NULL;
+        stream_bridge_t* oai_bridge = NULL;
 
-            const char* extra_hdrs[4][2] = {{0}};
-            int         n_extra_hdrs = 0;
+        anthropic_stream_ctx_t sctx;
+        memset(&sctx, 0, sizeof sctx);
+        sctx.rc = rc;
+
+        if (is_openai) {
+            build_openai_chat_url(cur_route.endpoint, url, sizeof url);
+            if (cur_route.upstream_key[0] != '\0') {
+                snprintf(auth_hdr, sizeof auth_hdr, "Bearer %s", cur_route.upstream_key);
+                extra_hdrs[n_extra_hdrs][0] = "Authorization";
+                extra_hdrs[n_extra_hdrs][1] = auth_hdr;
+                n_extra_hdrs++;
+            }
+            extra_hdrs[n_extra_hdrs][0] = "Content-Type";
+            extra_hdrs[n_extra_hdrs][1] = "application/json";
+            n_extra_hdrs++;
+            if (anthropic_req_to_openai(jbody, model, &oai_converted_body, &eff_len) == 0) {
+                eff_body = oai_converted_body;
+            }
+            oai_bridge = provider_openai_to_anthropic_bridge_new(rc, model);
+        } else {
+            build_anthropic_url(cur_route.endpoint, url, sizeof url);
             if (cur_route.upstream_key[0] != '\0') {
                 extra_hdrs[n_extra_hdrs][0] = "x-api-key";
                 extra_hdrs[n_extra_hdrs][1] = cur_route.upstream_key;
@@ -404,95 +438,115 @@ handle_anthropic_messages(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
             extra_hdrs[n_extra_hdrs][0] = "anthropic-version";
             extra_hdrs[n_extra_hdrs][1] = "2023-06-01";
             n_extra_hdrs++;
-
-            anthropic_stream_ctx_t sctx;
-            memset(&sctx, 0, sizeof sctx);
-            sctx.rc = rc;
             anthropic_sniffer_init(&sctx.sniffer);
+        }
 
-            int      status = 0;
-            char*    sbody = NULL;
-            size_t   slen = 0;
-            uint64_t t0 = mono_ns();
-            long     silence_timeout_ms =
-                ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
-            int urc = upstream_stream_call(url,
-                                           cur_route.upstream_key,
-                                           extra_hdrs,
-                                           n_extra_hdrs,
-                                           raw_body,
-                                           raw_len,
-                                           silence_timeout_ms,
-                                           anthropic_stream_chunk_cb,
-                                           &sctx,
-                                           &status,
-                                           &sbody,
-                                           &slen);
+        int      status = 0;
+        char*    sbody = NULL;
+        size_t   slen = 0;
+        uint64_t t0 = mono_ns();
+        long     silence_timeout_ms =
+            ac->default_timeout_ms > 0 ? (long)ac->default_timeout_ms : 30000L;
+        upstream_chunk_fn chunk_cb =
+            is_openai ? openai_to_anthropic_stream_chunk_cb : anthropic_stream_chunk_cb;
+        void* chunk_arg = is_openai ? (void*)oai_bridge : (void*)&sctx;
 
-            if (n_candidates == 1 && !sctx.headers_sent && (urc != 0 || status >= 500)) {
-                struct timespec sl = {0, 200 * 1000000}; /* 200ms */
-                nanosleep(&sl, NULL);
-                free(sbody);
-                sbody = NULL;
-                urc = upstream_stream_call(url,
-                                           cur_route.upstream_key,
-                                           extra_hdrs,
-                                           n_extra_hdrs,
-                                           raw_body,
-                                           raw_len,
-                                           silence_timeout_ms,
-                                           anthropic_stream_chunk_cb,
-                                           &sctx,
-                                           &status,
-                                           &sbody,
-                                           &slen);
+        int urc = upstream_stream_call(url,
+                                       cur_route.upstream_key,
+                                       extra_hdrs,
+                                       n_extra_hdrs,
+                                       eff_body,
+                                       eff_len,
+                                       silence_timeout_ms,
+                                       chunk_cb,
+                                       chunk_arg,
+                                       &status,
+                                       &sbody,
+                                       &slen);
+
+        bool headers_sent = is_openai ? rc->headers_sent : sctx.headers_sent;
+
+        if (n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {
+            struct timespec sl = {0, 200 * 1000000}; /* 200ms */
+            nanosleep(&sl, NULL);
+            free(sbody);
+            sbody = NULL;
+            urc = upstream_stream_call(url,
+                                       cur_route.upstream_key,
+                                       extra_hdrs,
+                                       n_extra_hdrs,
+                                       eff_body,
+                                       eff_len,
+                                       silence_timeout_ms,
+                                       chunk_cb,
+                                       chunk_arg,
+                                       &status,
+                                       &sbody,
+                                       &slen);
+            headers_sent = is_openai ? rc->headers_sent : sctx.headers_sent;
+        }
+
+        if (oai_converted_body != NULL) {
+            free(oai_converted_body);
+            oai_converted_body = NULL;
+        }
+        uint64_t lat = mono_ns() - t0;
+        total_lat += lat;
+
+        bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
+
+        if (!headers_sent) {
+            if (oai_bridge != NULL) {
+                provider_openai_to_anthropic_bridge_free(oai_bridge);
+                oai_bridge = NULL;
             }
-            uint64_t lat = mono_ns() - t0;
-            total_lat += lat;
+            cb_record_failure(ac->cb, model, target->endpoint, status);
 
-            bool is_failover = (urc != 0 || status == 429 || (status >= 500 && status <= 504));
-
-            if (!sctx.headers_sent) {
-                cb_record_failure(ac->cb, model, target->endpoint, status);
-
-                if (!is_failover && status >= 400) {
-                    if (sbody != NULL && urc == 0) {
-                        record_usage_and_event(ac,
-                                               krec.key_id,
-                                               model,
-                                               status,
-                                               0,
-                                               0,
-                                               0,
-                                               0,
-                                               total_lat,
-                                               target->provider,
-                                               NULL,
-                                               0.0);
-                        int rv = aigate_write_json(rc, status, sbody, slen);
-                        free(sbody);
-                        json_decref(jbody);
-                        key_rec_free(&krec);
-                        return rv;
-                    }
+            if (!is_failover && status >= 400) {
+                if (sbody != NULL && urc == 0) {
+                    record_usage_and_event(ac,
+                                           krec.key_id,
+                                           model,
+                                           status,
+                                           0,
+                                           0,
+                                           0,
+                                           0,
+                                           total_lat,
+                                           target->provider,
+                                           NULL,
+                                           0.0);
+                    int rv = aigate_write_json(rc, status, sbody, slen);
                     free(sbody);
-                    break;
-                }
-
-                if (ci + 1 < n_candidates) {
-                    AIGATE_LOG_WARN("anthropic stream failover for model %s to %s",
-                                    model,
-                                    candidates[ci + 1].provider);
-                    metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
-                    free(sbody);
-                    continue;
+                    json_decref(jbody);
+                    key_rec_free(&krec);
+                    return rv;
                 }
                 free(sbody);
                 break;
             }
 
-            long ptok = 0, ctok = 0, cached_tok = 0;
+            if (ci + 1 < n_candidates) {
+                AIGATE_LOG_WARN("anthropic stream failover for model %s to %s",
+                                model,
+                                candidates[ci + 1].provider);
+                metrics_inc_failover(model, target->provider, candidates[ci + 1].provider);
+                free(sbody);
+                continue;
+            }
+            free(sbody);
+            break;
+        }
+
+        long ptok = 0, ctok = 0, cached_tok = 0;
+        if (is_openai) {
+            provider_openai_to_anthropic_bridge_finish(oai_bridge);
+            provider_openai_to_anthropic_bridge_get_tokens(oai_bridge, &ptok, &ctok, &cached_tok);
+            provider_openai_to_anthropic_bridge_free(oai_bridge);
+            oai_bridge = NULL;
+        } else {
             anthropic_sniffer_get_tokens(&sctx.sniffer, &ptok, &ctok, &cached_tok);
+        }
 
             if (urc != 0) {
                 const char* err_msg = (urc == -110) ? "stream interrupted: silence timeout"

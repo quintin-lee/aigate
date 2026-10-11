@@ -376,6 +376,43 @@ TEST_CASE(test_openai_to_anthropic_thinking_sync)
     json_decref(root);
 }
 
+TEST_CASE(test_openai_to_anthropic_thinking_stream)
+{
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc;
+    memset(&rc, 0, sizeof(rc));
+    rc.write = mock_stream_write;
+    rc.impl = &sink;
+
+    stream_bridge_t* b = provider_openai_to_anthropic_bridge_new(&rc, "deepseek-r1");
+    TEST_ASSERT(b != NULL, "bridge created");
+
+    /* Feed OpenAI chunk with reasoning_content */
+    const char* chunk1 =
+        "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-r1\","
+        "\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Solving equation...\"},\"finish_reason\":null}]}\n\n";
+    provider_openai_to_anthropic_bridge_feed(b, chunk1, strlen(chunk1));
+
+    /* Feed OpenAI chunk with final content */
+    const char* chunk2 =
+        "data: {\"id\":\"c2\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-r1\","
+        "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x = 5\"},\"finish_reason\":\"stop\"}]}\n\n";
+    provider_openai_to_anthropic_bridge_feed(b, chunk2, strlen(chunk2));
+
+    provider_openai_to_anthropic_bridge_finish(b);
+    provider_openai_to_anthropic_bridge_free(b);
+
+    /* Verify Anthropic SSE events */
+    TEST_ASSERT(strstr(sink.accum, "event: content_block_start") != NULL, "block start emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"type\":\"thinking\"") != NULL, "thinking block start");
+    TEST_ASSERT(strstr(sink.accum, "event: content_block_delta") != NULL, "delta emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"type\":\"thinking_delta\"") != NULL, "thinking delta");
+    TEST_ASSERT(strstr(sink.accum, "Solving equation...") != NULL, "thinking text inside delta");
+    TEST_ASSERT(strstr(sink.accum, "\"type\":\"text_delta\"") != NULL, "text delta emitted");
+    TEST_ASSERT(strstr(sink.accum, "x = 5") != NULL, "text content emitted");
+}
+
 #include "watermark_engine.h"
 
 TEST_CASE(test_thinking_watermark_clean_pass)
