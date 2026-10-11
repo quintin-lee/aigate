@@ -133,3 +133,47 @@ TEST_CASE(test_gemini_thinking_inbound_budget)
 
     json_decref(out);
 }
+
+TEST_CASE(test_anthropic_thinking_outbound_sync)
+{
+    const char* ant_resp =
+        "{\"id\":\"msg_12345\","
+        "\"type\":\"message\","
+        "\"role\":\"assistant\","
+        "\"content\":["
+        "{\"type\":\"thinking\",\"thinking\":\"Step 1: Analyze problem. Step 2: Formulate solution.\"},"
+        "{\"type\":\"text\",\"text\":\"The solution is 42.\"}"
+        "],"
+        "\"stop_reason\":\"end_turn\","
+        "\"usage\":{\"input_tokens\":50,\"output_tokens\":120}"
+        "}";
+
+    char* out_openai = NULL;
+    size_t out_len = 0;
+    long ptok = 0, ctok = 0;
+
+    int rc = provider_anthropic_resp_to_openai(ant_resp, "claude-3-7-sonnet", &out_openai, &out_len, &ptok, &ctok);
+    TEST_ASSERT(rc == 0, "translation success");
+    TEST_ASSERT(out_openai != NULL, "out_openai non-null");
+
+    json_t* root = json_loads(out_openai, 0, NULL);
+    free(out_openai);
+    TEST_ASSERT(root != NULL, "json valid");
+
+    json_t* choices = json_object_get(root, "choices");
+    TEST_ASSERT(choices && json_is_array(choices), "choices array");
+    json_t* c0 = json_array_get(choices, 0);
+    json_t* msg = json_object_get(c0, "message");
+    TEST_ASSERT(msg != NULL, "message present");
+
+    json_t* jreasoning = json_object_get(msg, "reasoning_content");
+    TEST_ASSERT(jreasoning && json_is_string(jreasoning), "reasoning_content present");
+    TEST_ASSERT(strcmp(json_string_value(jreasoning), "Step 1: Analyze problem. Step 2: Formulate solution.") == 0,
+                "reasoning_content matches thinking text");
+
+    json_t* jcontent = json_object_get(msg, "content");
+    TEST_ASSERT(jcontent && json_is_string(jcontent), "content present");
+    TEST_ASSERT(strcmp(json_string_value(jcontent), "The solution is 42.") == 0, "content matches text");
+
+    json_decref(root);
+}

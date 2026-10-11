@@ -813,6 +813,9 @@ main(int argc, char** argv)
     extern void test_gemini_thinking_inbound_budget(void);
     test_register("gemini_thinking_inbound_budget", test_gemini_thinking_inbound_budget);
 
+    extern void test_anthropic_thinking_outbound_sync(void);
+    test_register("anthropic_thinking_outbound_sync", test_anthropic_thinking_outbound_sync);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

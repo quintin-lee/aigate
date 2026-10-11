@@ -475,9 +475,11 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
         }
     }
 
-    /* Scan content array: collect text and tool_use blocks */
+    /* Scan content array: collect text, thinking, and tool_use blocks */
     char*   content_text = NULL;
     size_t  ct_len = 0;
+    char*   thinking_text = NULL;
+    size_t  th_len = 0;
     json_t* tool_calls_arr = json_array();
 
     json_t* jcontent = json_object_get(root, "content");
@@ -492,7 +494,20 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
             }
             const char* btype = json_string_value(jtype);
 
-            if (strcmp(btype, "text") == 0) {
+            if (strcmp(btype, "thinking") == 0) {
+                json_t* jth = json_object_get(block, "thinking");
+                if (jth != NULL && json_is_string(jth)) {
+                    const char* t = json_string_value(jth);
+                    size_t      tlen = strlen(t);
+                    char*       nbuf = realloc(thinking_text, th_len + tlen + 1);
+                    if (nbuf != NULL) {
+                        thinking_text = nbuf;
+                        memcpy(thinking_text + th_len, t, tlen);
+                        th_len += tlen;
+                        thinking_text[th_len] = '\0';
+                    }
+                }
+            } else if (strcmp(btype, "text") == 0) {
                 json_t* jt = json_object_get(block, "text");
                 if (jt != NULL && json_is_string(jt)) {
                     const char* t = json_string_value(jt);
@@ -553,6 +568,10 @@ provider_anthropic_resp_to_openai(const char* anthropic_resp,
     json_object_set_new(choice, "index", json_integer(0));
     json_t* msg = json_object();
     json_object_set_new(msg, "role", json_string("assistant"));
+    if (thinking_text != NULL) {
+        json_object_set_new(msg, "reasoning_content", json_string(thinking_text));
+        free(thinking_text);
+    }
     /* content: text if present, null if pure tool_calls */
     if (content_text && content_text[0] != '\0') {
         json_object_set_new(msg, "content", json_string(content_text));
