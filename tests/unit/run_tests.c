@@ -801,6 +801,9 @@ main(int argc, char** argv)
     extern void test_admin_key_is_canary_field(void);
     test_register("admin_key_is_canary_field", test_admin_key_is_canary_field);
 
+    extern void test_admin_model_reasoning_crud(void);
+    test_register("admin_model_reasoning_crud", test_admin_model_reasoning_crud);
+
     extern void test_reasoning_budget_parsing_explicit(void);
     test_register("reasoning_budget_parsing_explicit", test_reasoning_budget_parsing_explicit);
 

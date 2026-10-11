@@ -1175,6 +1175,17 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
             m.max_concurrent = mc;
         }
     }
+    json_t* jsr = json_object_get(jbody, "supports_reasoning");
+    if (jsr != NULL && json_is_boolean(jsr)) {
+        m.supports_reasoning = json_is_true(jsr);
+    }
+    json_t* jbudget = json_object_get(jbody, "default_thinking_budget");
+    if (jbudget != NULL && json_is_integer(jbudget)) {
+        long budget = (long)json_integer_value(jbudget);
+        if (budget >= 0) {
+            m.default_thinking_budget = budget;
+        }
+    }
     m.enabled = 1;
 
     int rc = pg_store_ops(adm->ps)->create_key != NULL
@@ -1198,6 +1209,8 @@ model_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
     json_object_set_new(out, "hedged_delay_ms", json_integer(m.hedged_delay_ms));
     json_object_set_new(out, "hedge_budget_pct", json_integer(m.hedge_budget_pct));
     json_object_set_new(out, "max_concurrent", json_integer(m.max_concurrent));
+    json_object_set_new(out, "supports_reasoning", json_boolean(m.supports_reasoning));
+    json_object_set_new(out, "default_thinking_budget", json_integer(m.default_thinking_budget));
     json_object_set_new(out,
                         "system_prompt",
                         m.system_prompt[0] != '\0' ? json_string(m.system_prompt) : json_null());
@@ -1288,6 +1301,8 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
                             recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt)
                                                              : json_null());
         json_object_set_new(o, "prompt_mode", json_string(prompt_mode_str(recs[i].prompt_mode)));
+        json_object_set_new(o, "supports_reasoning", json_boolean(recs[i].supports_reasoning));
+        json_object_set_new(o, "default_thinking_budget", json_integer(recs[i].default_thinking_budget));
 
         json_array_append_new(arr, o);
         model_rec_free(&recs[i]);
@@ -1445,6 +1460,19 @@ model_patch(
         if (mc >= 0) {
             m.max_concurrent = mc;
             mask |= MMASK_MAX_CONCURRENT;
+        }
+    }
+    v = json_object_get(jbody, "supports_reasoning");
+    if (v != NULL && json_is_boolean(v)) {
+        m.supports_reasoning = json_is_true(v);
+        mask |= MMASK_SUPPORTS_REASONING;
+    }
+    v = json_object_get(jbody, "default_thinking_budget");
+    if (v != NULL && json_is_integer(v)) {
+        long budget = (long)json_integer_value(v);
+        if (budget >= 0) {
+            m.default_thinking_budget = budget;
+            mask |= MMASK_THINKING_BUDGET;
         }
     }
     json_decref(jbody);

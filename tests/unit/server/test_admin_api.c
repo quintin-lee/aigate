@@ -400,6 +400,12 @@ fake_update_model(void* ctx, const model_rec_t* m, int mask)
             if (mask & MMASK_PROMPT_MODE) {
                 db->models[i].prompt_mode = m->prompt_mode;
             }
+            if (mask & MMASK_THINKING_BUDGET) {
+                db->models[i].default_thinking_budget = m->default_thinking_budget;
+            }
+            if (mask & MMASK_SUPPORTS_REASONING) {
+                db->models[i].supports_reasoning = m->supports_reasoning;
+            }
             return 0;
         }
     }
@@ -4517,6 +4523,103 @@ TEST_CASE(test_admin_key_is_canary_field)
     TEST_ASSERT(json_is_false(json_object_get(json_array_get(arr, 0), "is_canary")),
                 "is_canary updated to false");
     json_decref(j);
+
+    teardown_admin(ps, &core, &db);
+}
+
+TEST_CASE(test_admin_model_reasoning_crud)
+{
+    struct fake_db db;
+    pg_ops_t       ops;
+    pg_store_t*    ps;
+    aigate_core    core;
+    admin_ctx_t    adm;
+    char           admin_hash[65];
+
+    setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
+
+    /* 1. POST /admin/v1/models with supports_reasoning=true, default_thinking_budget=4096 */
+    const char* post_body =
+        "{\"name\":\"deepseek-r1\",\"provider\":\"openai\",\"endpoint\":\"https://api.deepseek.com/v1\","
+        "\"supports_reasoning\":true,\"default_thinking_budget\":4096}";
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+    int    rc = admin_dispatch(&adm,
+                            "/admin/v1/models",
+                            "POST",
+                            NULL,
+                            "admin-secret-token",
+                            post_body,
+                            strlen(post_body),
+                            &status,
+                            &body,
+                            &len);
+    TEST_ASSERT(rc == 0 && status == 201, "POST /models -> 201, got %d", status);
+    free(body);
+
+    /* 2. GET /admin/v1/models: verify both fields */
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models",
+                        "GET",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "GET /models -> 200, got %d", status);
+    json_t* root = json_loads(body, 0, NULL);
+    free(body);
+    TEST_ASSERT(root != NULL, "json valid");
+    json_t* models = json_object_get(root, "models");
+    TEST_ASSERT(json_is_array(models) && json_array_size(models) == 1, "1 model in list");
+    json_t* m0 = json_array_get(models, 0);
+    json_t* jsr = json_object_get(m0, "supports_reasoning");
+    TEST_ASSERT(jsr != NULL && json_is_true(jsr), "supports_reasoning true");
+    json_t* jtb = json_object_get(m0, "default_thinking_budget");
+    TEST_ASSERT(jtb != NULL && json_integer_value(jtb) == 4096, "default_thinking_budget 4096");
+    json_decref(root);
+
+    /* 3. PATCH /admin/v1/models/deepseek-r1: update default_thinking_budget to 8192 */
+    const char* patch_body = "{\"default_thinking_budget\":8192}";
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models/deepseek-r1",
+                        "PATCH",
+                        NULL,
+                        "admin-secret-token",
+                        patch_body,
+                        strlen(patch_body),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "PATCH /models/deepseek-r1 -> 200, got %d", status);
+    free(body);
+
+    /* 4. GET again and verify updated budget */
+    body = NULL;
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/models",
+                        "GET",
+                        NULL,
+                        "admin-secret-token",
+                        NULL,
+                        0,
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "GET /models -> 200");
+    root = json_loads(body, 0, NULL);
+    free(body);
+    models = json_object_get(root, "models");
+    m0 = json_array_get(models, 0);
+    jtb = json_object_get(m0, "default_thinking_budget");
+    TEST_ASSERT(jtb != NULL && json_integer_value(jtb) == 8192,
+                "default_thinking_budget updated to 8192");
+    json_decref(root);
 
     teardown_admin(ps, &core, &db);
 }
