@@ -99,6 +99,16 @@ uint64_t mono_ns(void);
 double calc_req_cost(const model_rec_t* route, long prompt, long completion, long cached);
 
 /**
+ * @brief Calculate estimated request cost in USD based on model pricing and token counts,
+ *        including separate reasoning token pricing.
+ */
+double calc_req_cost_ext(const model_rec_t* route,
+                         long               prompt,
+                         long               completion,
+                         long               cached,
+                         long               reasoning);
+
+/**
  * @brief Calculate estimated dollar savings from upstream prompt cache hits.
  * @param[in] route  Model routing record containing pricing JSON.
  * @param[in] cached Cached prompt tokens count.

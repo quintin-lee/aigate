@@ -167,13 +167,18 @@ extract_prompt_snippet(json_t* jbody, char* out, size_t out_sz)
     }
 }
 
-/** @brief Estimate request cost from route pricing (pricing_json in_mtok/out_mtok per MTok).
+/** @brief Estimate request cost from route pricing (pricing_json in_mtok/out_mtok/reasoning_mtok per MTok).
  *  @param route      Matched route record; NULL or missing pricing = free.
  *  @param prompt     Total input tokens; @param completion output tokens.
  *  @param cached     Cache-hit tokens among input, priced at cached_mtok_discount (default 1.0).
- *  @return Cost = (unhit_input*in_price + cached_input*in_price*discount + output*out_price) / 1e6; returns 0.0 if pricing missing/invalid. */
+ *  @param reasoning  Reasoning output tokens, priced at reasoning_mtok if configured, else out_mtok.
+ *  @return Cost in USD; returns 0.0 if pricing missing/invalid. */
 double
-calc_req_cost(const model_rec_t* route, long prompt, long completion, long cached)
+calc_req_cost_ext(const model_rec_t* route,
+                  long               prompt,
+                  long               completion,
+                  long               cached,
+                  long               reasoning)
 {
     if (route == NULL || route->pricing_json[0] == '\0') {
         return 0.0;
@@ -187,22 +192,45 @@ calc_req_cost(const model_rec_t* route, long prompt, long completion, long cache
         return 0.0;
     }
     json_t* jin = json_object_get(jp, "in_mtok");
+    if (jin == NULL) {
+        jin = json_object_get(jp, "input_mtok");
+    }
     json_t* jout = json_object_get(jp, "out_mtok");
+    if (jout == NULL) {
+        jout = json_object_get(jp, "output_mtok");
+    }
     if (jin == NULL || jout == NULL || !json_is_number(jin) || !json_is_number(jout)) {
         json_decref(jp);
         return 0.0;
     }
-    double  in_mtok = json_number_value(jin);
-    double  out_mtok = json_number_value(jout);
+    double in_mtok = json_number_value(jin);
+    double out_mtok = json_number_value(jout);
+
     json_t* jdisc = json_object_get(jp, "cached_mtok_discount");
     double  cached_discount =
         (jdisc != NULL && json_is_number(jdisc)) ? json_number_value(jdisc) : 1.0;
+
+    json_t* jreasoning = json_object_get(jp, "reasoning_mtok");
+    double  reasoning_mtok = (jreasoning != NULL && json_is_number(jreasoning))
+                                 ? json_number_value(jreasoning)
+                                 : out_mtok;
     json_decref(jp);
 
     long unhit_prompt = (prompt >= cached) ? (prompt - cached) : 0;
-    return ((double)unhit_prompt * in_mtok + (double)cached * in_mtok * cached_discount +
-            (double)completion * out_mtok) /
+    long normal_completion = (completion >= reasoning) ? (completion - reasoning) : 0;
+    long billed_reasoning = (completion >= reasoning) ? reasoning : completion;
+
+    return ((double)unhit_prompt * in_mtok +
+            (double)cached * in_mtok * cached_discount +
+            (double)normal_completion * out_mtok +
+            (double)billed_reasoning * reasoning_mtok) /
            1000000.0;
+}
+
+double
+calc_req_cost(const model_rec_t* route, long prompt, long completion, long cached)
+{
+    return calc_req_cost_ext(route, prompt, completion, cached, 0);
 }
 
 double

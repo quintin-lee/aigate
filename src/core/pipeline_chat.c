@@ -564,9 +564,10 @@ handle_chat_sync(chat_req_t* q)
 
                     handle_prompt_cache_accounting_and_headers(q, ptok, cached_tok);
 
-                    double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
-                    long   reasoning_tok =
+                    long reasoning_tok =
                         extract_reasoning_tokens_from_json(parsed_body, parsed_len);
+                    double req_cost =
+                        calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
                     record_usage_and_event(q->ac,
                                            q->krec.key_id,
                                            q->model,
@@ -855,9 +856,10 @@ handle_chat_sync(chat_req_t* q)
 
             handle_prompt_cache_accounting_and_headers(q, ptok, cached_tok);
 
-            double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
-            long   reasoning_tok =
+            long reasoning_tok =
                 extract_reasoning_tokens_from_json(parsed_body, parsed_len);
+            double req_cost =
+                calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
             record_usage_and_event(q->ac,
                                    q->krec.key_id,
                                    q->model,
@@ -1431,7 +1433,8 @@ handle_chat_stream(chat_req_t* q)
             if (q->rc->write != NULL) {
                 q->rc->write(q->rc->impl, sse_err, strlen(sse_err), true);
             }
-            double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
+            double req_cost =
+                calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
             settle_success(
                 q, PIPE_UPSTREAM, ptok, ctok, cached_tok, total_lat, target->provider, req_cost);
             adapter->stream_bridge_free(bridge);
@@ -1446,7 +1449,8 @@ handle_chat_stream(chat_req_t* q)
 
         cb_record_success(q->ac->cb, q->model, target->endpoint);
         adapter->stream_bridge_finish(bridge);
-        double req_cost = calc_req_cost(&q->route, ptok, ctok, cached_tok);
+        double req_cost =
+            calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
         record_usage_and_event(q->ac,
                                q->krec.key_id,
                                q->model,

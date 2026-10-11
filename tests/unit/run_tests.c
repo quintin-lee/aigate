@@ -863,6 +863,15 @@ main(int argc, char** argv)
     extern void test_gemini_thinking_stream_raw_reasoning_content(void);
     test_register("gemini_thinking_stream_raw_reasoning_content", test_gemini_thinking_stream_raw_reasoning_content);
 
+    extern void test_pricing_reasoning_mtok_calculation(void);
+    test_register("pricing_reasoning_mtok_calculation", test_pricing_reasoning_mtok_calculation);
+
+    extern void test_pricing_reasoning_fallback_calculation(void);
+    test_register("pricing_reasoning_fallback_calculation", test_pricing_reasoning_fallback_calculation);
+
+    extern void test_pricing_reasoning_more_than_completion_clamp(void);
+    test_register("pricing_reasoning_more_than_completion_clamp", test_pricing_reasoning_more_than_completion_clamp);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

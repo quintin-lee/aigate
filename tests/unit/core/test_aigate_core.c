@@ -23,6 +23,7 @@
 #include "ratelimit.h"
 
 #include <jansson.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1659,4 +1660,52 @@ TEST_CASE(test_core_canary_auto_ban)
     aigate_core_shutdown(&ac);
     pg_store_close(ps);
     freed_db(&db);
+}
+
+TEST_CASE(test_pricing_reasoning_mtok_calculation)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+    snprintf(route.pricing_json, sizeof(route.pricing_json),
+             "{\"in_mtok\":2.0,\"out_mtok\":8.0,\"reasoning_mtok\":16.0,\"cached_mtok_discount\":0.25}");
+
+    /* prompt=1000, completion=2000, cached=400, reasoning=500
+     * unhit_prompt = 600
+     * normal_completion = 1500
+     * cost = (600 * 2.0 + 400 * 2.0 * 0.25 + 1500 * 8.0 + 500 * 16.0) / 1e6
+     *      = (1200 + 200 + 12000 + 8000) / 1e6 = 21400 / 1e6 = 0.0214 USD
+     */
+    double cost = calc_req_cost_ext(&route, 1000, 2000, 400, 500);
+    TEST_ASSERT(fabs(cost - 0.0214) < 1e-9, "cost calculation with reasoning_mtok matches expected 0.0214, got %f", cost);
+}
+
+TEST_CASE(test_pricing_reasoning_fallback_calculation)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+    snprintf(route.pricing_json, sizeof(route.pricing_json),
+             "{\"in_mtok\":2.0,\"out_mtok\":8.0}");
+
+    /* No reasoning_mtok configured: fallback to out_mtok (8.0) */
+    double cost_ext = calc_req_cost_ext(&route, 1000, 2000, 0, 500);
+    double cost_std = calc_req_cost(&route, 1000, 2000, 0);
+
+    /* (1000 * 2.0 + 2000 * 8.0) / 1e6 = 18000 / 1e6 = 0.018 USD */
+    TEST_ASSERT(fabs(cost_ext - 0.018) < 1e-9, "fallback cost matches 0.018, got %f", cost_ext);
+    TEST_ASSERT(fabs(cost_ext - cost_std) < 1e-9, "ext fallback equals std calc_req_cost");
+}
+
+TEST_CASE(test_pricing_reasoning_more_than_completion_clamp)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+    snprintf(route.pricing_json, sizeof(route.pricing_json),
+             "{\"in_mtok\":1.0,\"out_mtok\":5.0,\"reasoning_mtok\":10.0}");
+
+    /* Abnormal: reasoning > completion (e.g. reasoning=150, completion=100)
+     * Clamped: normal_completion = 0, billed_reasoning = 100
+     * cost = (100 * 10.0) / 1e6 = 1000 / 1e6 = 0.001 USD
+     */
+    double cost = calc_req_cost_ext(&route, 0, 100, 0, 150);
+    TEST_ASSERT(fabs(cost - 0.001) < 1e-9, "cost clamped when reasoning > completion, got %f", cost);
 }
