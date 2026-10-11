@@ -77,6 +77,17 @@ parse_reasoning_config(json_t* req_body, const model_rec_t* route, reasoning_con
     memset(out_cfg, 0, sizeof(*out_cfg));
 
     if (req_body != NULL && json_is_object(req_body)) {
+        /* Check tag emulation configuration */
+        json_t* jtm = json_object_get(req_body, "thinking_mode");
+        if (jtm == NULL) {
+            jtm = json_object_get(req_body, "thinking_format");
+        }
+        if (jtm != NULL && json_is_string(jtm)) {
+            if (strcasecmp(json_string_value(jtm), "tag") == 0) {
+                out_cfg->tag_emulation = true;
+            }
+        }
+
         /* 1. Explicit Anthropic thinking object */
         json_t* jth = json_object_get(req_body, "thinking");
         if (jth != NULL && json_is_object(jth)) {

@@ -21,6 +21,7 @@ typedef struct reasoning_config {
     bool     enabled;         /**< True if reasoning/thinking is active */
     long     budget_tokens;   /**< Reasoning token budget cap (0 = unlimited / model default) */
     char     effort[16];      /**< low | medium | high | none */
+    bool     tag_emulation;   /**< True to output <think>...</think> in content */
 } reasoning_config_t;
 
 /** @brief SSE streaming thinking state machine state */

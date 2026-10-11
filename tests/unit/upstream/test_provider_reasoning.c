@@ -63,6 +63,34 @@ TEST_CASE(test_reasoning_budget_parsing_route_fallback)
     TEST_ASSERT(cfg.budget_tokens == 8192, "fallback to default_thinking_budget");
 }
 
+TEST_CASE(test_reasoning_tag_emulation_parsing)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+
+    /* 1. Inbound JSON body contains thinking_mode: "tag" */
+    const char* json_str = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2048},\"thinking_mode\":\"tag\"}";
+    json_t* req = json_loads(json_str, 0, NULL);
+    TEST_ASSERT(req != NULL, "json valid");
+
+    reasoning_config_t cfg;
+    int rc = parse_reasoning_config(req, &route, &cfg);
+    json_decref(req);
+
+    TEST_ASSERT(rc == 0, "parsed ok");
+    TEST_ASSERT(cfg.enabled == true, "thinking enabled");
+    TEST_ASSERT(cfg.budget_tokens == 2048, "budget 2048");
+    TEST_ASSERT(cfg.tag_emulation == true, "tag emulation true");
+
+    /* 2. Inbound JSON body contains thinking_format: "tag" */
+    const char* json_str2 = "{\"thinking_format\":\"tag\"}";
+    json_t* req2 = json_loads(json_str2, 0, NULL);
+    rc = parse_reasoning_config(req2, &route, &cfg);
+    json_decref(req2);
+    TEST_ASSERT(rc == 0, "parsed ok");
+    TEST_ASSERT(cfg.tag_emulation == true, "thinking_format tag detected");
+}
+
 #include "provider_anthropic.h"
 #include "provider_gemini.h"
 
