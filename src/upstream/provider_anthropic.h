@@ -74,6 +74,11 @@ typedef struct anthropic_bridge {
         tool_args_buf; /**< malloc'd dynamic buffer accumulating input_json_delta; NULL = empty. */
     size_t tool_args_len; /**< Bytes used in tool_args_buf. */
     int    tool_index;    /**< tool_calls array index (increments per completed block). */
+    /* Thinking / reasoning state */
+    bool in_thinking;    /**< Currently accumulating a thinking content block. */
+    bool tag_emulation;  /**< Emulate <thinking> tags in content stream for legacy clients. */
+    bool tag_opened;     /**< Emulation <thinking> tag already emitted. */
+    bool tag_closed;     /**< Emulation </thinking> tag already emitted. */
 } anthropic_bridge_t;
 
 /** @brief Initialize bridge with response context. */

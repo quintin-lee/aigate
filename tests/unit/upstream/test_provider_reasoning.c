@@ -177,3 +177,63 @@ TEST_CASE(test_anthropic_thinking_outbound_sync)
 
     json_decref(root);
 }
+
+typedef struct {
+    char   accum[8192];
+    size_t len;
+} mock_stream_sink_t;
+
+static int mock_stream_write(void* ctx, const void* data, size_t len, bool is_final)
+{
+    (void)is_final;
+    mock_stream_sink_t* sink = ctx;
+    if (sink->len + len < sizeof(sink->accum)) {
+        memcpy(sink->accum + sink->len, data, len);
+        sink->len += len;
+        sink->accum[sink->len] = '\0';
+    }
+    return 0;
+}
+
+TEST_CASE(test_anthropic_thinking_outbound_stream)
+{
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc = {
+        .impl = &sink,
+        .write = mock_stream_write,
+    };
+
+    stream_bridge_t* bridge = g_provider_anthropic.stream_bridge_new(&rc, "claude-3-7-sonnet");
+    TEST_ASSERT(bridge != NULL, "bridge created");
+
+    /* 1. Send message_start */
+    const char* chunk1 = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-3-7-sonnet\",\"usage\":{\"input_tokens\":20}}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, chunk1, strlen(chunk1));
+
+    /* 2. Send content_block_start for thinking */
+    const char* chunk2 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, chunk2, strlen(chunk2));
+
+    /* 3. Send content_block_delta for thinking_delta */
+    const char* chunk3 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Analyzing query...\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, chunk3, strlen(chunk3));
+
+    /* 4. Send content_block_start for text */
+    const char* chunk4 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, chunk4, strlen(chunk4));
+
+    /* 5. Send content_block_delta for text_delta */
+    const char* chunk5 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello world!\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, chunk5, strlen(chunk5));
+
+    g_provider_anthropic.stream_bridge_finish(bridge);
+    g_provider_anthropic.stream_bridge_free(bridge);
+
+    /* Verify reasoning_content emitted */
+    TEST_ASSERT(strstr(sink.accum, "\"reasoning_content\":\"Analyzing query...\"") != NULL,
+                "reasoning_content emitted in SSE chunk");
+    /* Verify content emitted */
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Hello world!\"") != NULL,
+                "content emitted in SSE chunk");
+}
