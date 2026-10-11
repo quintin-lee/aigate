@@ -36,6 +36,45 @@ int provider_gemini_resp_to_openai(const char* gemini_resp,
                                    long*       out_ptok,
                                    long*       out_ctok);
 
+/** @brief Translate Gemini generateContent response JSON to OpenAI format with optional tag emulation. */
+int provider_gemini_resp_to_openai_ext(const char* gemini_resp,
+                                       const char* req_model,
+                                       bool        tag_emulation,
+                                       char**      out_openai,
+                                       size_t*     out_openai_len,
+                                       long*       out_ptok,
+                                       long*       out_ctok);
+
+/** @brief Gemini→OpenAI streaming translation bridge state machine. */
+typedef struct gemini_bridge {
+    aigate_response_ctx* rc;                /**< Downstream response context (borrowed). */
+    bool                 headers_sent;      /**< Downstream headers already sent. */
+    bool                 aborted;           /**< Downstream aborted. */
+    char                 line_buf[8192];    /**< SSE line buffer. */
+    size_t               line_len;          /**< Line buffer bytes used. */
+    char                 model[64];         /**< Model name. */
+    char                 msg_id[64];        /**< Upstream message id. */
+    char                 finish_reason[32]; /**< Upstream finishReason. */
+    long                 prompt_tokens;     /**< Accumulated prompt tokens. */
+    long                 completion_tokens; /**< Accumulated completion tokens. */
+    bool                 done_emitted;      /**< [DONE] already emitted. */
+    bool                 tag_emulation;     /**< True to output <think>...</think> in content */
+    bool                 tag_opened;        /**< True if <think> open tag already sent */
+    bool                 tag_closed;        /**< True if </think> close tag already sent */
+    bool                 in_thought;        /**< True while emitting thought deltas */
+    long                 reasoning_tokens;  /**< Accumulated reasoning tokens */
+} gemini_bridge_t;
+
+/** @brief Create a Gemini→OpenAI streaming translation bridge. */
+stream_bridge_t* provider_gemini_bridge_new(aigate_response_ctx* rc, const char* model);
+
+/** @brief Get the bridge's accumulated prompt, completion, cached, and reasoning tokens. */
+void provider_gemini_bridge_get_tokens(stream_bridge_t* bridge,
+                                       long*            out_ptok,
+                                       long*            out_ctok,
+                                       long*            out_cached_tok,
+                                       long*            out_reasoning_tok);
+
 /** @brief Build Gemini request for embeddings (single -> embedContent, array -> batchEmbedContents). */
 int provider_gemini_build_embeddings(const model_rec_t* route,
                                      const char*        in_body,

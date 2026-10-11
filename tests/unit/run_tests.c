@@ -845,6 +845,21 @@ main(int argc, char** argv)
     extern void test_thinking_watermark_clean_pass(void);
     test_register("thinking_watermark_clean_pass", test_thinking_watermark_clean_pass);
 
+    extern void test_gemini_thinking_inbound_budget_zero(void);
+    test_register("gemini_thinking_inbound_budget_zero", test_gemini_thinking_inbound_budget_zero);
+
+    extern void test_gemini_thinking_sync_tag_emulation(void);
+    test_register("gemini_thinking_sync_tag_emulation", test_gemini_thinking_sync_tag_emulation);
+
+    extern void test_gemini_thinking_raw_reasoning_content(void);
+    test_register("gemini_thinking_raw_reasoning_content", test_gemini_thinking_raw_reasoning_content);
+
+    extern void test_gemini_thinking_stream_tag_emulation(void);
+    test_register("gemini_thinking_stream_tag_emulation", test_gemini_thinking_stream_tag_emulation);
+
+    extern void test_gemini_thinking_stream_raw_reasoning_content(void);
+    test_register("gemini_thinking_stream_raw_reasoning_content", test_gemini_thinking_stream_raw_reasoning_content);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

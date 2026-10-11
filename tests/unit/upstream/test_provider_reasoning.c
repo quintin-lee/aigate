@@ -4,6 +4,7 @@
 #include "run_tests.h"
 #include "provider_adapter.h"
 #include "provider_openai.h"
+#include "provider_gemini.h"
 #include <jansson.h>
 #include <string.h>
 
@@ -456,4 +457,224 @@ TEST_CASE(test_thinking_watermark_clean_pass)
     TEST_ASSERT(strcmp(rtxt, "Detailed math proof: 2 + 2 = 4.") == 0, "reasoning matches original");
 
     json_decref(root);
+}
+
+TEST_CASE(test_gemini_thinking_inbound_budget_zero)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+    snprintf(route.endpoint, sizeof(route.endpoint), "https://generativelanguage.googleapis.com");
+    snprintf(route.upstream_key, sizeof(route.upstream_key), "gemini-key");
+    route.supports_reasoning = true;
+
+    const char* in_json =
+        "{\"model\":\"gemini-2.0-flash\",\"messages\":[{\"role\":\"user\",\"content\":\"solve\"}],"
+        "\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":0}}";
+    char        url[512];
+    const char* hdrs[4][2];
+    int         nhdrs = 0;
+    char*       out_body = NULL;
+    size_t      out_len = 0;
+
+    int rc = g_provider_gemini.build_chat(
+        &route, in_json, url, sizeof(url), hdrs, &nhdrs, &out_body, &out_len);
+    TEST_ASSERT(rc == 0, "gemini build success");
+    TEST_ASSERT(out_body != NULL, "out_body non-null");
+
+    json_t* out = json_loads(out_body, 0, NULL);
+    free(out_body);
+    TEST_ASSERT(out != NULL, "gemini json valid");
+
+    json_t* gcfg = json_object_get(out, "generationConfig");
+    TEST_ASSERT(gcfg && json_is_object(gcfg), "generationConfig present");
+    json_t* thcfg = json_object_get(gcfg, "thinkingConfig");
+    TEST_ASSERT(thcfg && json_is_object(thcfg), "thinkingConfig present");
+    json_t* jb = json_object_get(thcfg, "thinkingBudget");
+    TEST_ASSERT(jb && json_integer_value(jb) == 0, "thinkingBudget is 0");
+
+    json_decref(out);
+}
+
+TEST_CASE(test_gemini_thinking_sync_tag_emulation)
+{
+    const char* gemini_resp =
+        "{\"candidates\":[{"
+        "\"content\":{\"parts\":["
+        "{\"text\":\"Solving math problem step-by-step...\",\"thought\":true},"
+        "{\"text\":\"The solution is x = 42.\"}"
+        "]},\"finishReason\":\"STOP\"}],"
+        "\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":25,\"thoughtsTokenCount\":15}}";
+
+    char*  out_json = NULL;
+    size_t out_len = 0;
+    long   ptok = 0, ctok = 0;
+    int    rc = provider_gemini_resp_to_openai_ext(
+        gemini_resp, "gemini-2.0-flash", true, &out_json, &out_len, &ptok, &ctok);
+    TEST_ASSERT(rc == 0, "gemini resp translated ok");
+    TEST_ASSERT(out_json != NULL, "out_json not null");
+
+    json_t* root = json_loads(out_json, 0, NULL);
+    free(out_json);
+    TEST_ASSERT(root != NULL, "json parsed ok");
+
+    json_t*     choices = json_object_get(root, "choices");
+    json_t*     c0 = json_array_get(choices, 0);
+    json_t*     msg = json_object_get(c0, "message");
+    const char* content = json_string_value(json_object_get(msg, "content"));
+    TEST_ASSERT(content != NULL, "content present");
+    TEST_ASSERT(strstr(content,
+                       "<think>\nSolving math problem step-by-step...\n</think>\n\nThe "
+                       "solution is x = 42.") != NULL,
+                "<think> wrapped content present in tag emulation");
+
+    /* reasoning_content is also preserved in sync message for dual compatibility */
+    json_t* jreasoning = json_object_get(msg, "reasoning_content");
+    TEST_ASSERT(jreasoning != NULL && json_is_string(jreasoning),
+                "reasoning_content present for dual compatibility");
+
+    /* Check reasoning tokens in usage */
+    json_t* usage = json_object_get(root, "usage");
+    TEST_ASSERT(usage != NULL, "usage object present");
+    json_t* ctd = json_object_get(usage, "completion_tokens_details");
+    TEST_ASSERT(ctd != NULL, "completion_tokens_details present");
+    json_t* jrtok = json_object_get(ctd, "reasoning_tokens");
+    TEST_ASSERT(jrtok && json_integer_value(jrtok) == 15, "reasoning_tokens is 15");
+
+    json_decref(root);
+}
+
+TEST_CASE(test_gemini_thinking_raw_reasoning_content)
+{
+    const char* gemini_resp =
+        "{\"candidates\":[{"
+        "\"content\":{\"parts\":["
+        "{\"text\":\"Evaluating step 1...\",\"thought\":true},"
+        "{\"text\":\"Evaluating step 2...\",\"thought\":true},"
+        "{\"text\":\"Final answer is 100.\"}"
+        "]},\"finishReason\":\"STOP\"}],"
+        "\"usageMetadata\":{\"promptTokenCount\":12,\"candidatesTokenCount\":30,\"thoughtsTokenCount\":18}}";
+
+    char*  out_json = NULL;
+    size_t out_len = 0;
+    long   ptok = 0, ctok = 0;
+    int    rc = provider_gemini_resp_to_openai_ext(
+        gemini_resp, "gemini-2.0-flash", false, &out_json, &out_len, &ptok, &ctok);
+    TEST_ASSERT(rc == 0, "gemini resp translated ok");
+    TEST_ASSERT(out_json != NULL, "out_json not null");
+
+    json_t* root = json_loads(out_json, 0, NULL);
+    free(out_json);
+    TEST_ASSERT(root != NULL, "json parsed ok");
+
+    json_t*     choices = json_object_get(root, "choices");
+    json_t*     c0 = json_array_get(choices, 0);
+    json_t*     msg = json_object_get(c0, "message");
+    const char* content = json_string_value(json_object_get(msg, "content"));
+    const char* rcontent = json_string_value(json_object_get(msg, "reasoning_content"));
+
+    TEST_ASSERT(content != NULL && strcmp(content, "Final answer is 100.") == 0, "content correct");
+    TEST_ASSERT(rcontent != NULL && strcmp(rcontent, "Evaluating step 1...Evaluating step 2...") == 0,
+                "reasoning_content correct");
+
+    json_t* usage = json_object_get(root, "usage");
+    json_t* ctd = json_object_get(usage, "completion_tokens_details");
+    json_t* jrtok = json_object_get(ctd, "reasoning_tokens");
+    TEST_ASSERT(jrtok && json_integer_value(jrtok) == 18, "reasoning_tokens is 18");
+
+    json_decref(root);
+}
+
+TEST_CASE(test_gemini_thinking_stream_tag_emulation)
+{
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc;
+    memset(&rc, 0, sizeof(rc));
+    rc.write = mock_stream_write;
+    rc.impl = &sink;
+
+    stream_bridge_t* bridge = g_provider_gemini.stream_bridge_new(&rc, "gemini-2.0-flash");
+    TEST_ASSERT(bridge != NULL, "bridge created");
+    gemini_bridge_t* gb = (gemini_bridge_t*)bridge;
+    gb->tag_emulation = true;
+
+    /* Feed thinking chunk 1 */
+    const char* c1 =
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Deep reasoning "
+        "starts...\",\"thought\":true}]}}]}\n\n";
+    g_provider_gemini.stream_bridge_feed(bridge, c1, strlen(c1));
+
+    /* Feed thinking chunk 2 */
+    const char* c2 =
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" continuing "
+        "proof.\",\"thought\":true}]}}]}\n\n";
+    g_provider_gemini.stream_bridge_feed(bridge, c2, strlen(c2));
+
+    /* Feed answer chunk with usage */
+    const char* c3 =
+        "data: "
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Conclusion: "
+        "Q.E.D.\"}]}}],\"finishReason\":\"STOP\",\"usageMetadata\":{\"promptTokenCount\":10,"
+        "\"candidatesTokenCount\":25,\"thoughtsTokenCount\":14}}\n\n";
+    g_provider_gemini.stream_bridge_feed(bridge, c3, strlen(c3));
+
+    g_provider_gemini.stream_bridge_finish(bridge);
+
+    long ptok = 0, ctok = 0, cached_tok = 0, rtok = 0;
+    provider_gemini_bridge_get_tokens(bridge, &ptok, &ctok, &cached_tok, &rtok);
+    g_provider_gemini.stream_bridge_free(bridge);
+
+    TEST_ASSERT(ptok == 10, "prompt tokens 10");
+    TEST_ASSERT(ctok == 25, "candidates tokens 25");
+    TEST_ASSERT(rtok == 14, "reasoning tokens 14");
+
+    /* Verify <think> tag emitted in delta.content */
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"<think>\\n\"") != NULL, "<think> open emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Deep reasoning starts...\"") != NULL,
+                "thinking chunk 1 in content");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\" continuing proof.\"") != NULL,
+                "thinking chunk 2 in content");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"\\n</think>\\n\\n\"") != NULL,
+                "</think> close emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Conclusion: Q.E.D.\"") != NULL,
+                "answer text in content");
+    TEST_ASSERT(strstr(sink.accum, "data: [DONE]") != NULL, "[DONE] emitted");
+}
+
+TEST_CASE(test_gemini_thinking_stream_raw_reasoning_content)
+{
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc;
+    memset(&rc, 0, sizeof(rc));
+    rc.write = mock_stream_write;
+    rc.impl = &sink;
+
+    stream_bridge_t* bridge = g_provider_gemini.stream_bridge_new(&rc, "gemini-2.0-flash");
+    TEST_ASSERT(bridge != NULL, "bridge created");
+    gemini_bridge_t* gb = (gemini_bridge_t*)bridge;
+    gb->tag_emulation = false;
+
+    /* Feed thinking chunk */
+    const char* c1 =
+        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hypothesis "
+        "check...\",\"thought\":true}]}}]}\n\n";
+    g_provider_gemini.stream_bridge_feed(bridge, c1, strlen(c1));
+
+    /* Feed answer chunk */
+    const char* c2 =
+        "data: "
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Valid.\"}]}}],\"finishReason\":"
+        "\"STOP\"}\n\n";
+    g_provider_gemini.stream_bridge_feed(bridge, c2, strlen(c2));
+
+    g_provider_gemini.stream_bridge_finish(bridge);
+    g_provider_gemini.stream_bridge_free(bridge);
+
+    /* Verify reasoning_content and regular content emitted separately without tags */
+    TEST_ASSERT(strstr(sink.accum, "\"reasoning_content\":\"Hypothesis check...\"") != NULL,
+                "reasoning_content emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Valid.\"") != NULL, "regular content emitted");
+    TEST_ASSERT(strstr(sink.accum, "<think>") == NULL, "no <think> tag emitted in raw mode");
+    TEST_ASSERT(strstr(sink.accum, "</think>") == NULL, "no </think> tag emitted in raw mode");
 }
