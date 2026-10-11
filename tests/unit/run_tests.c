@@ -819,6 +819,9 @@ main(int argc, char** argv)
     extern void test_anthropic_thinking_outbound_stream(void);
     test_register("anthropic_thinking_outbound_stream", test_anthropic_thinking_outbound_stream);
 
+    extern void test_thinking_watermark_clean_pass(void);
+    test_register("thinking_watermark_clean_pass", test_thinking_watermark_clean_pass);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

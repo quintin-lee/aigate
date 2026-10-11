@@ -237,3 +237,48 @@ TEST_CASE(test_anthropic_thinking_outbound_stream)
     TEST_ASSERT(strstr(sink.accum, "\"content\":\"Hello world!\"") != NULL,
                 "content emitted in SSE chunk");
 }
+
+#include "watermark_engine.h"
+
+TEST_CASE(test_thinking_watermark_clean_pass)
+{
+    /* Construct response with reasoning_content and content */
+    const char* resp_json =
+        "{\"id\":\"chatcmpl-wm-test\",\"object\":\"chat.completion\","
+        "\"choices\":[{\"index\":0,\"message\":{"
+        "\"role\":\"assistant\","
+        "\"reasoning_content\":\"Detailed math proof: 2 + 2 = 4.\","
+        "\"content\":\"The answer is four.\""
+        "}}]}";
+
+    json_t* root = json_loads(resp_json, 0, NULL);
+    TEST_ASSERT(root != NULL, "json valid");
+
+    /* Watermark payload */
+    watermark_payload_t wp;
+    memset(&wp, 0, sizeof(wp));
+    wp.timestamp = 1728000000;
+    wp.key_id = 42;
+    wp.short_trace = 0x12345678ULL;
+
+    /* Inject watermark into content */
+    json_t* choices = json_object_get(root, "choices");
+    json_t* c0 = json_array_get(choices, 0);
+    json_t* msg = json_object_get(c0, "message");
+    json_t* content_val = json_object_get(msg, "content");
+    const char* raw_txt = json_string_value(content_val);
+    size_t wm_sz = 0;
+    char* wm_txt = watermark_inject(raw_txt, strlen(raw_txt), &wp, &wm_sz);
+    TEST_ASSERT(wm_txt != NULL, "watermark injected into content");
+    json_object_set_new(msg, "content", json_string(wm_txt));
+    free(wm_txt);
+
+    /* Verify reasoning_content remains completely untouched without zero-width marks */
+    json_t* jreasoning = json_object_get(msg, "reasoning_content");
+    const char* rtxt = json_string_value(jreasoning);
+    TEST_ASSERT(strstr(rtxt, "\xe2\x80\x8b") == NULL, "zero-width space not in reasoning");
+    TEST_ASSERT(strstr(rtxt, "\xe2\x80\x8c") == NULL, "zero-width non-joiner not in reasoning");
+    TEST_ASSERT(strcmp(rtxt, "Detailed math proof: 2 + 2 = 4.") == 0, "reasoning matches original");
+
+    json_decref(root);
+}

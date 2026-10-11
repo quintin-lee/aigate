@@ -396,14 +396,23 @@ filter_chain_execute_outbound(
                 }
             }
 
-            /* 2. Check Anthropic format: content[0].text */
+            /* 2. Check Anthropic format: scan content blocks for type=="text", skipping thinking */
             if (!modified) {
                 json_t* content_arr = json_object_get(root, "content");
-                if (content_arr != NULL && json_is_array(content_arr) &&
-                    json_array_size(content_arr) > 0) {
-                    json_t* block0 = json_array_get(content_arr, 0);
-                    if (block0 != NULL && json_is_object(block0)) {
-                        json_t* text_val = json_object_get(block0, "text");
+                if (content_arr != NULL && json_is_array(content_arr)) {
+                    size_t  idx;
+                    json_t* block;
+                    json_array_foreach(content_arr, idx, block)
+                    {
+                        if (block == NULL || !json_is_object(block)) {
+                            continue;
+                        }
+                        json_t* btype = json_object_get(block, "type");
+                        if (btype != NULL && json_is_string(btype) &&
+                            strcmp(json_string_value(btype), "thinking") == 0) {
+                            continue; /* Strictly bypass thinking blocks */
+                        }
+                        json_t* text_val = json_object_get(block, "text");
                         if (text_val != NULL && json_is_string(text_val)) {
                             const char* raw_txt = json_string_value(text_val);
                             if (raw_txt != NULL && raw_txt[0] != '\0') {
@@ -411,9 +420,10 @@ filter_chain_execute_outbound(
                                 char*  wm_txt =
                                     watermark_inject(raw_txt, strlen(raw_txt), &wp, &wm_sz);
                                 if (wm_txt != NULL) {
-                                    json_object_set_new(block0, "text", json_string(wm_txt));
+                                    json_object_set_new(block, "text", json_string(wm_txt));
                                     free(wm_txt);
                                     modified = true;
+                                    break;
                                 }
                             }
                         }
