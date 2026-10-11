@@ -4,7 +4,7 @@
 #ifndef AIGATE_SCHEMA_SQL_H
 #define AIGATE_SCHEMA_SQL_H
 
-#define AIGATE_SCHEMA_VERSION 18
+#define AIGATE_SCHEMA_VERSION 19
 
 static const char SCHEMA_SQL[] =
     "-- aigate schema (version 1); applied by pg_store_migrate() in one transaction.\n"
@@ -281,6 +281,11 @@ static const char SCHEMA_SQL[] =
     "  created_at      TIMESTAMPTZ NOT NULL DEFAULT now()\n"
     ");\n"
     "\n"
-    "INSERT INTO schema_migrations(version) VALUES (18) ON CONFLICT (version) DO NOTHING;\n";
+    "INSERT INTO schema_migrations(version) VALUES (18) ON CONFLICT (version) DO NOTHING;\n"
+    "\n"
+    "-- Migration v19: reasoning models and extended thinking budget\n"
+    "ALTER TABLE models ADD COLUMN IF NOT EXISTS default_thinking_budget BIGINT NOT NULL DEFAULT 0;\n"
+    "ALTER TABLE models ADD COLUMN IF NOT EXISTS supports_reasoning BOOLEAN NOT NULL DEFAULT FALSE;\n"
+    "INSERT INTO schema_migrations(version) VALUES (19) ON CONFLICT (version) DO NOTHING;\n";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

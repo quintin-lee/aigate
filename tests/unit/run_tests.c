@@ -82,6 +82,7 @@ main(int argc, char** argv)
     extern void test_pg_real_groups_and_cost(void);
     extern void test_pg_store_rotate_master_key(void);
     extern void test_pg_store_schema_v18_models(void);
+    extern void test_pg_store_schema_v19_models(void);
     extern void test_secret_roundtrip(void);
     extern void test_secret_tamper_and_wrong_key(void);
     extern void test_secret_hex_to_bytes(void);
@@ -179,6 +180,7 @@ main(int argc, char** argv)
     test_register("pg_real_groups_and_cost", test_pg_real_groups_and_cost);
     test_register("pg_store_rotate_master_key", test_pg_store_rotate_master_key);
     test_register("pg_store_schema_v18_models", test_pg_store_schema_v18_models);
+    test_register("pg_store_schema_v19_models", test_pg_store_schema_v19_models);
     test_register("secret_roundtrip", test_secret_roundtrip);
     test_register("secret_tamper", test_secret_tamper_and_wrong_key);
     test_register("secret_hex", test_secret_hex_to_bytes);

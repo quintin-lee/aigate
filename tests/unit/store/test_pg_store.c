@@ -1796,3 +1796,15 @@ TEST_CASE(test_pg_store_schema_v18_models)
 
     pg_store_close(ps);
 }
+
+TEST_CASE(test_pg_store_schema_v19_models)
+{
+    TEST_ASSERT(AIGATE_SCHEMA_VERSION == 19, "schema version should be 19");
+
+    model_rec_t m;
+    memset(&m, 0, sizeof m);
+    m.default_thinking_budget = 4096;
+    m.supports_reasoning = true;
+    TEST_ASSERT(m.default_thinking_budget == 4096, "default_thinking_budget stored");
+    TEST_ASSERT(m.supports_reasoning == true, "supports_reasoning stored");
+}

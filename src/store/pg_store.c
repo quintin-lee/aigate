@@ -599,6 +599,14 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
         const char* he = PQgetvalue(res, row, 13);
         out->hedged_enabled = (he != NULL && (strcmp(he, "t") == 0 || strcmp(he, "true") == 0));
     }
+    if (nfields > 14) {
+        const char* dtb = PQgetvalue(res, row, 14);
+        out->default_thinking_budget = (dtb != NULL && dtb[0] != '\0') ? atol(dtb) : 0;
+    }
+    if (nfields > 15) {
+        const char* sr = PQgetvalue(res, row, 15);
+        out->supports_reasoning = (sr != NULL && (strcmp(sr, "t") == 0 || strcmp(sr, "true") == 0));
+    }
 
     /* Fallback: if no targets configured, synthesize targets[0] from primary fields */
     if (out->n_targets == 0) {
@@ -627,7 +635,8 @@ pq_get_model(void* vctx, const char* name, model_rec_t* out)
         "'priority'), COALESCE(pricing::text, '{}'), "
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
         "COALESCE(hedged_delay_ms, 0), COALESCE(hedge_budget_pct, 15), COALESCE(hedged_enabled, "
-        "false) "
+        "false), "
+        "COALESCE(default_thinking_budget, 0), COALESCE(supports_reasoning, false) "
         "FROM models WHERE model_name = $1 AND enabled = true";
     const char* val[1] = {name};
     int         plen[1] = {0};
@@ -662,7 +671,8 @@ pq_list_models(void* vctx, model_rec_t* out, int cap, int* n)
         "'priority'), COALESCE(pricing::text, '{}'), "
         "COALESCE(system_prompt, ''), COALESCE(prompt_mode, 0), "
         "COALESCE(hedged_delay_ms, 0), COALESCE(hedge_budget_pct, 15), COALESCE(hedged_enabled, "
-        "false) "
+        "false), "
+        "COALESCE(default_thinking_budget, 0), COALESCE(supports_reasoning, false) "
         "FROM models ORDER BY model_name";
     *n = 0;
 
@@ -1017,13 +1027,15 @@ pq_create_model(void* vctx, const model_rec_t* m)
     static const char q[] =
         "INSERT INTO models(model_name, provider, endpoint, upstream_key_ref, "
         "default_params, targets, lb_policy, pricing, system_prompt, prompt_mode, "
-        "hedged_delay_ms, hedge_budget_pct, hedged_enabled) "
+        "hedged_delay_ms, hedge_budget_pct, hedged_enabled, "
+        "default_thinking_budget, supports_reasoning) "
         "VALUES($1, $2, $3, CASE WHEN $4 = '' THEN NULL ELSE $4 END, $5::jsonb, $6::jsonb, $7, "
-        "$8::jsonb, CASE WHEN $9 = '' THEN NULL ELSE $9 END, $10, $11, $12, $13)";
-    const char* vals[13];
-    int         plens[13] = {0};
-    char        pm_str[16], hd_str[16], hb_str[16];
+        "$8::jsonb, CASE WHEN $9 = '' THEN NULL ELSE $9 END, $10, $11, $12, $13, $14, $15)";
+    const char* vals[15];
+    int         plens[15] = {0};
+    char        pm_str[16], hd_str[16], hb_str[16], dtb_str[32];
     const char* he_str = m->hedged_enabled ? "true" : "false";
+    const char* sr_str = m->supports_reasoning ? "true" : "false";
 
     char*       targets_json = serialize_targets_json(m);
     const char* t_str = targets_json ? targets_json : "[]";
@@ -1040,6 +1052,7 @@ pq_create_model(void* vctx, const model_rec_t* m)
     snprintf(pm_str, sizeof pm_str, "%d", m->prompt_mode);
     snprintf(hd_str, sizeof hd_str, "%d", m->hedged_delay_ms);
     snprintf(hb_str, sizeof hb_str, "%d", m->hedge_budget_pct > 0 ? m->hedge_budget_pct : 15);
+    snprintf(dtb_str, sizeof dtb_str, "%ld", m->default_thinking_budget);
 
     vals[0] = m->name;
     vals[1] = prov;
@@ -1054,9 +1067,11 @@ pq_create_model(void* vctx, const model_rec_t* m)
     vals[10] = hd_str;
     vals[11] = hb_str;
     vals[12] = he_str;
+    vals[13] = dtb_str;
+    vals[14] = sr_str;
 
     pq_lock(px);
-    PGresult* res = PQexecParams(px->db, q, 13, NULL, vals, plens, NULL, 0);
+    PGresult* res = PQexecParams(px->db, q, 15, NULL, vals, plens, NULL, 0);
     pq_unlock(px);
     if (targets_json != NULL) {
         free(targets_json);
@@ -1077,11 +1092,11 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
 {
     struct pq_ctx* px = vctx;
     char           sql[2048];
-    const char*    vals[20];
-    int            plens[20] = {0};
+    const char*    vals[24];
+    int            plens[24] = {0};
     int            nv = 0, off;
     char*          targets_json = NULL;
-    char           pm_str[16], hd_str[16], hb_str[16];
+    char           pm_str[16], hd_str[16], hb_str[16], dtb_str[32];
     snprintf(pm_str, sizeof pm_str, "%d", m->prompt_mode);
 
     if (mask == 0) {
@@ -1177,6 +1192,25 @@ pq_update_model(void* vctx, const model_rec_t* m, int mask)
         off += snprintf(
             sql + off, sizeof sql - (size_t)off, "%shedged_enabled = $%d", nv > 1 ? ", " : "", nv);
         vals[nv - 1] = m->hedged_enabled ? "true" : "false";
+    }
+    if (mask & MMASK_THINKING_BUDGET) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%sdefault_thinking_budget = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        snprintf(dtb_str, sizeof dtb_str, "%ld", m->default_thinking_budget);
+        vals[nv - 1] = dtb_str;
+    }
+    if (mask & MMASK_SUPPORTS_REASONING) {
+        nv++;
+        off += snprintf(sql + off,
+                        sizeof sql - (size_t)off,
+                        "%ssupports_reasoning = $%d",
+                        nv > 1 ? ", " : "",
+                        nv);
+        vals[nv - 1] = m->supports_reasoning ? "true" : "false";
     }
     nv++;
     off += snprintf(sql + off, sizeof sql - (size_t)off, " WHERE model_name = $%d", nv);

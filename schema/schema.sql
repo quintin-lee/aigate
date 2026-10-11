@@ -273,3 +273,8 @@ CREATE TABLE IF NOT EXISTS ip_bans_persistent (
 );
 
 INSERT INTO schema_migrations(version) VALUES (18) ON CONFLICT (version) DO NOTHING;
+
+-- Migration v19: reasoning models and extended thinking budget
+ALTER TABLE models ADD COLUMN IF NOT EXISTS default_thinking_budget BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE models ADD COLUMN IF NOT EXISTS supports_reasoning BOOLEAN NOT NULL DEFAULT FALSE;
+INSERT INTO schema_migrations(version) VALUES (19) ON CONFLICT (version) DO NOTHING;

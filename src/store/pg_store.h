@@ -77,6 +77,8 @@ typedef struct model_rec {
     int  hedge_budget_pct;    /**< Max % of requests that can trigger hedge (default: 15) */
     bool hedged_enabled;      /**< True if hedged speculative execution is active */
     int  max_concurrent;      /**< 0 = unlimited, >0 max in-flight requests */
+    long default_thinking_budget; /**< Default thinking token budget (0 = disabled/unset) */
+    bool supports_reasoning;      /**< True if model supports reasoning / extended thinking */
 } model_rec_t;
 
 /** @brief One usage_daily row. */
@@ -193,6 +195,10 @@ typedef struct cost_row {
 #define MMASK_HEDGED_ENABLED (1 << 11)
 /** @brief Model update mask: max in-flight concurrent requests. */
 #define MMASK_MAX_CONCURRENT (1 << 12)
+/** @brief Model update mask: default thinking budget. */
+#define MMASK_THINKING_BUDGET (1 << 13)
+/** @brief Model update mask: supports reasoning model. */
+#define MMASK_SUPPORTS_REASONING (1 << 14)
 
 /** @brief Provider update mask: provider type. */
 #define PMASK_TYPE (1 << 0)
