@@ -869,3 +869,135 @@ TEST_CASE(test_claude_37_degraded_suppression)
 
     json_decref(out);
 }
+
+TEST_CASE(test_openai_reasoning_effort_mapping)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+    snprintf(route.endpoint, sizeof(route.endpoint), "https://api.openai.com");
+    snprintf(route.name, sizeof(route.name), "o1-mini");
+    route.supports_reasoning = true;
+
+    /* 1. Request with reasoning_effort and max_tokens on o1 model */
+    const char* in_json = "{\"model\":\"o1-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"think\"}],\"reasoning_effort\":\"high\",\"max_tokens\":5000}";
+    char url[512];
+    char* out_body = NULL;
+    size_t out_len = 0;
+
+    int rc = provider_openai_build(&route, "/chat/completions", in_json, url, sizeof(url), &out_body, &out_len);
+    TEST_ASSERT(rc == 0, "build success");
+    TEST_ASSERT(out_body != NULL, "out_body non-null");
+
+    json_t* out = json_loads(out_body, 0, NULL);
+    free(out_body);
+    TEST_ASSERT(out != NULL, "json valid");
+
+    json_t* jeff = json_object_get(out, "reasoning_effort");
+    TEST_ASSERT(jeff && strcmp(json_string_value(jeff), "high") == 0, "reasoning_effort high preserved");
+
+    /* max_tokens must be remapped to max_completion_tokens */
+    json_t* jmct = json_object_get(out, "max_completion_tokens");
+    TEST_ASSERT(jmct && json_integer_value(jmct) == 5000, "max_completion_tokens is 5000");
+    TEST_ASSERT(json_object_get(out, "max_tokens") == NULL, "max_tokens remapped and removed");
+
+    json_decref(out);
+
+    /* 2. Degraded request: reasoning_effort should be stripped */
+    const char* deg_json = "{\"model\":\"o1-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"think\"}],\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":0}}";
+    rc = provider_openai_build(&route, "/chat/completions", deg_json, url, sizeof(url), &out_body, &out_len);
+    TEST_ASSERT(rc == 0, "build success");
+    out = json_loads(out_body, 0, NULL);
+    free(out_body);
+    TEST_ASSERT(out != NULL, "json valid");
+    TEST_ASSERT(json_object_get(out, "reasoning_effort") == NULL, "reasoning_effort stripped when degraded");
+    json_decref(out);
+}
+
+TEST_CASE(test_openai_stream_reasoning_tag_emulation)
+{
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc = {
+        .impl = &sink,
+        .write = mock_stream_write,
+    };
+
+    stream_bridge_t* bridge = g_provider_openai.stream_bridge_new(&rc, "o3-mini");
+    TEST_ASSERT(bridge != NULL, "bridge created");
+    openai_bridge_t* ob = (openai_bridge_t*)bridge;
+    ob->tag_emulation = true;
+
+    /* 1. Reasoning chunk */
+    const char* c1 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Solving equation...\"},\"finish_reason\":null}]}\n\n";
+    g_provider_openai.stream_bridge_feed(bridge, c1, strlen(c1));
+
+    /* 2. Content chunk */
+    const char* c2 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x = 5\"},\"finish_reason\":null}]}\n\n";
+    g_provider_openai.stream_bridge_feed(bridge, c2, strlen(c2));
+
+    /* 3. Finish chunk */
+    const char* c3 = "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
+    g_provider_openai.stream_bridge_feed(bridge, c3, strlen(c3));
+
+    g_provider_openai.stream_bridge_finish(bridge);
+    g_provider_openai.stream_bridge_free(bridge);
+
+    /* Verify <think> wrapper */
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"<think>\\n\"") != NULL, "<think> open emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Solving equation...\"") != NULL, "reasoning text in content");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"\\n</think>\\n\\n\"") != NULL, "</think> close emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"x = 5\"") != NULL, "answer text in content");
+}
+
+TEST_CASE(test_openai_stream_fallback_thought)
+{
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc = {
+        .impl = &sink,
+        .write = mock_stream_write,
+    };
+
+    stream_bridge_t* bridge = g_provider_openai.stream_bridge_new(&rc, "deepseek-r1");
+    TEST_ASSERT(bridge != NULL, "bridge created");
+    openai_bridge_t* ob = (openai_bridge_t*)bridge;
+    ob->tag_emulation = false; /* raw mode */
+
+    /* Chunk with delta.thought instead of delta.reasoning_content */
+    const char* c1 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"thought\":\"Internal thought process\"},\"finish_reason\":null}]}\n\n";
+    g_provider_openai.stream_bridge_feed(bridge, c1, strlen(c1));
+
+    g_provider_openai.stream_bridge_finish(bridge);
+    g_provider_openai.stream_bridge_free(bridge);
+
+    /* Verify normalized to delta.reasoning_content */
+    TEST_ASSERT(strstr(sink.accum, "\"reasoning_content\":\"Internal thought process\"") != NULL, "thought normalized to reasoning_content");
+}
+
+TEST_CASE(test_openai_sync_reasoning_tag_emulation)
+{
+    const char* in_resp =
+        "{\"id\":\"chatcmpl-sync-test\",\"object\":\"chat.completion\",\"model\":\"o1-mini\","
+        "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Result is 100.\",\"reasoning_content\":\"Calculating 10*10=100.\"},\"finish_reason\":\"stop\"}],"
+        "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":25,\"total_tokens\":35}}";
+
+    char* out_body = NULL;
+    size_t out_len = 0;
+    long ptok = 0, ctok = 0, cached = 0;
+
+    int rc = provider_openai_resp_format_tag_emulation(in_resp, strlen(in_resp), "o1-mini", &out_body, &out_len, &ptok, &ctok, &cached);
+    TEST_ASSERT(rc == 0, "formatting success");
+    TEST_ASSERT(out_body != NULL, "out_body non-null");
+
+    json_t* root = json_loads(out_body, 0, NULL);
+    free(out_body);
+    TEST_ASSERT(root != NULL, "json valid");
+
+    json_t* choices = json_object_get(root, "choices");
+    json_t* c0 = json_array_get(choices, 0);
+    json_t* msg = json_object_get(c0, "message");
+    const char* content = json_string_value(json_object_get(msg, "content"));
+
+    TEST_ASSERT(strstr(content, "<think>\nCalculating 10*10=100.\n</think>\n\nResult is 100.") != NULL, "content formatted with <think> tag emulation");
+    json_decref(root);
+}

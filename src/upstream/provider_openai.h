@@ -12,6 +12,32 @@
 #include "pg_store.h"
 #include "provider_adapter.h"
 
+/** @brief OpenAI passthrough streaming bridge state machine. */
+typedef struct openai_bridge {
+    aigate_response_ctx* rc;           /**< Downstream response context (borrowed). */
+    bool                 headers_sent; /**< Downstream headers already sent. */
+    char                 line_buf[8192]; /**< SSE line buffer. */
+    size_t               line_len;     /**< Line buffer bytes used. */
+    char                 model[128];   /**< Model name. */
+    long                 prompt_tokens;
+    long                 completion_tokens;
+    long                 cached_tokens;
+    long                 reasoning_tokens;
+    bool                 tag_emulation; /**< Emulate <think> tags in content stream. */
+    bool                 tag_opened;    /**< Emulation <think> tag already emitted. */
+    bool                 tag_closed;    /**< Emulation </think> tag already emitted. */
+} openai_bridge_t;
+
+/** @brief Format non-streaming OpenAI response with <think> tag emulation. */
+int provider_openai_resp_format_tag_emulation(const char* raw_body,
+                                              size_t      raw_len,
+                                              const char* model,
+                                              char**      out_body,
+                                              size_t*     out_len,
+                                              long*       out_ptok,
+                                              long*       out_ctok,
+                                              long*       out_cached_tok);
+
 /** @brief OpenAI-compatible provider vtable instance (see the provider_adapter vtable). */
 extern const provider_adapter_t g_provider_openai;
 

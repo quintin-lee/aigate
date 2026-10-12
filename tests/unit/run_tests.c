@@ -875,6 +875,18 @@ main(int argc, char** argv)
     extern void test_claude_37_degraded_suppression(void);
     test_register("claude_37_degraded_suppression", test_claude_37_degraded_suppression);
 
+    extern void test_openai_reasoning_effort_mapping(void);
+    test_register("openai_reasoning_effort_mapping", test_openai_reasoning_effort_mapping);
+
+    extern void test_openai_stream_reasoning_tag_emulation(void);
+    test_register("openai_stream_reasoning_tag_emulation", test_openai_stream_reasoning_tag_emulation);
+
+    extern void test_openai_stream_fallback_thought(void);
+    test_register("openai_stream_fallback_thought", test_openai_stream_fallback_thought);
+
+    extern void test_openai_sync_reasoning_tag_emulation(void);
+    test_register("openai_sync_reasoning_tag_emulation", test_openai_sync_reasoning_tag_emulation);
+
     extern void test_pricing_reasoning_mtok_calculation(void);
     test_register("pricing_reasoning_mtok_calculation", test_pricing_reasoning_mtok_calculation);
 

@@ -88,6 +88,43 @@ provider_openai_build(const model_rec_t* route,
         }
     }
 
+    /* Check reasoning / thinking configuration */
+    reasoning_config_t rcfg;
+    parse_reasoning_config(req, route, &rcfg);
+
+    /* Check if request has reasoning_effort */
+    json_t* jeff = json_object_get(req, "reasoning_effort");
+    bool has_reasoning_effort = (jeff != NULL && json_is_string(jeff));
+    bool is_o_series = (strstr(route->name, "o1") != NULL ||
+                        strstr(route->name, "o3") != NULL ||
+                        (route->endpoint[0] != '\0' && strstr(route->endpoint, "o1") != NULL));
+
+    if (has_reasoning_effort) {
+        const char* eff = json_string_value(jeff);
+        if (strcmp(eff, "low") != 0 && strcmp(eff, "medium") != 0 &&
+            strcmp(eff, "high") != 0 && strcmp(eff, "none") != 0) {
+            json_object_set_new(req, "reasoning_effort", json_string("medium"));
+        }
+    }
+
+    /* If degraded (rcfg was disabled or budget == 0), strip reasoning_effort */
+    if (!rcfg.enabled || rcfg.budget_tokens == 0) {
+        if (has_reasoning_effort) {
+            json_object_del(req, "reasoning_effort");
+            has_reasoning_effort = false;
+        }
+    }
+
+    /* If targeting o-series model or reasoning_effort is active, map max_tokens -> max_completion_tokens */
+    if (is_o_series || has_reasoning_effort) {
+        json_t* jmt = json_object_get(req, "max_tokens");
+        json_t* jmct = json_object_get(req, "max_completion_tokens");
+        if (jmt != NULL && jmct == NULL) {
+            json_object_set(req, "max_completion_tokens", jmt);
+            json_object_del(req, "max_tokens");
+        }
+    }
+
     char* packed = json_dumps(req, JSON_COMPACT);
     json_decref(req);
     if (packed == NULL) {
@@ -194,19 +231,108 @@ openai_parse_chat_response(const char* raw_body,
     return 0;
 }
 
-/** @brief OpenAI passthrough streaming bridge state machine (sends the SSE header only on the first packet). */
-typedef struct {
-    aigate_response_ctx* rc;           /**< Downstream response context (borrowed). */
-    bool                 headers_sent; /**< Downstream headers already sent. */
-    char                 line_buf
-        [8192]; /**< SSE line buffer; lines over 8KB are truncated (P3-6), overlong deltas lose token counts. */
-    size_t line_len;          /**< Line buffer bytes used. */
-    char   model[128];        /**< Model name. */
-    long   prompt_tokens;     /**< Accumulated prompt tokens. */
-    long   completion_tokens; /**< Accumulated completion tokens. */
-    long   cached_tokens;     /**< Accumulated cache-hit tokens. */
-    long   reasoning_tokens;  /**< Accumulated reasoning tokens. */
-} openai_bridge_t;            /**< OpenAI passthrough streaming bridge type (see above). */
+int
+provider_openai_resp_format_tag_emulation(const char* raw_body,
+                                          size_t      raw_len,
+                                          const char* model,
+                                          char**      out_body,
+                                          size_t*     out_len,
+                                          long*       out_ptok,
+                                          long*       out_ctok,
+                                          long*       out_cached_tok)
+{
+    (void)model;
+    if (out_ptok) {
+        *out_ptok = 0;
+    }
+    if (out_ctok) {
+        *out_ctok = 0;
+    }
+    if (out_cached_tok) {
+        *out_cached_tok = 0;
+    }
+
+    if (raw_body == NULL || raw_len == 0) {
+        return -1;
+    }
+
+    json_error_t err;
+    json_t* root = json_loadb(raw_body, raw_len, 0, &err);
+    if (root == NULL) {
+        return -1;
+    }
+
+    /* Extract tokens from usage */
+    json_t* jusage = json_object_get(root, "usage");
+    if (jusage != NULL && json_is_object(jusage)) {
+        json_t* jp = json_object_get(jusage, "prompt_tokens");
+        json_t* jc = json_object_get(jusage, "completion_tokens");
+        if (json_is_integer(jp) && out_ptok) {
+            *out_ptok = json_integer_value(jp);
+        }
+        if (json_is_integer(jc) && out_ctok) {
+            *out_ctok = json_integer_value(jc);
+        }
+        json_t* jch = json_object_get(jusage, "prompt_cache_hit_tokens");
+        if (json_is_integer(jch) && out_cached_tok) {
+            *out_cached_tok = json_integer_value(jch);
+        } else {
+            json_t* jdet = json_object_get(jusage, "prompt_tokens_details");
+            if (jdet != NULL && json_is_object(jdet)) {
+                json_t* jcd = json_object_get(jdet, "cached_tokens");
+                if (json_is_integer(jcd) && out_cached_tok) {
+                    *out_cached_tok = json_integer_value(jcd);
+                }
+            }
+        }
+    }
+
+    /* Process choices[0].message for reasoning tag emulation */
+    json_t* choices = json_object_get(root, "choices");
+    if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+        json_t* c0 = json_array_get(choices, 0);
+        if (c0 != NULL && json_is_object(c0)) {
+            json_t* msg = json_object_get(c0, "message");
+            if (msg != NULL && json_is_object(msg)) {
+                json_t* jrc = json_object_get(msg, "reasoning_content");
+                if (jrc == NULL) {
+                    jrc = json_object_get(msg, "thought");
+                }
+                if (jrc != NULL && json_is_string(jrc)) {
+                    const char* rtext = json_string_value(jrc);
+                    if (rtext[0] != '\0') {
+                        json_t* jcontent = json_object_get(msg, "content");
+                        const char* ctext = (jcontent && json_is_string(jcontent)) ? json_string_value(jcontent) : "";
+                        size_t rlen = strlen(rtext);
+                        size_t clen = strlen(ctext);
+                        size_t new_len = rlen + clen + 32;
+                        char* new_content = malloc(new_len);
+                        if (new_content != NULL) {
+                            if (clen > 0) {
+                                snprintf(new_content, new_len, "<think>\n%s\n</think>\n\n%s", rtext, ctext);
+                            } else {
+                                snprintf(new_content, new_len, "<think>\n%s\n</think>", rtext);
+                            }
+                            json_object_set_new(msg, "content", json_string(new_content));
+                            free(new_content);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    char* packed = json_dumps(root, JSON_COMPACT);
+    json_decref(root);
+    if (packed == NULL) {
+        return -1;
+    }
+    *out_body = packed;
+    if (out_len != NULL) {
+        *out_len = strlen(packed);
+    }
+    return 0;
+}
 
 /** @brief Create an OpenAI passthrough streaming bridge (sends the SSE header only on the first packet).
  *  @return The bridge; NULL on OOM. */
@@ -222,7 +348,50 @@ openai_bridge_new(aigate_response_ctx* rc, const char* model)
     return (stream_bridge_t*)b;
 }
 
-/** @brief Parse `"usage"`-bearing SSE lines in the passthrough stream, accumulating prompt/completion/cached/reasoning tokens (input/output aliases supported). */
+static void
+openai_bridge_emit_sse(openai_bridge_t* b, const char* sse_str)
+{
+    if (b->rc != NULL && b->rc->write != NULL && sse_str != NULL && sse_str[0] != '\0') {
+        b->rc->write(b->rc->impl, sse_str, strlen(sse_str), false);
+    }
+}
+
+static void
+openai_bridge_emit_delta(openai_bridge_t* b, const char* field, const char* text, const char* finish_reason)
+{
+    char id_buf[256];
+    snprintf(id_buf, sizeof(id_buf), "chatcmpl-%s", b->model[0] ? b->model : "openai");
+    json_t* chunk = json_object();
+    json_object_set_new(chunk, "id", json_string(id_buf));
+    json_object_set_new(chunk, "object", json_string("chat.completion.chunk"));
+    json_object_set_new(chunk, "model", json_string(b->model));
+    json_t* choices = json_array();
+    json_t* c0 = json_object();
+    json_object_set_new(c0, "index", json_integer(0));
+    json_t* delta = json_object();
+    if (field != NULL && text != NULL) {
+        json_object_set_new(delta, field, json_string(text));
+    }
+    json_object_set_new(c0, "delta", delta);
+    if (finish_reason != NULL) {
+        json_object_set_new(c0, "finish_reason", json_string(finish_reason));
+    } else {
+        json_object_set_new(c0, "finish_reason", json_null());
+    }
+    json_array_append_new(choices, c0);
+    json_object_set_new(chunk, "choices", choices);
+
+    char* packed = json_dumps(chunk, JSON_COMPACT);
+    json_decref(chunk);
+    if (packed != NULL) {
+        char sse[8192];
+        snprintf(sse, sizeof(sse), "data: %s\n\n", packed);
+        openai_bridge_emit_sse(b, sse);
+        free(packed);
+    }
+}
+
+/** @brief Parse `"usage"`-bearing SSE lines in the passthrough stream, accumulating prompt/completion/cached/reasoning tokens and handling tag emulation. */
 static void
 openai_stream_process_line(openai_bridge_t* acc, const char* line)
 {
@@ -230,72 +399,187 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
     if (d == NULL) {
         return;
     }
+
+    /* 1. Extract usage if present */
     const char* u = strstr(d, "\"usage\"");
-    if (u == NULL) {
-        return;
-    }
-    const char* jstart = strchr(d, '{');
-    if (jstart == NULL) {
-        return;
-    }
-    json_t* root = json_loads(jstart, 0, NULL);
-    if (root == NULL) {
-        return;
-    }
-    json_t* jusage = json_object_get(root, "usage");
-    if (jusage == NULL) {
-        json_t* jresp = json_object_get(root, "response");
-        if (jresp != NULL && json_is_object(jresp)) {
-            jusage = json_object_get(jresp, "usage");
+    if (u != NULL) {
+        const char* jstart = strchr(d, '{');
+        if (jstart != NULL) {
+            json_t* root = json_loads(jstart, 0, NULL);
+            if (root != NULL) {
+                json_t* jusage = json_object_get(root, "usage");
+                if (jusage == NULL) {
+                    json_t* jresp = json_object_get(root, "response");
+                    if (jresp != NULL && json_is_object(jresp)) {
+                        jusage = json_object_get(jresp, "usage");
+                    }
+                }
+                if (jusage != NULL && json_is_object(jusage)) {
+                    json_t* jp = json_object_get(jusage, "prompt_tokens");
+                    if (jp == NULL) {
+                        jp = json_object_get(jusage, "input_tokens");
+                    }
+                    json_t* jc = json_object_get(jusage, "completion_tokens");
+                    if (jc == NULL) {
+                        jc = json_object_get(jusage, "output_tokens");
+                    }
+                    if (json_is_integer(jp)) {
+                        acc->prompt_tokens = json_integer_value(jp);
+                    }
+                    if (json_is_integer(jc)) {
+                        acc->completion_tokens = json_integer_value(jc);
+                    }
+
+                    json_t* jch = json_object_get(jusage, "prompt_cache_hit_tokens");
+                    if (json_is_integer(jch)) {
+                        acc->cached_tokens = json_integer_value(jch);
+                    } else {
+                        json_t* jdet = json_object_get(jusage, "prompt_tokens_details");
+                        if (jdet == NULL) {
+                            jdet = json_object_get(jusage, "input_tokens_details");
+                        }
+                        if (jdet != NULL && json_is_object(jdet)) {
+                            json_t* jcd = json_object_get(jdet, "cached_tokens");
+                            if (json_is_integer(jcd)) {
+                                acc->cached_tokens = json_integer_value(jcd);
+                            }
+                        }
+                    }
+
+                    json_t* jout_det = json_object_get(jusage, "completion_tokens_details");
+                    if (jout_det == NULL) {
+                        jout_det = json_object_get(jusage, "output_tokens_details");
+                    }
+                    if (jout_det != NULL && json_is_object(jout_det)) {
+                        json_t* jr = json_object_get(jout_det, "reasoning_tokens");
+                        if (json_is_integer(jr)) {
+                            acc->reasoning_tokens = json_integer_value(jr);
+                        }
+                    }
+                }
+                json_decref(root);
+            }
         }
     }
-    if (jusage != NULL && json_is_object(jusage)) {
-        json_t* jp = json_object_get(jusage, "prompt_tokens");
-        if (jp == NULL) {
-            jp = json_object_get(jusage, "input_tokens");
-        }
-        json_t* jc = json_object_get(jusage, "completion_tokens");
-        if (jc == NULL) {
-            jc = json_object_get(jusage, "output_tokens");
-        }
-        if (json_is_integer(jp)) {
-            acc->prompt_tokens = json_integer_value(jp);
-        }
-        if (json_is_integer(jc)) {
-            acc->completion_tokens = json_integer_value(jc);
+
+    const char* dp = d + 5;
+    while (*dp == ' ') {
+        dp++;
+    }
+
+    /* 2. Tag emulation mode */
+    if (acc->tag_emulation) {
+        if (strcmp(dp, "[DONE]") == 0) {
+            if (acc->tag_opened && !acc->tag_closed) {
+                openai_bridge_emit_delta(acc, "content", "\n</think>\n\n", NULL);
+                acc->tag_closed = true;
+            }
+            openai_bridge_emit_sse(acc, "data: [DONE]\n\n");
+            return;
         }
 
-        json_t* jch = json_object_get(jusage, "prompt_cache_hit_tokens");
-        if (json_is_integer(jch)) {
-            acc->cached_tokens = json_integer_value(jch);
-        } else {
-            json_t* jdet = json_object_get(jusage, "prompt_tokens_details");
-            if (jdet == NULL) {
-                jdet = json_object_get(jusage, "input_tokens_details");
+        const char* jstart = strchr(dp, '{');
+        if (jstart != NULL) {
+            json_t* root = json_loads(jstart, 0, NULL);
+            if (root != NULL) {
+                json_t* choices = json_object_get(root, "choices");
+                if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+                    json_t* c0 = json_array_get(choices, 0);
+                    if (c0 != NULL && json_is_object(c0)) {
+                        json_t* delta = json_object_get(c0, "delta");
+                        if (delta != NULL && json_is_object(delta)) {
+                            json_t* jrc = json_object_get(delta, "reasoning_content");
+                            if (jrc == NULL) {
+                                jrc = json_object_get(delta, "thought");
+                            }
+                            if (jrc != NULL && json_is_string(jrc)) {
+                                const char* rtext = json_string_value(jrc);
+                                if (!acc->tag_opened) {
+                                    openai_bridge_emit_delta(acc, "content", "<think>\n", NULL);
+                                    acc->tag_opened = true;
+                                }
+                                openai_bridge_emit_delta(acc, "content", rtext, NULL);
+                            }
+
+                            json_t* jc = json_object_get(delta, "content");
+                            if (jc != NULL && json_is_string(jc)) {
+                                const char* ctext = json_string_value(jc);
+                                if (acc->tag_opened && !acc->tag_closed) {
+                                    openai_bridge_emit_delta(acc, "content", "\n</think>\n\n", NULL);
+                                    acc->tag_closed = true;
+                                }
+                                openai_bridge_emit_delta(acc, "content", ctext, NULL);
+                            }
+                        }
+
+                        json_t* jfr = json_object_get(c0, "finish_reason");
+                        if (jfr != NULL && !json_is_null(jfr)) {
+                            if (acc->tag_opened && !acc->tag_closed) {
+                                openai_bridge_emit_delta(acc, "content", "\n</think>\n\n", NULL);
+                                acc->tag_closed = true;
+                            }
+                            const char* fr_str = json_is_string(jfr) ? json_string_value(jfr) : "stop";
+                            openai_bridge_emit_delta(acc, NULL, NULL, fr_str);
+                        }
+                    }
+                }
+                json_decref(root);
             }
-            if (jdet != NULL && json_is_object(jdet)) {
-                json_t* jcd = json_object_get(jdet, "cached_tokens");
-                if (json_is_integer(jcd)) {
-                    acc->cached_tokens = json_integer_value(jcd);
+        }
+        return;
+    }
+
+    /* 3. Raw mode (tag_emulation == false): normalize thought -> reasoning_content */
+    if (strcmp(dp, "[DONE]") == 0) {
+        openai_bridge_emit_sse(acc, "data: [DONE]\n\n");
+        return;
+    }
+
+    const char* jstart = strchr(dp, '{');
+    if (jstart != NULL) {
+        json_t* root = json_loads(jstart, 0, NULL);
+        if (root != NULL) {
+            bool modified = false;
+            json_t* choices = json_object_get(root, "choices");
+            if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
+                json_t* c0 = json_array_get(choices, 0);
+                if (c0 != NULL && json_is_object(c0)) {
+                    json_t* delta = json_object_get(c0, "delta");
+                    if (delta != NULL && json_is_object(delta)) {
+                        json_t* jth = json_object_get(delta, "thought");
+                        json_t* jrc = json_object_get(delta, "reasoning_content");
+                        if (jth != NULL && jrc == NULL) {
+                            json_object_set(delta, "reasoning_content", jth);
+                            json_object_del(delta, "thought");
+                            modified = true;
+                        }
+                    }
                 }
             }
-        }
-
-        json_t* jout_det = json_object_get(jusage, "completion_tokens_details");
-        if (jout_det == NULL) {
-            jout_det = json_object_get(jusage, "output_tokens_details");
-        }
-        if (jout_det != NULL && json_is_object(jout_det)) {
-            json_t* jr = json_object_get(jout_det, "reasoning_tokens");
-            if (json_is_integer(jr)) {
-                acc->reasoning_tokens = json_integer_value(jr);
+            if (modified) {
+                char* packed = json_dumps(root, JSON_COMPACT);
+                if (packed != NULL) {
+                    char sse[8192];
+                    snprintf(sse, sizeof(sse), "data: %s\n\n", packed);
+                    openai_bridge_emit_sse(acc, sse);
+                    free(packed);
+                }
+            } else {
+                char sse[8192];
+                snprintf(sse, sizeof(sse), "%s\n\n", line);
+                openai_bridge_emit_sse(acc, sse);
             }
+            json_decref(root);
+            return;
         }
     }
-    json_decref(root);
+
+    char sse[8192];
+    snprintf(sse, sizeof(sse), "%s\n\n", line);
+    openai_bridge_emit_sse(acc, sse);
 }
 
-/** @brief Passthrough stream feed: sends the SSE header on the first packet, forwards chunks verbatim, and accumulates usage per line.
+/** @brief Passthrough stream feed: sends the SSE header on the first packet, handles tag emulation or normalizes deltas per line.
  *  @return 0 on success; -1 on downstream write failure. */
 static int
 openai_bridge_feed(void* bridge, const void* chunk, size_t len)
@@ -312,12 +596,6 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
         acc->rc->headers_sent = true;
     }
 
-    if (acc->rc->write != NULL && len > 0) {
-        if (acc->rc->write(acc->rc->impl, chunk, len, false) != 0) {
-            return -1;
-        }
-    }
-
     const char* p = chunk;
     const char* end = p + len;
     while (p < end) {
@@ -327,8 +605,13 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
             if (acc->line_len + seg < sizeof(acc->line_buf)) {
                 memcpy(acc->line_buf + acc->line_len, p, seg);
                 acc->line_len += seg;
+                if (acc->line_len > 0 && acc->line_buf[acc->line_len - 1] == '\r') {
+                    acc->line_len--;
+                }
                 acc->line_buf[acc->line_len] = '\0';
-                openai_stream_process_line(acc, acc->line_buf);
+                if (acc->line_len > 0) {
+                    openai_stream_process_line(acc, acc->line_buf);
+                }
             } else {
                 AIGATE_LOG_WARN("stream line truncated for model %s",
                                 acc->model[0] ? acc->model : "unknown");
@@ -352,11 +635,15 @@ openai_bridge_feed(void* bridge, const void* chunk, size_t len)
     return 0;
 }
 
-/** @brief Terminate the passthrough stream (empty write as the fin marker). @return Downstream write result. */
+/** @brief Terminate the stream (closes <think> tag if needed, empty write as fin marker). @return Downstream write result. */
 static int
 openai_bridge_finish(stream_bridge_t* b)
 {
     openai_bridge_t* acc = (openai_bridge_t*)b;
+    if (acc->tag_emulation && acc->tag_opened && !acc->tag_closed) {
+        openai_bridge_emit_delta(acc, "content", "\n</think>\n\n", NULL);
+        acc->tag_closed = true;
+    }
     if (acc->rc->write != NULL) {
         return acc->rc->write(acc->rc->impl, "", 0, true);
     }

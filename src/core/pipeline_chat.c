@@ -307,6 +307,13 @@ chat_parse_upstream_response(chat_req_t*               q,
         return provider_gemini_resp_to_openai_ext(
             ubody ? ubody : "", q->model, true, parsed_body, parsed_len, ptok, ctok);
     }
+    if (rcfg.tag_emulation && (strcmp(provider, "openai") == 0 ||
+                               strcmp(provider, "azure") == 0 ||
+                               strcmp(provider, "deepseek") == 0)) {
+        *parsed_status = 200;
+        return provider_openai_resp_format_tag_emulation(
+            ubody ? ubody : "", ulen, q->model, parsed_body, parsed_len, ptok, ctok, cached_tok);
+    }
     return adapter->parse_chat_response(ubody ? ubody : "",
                                         ulen,
                                         q->model,
@@ -1362,6 +1369,10 @@ handle_chat_stream(chat_req_t* q)
                 ((anthropic_bridge_t*)bridge)->tag_emulation = true;
             } else if (strcmp(target->provider, "gemini") == 0) {
                 ((gemini_bridge_t*)bridge)->tag_emulation = true;
+            } else if (strcmp(target->provider, "openai") == 0 ||
+                       strcmp(target->provider, "azure") == 0 ||
+                       strcmp(target->provider, "deepseek") == 0) {
+                ((openai_bridge_t*)bridge)->tag_emulation = true;
             }
         }
 
