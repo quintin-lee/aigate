@@ -43,7 +43,8 @@
     .hidden { display: none; }
 
     /* Reasoning Process & Badges */
-    .reasoning-accordion {
+    .reasoning-accordion,
+    .thinking-accordion {
       margin-bottom: 0.5rem;
       border: 1px solid rgba(168, 85, 247, 0.3);
       background-color: rgba(168, 85, 247, 0.05);
@@ -81,10 +82,12 @@
       border-top: 1px solid rgba(168, 85, 247, 0.15);
       margin: 0;
     }
-    .reasoning-accordion.collapsed .reasoning-body {
+    .reasoning-accordion.collapsed .reasoning-body,
+    .thinking-accordion.collapsed .reasoning-body {
       display: none;
     }
-    .reasoning-accordion.collapsed .reasoning-toggle-icon {
+    .reasoning-accordion.collapsed .reasoning-toggle-icon,
+    .thinking-accordion.collapsed .reasoning-toggle-icon {
       transform: rotate(-90deg);
     }
     .badge-purple {
@@ -1381,6 +1384,7 @@
                 <th class="py-3 px-4">分组名称</th>
                 <th class="py-3 px-4">关联密钥数</th>
                 <th class="py-3 px-4">月度费用预算</th>
+                <th class="py-3 px-4">每日推理限额</th>
                 <th class="py-3 px-4 text-right">操作</th>
               </tr>
             </thead>
@@ -2047,6 +2051,26 @@
               <input type="range" id="playMaxTokensInput" min="64" max="8192" step="64" value="2048" oninput="document.getElementById('maxTokensDisplay').innerText=this.value" class="w-full accent-brand-500">
             </div>
 
+            <!-- Deep Reasoning Protocol Controls -->
+            <div class="pt-2 border-t border-slate-800/80 space-y-2.5">
+              <div>
+                <label class="block text-[11px] font-semibold text-purple-300 mb-1">思考流协议格式 (Reasoning Format)</label>
+                <select id="playReasoningFormat" class="w-full px-2.5 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-xs text-purple-300 focus:outline-none focus:border-purple-500 font-medium">
+                  <option value="">🌐 默认 (跟随网关与模型策略)</option>
+                  <option value="tag">🏷️ &lt;think&gt; 标签仿真封装</option>
+                  <option value="raw">📦 原始模式 (reasoning_content)</option>
+                </select>
+              </div>
+
+              <div id="playReasoningBudgetGroup">
+                <div class="flex justify-between text-[11px] font-semibold mb-1">
+                  <span class="text-purple-300">思考预算上限 (Thinking Budget)</span>
+                  <span id="thinkingBudgetDisplay" class="text-purple-400 font-mono">0 (默认)</span>
+                </div>
+                <input type="range" id="playReasoningBudgetInput" name="playThinkingBudget" min="0" max="131072" step="1024" value="0" oninput="document.getElementById('thinkingBudgetDisplay').innerText = this.value > 0 ? (this.value >= 1024 ? Math.round(this.value/1024) + 'K (' + this.value + ')' : this.value) : '0 (默认)'" class="w-full accent-purple-500">
+              </div>
+            </div>
+
             <div class="flex items-center justify-between pt-1">
               <div class="flex items-center space-x-2">
                 <input type="checkbox" id="playStreamToggle" checked class="rounded bg-slate-900 border-slate-700 text-brand-600 focus:ring-brand-500 w-4 h-4">
@@ -2063,6 +2087,15 @@
         <!-- Col 2: Chat Stream Dialog (6 cols) -->
         <div class="lg:col-span-6 space-y-3">
           <div class="glass-panel p-4 rounded-2xl border border-slate-800 flex flex-col h-[600px]">
+            <!-- Degradation Alert Banner -->
+            <div id="playDegradedBanner" class="hidden px-3 py-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center justify-between mb-2">
+              <div class="flex items-center gap-2">
+                <span>⚠️</span>
+                <span>每日推理配额已超限，本次交互已自动降级为标准模式生成 (<code class="font-mono text-[10px]">X-Aigate-Reasoning-Degraded: quota_exceeded</code>)</span>
+              </div>
+              <button type="button" onclick="document.getElementById('playDegradedBanner').classList.add('hidden')" class="text-amber-400 hover:text-white font-bold ml-2">&times;</button>
+            </div>
+
             <!-- Messages scroll container -->
             <div id="playChatHistory" class="flex-1 overflow-y-auto custom-scroll p-3 space-y-3 rounded-xl bg-slate-950/70 border border-slate-800/80 text-xs">
               <div class="text-center py-16 text-slate-500 text-xs flex flex-col items-center justify-center space-y-2">
@@ -2135,6 +2168,10 @@
             <div class="flex justify-between items-center text-slate-400">
               <span>补全 Token:</span>
               <span id="playStatCompTokens" class="text-slate-200">0</span>
+            </div>
+            <div class="flex justify-between items-center text-purple-300">
+              <span>🧠 推理 Token:</span>
+              <span id="playStatReasoningTokens" class="font-bold font-mono text-purple-400">0</span>
             </div>
           </div>
 
@@ -3720,7 +3757,7 @@
         <!-- Pricing config -->
         <div class="border-t border-slate-800/80 pt-3">
           <div class="font-semibold text-slate-200 mb-2">定价策略 (成本核算)</div>
-          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <label class="block text-[11px] text-slate-400 mb-1">输入价格 ($/Mtok)</label>
               <input type="number" step="0.0001" min="0" id="mFormPricingIn" placeholder="0" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
@@ -3730,11 +3767,15 @@
               <input type="number" step="0.0001" min="0" id="mFormPricingOut" placeholder="0" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
             </div>
             <div>
+              <label class="block text-[11px] text-slate-400 mb-1">思考价格 ($/Mtok)</label>
+              <input type="number" step="0.0001" min="0" id="mFormPricingReasoning" placeholder="0" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
+            </div>
+            <div>
               <label class="block text-[11px] text-slate-400 mb-1">缓存命中折扣 (0~1)</label>
               <input type="number" step="0.01" min="0" max="1" id="mFormPricingDiscount" placeholder="0.1" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
             </div>
           </div>
-          <p class="text-[10px] text-slate-500 mt-1">缺省不填则仅统计 Token 消耗量，报表中不折算美元金额。</p>
+          <p class="text-[10px] text-slate-500 mt-1">缺省不填则仅统计 Token 消耗量，报表中不折算美元金额。思考价格未填时默认采用输出价格。</p>
         </div>
 
         <!-- Reasoning / Thinking config -->
@@ -3758,9 +3799,15 @@
                 <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=8192" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">8192</button>
                 <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=16384" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">16K</button>
                 <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=32768" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">32K</button>
+                <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=65536" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">64K</button>
+                <button type="button" onclick="document.getElementById('mFormThinkingBudget').value=131072" class="px-1.5 py-0.5 rounded text-[10px] bg-slate-800 hover:bg-slate-700 text-purple-300 font-mono">128K</button>
               </div>
             </div>
             <input type="number" min="0" step="1024" id="mFormThinkingBudget" name="m-default-thinking-budget" data-testid="m-default-thinking-budget" placeholder="0" class="w-full px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono">
+          </div>
+          <div class="flex items-center space-x-2 pt-1">
+            <input type="checkbox" id="mFormTagEmulationDefault" name="tag_emulation_default" class="rounded bg-slate-900 border-slate-700 text-purple-600 focus:ring-purple-500 w-4 h-4">
+            <label for="mFormTagEmulationDefault" class="text-xs text-slate-300 font-medium cursor-pointer">默认开启 &lt;think&gt; 标签流式仿真封装 (tag_emulation_default)</label>
           </div>
           <p class="text-[10px] text-slate-500">启用后网关支持 Anthropic/OpenAI 原生思考协议双向桥接及 &lt;think&gt; 标签流式仿真封装。</p>
         </div>
@@ -3807,7 +3854,7 @@
           <p class="text-[10px] text-slate-500 mt-1">全部不勾选则允许访问所有现有及未来模型。</p>
         </div>
 
-        <div class="grid grid-cols-2 gap-3">
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label class="block font-semibold text-slate-300 mb-1">限流 (QPS)</label>
             <input type="number" id="kFormRateQps" min="0" value="10" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
@@ -3816,6 +3863,11 @@
           <div>
             <label class="block font-semibold text-slate-300 mb-1">每日 Token 配额</label>
             <input type="number" id="kFormQuota" min="0" value="100000" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+            <p class="text-[10px] text-slate-500 mt-0.5">0 = 不限</p>
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-300 mb-1">每日推理限额 (Token)</label>
+            <input type="number" id="kFormReasoningQuota" min="0" value="0" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
             <p class="text-[10px] text-slate-500 mt-0.5">0 = 不限</p>
           </div>
         </div>
@@ -3897,6 +3949,11 @@
           <label class="block font-semibold text-slate-300 mb-1">月度费用预算 ($ USD)</label>
           <input type="number" id="gFormMonthlyBudget" step="0.01" min="0" value="0.0" placeholder="0.00 (0 表示不限)" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
           <p class="text-[10px] text-slate-500 mt-0.5">当月全组 API 密钥累计消费达到该限额后触发阻断 (429 额度超限)。0 表示不限额。</p>
+        </div>
+        <div>
+          <label class="block font-semibold text-slate-300 mb-1">组级每日推理配额 (Token)</label>
+          <input type="number" id="gFormDailyReasoningQuota" min="0" value="0" placeholder="0 (0 表示不限)" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white focus:outline-none focus:border-brand-500 font-mono">
+          <p class="text-[10px] text-slate-500 mt-0.5">当日本组累计推理 Token 达到限额后自动平滑降级。0 表示不限。</p>
         </div>
         <div class="flex justify-end space-x-3 pt-3 border-t border-slate-800">
           <button type="button" onclick="closeGroupModal()" class="px-4 py-2 rounded-xl text-slate-400 hover:text-white transition">取消</button>
@@ -5196,9 +5253,10 @@
         }
 
         let reasoningBadge = "";
-        if (m.supports_reasoning || (m.default_thinking_budget && m.default_thinking_budget > 0)) {
+        if (m.supports_reasoning || (m.default_thinking_budget && m.default_thinking_budget > 0) || m.tag_emulation_default) {
           const budgetTxt = (m.default_thinking_budget && m.default_thinking_budget > 0) ? ` (${m.default_thinking_budget})` : "";
-          reasoningBadge = `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 badge badge-purple" title="支持深度思考 / 思考预算: ${m.default_thinking_budget || '默认'}">💭 Reasoning${budgetTxt}</span>`;
+          const tagTxt = m.tag_emulation_default ? ` [<think>]` : "";
+          reasoningBadge = `<span class="ml-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-purple-500/10 text-purple-400 border border-purple-500/20 badge badge-purple" title="支持深度思考 / 思考预算: ${m.default_thinking_budget || '默认'}${m.tag_emulation_default ? ' / 默认开启 <think> 标签仿真' : ''}">💭 Reasoning${budgetTxt}${tagTxt}</span>`;
         }
 
         let tgts = (m.targets && m.targets.length > 0) ? m.targets : [];
@@ -5256,10 +5314,12 @@
           : `<button onclick="toggleModelEnabled('${name}', true)" class="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:bg-slate-700 transition">○ 已停用</button>`;
 
         let pricingBadge = "";
-        if (m.pricing && (m.pricing.in_mtok != null || m.pricing.out_mtok != null)) {
+        if (m.pricing && (m.pricing.in_mtok != null || m.pricing.out_mtok != null || m.pricing.reasoning_mtok != null)) {
           const inVal = m.pricing.in_mtok ?? 0;
           const outVal = m.pricing.out_mtok ?? 0;
-          pricingBadge = `<div class="mt-1"><span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" title="输入: $${inVal}/Mtok, 输出: $${outVal}/Mtok">💰 In $${inVal} / Out $${outVal}</span></div>`;
+          const reasVal = m.pricing.reasoning_mtok != null ? m.pricing.reasoning_mtok : null;
+          const reasTxt = (reasVal != null && reasVal > 0) ? ` / Reas $${reasVal}` : "";
+          pricingBadge = `<div class="mt-1"><span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" title="输入: $${inVal}/Mtok, 输出: $${outVal}/Mtok${reasTxt}">💰 In $${inVal} / Out $${outVal}${reasTxt}</span></div>`;
         }
 
         const tr = document.createElement("tr");
@@ -5442,14 +5502,17 @@
 
         const fPIn = document.getElementById("mFormPricingIn");
         const fPOut = document.getElementById("mFormPricingOut");
+        const fPReas = document.getElementById("mFormPricingReasoning");
         const fPDisc = document.getElementById("mFormPricingDiscount");
         if (m && m.pricing) {
           fPIn.value = m.pricing.in_mtok ?? "";
           fPOut.value = m.pricing.out_mtok ?? "";
+          fPReas.value = m.pricing.reasoning_mtok ?? "";
           fPDisc.value = m.pricing.cached_mtok_discount ?? "";
         } else {
           fPIn.value = "";
           fPOut.value = "";
+          fPReas.value = "";
           fPDisc.value = "";
         }
 
@@ -5468,12 +5531,15 @@
 
         const fSR = document.getElementById("mFormSupportsReasoning") || document.getElementById("m-supports-reasoning");
         const fTB = document.getElementById("mFormThinkingBudget") || document.getElementById("m-default-thinking-budget");
+        const fTED = document.getElementById("mFormTagEmulationDefault");
         if (m) {
           if (fSR) fSR.checked = !!m.supports_reasoning;
           if (fTB) fTB.value = (m.default_thinking_budget != null && m.default_thinking_budget > 0) ? m.default_thinking_budget : "";
+          if (fTED) fTED.checked = !!m.tag_emulation_default;
         } else {
           if (fSR) fSR.checked = false;
           if (fTB) fTB.value = "";
+          if (fTED) fTED.checked = false;
         }
 
         let tgts = (m && m.targets && m.targets.length > 0) ? m.targets : [];
@@ -5500,14 +5566,17 @@
         fEnab.checked = true;
         document.getElementById("mFormPricingIn").value = "";
         document.getElementById("mFormPricingOut").value = "";
+        document.getElementById("mFormPricingReasoning").value = "";
         document.getElementById("mFormPricingDiscount").value = "";
         document.getElementById("mFormHedgedEnabled").checked = false;
         document.getElementById("mFormHedgedDelay").value = "";
         document.getElementById("mFormHedgeBudget").value = 15;
         const fSR = document.getElementById("mFormSupportsReasoning") || document.getElementById("m-supports-reasoning");
         const fTB = document.getElementById("mFormThinkingBudget") || document.getElementById("m-default-thinking-budget");
+        const fTED = document.getElementById("mFormTagEmulationDefault");
         if (fSR) fSR.checked = false;
         if (fTB) fTB.value = "";
+        if (fTED) fTED.checked = false;
         addTargetRow({
           provider: "openai",
           endpoint: "https://api.openai.com",
@@ -5543,6 +5612,8 @@
       const elTB = document.getElementById("mFormThinkingBudget") || document.getElementById("m-default-thinking-budget");
       const rawReasoningBudget = elTB ? parseInt(elTB.value, 10) : 0;
       const thinkingBudget = (!isNaN(rawReasoningBudget) && rawReasoningBudget >= 0) ? rawReasoningBudget : 0;
+      const elTED = document.getElementById("mFormTagEmulationDefault");
+      const tagEmulationDefault = elTED ? elTED.checked : false;
 
       let defaultParams = {};
       try {
@@ -5587,6 +5658,7 @@
         hedge_budget_pct: hedgeBudget,
         supports_reasoning: supportsReasoning,
         default_thinking_budget: thinkingBudget,
+        tag_emulation_default: tagEmulationDefault,
         targets: targets,
         default_params: defaultParams,
         enabled: enabled
@@ -5594,11 +5666,13 @@
 
       const pIn = parseFloat(document.getElementById("mFormPricingIn").value);
       const pOut = parseFloat(document.getElementById("mFormPricingOut").value);
+      const pReas = parseFloat(document.getElementById("mFormPricingReasoning").value);
       const pDisc = parseFloat(document.getElementById("mFormPricingDiscount").value);
-      if (!isNaN(pIn) || !isNaN(pOut) || !isNaN(pDisc)) {
+      if (!isNaN(pIn) || !isNaN(pOut) || !isNaN(pReas) || !isNaN(pDisc)) {
         payload.pricing = {
           in_mtok: !isNaN(pIn) ? pIn : 0,
           out_mtok: !isNaN(pOut) ? pOut : 0,
+          reasoning_mtok: !isNaN(pReas) ? pReas : 0,
           cached_mtok_discount: !isNaN(pDisc) ? pDisc : 0.1
         };
       }
@@ -6248,17 +6322,28 @@
           ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 ml-1">🍯 金丝雀蜜标</span>`
           : "";
 
+        const degradedBadge = k.degraded
+          ? `<span class="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 text-amber-400 border border-amber-500/20 ml-1" title="每日推理配额已超限，处于降级模式">⚠️ 已降级</span>`
+          : "";
+
+        const reasQuotaInfo = (k.daily_reasoning_quota && k.daily_reasoning_quota > 0)
+          ? `<div class="text-[10px] text-purple-400 font-mono mt-0.5">🧠 推理: ${Number(k.daily_reasoning_quota).toLocaleString()} / 天</div>`
+          : "";
+
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
         tr.innerHTML = `
           <td class="py-3 px-4">
-            <div class="font-bold text-slate-100 flex items-center">${k.name} ${canaryBadge}</div>
+            <div class="font-bold text-slate-100 flex items-center">${k.name} ${canaryBadge} ${degradedBadge}</div>
             <div class="font-mono text-[10px] text-slate-500">ID: #${k.key_id}</div>
             ${groupBadge}
           </td>
           <td class="py-3 px-4">${allowed}</td>
           <td class="py-3 px-4 font-mono">${k.rate_qps > 0 ? `${k.rate_qps} QPS` : "<span class='text-slate-500'>不限</span>"}</td>
-          <td class="py-3 px-4 font-mono">${k.daily_token_quota > 0 ? `${k.daily_token_quota.toLocaleString()} / 天` : "<span class='text-slate-500'>不限</span>"}</td>
+          <td class="py-3 px-4 font-mono">
+            <div>${k.daily_token_quota > 0 ? `${k.daily_token_quota.toLocaleString()} / 天` : "<span class='text-slate-500'>不限</span>"}</div>
+            ${reasQuotaInfo}
+          </td>
           <td class="py-3 px-4 whitespace-nowrap">${budgetInfo}</td>
           <td class="py-3 px-4 text-center whitespace-nowrap">${grBadge}</td>
           <td class="py-3 px-4 font-mono text-slate-400">${expiryStr}</td>
@@ -6287,6 +6372,7 @@
       document.getElementById("kFormName").value = "";
       document.getElementById("kFormRateQps").value = "10";
       document.getElementById("kFormQuota").value = "100000";
+      document.getElementById("kFormReasoningQuota").value = "0";
       document.getElementById("kFormMonthlyCostBudget").value = "0.0";
       document.getElementById("kFormMonthlyTokenBudget").value = "0";
       document.getElementById("kFormGuardrailsEnabled").checked = true;
@@ -6331,6 +6417,7 @@
       const name = document.getElementById("kFormName").value.trim();
       const rateQps = parseInt(document.getElementById("kFormRateQps").value, 10) || 0;
       const quota = parseInt(document.getElementById("kFormQuota").value, 10) || 0;
+      const reasoningQuota = parseInt(document.getElementById("kFormReasoningQuota").value, 10) || 0;
       const monthlyCost = parseFloat(document.getElementById("kFormMonthlyCostBudget").value) || 0.0;
       const monthlyToken = parseInt(document.getElementById("kFormMonthlyTokenBudget").value, 10) || 0;
       const guardrailsEnabled = document.getElementById("kFormGuardrailsEnabled").checked;
@@ -6351,6 +6438,7 @@
         allowed_models: checkedModels,
         rate_qps: rateQps,
         daily_token_quota: quota,
+        daily_reasoning_quota: reasoningQuota,
         monthly_cost_budget: monthlyCost,
         monthly_token_budget: monthlyToken,
         guardrails_enabled: guardrailsEnabled,
@@ -7421,7 +7509,7 @@
     async function fetchGroups() {
       const tbody = document.getElementById("groupsTableBody");
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="4" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载部门分组…</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="py-8 px-4 text-center text-slate-500 text-xs">正在加载部门分组…</td></tr>`;
       }
       const resp = await apiCall("/admin/v1/groups");
       if (!resp || !resp.ok) return;
@@ -7452,6 +7540,10 @@
           ? `<span class="font-mono text-emerald-400 font-semibold">$${Number(g.monthly_budget_usd).toFixed(2)}</span> <span class="text-[10px] text-slate-500">/ 月</span>`
           : `<span class="text-slate-500">不限</span>`;
 
+        const drq = (g.daily_reasoning_quota && g.daily_reasoning_quota > 0)
+          ? `<span class="font-mono text-purple-400 font-semibold">${Number(g.daily_reasoning_quota).toLocaleString()} Tok</span> <span class="text-[10px] text-slate-500">/ 天</span>`
+          : `<span class="text-slate-500">不限</span>`;
+
         const tr = document.createElement("tr");
         tr.className = "hover:bg-slate-900/40 transition";
         tr.innerHTML = `
@@ -7461,8 +7553,9 @@
             <span class="px-2 py-0.5 rounded-full text-[10px] bg-slate-800 text-slate-300 font-semibold">${g.key_count ?? 0} 个密钥</span>
           </td>
           <td class="py-3 px-4 whitespace-nowrap">${mb}</td>
+          <td class="py-3 px-4 whitespace-nowrap">${drq}</td>
           <td class="py-3 px-4 text-right space-x-2 whitespace-nowrap">
-            <button onclick="openGroupModal(${g.id}, '${escapeHtml(g.name)}', ${g.monthly_budget_usd || 0})" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
+            <button onclick="openGroupModal(${g.id}, '${escapeHtml(g.name)}', ${g.monthly_budget_usd || 0}, ${g.daily_reasoning_quota || 0})" class="text-xs text-slate-400 hover:text-white transition">编辑</button>
             <button onclick="deleteGroup(${g.id}, '${escapeHtml(g.name)}')" class="text-xs text-rose-400 hover:text-rose-300 transition">删除</button>
           </td>
         `;
@@ -7471,10 +7564,11 @@
     }
 
 // Open the group modal (blank for create).
-    function openGroupModal(id = null, name = "", monthlyBudget = 0) {
+    function openGroupModal(id = null, name = "", monthlyBudget = 0, dailyReasoningQuota = 0) {
       document.getElementById("gFormId").value = id || "";
       document.getElementById("gFormName").value = name || "";
       document.getElementById("gFormMonthlyBudget").value = (monthlyBudget && monthlyBudget > 0) ? monthlyBudget : "0.0";
+      document.getElementById("gFormDailyReasoningQuota").value = (dailyReasoningQuota && dailyReasoningQuota > 0) ? dailyReasoningQuota : "0";
       document.getElementById("groupModalTitle").innerText = id ? "编辑部门分组" : "新建部门分组";
       document.getElementById("groupModal").classList.remove("hidden");
       setTimeout(() => document.getElementById("gFormName").focus(), 50);
@@ -7491,13 +7585,15 @@
       const id = document.getElementById("gFormId").value;
       const name = document.getElementById("gFormName").value.trim();
       const monthlyBudget = parseFloat(document.getElementById("gFormMonthlyBudget").value) || 0.0;
+      const dailyReasoningQuota = parseInt(document.getElementById("gFormDailyReasoningQuota").value, 10) || 0;
       if (!name) {
         showToast("分组名称不能为空", "error");
         return;
       }
       const payload = {
         name,
-        monthly_budget_usd: monthlyBudget
+        monthly_budget_usd: monthlyBudget,
+        daily_reasoning_quota: dailyReasoningQuota
       };
       if (id) {
         const resp = await apiCall(`/admin/v1/groups/${id}`, {
@@ -9403,7 +9499,7 @@
     }
 
     function toggleReasoning(btn) {
-      const box = btn ? (btn.closest ? btn.closest(".reasoning-accordion") : document.getElementById("reasoning-box")) : document.getElementById("reasoning-box");
+      const box = btn ? (btn.closest ? (btn.closest(".thinking-accordion") || btn.closest(".reasoning-accordion")) : document.getElementById("reasoning-box")) : document.getElementById("reasoning-box");
       if (box) {
         box.classList.toggle("collapsed");
       }
@@ -9413,13 +9509,19 @@
       if (!usage) return;
       const pTokens = usage.prompt_tokens || 0;
       const cTokens = usage.completion_tokens || 0;
+      const rTokens = usage.completion_tokens_details?.reasoning_tokens || usage.reasoning_tokens || 0;
       document.getElementById("playStatPromptTokens").innerText = pTokens;
       document.getElementById("playStatCompTokens").innerText = cTokens;
+      const statReasEl = document.getElementById("playStatReasoningTokens");
+      if (statReasEl) statReasEl.innerText = rTokens;
+
       const model = (state.models || []).find(m => m.name === modelName);
       if (model) {
-        const pRate = parseFloat(model.price_prompt_1m) || 0;
-        const cRate = parseFloat(model.price_completion_1m) || 0;
-        const cost = (pTokens * pRate + cTokens * cRate) / 1000000.0;
+        const pRate = parseFloat(model.pricing?.in_mtok || model.price_prompt_1m) || 0;
+        const cRate = parseFloat(model.pricing?.out_mtok || model.price_completion_1m) || 0;
+        const rRate = parseFloat(model.pricing?.reasoning_mtok) || cRate;
+        const billedCompletion = Math.max(0, cTokens - rTokens);
+        const cost = (pTokens * pRate + billedCompletion * cRate + rTokens * rRate) / 1000000.0;
         document.getElementById("playStatCost").innerText = `$${cost.toFixed(5)}`;
       }
     }
@@ -9438,6 +9540,11 @@
 
       if (!model) { showToast("请选择模型", "warning"); return; }
       if (!usr) { showToast("请输入用户消息", "warning"); return; }
+
+      const degradedBanner = document.getElementById("playDegradedBanner");
+      if (degradedBanner) degradedBanner.classList.add("hidden");
+      const statReasEl = document.getElementById("playStatReasoningTokens");
+      if (statReasEl) statReasEl.innerText = "0";
 
       const history = document.getElementById("playChatHistory");
       if (playState.messages.length === 0) {
@@ -9467,10 +9574,13 @@
           </span>
           <button onclick="copyPlaygroundMessage(this)" title="复制内容" class="text-slate-400 hover:text-white transition px-1.5 py-0.5 rounded hover:bg-slate-800">📋 复制</button>
         </div>
-        <div class="reasoning-accordion hidden" id="reasoning-box">
-          <div class="reasoning-header" onclick="toggleReasoning(this)">
-            <span>💭 深度思考过程</span>
-            <span class="reasoning-toggle-icon">▼</span>
+        <div class="reasoning-accordion thinking-accordion hidden" id="reasoning-box">
+          <div class="reasoning-header flex items-center justify-between" onclick="toggleReasoning(this)">
+            <span class="flex items-center gap-1.5"><span>🧠</span><span>思考过程 (Thinking Process)</span></span>
+            <span class="flex items-center gap-2">
+              <span class="text-[10px] font-mono text-purple-400/80 thinking-token-count"></span>
+              <span class="reasoning-toggle-icon text-xs">▼</span>
+            </span>
           </div>
           <pre class="reasoning-body" id="reasoning-stream-content"></pre>
         </div>
@@ -9503,6 +9613,27 @@
       if (key) headers["Authorization"] = `Bearer ${key}`;
       if (targetChannel) headers["X-Aigate-Target-Provider"] = targetChannel;
 
+      // Reasoning format selector
+      const rFormatEl = document.getElementById("playReasoningFormat");
+      const rFormat = rFormatEl ? rFormatEl.value : "";
+      if (rFormat === "tag") {
+        headers["X-Reasoning-Format"] = "tag_emulation";
+        reqBody.tag_emulation = true;
+      } else if (rFormat === "raw") {
+        headers["X-Reasoning-Format"] = "raw";
+        reqBody.tag_emulation = false;
+      }
+
+      // Thinking budget
+      const rBudgetEl = document.getElementById("playReasoningBudgetInput") || document.getElementById("playThinkingBudget");
+      const rBudget = rBudgetEl ? parseInt(rBudgetEl.value, 10) : 0;
+      if (rBudget > 0) {
+        reqBody.thinking = {
+          type: "enabled",
+          budget_tokens: rBudget
+        };
+      }
+
       const sendBtn = document.getElementById("playSendBtn");
       const stopBtn = document.getElementById("playStopBtn");
       const statusBadge = document.getElementById("playStatusBadge");
@@ -9524,6 +9655,7 @@
       const msgTextEl = assistantBubble.querySelector(".assistant-msg-text");
       const reasoningBox = assistantBubble.querySelector(".reasoning-accordion");
       const reasoningStreamEl = assistantBubble.querySelector(".reasoning-body");
+      const thinkingCountEl = assistantBubble.querySelector(".thinking-token-count");
       const provTagEl = assistantBubble.querySelector(".assistant-provider-tag");
 
       try {
@@ -9546,6 +9678,17 @@
         document.getElementById("playStatCache").innerText = cacheHeader;
         if (provTagEl) {
           provTagEl.innerText = `通道: ${winningProvider} [${cacheHeader}]`;
+        }
+
+        // Degradation alert check
+        const isDegraded = resp.headers.get("X-Aigate-Reasoning-Degraded") === "quota_exceeded" ||
+                           resp.headers.has("X-Aigate-Reasoning-Degraded");
+        if (degradedBanner) {
+          if (isDegraded) {
+            degradedBanner.classList.remove("hidden");
+          } else {
+            degradedBanner.classList.add("hidden");
+          }
         }
 
         if (!resp.ok) {
@@ -9581,6 +9724,10 @@
           if (reasoning && reasoningBox && reasoningStreamEl) {
             reasoningBox.classList.remove("hidden");
             reasoningStreamEl.innerText = reasoning;
+            if (thinkingCountEl) {
+              const estTokens = Math.max(1, Math.round(reasoning.length / 3.5));
+              thinkingCountEl.innerText = `~${estTokens} tokens`;
+            }
           }
 
           msgTextEl.innerText = reply;
@@ -9629,6 +9776,10 @@
                         reasoningBox.classList.remove("hidden");
                         reasoningStreamEl.innerText = playState.activeReasoningText;
                       }
+                      if (thinkingCountEl && playState.activeReasoningText) {
+                        const estTokens = Math.max(1, Math.round(playState.activeReasoningText.length / 3.5));
+                        thinkingCountEl.innerText = `~${estTokens} tokens`;
+                      }
                       history.scrollTop = history.scrollHeight;
                     }
                     if (delta.content) {
@@ -9649,6 +9800,10 @@
                         if (reasoningBox && reasoningStreamEl) {
                           reasoningBox.classList.remove("hidden");
                           reasoningStreamEl.innerText = playState.activeReasoningText;
+                        }
+                        if (thinkingCountEl && playState.activeReasoningText) {
+                          const estTokens = Math.max(1, Math.round(playState.activeReasoningText.length / 3.5));
+                          thinkingCountEl.innerText = `~${estTokens} tokens`;
                         }
                         history.scrollTop = history.scrollHeight;
                       } else {
