@@ -112,7 +112,7 @@ class BenchmarkHarness:
         }
 
         # Clean up any existing benchmark models and keys first
-        for m in ["bench-sync", "bench-stream", "bench-cache", "bench-failover"]:
+        for m in ["bench-sync", "bench-stream", "bench-cache", "bench-failover", "bench-reasoning"]:
             req = urllib.request.Request(f"{admin_url}/models/{m}", headers=admin_headers, method="DELETE")
             try:
                 with urllib.request.urlopen(req, timeout=1) as resp:
@@ -125,6 +125,12 @@ class BenchmarkHarness:
             {"name": "bench-sync", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}"},
             {"name": "bench-stream", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}"},
             {"name": "bench-cache", "provider": "openai", "endpoint": f"http://127.0.0.1:{MOCK_PORT}"},
+            {
+                "name": "bench-reasoning",
+                "provider": "openai",
+                "endpoint": f"http://127.0.0.1:{MOCK_PORT}",
+                "supports_reasoning": True,
+            },
             {
                 "name": "bench-failover",
                 "lb_policy": "priority",
@@ -403,8 +409,9 @@ def run_python_scenario(scenario, duration, concurrency, api_key):
 def main():
     parser = argparse.ArgumentParser(description="aigate Performance Benchmark Suite")
     parser.add_argument("--tool", choices=["k6", "wrk", "python", "auto"], default="auto", help="Load test tool")
-    parser.add_argument("--scenario", choices=["sync", "stream", "cache", "failover", "all"], default="all")
+    parser.add_argument("--scenario", choices=["sync", "stream", "cache", "failover", "reasoning_raw", "reasoning_emulation", "all", "suite", "reasoning"], default="all")
     parser.add_argument("--concurrency", type=int, default=20, help="VUs / connections (default 20)")
+    parser.add_argument("--concurrencies", type=str, default="", help="Comma-separated concurrency levels for ladder stress test (e.g. 20,50,100,200)")
     parser.add_argument("--duration", type=int, default=10, help="Test duration in seconds (default 10)")
     parser.add_argument("--pg-dsn", default="", help="Custom PostgreSQL DSN")
     args = parser.parse_args()
@@ -431,10 +438,19 @@ def main():
     pg_dsn = args.pg_dsn or resolve_pg_dsn()
     print(f"[bench] Using PostgreSQL: {pg_dsn}")
 
-    scenarios = ["sync", "stream", "cache", "failover"] if args.scenario == "all" else [args.scenario]
-    if tool == "wrk" and "failover" in scenarios:
-        # wrk lacks custom assertion in simple mode
-        scenarios.remove("failover")
+    if args.scenario in ["all", "suite"]:
+        scenarios = ["sync", "stream", "cache", "failover", "reasoning_raw", "reasoning_emulation"]
+    elif args.scenario == "reasoning":
+        scenarios = ["stream", "reasoning_raw", "reasoning_emulation"]
+    else:
+        scenarios = [args.scenario]
+
+    if tool == "wrk":
+        for skip_sc in ["failover", "reasoning_raw", "reasoning_emulation"]:
+            if skip_sc in scenarios:
+                scenarios.remove(skip_sc)
+
+    concurrency_list = [int(c.strip()) for c in args.concurrencies.split(",") if c.strip()] if args.concurrencies else [args.concurrency]
 
     harness = BenchmarkHarness(pg_dsn)
     results = []
@@ -459,16 +475,17 @@ def main():
         print("[bench] Warming up cache...")
         harness.warmup_cache()
 
-        for sc in scenarios:
-            print(f"[bench] Running scenario: {sc} (concurrency={args.concurrency}, duration={args.duration}s)...")
-            if tool == "k6":
-                res = run_k6_scenario(sc, args.duration, args.concurrency, harness.api_key)
-            elif tool == "wrk":
-                res = run_wrk_scenario(sc, args.duration, args.concurrency, harness.api_key)
-            else:
-                res = run_python_scenario(sc, args.duration, args.concurrency, harness.api_key)
-            results.append(res)
-            time.sleep(1)
+        for cc in concurrency_list:
+            for sc in scenarios:
+                print(f"[bench] Running scenario: {sc} (concurrency={cc}, duration={args.duration}s)...")
+                if tool == "k6":
+                    res = run_k6_scenario(sc, args.duration, cc, harness.api_key)
+                elif tool == "wrk":
+                    res = run_wrk_scenario(sc, args.duration, cc, harness.api_key)
+                else:
+                    res = run_python_scenario(sc, args.duration, cc, harness.api_key)
+                results.append(res)
+                time.sleep(1)
 
     finally:
         print("[bench] Tearing down background services...")

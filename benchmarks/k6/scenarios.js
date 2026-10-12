@@ -95,5 +95,70 @@ export default function () {
     });
     failoverSuccessRate.add(is200);
     reqThroughput.add(1);
+
+  } else if (SCENARIO === 'reasoning_raw') {
+    const startTime = Date.now();
+    const payload = JSON.stringify({
+      model: 'bench-reasoning',
+      messages: [{ role: 'user', content: 'test reasoning raw' }],
+      stream: true
+    });
+    const res = http.post(TARGET_URL, payload, {
+      headers: Object.assign({}, headers, { 'Accept': 'text/event-stream' }),
+      responseType: 'text',
+    });
+    const is200 = check(res, { 'status is 200': (r) => r.status === 200 });
+    if (is200 && res.body) {
+      const events = parseSSELines(res.body);
+      for (const ev of events) {
+        if (ev.data && ev.data !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(ev.data);
+            if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
+              const ttft = Date.now() - startTime;
+              ttftTrend.add(ttft);
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+    reqThroughput.add(1);
+
+  } else if (SCENARIO === 'reasoning_emulation') {
+    const startTime = Date.now();
+    const payload = JSON.stringify({
+      model: 'bench-reasoning',
+      messages: [{ role: 'user', content: 'test reasoning emulation' }],
+      stream: true,
+      tag_emulation: true
+    });
+    const res = http.post(TARGET_URL, payload, {
+      headers: Object.assign({}, headers, {
+        'Accept': 'text/event-stream',
+        'X-Reasoning-Format': 'tag_emulation'
+      }),
+      responseType: 'text',
+    });
+    const is200 = check(res, {
+      'status is 200': (r) => r.status === 200,
+      'has think tag': (r) => r.body && r.body.includes('<think>')
+    });
+    if (is200 && res.body) {
+      const events = parseSSELines(res.body);
+      for (const ev of events) {
+        if (ev.data && ev.data !== '[DONE]') {
+          try {
+            const parsed = JSON.parse(ev.data);
+            if (parsed.choices && parsed.choices[0] && parsed.choices[0].delta) {
+              const ttft = Date.now() - startTime;
+              ttftTrend.add(ttft);
+              break;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+    reqThroughput.add(1);
   }
 }

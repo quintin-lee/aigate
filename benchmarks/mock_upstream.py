@@ -30,6 +30,15 @@ STREAM_CHUNKS = [
     b'data: [DONE]\n\n'
 ]
 
+REASONING_STREAM_CHUNKS = [
+    b'data: {"id":"chatcmpl-bench-reas","object":"chat.completion.chunk","created":1700000000,"model":"bench-reasoning","choices":[{"index":0,"delta":{"role":"assistant"}}]}\n\n',
+    b'data: {"id":"chatcmpl-bench-reas","object":"chat.completion.chunk","created":1700000000,"model":"bench-reasoning","choices":[{"index":0,"delta":{"reasoning_content":"Step 1: thinking through logic."}}]}\n\n',
+    b'data: {"id":"chatcmpl-bench-reas","object":"chat.completion.chunk","created":1700000000,"model":"bench-reasoning","choices":[{"index":0,"delta":{"reasoning_content":" Step 2: validating constraints."}}]}\n\n',
+    b'data: {"id":"chatcmpl-bench-reas","object":"chat.completion.chunk","created":1700000000,"model":"bench-reasoning","choices":[{"index":0,"delta":{"content":"Final solution arrived."}}]}\n\n',
+    b'data: {"id":"chatcmpl-bench-reas","object":"chat.completion.chunk","created":1700000000,"model":"bench-reasoning","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":12,"total_tokens":22,"completion_tokens_details":{"reasoning_tokens":8}}}\n\n',
+    b'data: [DONE]\n\n'
+]
+
 
 class MockHandler(BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.1"
@@ -72,7 +81,8 @@ class MockHandler(BaseHTTPRequestHandler):
             self.send_header("X-Upstream-Provider", "mock-primary")
             self.end_headers()
 
-            for chunk in STREAM_CHUNKS:
+            chunks = REASONING_STREAM_CHUNKS if b"bench-reasoning" in body_bytes else STREAM_CHUNKS
+            for chunk in chunks:
                 self.wfile.write(chunk)
                 self.wfile.flush()
                 time.sleep(0.002)
