@@ -863,6 +863,18 @@ main(int argc, char** argv)
     extern void test_gemini_thinking_stream_raw_reasoning_content(void);
     test_register("gemini_thinking_stream_raw_reasoning_content", test_gemini_thinking_stream_raw_reasoning_content);
 
+    extern void test_claude_37_128k_budget_parsing(void);
+    test_register("claude_37_128k_budget_parsing", test_claude_37_128k_budget_parsing);
+
+    extern void test_claude_37_signature_delta_stream(void);
+    test_register("claude_37_signature_delta_stream", test_claude_37_signature_delta_stream);
+
+    extern void test_claude_37_redacted_thinking(void);
+    test_register("claude_37_redacted_thinking", test_claude_37_redacted_thinking);
+
+    extern void test_claude_37_degraded_suppression(void);
+    test_register("claude_37_degraded_suppression", test_claude_37_degraded_suppression);
+
     extern void test_pricing_reasoning_mtok_calculation(void);
     test_register("pricing_reasoning_mtok_calculation", test_pricing_reasoning_mtok_calculation);
 

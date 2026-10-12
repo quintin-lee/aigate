@@ -301,7 +301,7 @@ provider_anthropic_build(const model_rec_t* route,
         max_tokens = json_integer_value(jmt);
     }
 
-    if (rcfg.enabled && rcfg.budget_tokens > 0) {
+    if (rcfg.enabled && rcfg.budget_tokens >= 1024) {
         json_t* th_obj = json_object();
         json_object_set_new(th_obj, "type", json_string("enabled"));
         json_object_set_new(th_obj, "budget_tokens", json_integer(rcfg.budget_tokens));
@@ -310,6 +310,9 @@ provider_anthropic_build(const model_rec_t* route,
         /* Anthropic safety rule: max_tokens MUST be strictly greater than budget_tokens */
         if (max_tokens <= rcfg.budget_tokens) {
             max_tokens = rcfg.budget_tokens + 4096;
+            if (max_tokens > 132096) {
+                max_tokens = 132096;
+            }
         }
     }
 
@@ -481,6 +484,7 @@ provider_anthropic_resp_to_openai_ext(const char* anthropic_resp,
     size_t  ct_len = 0;
     char*   thinking_text = NULL;
     size_t  th_len = 0;
+    char*   signature_text = NULL;
     json_t* tool_calls_arr = json_array();
 
     json_t* jcontent = json_object_get(root, "content");
@@ -507,6 +511,20 @@ provider_anthropic_resp_to_openai_ext(const char* anthropic_resp,
                         th_len += tlen;
                         thinking_text[th_len] = '\0';
                     }
+                }
+                json_t* jsig = json_object_get(block, "signature");
+                if (jsig != NULL && json_is_string(jsig) && signature_text == NULL) {
+                    signature_text = strdup(json_string_value(jsig));
+                }
+            } else if (strcmp(btype, "redacted_thinking") == 0) {
+                const char* t = "[redacted thinking]";
+                size_t      tlen = strlen(t);
+                char*       nbuf = realloc(thinking_text, th_len + tlen + 1);
+                if (nbuf != NULL) {
+                    thinking_text = nbuf;
+                    memcpy(thinking_text + th_len, t, tlen);
+                    th_len += tlen;
+                    thinking_text[th_len] = '\0';
                 }
             } else if (strcmp(btype, "text") == 0) {
                 json_t* jt = json_object_get(block, "text");
@@ -571,6 +589,12 @@ provider_anthropic_resp_to_openai_ext(const char* anthropic_resp,
     json_object_set_new(msg, "role", json_string("assistant"));
     if (thinking_text != NULL) {
         json_object_set_new(msg, "reasoning_content", json_string(thinking_text));
+    }
+    if (signature_text != NULL) {
+        if (!tag_emulation) {
+            json_object_set_new(msg, "reasoning_signature", json_string(signature_text));
+        }
+        free(signature_text);
     }
     if (tag_emulation && thinking_text != NULL && thinking_text[0] != '\0') {
         const char* ct = (content_text && content_text[0] != '\0') ? content_text : "";
@@ -760,7 +784,7 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
             json_t* jt = json_object_get(jcb, "type");
             if (jt && json_is_string(jt)) {
                 const char* type_str = json_string_value(jt);
-                if (strcmp(type_str, "thinking") == 0) {
+                if (strcmp(type_str, "thinking") == 0 || strcmp(type_str, "redacted_thinking") == 0) {
                     b->in_thinking = true;
                     b->in_tool_use = false;
                     if (b->tag_emulation && !b->tag_opened) {
@@ -777,6 +801,36 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
                             free(pd);
                         }
                         b->tag_opened = true;
+                    }
+                    if (strcmp(type_str, "redacted_thinking") == 0) {
+                        const char* rtext = "[redacted thinking]";
+                        if (b->tag_emulation) {
+                            json_t* cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                                   "id", id_buf, "object", "chat.completion.chunk",
+                                                   "model", b->model, "choices", "index", 0,
+                                                   "delta", "content", rtext, "finish_reason");
+                            char* pd = json_dumps(cd, JSON_COMPACT);
+                            json_decref(cd);
+                            if (pd != NULL) {
+                                char sse[8192];
+                                snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                                bridge_send_chunk(b, sse);
+                                free(pd);
+                            }
+                        } else {
+                            json_t* cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                                   "id", id_buf, "object", "chat.completion.chunk",
+                                                   "model", b->model, "choices", "index", 0,
+                                                   "delta", "reasoning_content", rtext, "finish_reason");
+                            char* pd = json_dumps(cd, JSON_COMPACT);
+                            json_decref(cd);
+                            if (pd != NULL) {
+                                char sse[8192];
+                                snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                                bridge_send_chunk(b, sse);
+                                free(pd);
+                            }
+                        }
                     }
                 } else if (strcmp(type_str, "text") == 0) {
                     b->in_thinking = false;
@@ -823,7 +877,32 @@ bridge_process_line(anthropic_bridge_t* b, const char* line)
         if (jdel != NULL && json_is_object(jdel)) {
             json_t*     jtype = json_object_get(jdel, "type");
             const char* dtype = (jtype && json_is_string(jtype)) ? json_string_value(jtype) : "";
-            if (strcmp(dtype, "thinking_delta") == 0 ||
+            if (strcmp(dtype, "signature_delta") == 0) {
+                json_t* jsig = json_object_get(jdel, "signature");
+                if (jsig != NULL && json_is_string(jsig)) {
+                    const char* sig = json_string_value(jsig);
+                    size_t sig_len = strlen(sig);
+                    if (b->signature_len + sig_len < sizeof(b->signature_buf) - 1) {
+                        memcpy(b->signature_buf + b->signature_len, sig, sig_len);
+                        b->signature_len += sig_len;
+                        b->signature_buf[b->signature_len] = '\0';
+                    }
+                    if (!b->tag_emulation) {
+                        json_t* cd = json_pack("{s:s,s:s,s:s,s:[{s:i,s:{s:s},s:n}]}",
+                                               "id", id_buf, "object", "chat.completion.chunk",
+                                               "model", b->model, "choices", "index", 0,
+                                               "delta", "reasoning_signature", sig, "finish_reason");
+                        char* pd = json_dumps(cd, JSON_COMPACT);
+                        json_decref(cd);
+                        if (pd != NULL) {
+                            char sse[8192];
+                            snprintf(sse, sizeof sse, "data: %s\n\n", pd);
+                            bridge_send_chunk(b, sse);
+                            free(pd);
+                        }
+                    }
+                }
+            } else if (strcmp(dtype, "thinking_delta") == 0 ||
                 (b->in_thinking && strcmp(dtype, "input_json_delta") != 0 && strcmp(dtype, "text_delta") != 0)) {
                 json_t* jth = json_object_get(jdel, "thinking");
                 if (jth == NULL) {

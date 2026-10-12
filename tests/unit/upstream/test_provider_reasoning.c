@@ -722,3 +722,150 @@ TEST_CASE(test_gemini_thinking_stream_raw_reasoning_content)
     TEST_ASSERT(strstr(sink.accum, "<think>") == NULL, "no <think> tag emitted in raw mode");
     TEST_ASSERT(strstr(sink.accum, "</think>") == NULL, "no </think> tag emitted in raw mode");
 }
+
+TEST_CASE(test_claude_37_128k_budget_parsing)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+
+    /* 128k budget */
+    const char* j1 = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":128000}}";
+    json_t* r1 = json_loads(j1, 0, NULL);
+    reasoning_config_t cfg1;
+    int rc = parse_reasoning_config(r1, &route, &cfg1);
+    json_decref(r1);
+    TEST_ASSERT(rc == 0 && cfg1.enabled && cfg1.budget_tokens == 128000, "128k parsed ok");
+
+    /* Clamped over 128k */
+    const char* j2 = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":200000}}";
+    json_t* r2 = json_loads(j2, 0, NULL);
+    reasoning_config_t cfg2;
+    rc = parse_reasoning_config(r2, &route, &cfg2);
+    json_decref(r2);
+    TEST_ASSERT(rc == 0 && cfg2.enabled && cfg2.budget_tokens == 128000, "over-128k clamped to 128000");
+
+    /* Disabled */
+    const char* j3 = "{\"thinking\":{\"type\":\"disabled\"}}";
+    json_t* r3 = json_loads(j3, 0, NULL);
+    reasoning_config_t cfg3;
+    rc = parse_reasoning_config(r3, &route, &cfg3);
+    json_decref(r3);
+    TEST_ASSERT(rc == 0 && !cfg3.enabled && cfg3.budget_tokens == 0, "thinking disabled");
+
+    /* Tag emulation direct boolean in body */
+    const char* j4 = "{\"tag_emulation\":true}";
+    json_t* r4 = json_loads(j4, 0, NULL);
+    reasoning_config_t cfg4;
+    rc = parse_reasoning_config(r4, &route, &cfg4);
+    json_decref(r4);
+    TEST_ASSERT(rc == 0 && cfg4.tag_emulation == true, "tag_emulation boolean supported");
+}
+
+TEST_CASE(test_claude_37_signature_delta_stream)
+{
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc = {
+        .impl = &sink,
+        .write = mock_stream_write,
+    };
+
+    stream_bridge_t* bridge = g_provider_anthropic.stream_bridge_new(&rc, "claude-3-7-sonnet");
+    TEST_ASSERT(bridge != NULL, "bridge created");
+    anthropic_bridge_t* ab = (anthropic_bridge_t*)bridge;
+    ab->tag_emulation = false;
+
+    /* 1. message_start */
+    const char* c1 = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sig\",\"model\":\"claude-3-7-sonnet\",\"usage\":{\"input_tokens\":15}}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c1, strlen(c1));
+
+    /* 2. content_block_start thinking */
+    const char* c2 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c2, strlen(c2));
+
+    /* 3. thinking_delta */
+    const char* c3 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Calculating steps...\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c3, strlen(c3));
+
+    /* 4. signature_delta */
+    const char* c4 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_claude37_proof\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c4, strlen(c4));
+
+    g_provider_anthropic.stream_bridge_finish(bridge);
+    g_provider_anthropic.stream_bridge_free(bridge);
+
+    /* Verify reasoning_content and reasoning_signature emitted */
+    TEST_ASSERT(strstr(sink.accum, "\"reasoning_content\":\"Calculating steps...\"") != NULL, "reasoning_content emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"reasoning_signature\":\"sig_claude37_proof\"") != NULL, "reasoning_signature emitted");
+}
+
+TEST_CASE(test_claude_37_redacted_thinking)
+{
+    /* Non-streaming test with redacted_thinking */
+    const char* ant_resp =
+        "{\"id\":\"msg_redacted\","
+        "\"type\":\"message\","
+        "\"role\":\"assistant\","
+        "\"content\":["
+        "{\"type\":\"redacted_thinking\",\"data\":\"encrypted_blob\"},"
+        "{\"type\":\"text\",\"text\":\"Safe answer.\"}"
+        "],"
+        "\"usage\":{\"input_tokens\":20,\"output_tokens\":30}"
+        "}";
+
+    char* out_openai = NULL;
+    size_t out_len = 0;
+    long ptok = 0, ctok = 0;
+    int rc = provider_anthropic_resp_to_openai(ant_resp, "claude-3-7-sonnet", &out_openai, &out_len, &ptok, &ctok);
+    TEST_ASSERT(rc == 0, "translation success");
+    TEST_ASSERT(strstr(out_openai, "[redacted thinking]") != NULL, "redacted thinking captured");
+    free(out_openai);
+
+    /* Streaming test with redacted_thinking and tag emulation */
+    mock_stream_sink_t sink;
+    memset(&sink, 0, sizeof(sink));
+    aigate_response_ctx rc_stream = {
+        .impl = &sink,
+        .write = mock_stream_write,
+    };
+    stream_bridge_t* bridge = g_provider_anthropic.stream_bridge_new(&rc_stream, "claude-3-7-sonnet");
+    anthropic_bridge_t* ab = (anthropic_bridge_t*)bridge;
+    ab->tag_emulation = true;
+
+    const char* c_red = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"redacted_thinking\",\"data\":\"secret\"}}\n\n";
+    g_provider_anthropic.stream_bridge_feed(bridge, c_red, strlen(c_red));
+    g_provider_anthropic.stream_bridge_finish(bridge);
+    g_provider_anthropic.stream_bridge_free(bridge);
+
+    TEST_ASSERT(strstr(sink.accum, "<think>") != NULL, "<think> emitted for redacted thinking");
+    TEST_ASSERT(strstr(sink.accum, "[redacted thinking]") != NULL, "[redacted thinking] emitted");
+}
+
+TEST_CASE(test_claude_37_degraded_suppression)
+{
+    model_rec_t route;
+    memset(&route, 0, sizeof(route));
+    snprintf(route.endpoint, sizeof(route.endpoint), "https://api.anthropic.com");
+
+    /* Degraded budget (0 tokens) */
+    const char* in_json = "{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":0}}";
+    char url[512];
+    const char* hdrs[4][2];
+    int nhdrs = 0;
+    char* out_body = NULL;
+    size_t out_len = 0;
+
+    int rc = provider_anthropic_build(&route, in_json, url, sizeof(url), hdrs, &nhdrs, &out_body, &out_len);
+    TEST_ASSERT(rc == 0, "build success");
+    TEST_ASSERT(out_body != NULL, "out_body non-null");
+
+    json_t* out = json_loads(out_body, 0, NULL);
+    free(out_body);
+    TEST_ASSERT(out != NULL, "parsed json valid");
+
+    /* Verify thinking object is suppressed (NULL) */
+    json_t* jth = json_object_get(out, "thinking");
+    TEST_ASSERT(jth == NULL, "thinking object suppressed when budget is 0 / degraded");
+
+    json_decref(out);
+}

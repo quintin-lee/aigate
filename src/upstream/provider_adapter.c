@@ -92,18 +92,25 @@ parse_reasoning_config_ext(json_t*            req_body,
     }
 
     if (!resolved && req_body != NULL && json_is_object(req_body)) {
-        json_t* jtm = json_object_get(req_body, "thinking_mode");
-        if (jtm == NULL) {
-            jtm = json_object_get(req_body, "thinking_format");
+        json_t* jte = json_object_get(req_body, "tag_emulation");
+        if (jte != NULL && json_is_boolean(jte)) {
+            out_cfg->tag_emulation = json_is_true(jte);
+            resolved = 1;
         }
-        if (jtm != NULL && json_is_string(jtm)) {
-            const char* s = json_string_value(jtm);
-            if (strcasecmp(s, "tag") == 0) {
-                out_cfg->tag_emulation = true;
-                resolved = 1;
-            } else if (strcasecmp(s, "raw") == 0) {
-                out_cfg->tag_emulation = false;
-                resolved = 1;
+        if (!resolved) {
+            json_t* jtm = json_object_get(req_body, "thinking_mode");
+            if (jtm == NULL) {
+                jtm = json_object_get(req_body, "thinking_format");
+            }
+            if (jtm != NULL && json_is_string(jtm)) {
+                const char* s = json_string_value(jtm);
+                if (strcasecmp(s, "tag") == 0) {
+                    out_cfg->tag_emulation = true;
+                    resolved = 1;
+                } else if (strcasecmp(s, "raw") == 0) {
+                    out_cfg->tag_emulation = false;
+                    resolved = 1;
+                }
             }
         }
     }
@@ -122,20 +129,40 @@ parse_reasoning_config_ext(json_t*            req_body,
         if (jth != NULL && json_is_object(jth)) {
             json_t* jtype = json_object_get(jth, "type");
             json_t* jb = json_object_get(jth, "budget_tokens");
-            if (jtype != NULL && json_is_string(jtype) && strcmp(json_string_value(jtype), "enabled") == 0) {
-                out_cfg->enabled = true;
-                if (jb != NULL && json_is_integer(jb)) {
-                    out_cfg->budget_tokens = json_integer_value(jb);
+            if (jtype != NULL && json_is_string(jtype)) {
+                if (strcmp(json_string_value(jtype), "enabled") == 0) {
+                    out_cfg->enabled = true;
+                    long bval = 0;
+                    if (jb != NULL && json_is_integer(jb)) {
+                        bval = json_integer_value(jb);
+                    }
+                    if (bval > 128000) {
+                        bval = 128000;
+                    }
+                    out_cfg->budget_tokens = bval;
+                    return 0;
+                } else if (strcmp(json_string_value(jtype), "disabled") == 0) {
+                    out_cfg->enabled = false;
+                    out_cfg->budget_tokens = 0;
+                    return 0;
                 }
-                return 0;
             }
         }
 
         /* 2. max_thinking_tokens parameter */
         json_t* jmtt = json_object_get(req_body, "max_thinking_tokens");
         if (jmtt != NULL && json_is_integer(jmtt)) {
-            out_cfg->enabled = true;
-            out_cfg->budget_tokens = json_integer_value(jmtt);
+            long bval = json_integer_value(jmtt);
+            if (bval > 0) {
+                out_cfg->enabled = true;
+                if (bval > 128000) {
+                    bval = 128000;
+                }
+                out_cfg->budget_tokens = bval;
+            } else {
+                out_cfg->enabled = false;
+                out_cfg->budget_tokens = 0;
+            }
             return 0;
         }
 
