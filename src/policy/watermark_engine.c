@@ -227,11 +227,8 @@ watermark_inject(const char* text, size_t len, const watermark_payload_t* payloa
 }
 
 int
-watermark_decode_all(const char*          text,
-                     size_t               len,
-                     watermark_payload_t* out_payloads,
-                     int                  cap,
-                     int*                 out_count)
+watermark_decode_all(
+    const char* text, size_t len, watermark_payload_t* out_payloads, int cap, int* out_count)
 {
     if (text == NULL || len < 3 || out_payloads == NULL || cap <= 0 || out_count == NULL) {
         return -1;
@@ -340,7 +337,7 @@ watermark_decode(const char* text, size_t len, watermark_payload_t* out_payload)
 }
 
 void
-watermark_stream_init(stream_watermark_state_t*   state,
+watermark_stream_init(stream_watermark_state_t*  state,
                       const watermark_payload_t* payload,
                       const char*                format,
                       size_t                     min_interval)
@@ -366,12 +363,12 @@ watermark_stream_init(stream_watermark_state_t*   state,
 
 int
 watermark_stream_feed(stream_watermark_state_t* state,
-                      const char*              in_buf,
-                      size_t                   in_len,
-                      bool                     is_final,
-                      char*                    out_buf,
-                      size_t                   out_cap,
-                      size_t*                  out_len)
+                      const char*               in_buf,
+                      size_t                    in_len,
+                      bool                      is_final,
+                      char*                     out_buf,
+                      size_t                    out_cap,
+                      size_t*                   out_len)
 {
     if (state == NULL || out_buf == NULL || out_len == NULL) {
         return -1;
@@ -390,10 +387,9 @@ watermark_stream_feed(stream_watermark_state_t* state,
     bool is_anthropic = (strcmp(state->format, "anthropic") == 0);
 
     /* 1. Check if we need to inject an end-of-stream fallback tile */
-    bool is_stream_end = is_final ||
-                         (in_buf != NULL &&
-                          (strstr(in_buf, "data: [DONE]") != NULL ||
-                           (is_anthropic && strstr(in_buf, "message_stop") != NULL)));
+    bool is_stream_end =
+        is_final || (in_buf != NULL && (strstr(in_buf, "data: [DONE]") != NULL ||
+                                        (is_anthropic && strstr(in_buf, "message_stop") != NULL)));
 
     /* Build synthetic delta event if needed */
     char   synth_event[512];
@@ -401,13 +397,14 @@ watermark_stream_feed(stream_watermark_state_t* state,
 
     if (is_stream_end && !state->tile_injected) {
         if (is_anthropic) {
-            synth_len = (size_t)snprintf(
-                synth_event,
-                sizeof(synth_event),
-                "event: content_block_delta\n"
-                "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"%.*s\"}}\n\n",
-                WATERMARK_UTF8_BYTES,
-                state->wm_utf8);
+            synth_len = (size_t)snprintf(synth_event,
+                                         sizeof(synth_event),
+                                         "event: content_block_delta\n"
+                                         "data: "
+                                         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{"
+                                         "\"type\":\"text_delta\",\"text\":\"%.*s\"}}\n\n",
+                                         WATERMARK_UTF8_BYTES,
+                                         state->wm_utf8);
         } else {
             synth_len = (size_t)snprintf(
                 synth_event,

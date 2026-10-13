@@ -69,9 +69,9 @@ provider_probe_plan(const char* provider_type, const char* endpoint, provider_pr
 }
 
 int
-parse_reasoning_config_ext(json_t*            req_body,
-                           const model_rec_t* route,
-                           const char*        header_format,
+parse_reasoning_config_ext(json_t*             req_body,
+                           const model_rec_t*  route,
+                           const char*         header_format,
                            reasoning_config_t* out_cfg)
 {
     if (out_cfg == NULL) {

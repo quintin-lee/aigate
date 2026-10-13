@@ -29,17 +29,17 @@ enum {
 
 /** @brief Streaming cache accumulator for real-time SSE chunk passthrough and full content aggregation. */
 typedef struct stream_cache_acc {
-    aigate_response_ctx* orig_rc;       /**< Real response context (borrowed). */
-    char*                accum_content; /**< Accumulated full body (max 512KiB). */
-    size_t               accum_len;     /**< Accumulated byte count. */
-    size_t               accum_cap;     /**< accum_content capacity. */
-    char*                line_buf;      /**< Growable SSE line buffer. */
-    size_t               line_cap;      /**< line_buf capacity. */
-    size_t               line_len;      /**< Valid line buffer length. */
-    char                 id[64];        /**< Response id (from first data line). */
-    long                 created;       /**< Response created timestamp. */
-    bool                 overflow;      /**< Over-limit/alloc failure: passthrough only. */
-    pii_stream_filter_t  pii_sf; /**< Streaming PII de-anonymization sliding window filter. */
+    aigate_response_ctx*     orig_rc;       /**< Real response context (borrowed). */
+    char*                    accum_content; /**< Accumulated full body (max 512KiB). */
+    size_t                   accum_len;     /**< Accumulated byte count. */
+    size_t                   accum_cap;     /**< accum_content capacity. */
+    char*                    line_buf;      /**< Growable SSE line buffer. */
+    size_t                   line_cap;      /**< line_buf capacity. */
+    size_t                   line_len;      /**< Valid line buffer length. */
+    char                     id[64];        /**< Response id (from first data line). */
+    long                     created;       /**< Response created timestamp. */
+    bool                     overflow;      /**< Over-limit/alloc failure: passthrough only. */
+    pii_stream_filter_t      pii_sf;   /**< Streaming PII de-anonymization sliding window filter. */
     stream_watermark_state_t wm_state; /**< Streaming watermark state machine. */
 } stream_cache_acc_t;
 
@@ -85,7 +85,7 @@ typedef struct chat_req {
     char   fallback_reason[32]; /**< Fallback trigger reason (e.g. SLA_TTFT_EXCEEDED). */
     char   routed_model[64];    /**< Routed model name buffer. */
     char   requested_model[64]; /**< Client requested model name buffer. */
-    bool   reasoning_degraded;  /**< True if daily reasoning quota exceeded and gracefully degraded. */
+    bool reasoning_degraded; /**< True if daily reasoning quota exceeded and gracefully degraded. */
 } chat_req_t;
 
 /**
@@ -103,11 +103,8 @@ double calc_req_cost(const model_rec_t* route, long prompt, long completion, lon
  * @brief Calculate estimated request cost in USD based on model pricing and token counts,
  *        including separate reasoning token pricing.
  */
-double calc_req_cost_ext(const model_rec_t* route,
-                         long               prompt,
-                         long               completion,
-                         long               cached,
-                         long               reasoning);
+double calc_req_cost_ext(
+    const model_rec_t* route, long prompt, long completion, long cached, long reasoning);
 
 /**
  * @brief Calculate estimated dollar savings from upstream prompt cache hits.

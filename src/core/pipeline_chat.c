@@ -286,8 +286,7 @@ chat_parse_upstream_response(chat_req_t*               q,
                              long*                     cached_tok)
 {
     reasoning_config_t rcfg;
-    parse_reasoning_config_ext(
-        q->jbody, route, q->rq ? q->rq->thinking_format : NULL, &rcfg);
+    parse_reasoning_config_ext(q->jbody, route, q->rq ? q->rq->thinking_format : NULL, &rcfg);
 
     if (rcfg.tag_emulation && strcmp(provider, "anthropic") == 0) {
         (void)ulen;
@@ -307,8 +306,7 @@ chat_parse_upstream_response(chat_req_t*               q,
         return provider_gemini_resp_to_openai_ext(
             ubody ? ubody : "", q->model, true, parsed_body, parsed_len, ptok, ctok);
     }
-    if (rcfg.tag_emulation && (strcmp(provider, "openai") == 0 ||
-                               strcmp(provider, "azure") == 0 ||
+    if (rcfg.tag_emulation && (strcmp(provider, "openai") == 0 || strcmp(provider, "azure") == 0 ||
                                strcmp(provider, "deepseek") == 0)) {
         *parsed_status = 200;
         return provider_openai_resp_format_tag_emulation(
@@ -333,7 +331,8 @@ chat_apply_reasoning_quota_and_degradation(chat_req_t* q)
     }
     long effective_quota = q->krec.daily_reasoning_quota;
     if (effective_quota <= 0 && q->ac->be != NULL && q->krec.group_id > 0) {
-        effective_quota = (long)budget_enforce_get_group_reasoning_quota(q->ac->be, q->krec.group_id);
+        effective_quota =
+            (long)budget_enforce_get_group_reasoning_quota(q->ac->be, q->krec.group_id);
     }
     if (effective_quota <= 0) {
         return; /* unlimited */
@@ -386,7 +385,8 @@ chat_record_tokens_and_reasoning(chat_req_t* q, long total_tokens, long reasonin
     if (reasoning_tok > 0) {
         long effective_quota = q->krec.daily_reasoning_quota;
         if (effective_quota <= 0 && q->ac->be != NULL && q->krec.group_id > 0) {
-            effective_quota = (long)budget_enforce_get_group_reasoning_quota(q->ac->be, q->krec.group_id);
+            effective_quota =
+                (long)budget_enforce_get_group_reasoning_quota(q->ac->be, q->krec.group_id);
         }
         rl_reserve_reasoning_tokens(q->ac->rl, q->krec.key_id, effective_quota, reasoning_tok);
     }
@@ -806,15 +806,15 @@ handle_chat_sync(chat_req_t* q)
         size_t   ulen = 0;
         uint64_t t0 = mono_ns();
         int      urc = upstream_call_ext(url,
-                                    cur_route.upstream_key,
-                                    extra_hdrs,
-                                    n_extra_hdrs,
-                                    merged,
-                                    mlen,
-                                    q->ac->default_timeout_ms,
-                                    &status,
-                                    &ubody,
-                                    &ulen);
+                                         cur_route.upstream_key,
+                                         extra_hdrs,
+                                         n_extra_hdrs,
+                                         merged,
+                                         mlen,
+                                         q->ac->default_timeout_ms,
+                                         &status,
+                                         &ubody,
+                                         &ulen);
 
         if (q->n_candidates == 1 && urc == 0 && status >= 500) {
             free(ubody);
@@ -931,10 +931,8 @@ handle_chat_sync(chat_req_t* q)
 
             handle_prompt_cache_accounting_and_headers(q, ptok, cached_tok);
 
-            long reasoning_tok =
-                extract_reasoning_tokens_from_json(parsed_body, parsed_len);
-            double req_cost =
-                calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
+            long   reasoning_tok = extract_reasoning_tokens_from_json(parsed_body, parsed_len);
+            double req_cost = calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
             record_usage_and_event(q->ac,
                                    q->krec.key_id,
                                    q->model,
@@ -1205,17 +1203,17 @@ handle_stream_preheaders(chat_req_t*               q,
 typedef struct stream_feed_wrapper {
     int (*real_feed)(void*       bridge,
                      const void* chunk,
-                     size_t      len);     /**< Underlying stream bridge feed callback. */
-    void*              real_bridge;   /**< Underlying bridge instance. */
-    latency_tracker_t* lt;            /**< Latency tracker instance (optional). */
-    const char*        model;         /**< Target model name for metrics. */
-    const char*        endpoint;      /**< Target upstream endpoint address. */
-    const char*        provider;      /**< Target upstream provider name. */
-    uint64_t           t0;            /**< Timestamp when request was dispatched. */
-    bool        first_chunk_recorded; /**< True if first non-empty chunk has been observed. */
-    chat_req_t* q;                    /**< Request context for OpenTelemetry span tracking. */
-    int         chunk_count;          /**< Number of streaming chunks observed. */
-    size_t      total_bytes;          /**< Total chunk bytes observed. */
+                     size_t      len); /**< Underlying stream bridge feed callback. */
+    void*              real_bridge;    /**< Underlying bridge instance. */
+    latency_tracker_t* lt;             /**< Latency tracker instance (optional). */
+    const char*        model;          /**< Target model name for metrics. */
+    const char*        endpoint;       /**< Target upstream endpoint address. */
+    const char*        provider;       /**< Target upstream provider name. */
+    uint64_t           t0;             /**< Timestamp when request was dispatched. */
+    bool        first_chunk_recorded;  /**< True if first non-empty chunk has been observed. */
+    chat_req_t* q;                     /**< Request context for OpenTelemetry span tracking. */
+    int         chunk_count;           /**< Number of streaming chunks observed. */
+    size_t      total_bytes;           /**< Total chunk bytes observed. */
 } stream_feed_wrapper_t;
 
 static int
@@ -1398,17 +1396,17 @@ handle_chat_stream(chat_req_t* q)
         };
 
         int  urc = upstream_stream_call(url,
-                                       cur_route.upstream_key,
-                                       extra_hdrs,
-                                       n_extra_hdrs,
-                                       merged,
-                                       mlen,
-                                       silence_timeout_ms,
-                                       (upstream_chunk_fn)stream_feed_wrapper_fn,
-                                       &feed_wrapper,
-                                       &status,
-                                       &sbody,
-                                       &slen);
+                                        cur_route.upstream_key,
+                                        extra_hdrs,
+                                        n_extra_hdrs,
+                                        merged,
+                                        mlen,
+                                        silence_timeout_ms,
+                                        (upstream_chunk_fn)stream_feed_wrapper_fn,
+                                        &feed_wrapper,
+                                        &status,
+                                        &sbody,
+                                        &slen);
         bool headers_sent = adapter->stream_bridge_headers_sent(bridge);
 
         if (q->n_candidates == 1 && !headers_sent && (urc != 0 || status >= 500)) {
@@ -1514,8 +1512,7 @@ handle_chat_stream(chat_req_t* q)
             if (q->rc->write != NULL) {
                 q->rc->write(q->rc->impl, sse_err, strlen(sse_err), true);
             }
-            double req_cost =
-                calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
+            double req_cost = calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
             settle_success(
                 q, PIPE_UPSTREAM, ptok, ctok, cached_tok, total_lat, target->provider, req_cost);
             chat_record_tokens_and_reasoning(q, 0, reasoning_tok);
@@ -1531,8 +1528,7 @@ handle_chat_stream(chat_req_t* q)
 
         cb_record_success(q->ac->cb, q->model, target->endpoint);
         adapter->stream_bridge_finish(bridge);
-        double req_cost =
-            calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
+        double req_cost = calc_req_cost_ext(&q->route, ptok, ctok, cached_tok, reasoning_tok);
         record_usage_and_event(q->ac,
                                q->krec.key_id,
                                q->model,

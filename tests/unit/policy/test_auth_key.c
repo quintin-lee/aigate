@@ -278,8 +278,8 @@ TEST_CASE(test_auth_key_canary_detection)
     db.recs[0] = canary;
     db.n = 1;
 
-    pg_ops_t ops = build_akg_ops(&db);
-    pg_store_t* ps = pg_store_open("unused", &ops);
+    pg_ops_t       ops = build_akg_ops(&db);
+    pg_store_t*    ps = pg_store_open("unused", &ops);
     auth_key_cache akc;
     auth_key_init(&akc, ps);
 
@@ -288,9 +288,7 @@ TEST_CASE(test_auth_key_canary_detection)
 
     /* 1. First resolve hits DB and returns AUTH_KEY_ERR_CANARY (-4) */
     int rc = auth_key_resolve(&akc, "honey-token-xyz", &out);
-    TEST_ASSERT(rc == AUTH_KEY_ERR_CANARY,
-                "canary returns AUTH_KEY_ERR_CANARY (-4, got %d)",
-                rc);
+    TEST_ASSERT(rc == AUTH_KEY_ERR_CANARY, "canary returns AUTH_KEY_ERR_CANARY (-4, got %d)", rc);
     TEST_ASSERT(out.key_id == 777, "out populated with canary key_id");
     TEST_ASSERT(out.is_canary == 1, "out has is_canary = 1");
     key_rec_free(&out);
@@ -298,9 +296,8 @@ TEST_CASE(test_auth_key_canary_detection)
     /* 2. Second resolve hits cache and returns AUTH_KEY_ERR_CANARY (-4) without extra store calls */
     int prev_calls = db.get_calls;
     rc = auth_key_resolve(&akc, "honey-token-xyz", &out);
-    TEST_ASSERT(rc == AUTH_KEY_ERR_CANARY,
-                "cached canary returns AUTH_KEY_ERR_CANARY (-4, got %d)",
-                rc);
+    TEST_ASSERT(
+        rc == AUTH_KEY_ERR_CANARY, "cached canary returns AUTH_KEY_ERR_CANARY (-4, got %d)", rc);
     TEST_ASSERT(db.get_calls == prev_calls, "cached canary served from LRU");
     key_rec_free(&out);
 

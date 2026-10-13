@@ -26,7 +26,7 @@ TEST_CASE(test_threat_whitelist_lifecycle)
     TEST_ASSERT(threat_whitelist_add(tw, &r1) == 0, "add r1");
 
     threat_whitelist_rec_t list[8];
-    int n = 0;
+    int                    n = 0;
     TEST_ASSERT(threat_whitelist_list(tw, list, 8, &n) == 0, "list rules");
     TEST_ASSERT(n == 1, "expected 1 rule, got %d", n);
     TEST_ASSERT(list[0].rule_id == 101, "expected rule_id 101");
@@ -112,8 +112,9 @@ TEST_CASE(test_threat_whitelist_matching)
     };
     threat_whitelist_add(tw, &r2);
 
-    TEST_ASSERT(threat_whitelist_is_bypassed(tw, 8888, "any-model", "leak_system_prompt", &matched_id),
-                "r2 wildcard key & model match");
+    TEST_ASSERT(
+        threat_whitelist_is_bypassed(tw, 8888, "any-model", "leak_system_prompt", &matched_id),
+        "r2 wildcard key & model match");
     TEST_ASSERT(matched_id == 20, "matched_id == 20");
 
     /* 3. Disabled rule */
@@ -167,7 +168,7 @@ TEST_CASE(test_threat_whitelist_matching)
 
 typedef struct {
     threat_whitelist_t* tw;
-    int iterations;
+    int                 iterations;
 } conc_ctx_t;
 
 static void*
@@ -210,8 +211,8 @@ TEST_CASE(test_threat_whitelist_concurrency)
     TEST_ASSERT(tw != NULL, "threat_whitelist_create failed");
 
     conc_ctx_t ctx = {.tw = tw, .iterations = 1000};
-    pthread_t r_threads[4];
-    pthread_t w_threads[2];
+    pthread_t  r_threads[4];
+    pthread_t  w_threads[2];
 
     for (int i = 0; i < 4; i++) {
         pthread_create(&r_threads[i], NULL, conc_reader, &ctx);
@@ -285,9 +286,8 @@ TEST_CASE(test_filter_chain_threat_whitelist_bypass)
     q.krec.key_id = 1001;
 
     filter_action_t act = filter_chain_execute_inbound(&q);
-    TEST_ASSERT(act == FILTER_CONTINUE,
-                "Expected FILTER_CONTINUE when bypassed by whitelist, got %d",
-                act);
+    TEST_ASSERT(
+        act == FILTER_CONTINUE, "Expected FILTER_CONTINUE when bypassed by whitelist, got %d", act);
     TEST_ASSERT(strcmp(q.guardrail_act, "whitelisted") == 0,
                 "guardrail_act should be 'whitelisted', got %s",
                 q.guardrail_act);

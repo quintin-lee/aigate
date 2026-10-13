@@ -498,7 +498,8 @@ TEST_CASE(test_transport_ip_ban_interception)
     /* 3. Request from banned IP gets dropped with 403 Forbidden */
     status = do_http_get("http://127.0.0.1:18099/healthz", NULL, body, sizeof(body));
     TEST_ASSERT(status == 403, "healthz returns 403 when banned (got %ld)", status);
-    TEST_ASSERT(strstr(body, "Access Forbidden") != NULL, "response body indicates access forbidden");
+    TEST_ASSERT(strstr(body, "Access Forbidden") != NULL,
+                "response body indicates access forbidden");
 
     /* 4. Unban 127.0.0.1 */
     ip_ban_table_unban(core.ip_ban_tbl, "127.0.0.1");

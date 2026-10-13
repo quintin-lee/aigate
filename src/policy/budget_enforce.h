@@ -58,12 +58,12 @@ void
 budget_enforce_set_group_budget(budget_enforce_mgr_t* mgr, int64_t group_id, double budget_usd);
 
 /** @brief Set/update daily reasoning token quota for a group. */
-void
-budget_enforce_set_group_reasoning_quota(budget_enforce_mgr_t* mgr, int64_t group_id, int64_t reasoning_quota);
+void budget_enforce_set_group_reasoning_quota(budget_enforce_mgr_t* mgr,
+                                              int64_t               group_id,
+                                              int64_t               reasoning_quota);
 
 /** @brief Query configured daily reasoning token quota for a group. */
-int64_t
-budget_enforce_get_group_reasoning_quota(budget_enforce_mgr_t* mgr, int64_t group_id);
+int64_t budget_enforce_get_group_reasoning_quota(budget_enforce_mgr_t* mgr, int64_t group_id);
 
 struct event_bus;
 /** @brief Attach event bus for publishing budget warning events. */

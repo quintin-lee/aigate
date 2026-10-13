@@ -22,24 +22,24 @@
 
 /** @brief Client API key record (api_keys row; allowed_models is a copy). */
 typedef struct key_rec {
-    long   key_id;               /**< Primary key */
-    char   key_hash[65];         /**< 64 lowercase hex + NUL */
-    char   name[128];            /**< Name */
-    char** allowed_models;       /**< NUL-terminated-ish: exactly n_allowed entries */
-    int    n_allowed;            /**< 0 = all models allowed */
-    int    rate_qps;             /**< 0 = unlimited */
-    long   daily_token_quota;    /**< 0 = unlimited */
-    time_t expires_at;           /**< Expiration timestamp */
-    int    has_expiry;           /**< Whether expiry is set (1 takes effect) */
-    int    revoked;              /**< Revocation flag (1 means revoked) */
-    long   group_id;             /**< 0 = ungrouped */
-    int    guardrails_enabled;   /**< 1 = enabled (default), 0 = disabled */
-    double monthly_cost_budget;  /**< 0.0 = unlimited */
-    long   monthly_token_budget; /**< 0 = unlimited */
-    char   system_prompt[4096];  /**< Optional prompt template */
-    int    prompt_mode;          /**< 0=prepend, 1=append, 2=override */
-    int    watermark_enabled;    /**< 1 = watermark enabled, 0 = disabled */
-    int    is_canary;            /**< 1 = canary honey-token, 0 = normal */
+    long   key_id;                /**< Primary key */
+    char   key_hash[65];          /**< 64 lowercase hex + NUL */
+    char   name[128];             /**< Name */
+    char** allowed_models;        /**< NUL-terminated-ish: exactly n_allowed entries */
+    int    n_allowed;             /**< 0 = all models allowed */
+    int    rate_qps;              /**< 0 = unlimited */
+    long   daily_token_quota;     /**< 0 = unlimited */
+    time_t expires_at;            /**< Expiration timestamp */
+    int    has_expiry;            /**< Whether expiry is set (1 takes effect) */
+    int    revoked;               /**< Revocation flag (1 means revoked) */
+    long   group_id;              /**< 0 = ungrouped */
+    int    guardrails_enabled;    /**< 1 = enabled (default), 0 = disabled */
+    double monthly_cost_budget;   /**< 0.0 = unlimited */
+    long   monthly_token_budget;  /**< 0 = unlimited */
+    char   system_prompt[4096];   /**< Optional prompt template */
+    int    prompt_mode;           /**< 0=prepend, 1=append, 2=override */
+    int    watermark_enabled;     /**< 1 = watermark enabled, 0 = disabled */
+    int    is_canary;             /**< 1 = canary honey-token, 0 = normal */
     long   daily_reasoning_quota; /**< Daily reasoning token quota (0 = unlimited) */
 } key_rec_t;
 
@@ -112,11 +112,11 @@ typedef struct usage_request_row {
 
 /** @brief Group record (groups row + key count). */
 typedef struct group_rec {
-    long   id;                 /**< Primary key */
-    char   name[128];          /**< Group name */
-    long   key_count;          /**< Key count in the group */
-    time_t created_at;         /**< Creation timestamp */
-    double monthly_budget_usd; /**< 0.0 = unlimited */
+    long   id;                    /**< Primary key */
+    char   name[128];             /**< Group name */
+    long   key_count;             /**< Key count in the group */
+    time_t created_at;            /**< Creation timestamp */
+    double monthly_budget_usd;    /**< 0.0 = unlimited */
     long   daily_reasoning_quota; /**< Daily reasoning token quota (0 = unlimited) */
 } group_rec_t;
 
@@ -280,7 +280,7 @@ typedef struct pg_ops {
     int (*list_keys)(void*      ctx,
                      key_rec_t* out,
                      int        cap,
-                     int*       n);             /**< List keys (out capacity cap, n returns the count). */
+                     int*       n);       /**< List keys (out capacity cap, n returns the count). */
     int (*get_key_by_id)(void*      ctx,
                          long       key_id,
                          key_rec_t* out); /**< Look up a key by numeric id. */
@@ -294,19 +294,19 @@ typedef struct pg_ops {
                       long* out_key_id); /**< Create a key, out_key_id returns the primary key. */
     int (*update_key)(void*            ctx,
                       const key_rec_t* k,
-                      int              mask);         /**< Update key fields by KMASK_* mask. */
+                      int              mask);             /**< Update key fields by KMASK_* mask. */
     int (*revoke_key)(void* ctx, long key_id);            /**< Revoke a key. */
 
     int (*create_model)(void* ctx, const model_rec_t* m); /**< Create a model route. */
     int (*update_model)(void*              ctx,
                         const model_rec_t* m,
-                        int                mask);                    /**< Update a model route by MMASK_* mask. */
+                        int                mask);     /**< Update a model route by MMASK_* mask. */
     int (*delete_model)(void* ctx, const char* name); /**< Delete a route by model name. */
 
     int (*list_providers)(void*           ctx,
                           provider_rec_t* out,
                           int             cap,
-                          int*            n);            /**< List upstream providers. */
+                          int*            n); /**< List upstream providers. */
     int (*get_provider)(void*           ctx,
                         long            id,
                         provider_rec_t* out); /**< Look up a provider by numeric id. */
@@ -315,8 +315,8 @@ typedef struct pg_ops {
                            long* out_id); /**< Create a provider, out_id returns the primary key. */
     int (*update_provider)(void*                 ctx,
                            const provider_rec_t* p,
-                           int                   mask);     /**< Update a provider by PMASK_* mask. */
-    int (*delete_provider)(void* ctx, long id); /**< Delete a provider by numeric id. */
+                           int                   mask); /**< Update a provider by PMASK_* mask. */
+    int (*delete_provider)(void* ctx, long id);         /**< Delete a provider by numeric id. */
 
     int (*flush_usage)(void*              ctx,
                        const usage_row_t* rows,
@@ -328,7 +328,7 @@ typedef struct pg_ops {
                        time_t       to,
                        usage_row_t* out,
                        int          cap,
-                       int*         n);         /**< Query daily usage by key/model/time range. */
+                       int*         n); /**< Query daily usage by key/model/time range. */
     int (*flush_usage_requests)(void*                      ctx,
                                 const usage_request_row_t* rows,
                                 int n); /**< Batch-persist per-request audit rows. */
@@ -347,10 +347,11 @@ typedef struct pg_ops {
     int (*patch_group_budget)(void*  ctx,
                               long   id,
                               double budget); /**< Change a group's monthly budget by numeric id. */
-    int (*patch_group_reasoning_quota)(void* ctx,
-                                       long  id,
-                                       long  quota); /**< Change a group's daily reasoning quota by numeric id. */
-    int (*delete_group)(void* ctx, long id);  /**< Delete a group by numeric id. */
+    int (*patch_group_reasoning_quota)(
+        void* ctx,
+        long  id,
+        long  quota); /**< Change a group's daily reasoning quota by numeric id. */
+    int (*delete_group)(void* ctx, long id); /**< Delete a group by numeric id. */
     int (*count_keys_in_group)(void* ctx, long group_id, long* n); /**< Count keys in a group. */
     int (*query_cost)(void*       ctx,
                       long        since_s,
@@ -369,14 +370,14 @@ typedef struct pg_ops {
         long* out_id); /**< Create a guardrails rule, out_id returns the primary key. */
     int (*update_guardrails_rule)(
         void*                   ctx,
-        const guardrail_rule_t* rule);      /**< Full-field update of a guardrails rule by id. */
+        const guardrail_rule_t* rule);       /**< Full-field update of a guardrails rule by id. */
     int (*delete_guardrails_rule)(void* ctx,
                                   long  id); /**< Delete a guardrails rule by numeric id. */
 
     int (*list_shadow_rules)(void*          ctx,
                              shadow_rule_t* out,
                              int            cap,
-                             int*           n);        /**< List traffic shadow/canary rules. */
+                             int*           n); /**< List traffic shadow/canary rules. */
     int (*create_shadow_rule)(void*                ctx,
                               const shadow_rule_t* rule,
                               long* out_id); /**< Create shadow rule, out_id returns primary key. */
@@ -387,7 +388,7 @@ typedef struct pg_ops {
     int (*list_compressor_rules)(void*              ctx,
                                  compressor_rule_t* out,
                                  int                cap,
-                                 int*               n);          /**< List prompt compressor rules. */
+                                 int*               n); /**< List prompt compressor rules. */
     int (*upsert_compressor_rule)(
         void* ctx, const compressor_rule_t* rule); /**< Upsert prompt compressor rule by UUID id. */
     int (*delete_compressor_rule)(void*       ctx,
@@ -417,12 +418,14 @@ typedef struct pg_ops {
         int*                      total_count,
         int* returned_count); /**< List audit violations with filtering and pagination. */
 
-    int (*list_threat_whitelists)(
-        void* ctx, threat_whitelist_rec_t** out_recs, size_t* out_count); /**< List threat defense whitelists. */
-    int (*create_threat_whitelist)(
-        void* ctx, const threat_whitelist_rec_t* rec, int64_t* out_id); /**< Create threat defense whitelist. */
-    int (*delete_threat_whitelist)(
-        void* ctx, int64_t rule_id); /**< Delete threat defense whitelist by ID. */
+    int (*list_threat_whitelists)(void*                    ctx,
+                                  threat_whitelist_rec_t** out_recs,
+                                  size_t* out_count); /**< List threat defense whitelists. */
+    int (*create_threat_whitelist)(void*                         ctx,
+                                   const threat_whitelist_rec_t* rec,
+                                   int64_t* out_id);  /**< Create threat defense whitelist. */
+    int (*delete_threat_whitelist)(void*   ctx,
+                                   int64_t rule_id);  /**< Delete threat defense whitelist by ID. */
 } pg_ops_t;
 
 /** @brief Storage handle (opaque; holder of a libpq connection or a fake context). */
@@ -596,14 +599,18 @@ void audit_violation_record_free(audit_violation_record_t* rec);
  *  @param out_recs  Heap-allocated array of whitelist records; caller must free(*out_recs).
  *  @param out_count Number of records returned.
  *  @return 0 on success, -1 on storage error. */
-int pg_store_list_threat_whitelists(pg_store_t* ps, threat_whitelist_rec_t** out_recs, size_t* out_count);
+int pg_store_list_threat_whitelists(pg_store_t*              ps,
+                                    threat_whitelist_rec_t** out_recs,
+                                    size_t*                  out_count);
 
 /** @brief Create a new dynamic threat defense whitelist rule.
  *  @param ps      Storage handle.
  *  @param rec     Whitelist rule record.
  *  @param out_id  Receives newly generated rule_id.
  *  @return 0 on success, -1 on storage error. */
-int pg_store_create_threat_whitelist(pg_store_t* ps, const threat_whitelist_rec_t* rec, int64_t* out_id);
+int pg_store_create_threat_whitelist(pg_store_t*                   ps,
+                                     const threat_whitelist_rec_t* rec,
+                                     int64_t*                      out_id);
 
 /** @brief Delete a threat defense whitelist rule by ID.
  *  @param ps       Storage handle.

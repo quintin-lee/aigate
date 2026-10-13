@@ -14,11 +14,11 @@ TEST_CASE(test_reasoning_budget_parsing_explicit)
     memset(&route, 0, sizeof(route));
 
     const char* json_str = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2048}}";
-    json_t* req = json_loads(json_str, 0, NULL);
+    json_t*     req = json_loads(json_str, 0, NULL);
     TEST_ASSERT(req != NULL, "json valid");
 
     reasoning_config_t cfg;
-    int rc = parse_reasoning_config(req, &route, &cfg);
+    int                rc = parse_reasoning_config(req, &route, &cfg);
     json_decref(req);
 
     TEST_ASSERT(rc == 0, "parsed ok");
@@ -32,11 +32,11 @@ TEST_CASE(test_reasoning_budget_parsing_effort)
     memset(&route, 0, sizeof(route));
 
     const char* json_str = "{\"reasoning_effort\":\"medium\"}";
-    json_t* req = json_loads(json_str, 0, NULL);
+    json_t*     req = json_loads(json_str, 0, NULL);
     TEST_ASSERT(req != NULL, "json valid");
 
     reasoning_config_t cfg;
-    int rc = parse_reasoning_config(req, &route, &cfg);
+    int                rc = parse_reasoning_config(req, &route, &cfg);
     json_decref(req);
 
     TEST_ASSERT(rc == 0, "parsed ok");
@@ -53,11 +53,11 @@ TEST_CASE(test_reasoning_budget_parsing_route_fallback)
     route.default_thinking_budget = 8192;
 
     const char* json_str = "{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}";
-    json_t* req = json_loads(json_str, 0, NULL);
+    json_t*     req = json_loads(json_str, 0, NULL);
     TEST_ASSERT(req != NULL, "json valid");
 
     reasoning_config_t cfg;
-    int rc = parse_reasoning_config(req, &route, &cfg);
+    int                rc = parse_reasoning_config(req, &route, &cfg);
     json_decref(req);
 
     TEST_ASSERT(rc == 0, "parsed ok");
@@ -71,12 +71,13 @@ TEST_CASE(test_reasoning_tag_emulation_parsing)
     memset(&route, 0, sizeof(route));
 
     /* 1. Inbound JSON body contains thinking_mode: "tag" */
-    const char* json_str = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2048},\"thinking_mode\":\"tag\"}";
+    const char* json_str =
+        "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":2048},\"thinking_mode\":\"tag\"}";
     json_t* req = json_loads(json_str, 0, NULL);
     TEST_ASSERT(req != NULL, "json valid");
 
     reasoning_config_t cfg;
-    int rc = parse_reasoning_config(req, &route, &cfg);
+    int                rc = parse_reasoning_config(req, &route, &cfg);
     json_decref(req);
 
     TEST_ASSERT(rc == 0, "parsed ok");
@@ -86,7 +87,7 @@ TEST_CASE(test_reasoning_tag_emulation_parsing)
 
     /* 2. Inbound JSON body contains thinking_format: "tag" */
     const char* json_str2 = "{\"thinking_format\":\"tag\"}";
-    json_t* req2 = json_loads(json_str2, 0, NULL);
+    json_t*     req2 = json_loads(json_str2, 0, NULL);
     rc = parse_reasoning_config(req2, &route, &cfg);
     json_decref(req2);
     TEST_ASSERT(rc == 0, "parsed ok");
@@ -99,9 +100,9 @@ TEST_CASE(test_reasoning_tag_emulation_3tier_hierarchy)
     memset(&route, 0, sizeof(route));
 
     reasoning_config_t cfg;
-    json_t* req_tag = json_pack("{s:s}", "thinking_format", "tag");
-    json_t* req_raw = json_pack("{s:s}", "thinking_format", "raw");
-    json_t* req_none = json_pack("{s:s}", "model", "test-model");
+    json_t*            req_tag = json_pack("{s:s}", "thinking_format", "tag");
+    json_t*            req_raw = json_pack("{s:s}", "thinking_format", "raw");
+    json_t*            req_none = json_pack("{s:s}", "model", "test-model");
 
     /* Case 1: Tier 1 (Header "raw") beats Tier 2 (Body "tag") */
     route.tag_emulation_default = true;
@@ -126,11 +127,13 @@ TEST_CASE(test_reasoning_tag_emulation_3tier_hierarchy)
     /* Case 5: Tier 3 fallback when no header and no body format */
     route.tag_emulation_default = true;
     rc = parse_reasoning_config_ext(req_none, &route, NULL, &cfg);
-    TEST_ASSERT(rc == 0 && cfg.tag_emulation == true, "Route true takes effect when no header/body");
+    TEST_ASSERT(rc == 0 && cfg.tag_emulation == true,
+                "Route true takes effect when no header/body");
 
     route.tag_emulation_default = false;
     rc = parse_reasoning_config_ext(req_none, &route, NULL, &cfg);
-    TEST_ASSERT(rc == 0 && cfg.tag_emulation == false, "Route false takes effect when no header/body");
+    TEST_ASSERT(rc == 0 && cfg.tag_emulation == false,
+                "Route false takes effect when no header/body");
 
     json_decref(req_tag);
     json_decref(req_raw);
@@ -148,14 +151,17 @@ TEST_CASE(test_anthropic_thinking_inbound_max_tokens_autolift)
     snprintf(route.upstream_key, sizeof(route.upstream_key), "ant-key-123");
 
     /* Client sets reasoning_effort: medium (4096 tokens) and max_tokens: 2000 (which is <= 4096) */
-    const char* in_json = "{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"think\"}],\"reasoning_effort\":\"medium\",\"max_tokens\":2000}";
-    char url[512];
+    const char* in_json =
+        "{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"think\"}],"
+        "\"reasoning_effort\":\"medium\",\"max_tokens\":2000}";
+    char        url[512];
     const char* hdrs[4][2];
-    int nhdrs = 0;
-    char* out_body = NULL;
-    size_t out_len = 0;
+    int         nhdrs = 0;
+    char*       out_body = NULL;
+    size_t      out_len = 0;
 
-    int rc = provider_anthropic_build(&route, in_json, url, sizeof(url), hdrs, &nhdrs, &out_body, &out_len);
+    int rc = provider_anthropic_build(
+        &route, in_json, url, sizeof(url), hdrs, &nhdrs, &out_body, &out_len);
     TEST_ASSERT(rc == 0, "build success");
     TEST_ASSERT(out_body != NULL, "out_body non-null");
 
@@ -171,7 +177,9 @@ TEST_CASE(test_anthropic_thinking_inbound_max_tokens_autolift)
 
     /* Verify max_tokens auto-lifted to budget + 4096 = 8192 */
     json_t* jmt = json_object_get(out, "max_tokens");
-    TEST_ASSERT(jmt && json_integer_value(jmt) == 8192, "max_tokens autolifted to 8192, got %lld", (long long)json_integer_value(jmt));
+    TEST_ASSERT(jmt && json_integer_value(jmt) == 8192,
+                "max_tokens autolifted to 8192, got %lld",
+                (long long)json_integer_value(jmt));
 
     json_decref(out);
 }
@@ -183,14 +191,17 @@ TEST_CASE(test_gemini_thinking_inbound_budget)
     snprintf(route.endpoint, sizeof(route.endpoint), "https://generativelanguage.googleapis.com");
     snprintf(route.upstream_key, sizeof(route.upstream_key), "gemini-key");
 
-    const char* in_json = "{\"model\":\"gemini-2.0-flash-thinking\",\"messages\":[{\"role\":\"user\",\"content\":\"solve\"}],\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":3000}}";
-    char url[512];
+    const char* in_json =
+        "{\"model\":\"gemini-2.0-flash-thinking\",\"messages\":[{\"role\":\"user\",\"content\":"
+        "\"solve\"}],\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":3000}}";
+    char        url[512];
     const char* hdrs[4][2];
-    int nhdrs = 0;
-    char* out_body = NULL;
-    size_t out_len = 0;
+    int         nhdrs = 0;
+    char*       out_body = NULL;
+    size_t      out_len = 0;
 
-    int rc = g_provider_gemini.build_chat(&route, in_json, url, sizeof(url), hdrs, &nhdrs, &out_body, &out_len);
+    int rc = g_provider_gemini.build_chat(
+        &route, in_json, url, sizeof(url), hdrs, &nhdrs, &out_body, &out_len);
     TEST_ASSERT(rc == 0, "gemini build success");
     TEST_ASSERT(out_body != NULL, "out_body non-null");
 
@@ -210,23 +221,24 @@ TEST_CASE(test_gemini_thinking_inbound_budget)
 
 TEST_CASE(test_anthropic_thinking_outbound_sync)
 {
-    const char* ant_resp =
-        "{\"id\":\"msg_12345\","
-        "\"type\":\"message\","
-        "\"role\":\"assistant\","
-        "\"content\":["
-        "{\"type\":\"thinking\",\"thinking\":\"Step 1: Analyze problem. Step 2: Formulate solution.\"},"
-        "{\"type\":\"text\",\"text\":\"The solution is 42.\"}"
-        "],"
-        "\"stop_reason\":\"end_turn\","
-        "\"usage\":{\"input_tokens\":50,\"output_tokens\":120}"
-        "}";
+    const char* ant_resp = "{\"id\":\"msg_12345\","
+                           "\"type\":\"message\","
+                           "\"role\":\"assistant\","
+                           "\"content\":["
+                           "{\"type\":\"thinking\",\"thinking\":\"Step 1: Analyze problem. Step 2: "
+                           "Formulate solution.\"},"
+                           "{\"type\":\"text\",\"text\":\"The solution is 42.\"}"
+                           "],"
+                           "\"stop_reason\":\"end_turn\","
+                           "\"usage\":{\"input_tokens\":50,\"output_tokens\":120}"
+                           "}";
 
-    char* out_openai = NULL;
+    char*  out_openai = NULL;
     size_t out_len = 0;
-    long ptok = 0, ctok = 0;
+    long   ptok = 0, ctok = 0;
 
-    int rc = provider_anthropic_resp_to_openai(ant_resp, "claude-3-7-sonnet", &out_openai, &out_len, &ptok, &ctok);
+    int rc = provider_anthropic_resp_to_openai(
+        ant_resp, "claude-3-7-sonnet", &out_openai, &out_len, &ptok, &ctok);
     TEST_ASSERT(rc == 0, "translation success");
     TEST_ASSERT(out_openai != NULL, "out_openai non-null");
 
@@ -242,12 +254,14 @@ TEST_CASE(test_anthropic_thinking_outbound_sync)
 
     json_t* jreasoning = json_object_get(msg, "reasoning_content");
     TEST_ASSERT(jreasoning && json_is_string(jreasoning), "reasoning_content present");
-    TEST_ASSERT(strcmp(json_string_value(jreasoning), "Step 1: Analyze problem. Step 2: Formulate solution.") == 0,
+    TEST_ASSERT(strcmp(json_string_value(jreasoning),
+                       "Step 1: Analyze problem. Step 2: Formulate solution.") == 0,
                 "reasoning_content matches thinking text");
 
     json_t* jcontent = json_object_get(msg, "content");
     TEST_ASSERT(jcontent && json_is_string(jcontent), "content present");
-    TEST_ASSERT(strcmp(json_string_value(jcontent), "The solution is 42.") == 0, "content matches text");
+    TEST_ASSERT(strcmp(json_string_value(jcontent), "The solution is 42.") == 0,
+                "content matches text");
 
     json_decref(root);
 }
@@ -257,7 +271,8 @@ typedef struct {
     size_t len;
 } mock_stream_sink_t;
 
-static int mock_stream_write(void* ctx, const void* data, size_t len, bool is_final)
+static int
+mock_stream_write(void* ctx, const void* data, size_t len, bool is_final)
 {
     (void)is_final;
     mock_stream_sink_t* sink = ctx;
@@ -282,23 +297,33 @@ TEST_CASE(test_anthropic_thinking_outbound_stream)
     TEST_ASSERT(bridge != NULL, "bridge created");
 
     /* 1. Send message_start */
-    const char* chunk1 = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":\"claude-3-7-sonnet\",\"usage\":{\"input_tokens\":20}}}\n\n";
+    const char* chunk1 = "event: message_start\ndata: "
+                         "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_1\",\"model\":"
+                         "\"claude-3-7-sonnet\",\"usage\":{\"input_tokens\":20}}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, chunk1, strlen(chunk1));
 
     /* 2. Send content_block_start for thinking */
-    const char* chunk2 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n";
+    const char* chunk2 = "event: content_block_start\ndata: "
+                         "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{"
+                         "\"type\":\"thinking\",\"thinking\":\"\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, chunk2, strlen(chunk2));
 
     /* 3. Send content_block_delta for thinking_delta */
-    const char* chunk3 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Analyzing query...\"}}\n\n";
+    const char* chunk3 = "event: content_block_delta\ndata: "
+                         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":"
+                         "\"thinking_delta\",\"thinking\":\"Analyzing query...\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, chunk3, strlen(chunk3));
 
     /* 4. Send content_block_start for text */
-    const char* chunk4 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n";
+    const char* chunk4 = "event: content_block_start\ndata: "
+                         "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{"
+                         "\"type\":\"text\",\"text\":\"\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, chunk4, strlen(chunk4));
 
     /* 5. Send content_block_delta for text_delta */
-    const char* chunk5 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello world!\"}}\n\n";
+    const char* chunk5 = "event: content_block_delta\ndata: "
+                         "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_"
+                         "delta\",\"text\":\"Hello world!\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, chunk5, strlen(chunk5));
 
     g_provider_anthropic.stream_bridge_finish(bridge);
@@ -327,21 +352,30 @@ TEST_CASE(test_anthropic_thinking_stream_tag_emulation)
     ab->tag_emulation = true;
 
     /* Feed content_block_start with thinking */
-    const char* c1 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n";
+    const char* c1 = "event: content_block_start\ndata: "
+                     "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":"
+                     "\"thinking\",\"thinking\":\"\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c1, strlen(c1));
 
     /* Feed thinking_delta */
-    const char* c2 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Reasoning step 1...\"}}\n\n";
+    const char* c2 = "event: content_block_delta\ndata: "
+                     "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_"
+                     "delta\",\"thinking\":\"Reasoning step 1...\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c2, strlen(c2));
 
     /* Feed content_block_stop */
-    const char* c3 = "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
+    const char* c3 =
+        "event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c3, strlen(c3));
 
     /* Feed text content */
-    const char* c4 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n";
+    const char* c4 = "event: content_block_start\ndata: "
+                     "{\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":"
+                     "\"text\",\"text\":\"\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c4, strlen(c4));
-    const char* c5 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello world!\"}}\n\n";
+    const char* c5 = "event: content_block_delta\ndata: "
+                     "{\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_"
+                     "delta\",\"text\":\"Hello world!\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c5, strlen(c5));
 
     g_provider_anthropic.stream_bridge_finish(bridge);
@@ -349,37 +383,40 @@ TEST_CASE(test_anthropic_thinking_stream_tag_emulation)
 
     /* Verify <think> tag emitted in delta.content */
     TEST_ASSERT(strstr(sink.accum, "\"content\":\"<think>\\n\"") != NULL, "<think> open emitted");
-    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Reasoning step 1...\"") != NULL, "thinking delta in content");
-    TEST_ASSERT(strstr(sink.accum, "\"content\":\"\\n</think>\\n\\n\"") != NULL, "</think> close emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Reasoning step 1...\"") != NULL,
+                "thinking delta in content");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"\\n</think>\\n\\n\"") != NULL,
+                "</think> close emitted");
 }
 
 TEST_CASE(test_anthropic_thinking_sync_tag_emulation)
 {
-    const char* anthropic_resp =
-        "{\"id\":\"msg_tag_1\",\"type\":\"message\",\"role\":\"assistant\",\"model\":\"claude-3-7-sonnet\","
-        "\"content\":["
-        "{\"type\":\"thinking\",\"thinking\":\"Step-by-step reasoning.\"},"
-        "{\"type\":\"text\",\"text\":\"42 is the answer.\"}"
-        "],"
-        "\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}";
+    const char* anthropic_resp = "{\"id\":\"msg_tag_1\",\"type\":\"message\",\"role\":"
+                                 "\"assistant\",\"model\":\"claude-3-7-sonnet\","
+                                 "\"content\":["
+                                 "{\"type\":\"thinking\",\"thinking\":\"Step-by-step reasoning.\"},"
+                                 "{\"type\":\"text\",\"text\":\"42 is the answer.\"}"
+                                 "],"
+                                 "\"usage\":{\"input_tokens\":10,\"output_tokens\":20}}";
 
     char*  out_json = NULL;
     size_t out_len = 0;
     long   ptok = 0, ctok = 0;
-    int rc = provider_anthropic_resp_to_openai_ext(anthropic_resp, "claude-3-7-sonnet", true,
-                                                   &out_json, &out_len, &ptok, &ctok);
+    int    rc = provider_anthropic_resp_to_openai_ext(
+        anthropic_resp, "claude-3-7-sonnet", true, &out_json, &out_len, &ptok, &ctok);
     TEST_ASSERT(rc == 0, "translated ok");
 
     json_t* root = json_loads(out_json, 0, NULL);
     free(out_json);
     TEST_ASSERT(root != NULL, "json valid");
 
-    json_t* choices = json_object_get(root, "choices");
-    json_t* c0 = json_array_get(choices, 0);
-    json_t* msg = json_object_get(c0, "message");
+    json_t*     choices = json_object_get(root, "choices");
+    json_t*     c0 = json_array_get(choices, 0);
+    json_t*     msg = json_object_get(c0, "message");
     const char* content = json_string_value(json_object_get(msg, "content"));
-    TEST_ASSERT(strstr(content, "<think>\nStep-by-step reasoning.\n</think>\n\n42 is the answer.") != NULL,
-                "<think> wrapped content present");
+    TEST_ASSERT(
+        strstr(content, "<think>\nStep-by-step reasoning.\n</think>\n\n42 is the answer.") != NULL,
+        "<think> wrapped content present");
 
     json_decref(root);
 }
@@ -398,7 +435,8 @@ TEST_CASE(test_openai_to_anthropic_thinking_sync)
     char*  ant_resp = NULL;
     size_t ant_len = 0;
     long   ptok = 0, ctok = 0;
-    int rc = provider_openai_resp_to_anthropic(oai_resp, "deepseek-r1", &ant_resp, &ant_len, &ptok, &ctok);
+    int    rc = provider_openai_resp_to_anthropic(
+        oai_resp, "deepseek-r1", &ant_resp, &ant_len, &ptok, &ctok);
     TEST_ASSERT(rc == 0, "converted ok");
 
     json_t* root = json_loads(ant_resp, 0, NULL);
@@ -409,8 +447,10 @@ TEST_CASE(test_openai_to_anthropic_thinking_sync)
     TEST_ASSERT(json_is_array(content) && json_array_size(content) == 2, "2 content blocks");
 
     json_t* b0 = json_array_get(content, 0);
-    TEST_ASSERT(strcmp(json_string_value(json_object_get(b0, "type")), "thinking") == 0, "b0 is thinking");
-    TEST_ASSERT(strstr(json_string_value(json_object_get(b0, "thinking")), "Proof of irrationality") != NULL,
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(b0, "type")), "thinking") == 0,
+                "b0 is thinking");
+    TEST_ASSERT(strstr(json_string_value(json_object_get(b0, "thinking")),
+                       "Proof of irrationality") != NULL,
                 "thinking text matches");
 
     json_t* b1 = json_array_get(content, 1);
@@ -436,13 +476,15 @@ TEST_CASE(test_openai_to_anthropic_thinking_stream)
     /* Feed OpenAI chunk with reasoning_content */
     const char* chunk1 =
         "data: {\"id\":\"c1\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-r1\","
-        "\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Solving equation...\"},\"finish_reason\":null}]}\n\n";
+        "\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Solving "
+        "equation...\"},\"finish_reason\":null}]}\n\n";
     provider_openai_to_anthropic_bridge_feed(b, chunk1, strlen(chunk1));
 
     /* Feed OpenAI chunk with final content */
     const char* chunk2 =
         "data: {\"id\":\"c2\",\"object\":\"chat.completion.chunk\",\"model\":\"deepseek-r1\","
-        "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x = 5\"},\"finish_reason\":\"stop\"}]}\n\n";
+        "\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x = "
+        "5\"},\"finish_reason\":\"stop\"}]}\n\n";
     provider_openai_to_anthropic_bridge_feed(b, chunk2, strlen(chunk2));
 
     provider_openai_to_anthropic_bridge_finish(b);
@@ -463,13 +505,12 @@ TEST_CASE(test_openai_to_anthropic_thinking_stream)
 TEST_CASE(test_thinking_watermark_clean_pass)
 {
     /* Construct response with reasoning_content and content */
-    const char* resp_json =
-        "{\"id\":\"chatcmpl-wm-test\",\"object\":\"chat.completion\","
-        "\"choices\":[{\"index\":0,\"message\":{"
-        "\"role\":\"assistant\","
-        "\"reasoning_content\":\"Detailed math proof: 2 + 2 = 4.\","
-        "\"content\":\"The answer is four.\""
-        "}}]}";
+    const char* resp_json = "{\"id\":\"chatcmpl-wm-test\",\"object\":\"chat.completion\","
+                            "\"choices\":[{\"index\":0,\"message\":{"
+                            "\"role\":\"assistant\","
+                            "\"reasoning_content\":\"Detailed math proof: 2 + 2 = 4.\","
+                            "\"content\":\"The answer is four.\""
+                            "}}]}";
 
     json_t* root = json_loads(resp_json, 0, NULL);
     TEST_ASSERT(root != NULL, "json valid");
@@ -482,19 +523,19 @@ TEST_CASE(test_thinking_watermark_clean_pass)
     wp.short_trace = 0x12345678ULL;
 
     /* Inject watermark into content */
-    json_t* choices = json_object_get(root, "choices");
-    json_t* c0 = json_array_get(choices, 0);
-    json_t* msg = json_object_get(c0, "message");
-    json_t* content_val = json_object_get(msg, "content");
+    json_t*     choices = json_object_get(root, "choices");
+    json_t*     c0 = json_array_get(choices, 0);
+    json_t*     msg = json_object_get(c0, "message");
+    json_t*     content_val = json_object_get(msg, "content");
     const char* raw_txt = json_string_value(content_val);
-    size_t wm_sz = 0;
-    char* wm_txt = watermark_inject(raw_txt, strlen(raw_txt), &wp, &wm_sz);
+    size_t      wm_sz = 0;
+    char*       wm_txt = watermark_inject(raw_txt, strlen(raw_txt), &wp, &wm_sz);
     TEST_ASSERT(wm_txt != NULL, "watermark injected into content");
     json_object_set_new(msg, "content", json_string(wm_txt));
     free(wm_txt);
 
     /* Verify reasoning_content remains completely untouched without zero-width marks */
-    json_t* jreasoning = json_object_get(msg, "reasoning_content");
+    json_t*     jreasoning = json_object_get(msg, "reasoning_content");
     const char* rtxt = json_string_value(jreasoning);
     TEST_ASSERT(strstr(rtxt, "\xe2\x80\x8b") == NULL, "zero-width space not in reasoning");
     TEST_ASSERT(strstr(rtxt, "\xe2\x80\x8c") == NULL, "zero-width non-joiner not in reasoning");
@@ -547,7 +588,8 @@ TEST_CASE(test_gemini_thinking_sync_tag_emulation)
         "{\"text\":\"Solving math problem step-by-step...\",\"thought\":true},"
         "{\"text\":\"The solution is x = 42.\"}"
         "]},\"finishReason\":\"STOP\"}],"
-        "\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":25,\"thoughtsTokenCount\":15}}";
+        "\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":25,"
+        "\"thoughtsTokenCount\":15}}";
 
     char*  out_json = NULL;
     size_t out_len = 0;
@@ -589,14 +631,14 @@ TEST_CASE(test_gemini_thinking_sync_tag_emulation)
 
 TEST_CASE(test_gemini_thinking_raw_reasoning_content)
 {
-    const char* gemini_resp =
-        "{\"candidates\":[{"
-        "\"content\":{\"parts\":["
-        "{\"text\":\"Evaluating step 1...\",\"thought\":true},"
-        "{\"text\":\"Evaluating step 2...\",\"thought\":true},"
-        "{\"text\":\"Final answer is 100.\"}"
-        "]},\"finishReason\":\"STOP\"}],"
-        "\"usageMetadata\":{\"promptTokenCount\":12,\"candidatesTokenCount\":30,\"thoughtsTokenCount\":18}}";
+    const char* gemini_resp = "{\"candidates\":[{"
+                              "\"content\":{\"parts\":["
+                              "{\"text\":\"Evaluating step 1...\",\"thought\":true},"
+                              "{\"text\":\"Evaluating step 2...\",\"thought\":true},"
+                              "{\"text\":\"Final answer is 100.\"}"
+                              "]},\"finishReason\":\"STOP\"}],"
+                              "\"usageMetadata\":{\"promptTokenCount\":12,\"candidatesTokenCount\":"
+                              "30,\"thoughtsTokenCount\":18}}";
 
     char*  out_json = NULL;
     size_t out_len = 0;
@@ -617,7 +659,8 @@ TEST_CASE(test_gemini_thinking_raw_reasoning_content)
     const char* rcontent = json_string_value(json_object_get(msg, "reasoning_content"));
 
     TEST_ASSERT(content != NULL && strcmp(content, "Final answer is 100.") == 0, "content correct");
-    TEST_ASSERT(rcontent != NULL && strcmp(rcontent, "Evaluating step 1...Evaluating step 2...") == 0,
+    TEST_ASSERT(rcontent != NULL &&
+                    strcmp(rcontent, "Evaluating step 1...Evaluating step 2...") == 0,
                 "reasoning_content correct");
 
     json_t* usage = json_object_get(root, "usage");
@@ -643,15 +686,13 @@ TEST_CASE(test_gemini_thinking_stream_tag_emulation)
     gb->tag_emulation = true;
 
     /* Feed thinking chunk 1 */
-    const char* c1 =
-        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Deep reasoning "
-        "starts...\",\"thought\":true}]}}]}\n\n";
+    const char* c1 = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Deep reasoning "
+                     "starts...\",\"thought\":true}]}}]}\n\n";
     g_provider_gemini.stream_bridge_feed(bridge, c1, strlen(c1));
 
     /* Feed thinking chunk 2 */
-    const char* c2 =
-        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" continuing "
-        "proof.\",\"thought\":true}]}}]}\n\n";
+    const char* c2 = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\" continuing "
+                     "proof.\",\"thought\":true}]}}]}\n\n";
     g_provider_gemini.stream_bridge_feed(bridge, c2, strlen(c2));
 
     /* Feed answer chunk with usage */
@@ -700,9 +741,8 @@ TEST_CASE(test_gemini_thinking_stream_raw_reasoning_content)
     gb->tag_emulation = false;
 
     /* Feed thinking chunk */
-    const char* c1 =
-        "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hypothesis "
-        "check...\",\"thought\":true}]}}]}\n\n";
+    const char* c1 = "data: {\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hypothesis "
+                     "check...\",\"thought\":true}]}}]}\n\n";
     g_provider_gemini.stream_bridge_feed(bridge, c1, strlen(c1));
 
     /* Feed answer chunk */
@@ -729,32 +769,33 @@ TEST_CASE(test_claude_37_128k_budget_parsing)
     memset(&route, 0, sizeof(route));
 
     /* 128k budget */
-    const char* j1 = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":128000}}";
-    json_t* r1 = json_loads(j1, 0, NULL);
+    const char*        j1 = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":128000}}";
+    json_t*            r1 = json_loads(j1, 0, NULL);
     reasoning_config_t cfg1;
-    int rc = parse_reasoning_config(r1, &route, &cfg1);
+    int                rc = parse_reasoning_config(r1, &route, &cfg1);
     json_decref(r1);
     TEST_ASSERT(rc == 0 && cfg1.enabled && cfg1.budget_tokens == 128000, "128k parsed ok");
 
     /* Clamped over 128k */
-    const char* j2 = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":200000}}";
-    json_t* r2 = json_loads(j2, 0, NULL);
+    const char*        j2 = "{\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":200000}}";
+    json_t*            r2 = json_loads(j2, 0, NULL);
     reasoning_config_t cfg2;
     rc = parse_reasoning_config(r2, &route, &cfg2);
     json_decref(r2);
-    TEST_ASSERT(rc == 0 && cfg2.enabled && cfg2.budget_tokens == 128000, "over-128k clamped to 128000");
+    TEST_ASSERT(rc == 0 && cfg2.enabled && cfg2.budget_tokens == 128000,
+                "over-128k clamped to 128000");
 
     /* Disabled */
-    const char* j3 = "{\"thinking\":{\"type\":\"disabled\"}}";
-    json_t* r3 = json_loads(j3, 0, NULL);
+    const char*        j3 = "{\"thinking\":{\"type\":\"disabled\"}}";
+    json_t*            r3 = json_loads(j3, 0, NULL);
     reasoning_config_t cfg3;
     rc = parse_reasoning_config(r3, &route, &cfg3);
     json_decref(r3);
     TEST_ASSERT(rc == 0 && !cfg3.enabled && cfg3.budget_tokens == 0, "thinking disabled");
 
     /* Tag emulation direct boolean in body */
-    const char* j4 = "{\"tag_emulation\":true}";
-    json_t* r4 = json_loads(j4, 0, NULL);
+    const char*        j4 = "{\"tag_emulation\":true}";
+    json_t*            r4 = json_loads(j4, 0, NULL);
     reasoning_config_t cfg4;
     rc = parse_reasoning_config(r4, &route, &cfg4);
     json_decref(r4);
@@ -776,47 +817,57 @@ TEST_CASE(test_claude_37_signature_delta_stream)
     ab->tag_emulation = false;
 
     /* 1. message_start */
-    const char* c1 = "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_sig\",\"model\":\"claude-3-7-sonnet\",\"usage\":{\"input_tokens\":15}}}\n\n";
+    const char* c1 = "event: message_start\ndata: "
+                     "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_sig\",\"model\":"
+                     "\"claude-3-7-sonnet\",\"usage\":{\"input_tokens\":15}}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c1, strlen(c1));
 
     /* 2. content_block_start thinking */
-    const char* c2 = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n";
+    const char* c2 = "event: content_block_start\ndata: "
+                     "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":"
+                     "\"thinking\",\"thinking\":\"\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c2, strlen(c2));
 
     /* 3. thinking_delta */
-    const char* c3 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"Calculating steps...\"}}\n\n";
+    const char* c3 = "event: content_block_delta\ndata: "
+                     "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"thinking_"
+                     "delta\",\"thinking\":\"Calculating steps...\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c3, strlen(c3));
 
     /* 4. signature_delta */
-    const char* c4 = "event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig_claude37_proof\"}}\n\n";
+    const char* c4 = "event: content_block_delta\ndata: "
+                     "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":"
+                     "\"signature_delta\",\"signature\":\"sig_claude37_proof\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c4, strlen(c4));
 
     g_provider_anthropic.stream_bridge_finish(bridge);
     g_provider_anthropic.stream_bridge_free(bridge);
 
     /* Verify reasoning_content and reasoning_signature emitted */
-    TEST_ASSERT(strstr(sink.accum, "\"reasoning_content\":\"Calculating steps...\"") != NULL, "reasoning_content emitted");
-    TEST_ASSERT(strstr(sink.accum, "\"reasoning_signature\":\"sig_claude37_proof\"") != NULL, "reasoning_signature emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"reasoning_content\":\"Calculating steps...\"") != NULL,
+                "reasoning_content emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"reasoning_signature\":\"sig_claude37_proof\"") != NULL,
+                "reasoning_signature emitted");
 }
 
 TEST_CASE(test_claude_37_redacted_thinking)
 {
     /* Non-streaming test with redacted_thinking */
-    const char* ant_resp =
-        "{\"id\":\"msg_redacted\","
-        "\"type\":\"message\","
-        "\"role\":\"assistant\","
-        "\"content\":["
-        "{\"type\":\"redacted_thinking\",\"data\":\"encrypted_blob\"},"
-        "{\"type\":\"text\",\"text\":\"Safe answer.\"}"
-        "],"
-        "\"usage\":{\"input_tokens\":20,\"output_tokens\":30}"
-        "}";
+    const char* ant_resp = "{\"id\":\"msg_redacted\","
+                           "\"type\":\"message\","
+                           "\"role\":\"assistant\","
+                           "\"content\":["
+                           "{\"type\":\"redacted_thinking\",\"data\":\"encrypted_blob\"},"
+                           "{\"type\":\"text\",\"text\":\"Safe answer.\"}"
+                           "],"
+                           "\"usage\":{\"input_tokens\":20,\"output_tokens\":30}"
+                           "}";
 
-    char* out_openai = NULL;
+    char*  out_openai = NULL;
     size_t out_len = 0;
-    long ptok = 0, ctok = 0;
-    int rc = provider_anthropic_resp_to_openai(ant_resp, "claude-3-7-sonnet", &out_openai, &out_len, &ptok, &ctok);
+    long   ptok = 0, ctok = 0;
+    int    rc = provider_anthropic_resp_to_openai(
+        ant_resp, "claude-3-7-sonnet", &out_openai, &out_len, &ptok, &ctok);
     TEST_ASSERT(rc == 0, "translation success");
     TEST_ASSERT(strstr(out_openai, "[redacted thinking]") != NULL, "redacted thinking captured");
     free(out_openai);
@@ -828,11 +879,14 @@ TEST_CASE(test_claude_37_redacted_thinking)
         .impl = &sink,
         .write = mock_stream_write,
     };
-    stream_bridge_t* bridge = g_provider_anthropic.stream_bridge_new(&rc_stream, "claude-3-7-sonnet");
+    stream_bridge_t* bridge =
+        g_provider_anthropic.stream_bridge_new(&rc_stream, "claude-3-7-sonnet");
     anthropic_bridge_t* ab = (anthropic_bridge_t*)bridge;
     ab->tag_emulation = true;
 
-    const char* c_red = "event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"redacted_thinking\",\"data\":\"secret\"}}\n\n";
+    const char* c_red = "event: content_block_start\ndata: "
+                        "{\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":"
+                        "\"redacted_thinking\",\"data\":\"secret\"}}\n\n";
     g_provider_anthropic.stream_bridge_feed(bridge, c_red, strlen(c_red));
     g_provider_anthropic.stream_bridge_finish(bridge);
     g_provider_anthropic.stream_bridge_free(bridge);
@@ -848,14 +902,17 @@ TEST_CASE(test_claude_37_degraded_suppression)
     snprintf(route.endpoint, sizeof(route.endpoint), "https://api.anthropic.com");
 
     /* Degraded budget (0 tokens) */
-    const char* in_json = "{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":0}}";
-    char url[512];
+    const char* in_json =
+        "{\"model\":\"claude-3-7-sonnet\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],"
+        "\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":0}}";
+    char        url[512];
     const char* hdrs[4][2];
-    int nhdrs = 0;
-    char* out_body = NULL;
-    size_t out_len = 0;
+    int         nhdrs = 0;
+    char*       out_body = NULL;
+    size_t      out_len = 0;
 
-    int rc = provider_anthropic_build(&route, in_json, url, sizeof(url), hdrs, &nhdrs, &out_body, &out_len);
+    int rc = provider_anthropic_build(
+        &route, in_json, url, sizeof(url), hdrs, &nhdrs, &out_body, &out_len);
     TEST_ASSERT(rc == 0, "build success");
     TEST_ASSERT(out_body != NULL, "out_body non-null");
 
@@ -879,12 +936,14 @@ TEST_CASE(test_openai_reasoning_effort_mapping)
     route.supports_reasoning = true;
 
     /* 1. Request with reasoning_effort and max_tokens on o1 model */
-    const char* in_json = "{\"model\":\"o1-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"think\"}],\"reasoning_effort\":\"high\",\"max_tokens\":5000}";
-    char url[512];
-    char* out_body = NULL;
-    size_t out_len = 0;
+    const char* in_json = "{\"model\":\"o1-mini\",\"messages\":[{\"role\":\"user\",\"content\":"
+                          "\"think\"}],\"reasoning_effort\":\"high\",\"max_tokens\":5000}";
+    char        url[512];
+    char*       out_body = NULL;
+    size_t      out_len = 0;
 
-    int rc = provider_openai_build(&route, "/chat/completions", in_json, url, sizeof(url), &out_body, &out_len);
+    int rc = provider_openai_build(
+        &route, "/chat/completions", in_json, url, sizeof(url), &out_body, &out_len);
     TEST_ASSERT(rc == 0, "build success");
     TEST_ASSERT(out_body != NULL, "out_body non-null");
 
@@ -893,7 +952,8 @@ TEST_CASE(test_openai_reasoning_effort_mapping)
     TEST_ASSERT(out != NULL, "json valid");
 
     json_t* jeff = json_object_get(out, "reasoning_effort");
-    TEST_ASSERT(jeff && strcmp(json_string_value(jeff), "high") == 0, "reasoning_effort high preserved");
+    TEST_ASSERT(jeff && strcmp(json_string_value(jeff), "high") == 0,
+                "reasoning_effort high preserved");
 
     /* max_tokens must be remapped to max_completion_tokens */
     json_t* jmct = json_object_get(out, "max_completion_tokens");
@@ -903,13 +963,17 @@ TEST_CASE(test_openai_reasoning_effort_mapping)
     json_decref(out);
 
     /* 2. Degraded request: reasoning_effort should be stripped */
-    const char* deg_json = "{\"model\":\"o1-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"think\"}],\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":0}}";
-    rc = provider_openai_build(&route, "/chat/completions", deg_json, url, sizeof(url), &out_body, &out_len);
+    const char* deg_json =
+        "{\"model\":\"o1-mini\",\"messages\":[{\"role\":\"user\",\"content\":\"think\"}],"
+        "\"reasoning_effort\":\"high\",\"thinking\":{\"type\":\"enabled\",\"budget_tokens\":0}}";
+    rc = provider_openai_build(
+        &route, "/chat/completions", deg_json, url, sizeof(url), &out_body, &out_len);
     TEST_ASSERT(rc == 0, "build success");
     out = json_loads(out_body, 0, NULL);
     free(out_body);
     TEST_ASSERT(out != NULL, "json valid");
-    TEST_ASSERT(json_object_get(out, "reasoning_effort") == NULL, "reasoning_effort stripped when degraded");
+    TEST_ASSERT(json_object_get(out, "reasoning_effort") == NULL,
+                "reasoning_effort stripped when degraded");
     json_decref(out);
 }
 
@@ -928,15 +992,18 @@ TEST_CASE(test_openai_stream_reasoning_tag_emulation)
     ob->tag_emulation = true;
 
     /* 1. Reasoning chunk */
-    const char* c1 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Solving equation...\"},\"finish_reason\":null}]}\n\n";
+    const char* c1 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"reasoning_content\":\"Solving "
+                     "equation...\"},\"finish_reason\":null}]}\n\n";
     g_provider_openai.stream_bridge_feed(bridge, c1, strlen(c1));
 
     /* 2. Content chunk */
-    const char* c2 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x = 5\"},\"finish_reason\":null}]}\n\n";
+    const char* c2 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"x = "
+                     "5\"},\"finish_reason\":null}]}\n\n";
     g_provider_openai.stream_bridge_feed(bridge, c2, strlen(c2));
 
     /* 3. Finish chunk */
-    const char* c3 = "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
+    const char* c3 =
+        "data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n";
     g_provider_openai.stream_bridge_feed(bridge, c3, strlen(c3));
 
     g_provider_openai.stream_bridge_finish(bridge);
@@ -944,8 +1011,10 @@ TEST_CASE(test_openai_stream_reasoning_tag_emulation)
 
     /* Verify <think> wrapper */
     TEST_ASSERT(strstr(sink.accum, "\"content\":\"<think>\\n\"") != NULL, "<think> open emitted");
-    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Solving equation...\"") != NULL, "reasoning text in content");
-    TEST_ASSERT(strstr(sink.accum, "\"content\":\"\\n</think>\\n\\n\"") != NULL, "</think> close emitted");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"Solving equation...\"") != NULL,
+                "reasoning text in content");
+    TEST_ASSERT(strstr(sink.accum, "\"content\":\"\\n</think>\\n\\n\"") != NULL,
+                "</think> close emitted");
     TEST_ASSERT(strstr(sink.accum, "\"content\":\"x = 5\"") != NULL, "answer text in content");
 }
 
@@ -964,28 +1033,32 @@ TEST_CASE(test_openai_stream_fallback_thought)
     ob->tag_emulation = false; /* raw mode */
 
     /* Chunk with delta.thought instead of delta.reasoning_content */
-    const char* c1 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"thought\":\"Internal thought process\"},\"finish_reason\":null}]}\n\n";
+    const char* c1 = "data: {\"choices\":[{\"index\":0,\"delta\":{\"thought\":\"Internal thought "
+                     "process\"},\"finish_reason\":null}]}\n\n";
     g_provider_openai.stream_bridge_feed(bridge, c1, strlen(c1));
 
     g_provider_openai.stream_bridge_finish(bridge);
     g_provider_openai.stream_bridge_free(bridge);
 
     /* Verify normalized to delta.reasoning_content */
-    TEST_ASSERT(strstr(sink.accum, "\"reasoning_content\":\"Internal thought process\"") != NULL, "thought normalized to reasoning_content");
+    TEST_ASSERT(strstr(sink.accum, "\"reasoning_content\":\"Internal thought process\"") != NULL,
+                "thought normalized to reasoning_content");
 }
 
 TEST_CASE(test_openai_sync_reasoning_tag_emulation)
 {
     const char* in_resp =
         "{\"id\":\"chatcmpl-sync-test\",\"object\":\"chat.completion\",\"model\":\"o1-mini\","
-        "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Result is 100.\",\"reasoning_content\":\"Calculating 10*10=100.\"},\"finish_reason\":\"stop\"}],"
+        "\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"Result is "
+        "100.\",\"reasoning_content\":\"Calculating 10*10=100.\"},\"finish_reason\":\"stop\"}],"
         "\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":25,\"total_tokens\":35}}";
 
-    char* out_body = NULL;
+    char*  out_body = NULL;
     size_t out_len = 0;
-    long ptok = 0, ctok = 0, cached = 0;
+    long   ptok = 0, ctok = 0, cached = 0;
 
-    int rc = provider_openai_resp_format_tag_emulation(in_resp, strlen(in_resp), "o1-mini", &out_body, &out_len, &ptok, &ctok, &cached);
+    int rc = provider_openai_resp_format_tag_emulation(
+        in_resp, strlen(in_resp), "o1-mini", &out_body, &out_len, &ptok, &ctok, &cached);
     TEST_ASSERT(rc == 0, "formatting success");
     TEST_ASSERT(out_body != NULL, "out_body non-null");
 
@@ -993,11 +1066,13 @@ TEST_CASE(test_openai_sync_reasoning_tag_emulation)
     free(out_body);
     TEST_ASSERT(root != NULL, "json valid");
 
-    json_t* choices = json_object_get(root, "choices");
-    json_t* c0 = json_array_get(choices, 0);
-    json_t* msg = json_object_get(c0, "message");
+    json_t*     choices = json_object_get(root, "choices");
+    json_t*     c0 = json_array_get(choices, 0);
+    json_t*     msg = json_object_get(c0, "message");
     const char* content = json_string_value(json_object_get(msg, "content"));
 
-    TEST_ASSERT(strstr(content, "<think>\nCalculating 10*10=100.\n</think>\n\nResult is 100.") != NULL, "content formatted with <think> tag emulation");
+    TEST_ASSERT(strstr(content, "<think>\nCalculating 10*10=100.\n</think>\n\nResult is 100.") !=
+                    NULL,
+                "content formatted with <think> tag emulation");
     json_decref(root);
 }

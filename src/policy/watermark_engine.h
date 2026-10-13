@@ -46,10 +46,10 @@ watermark_inject(const char* text, size_t len, const watermark_payload_t* payloa
  * @return Newly allocated watermarked string (caller frees), or NULL on OOM.
  */
 char* watermark_inject_multi_tile(const char*                text,
-                                 size_t                     len,
-                                 const watermark_payload_t* payload,
-                                 size_t                     min_interval,
-                                 size_t*                    out_len);
+                                  size_t                     len,
+                                  const watermark_payload_t* payload,
+                                  size_t                     min_interval,
+                                  size_t*                    out_len);
 
 /**
  * @brief Scan and decode steganographic zero-width watermark from arbitrary text.
@@ -69,11 +69,8 @@ int watermark_decode(const char* text, size_t len, watermark_payload_t* out_payl
  * @param[out] out_count Written with number of valid frames decoded.
  * @return 0 on success; -1 if no valid frame found or error.
  */
-int watermark_decode_all(const char*          text,
-                         size_t               len,
-                         watermark_payload_t* out_payloads,
-                         int                  cap,
-                         int*                 out_count);
+int watermark_decode_all(
+    const char* text, size_t len, watermark_payload_t* out_payloads, int cap, int* out_count);
 
 /** @brief Streaming chunk-level watermark state machine context. */
 typedef struct stream_watermark_state {
@@ -93,7 +90,7 @@ typedef struct stream_watermark_state {
  * @param format Output SSE format ("openai", "anthropic", or "raw").
  * @param min_interval Minimum character spacing between tiles (e.g. 50~100).
  */
-void watermark_stream_init(stream_watermark_state_t*   state,
+void watermark_stream_init(stream_watermark_state_t*  state,
                            const watermark_payload_t* payload,
                            const char*                format,
                            size_t                     min_interval);
@@ -110,12 +107,12 @@ void watermark_stream_init(stream_watermark_state_t*   state,
  * @return 0 on success, -1 on buffer overflow or error.
  */
 int watermark_stream_feed(stream_watermark_state_t* state,
-                          const char*              in_buf,
-                          size_t                   in_len,
-                          bool                     is_final,
-                          char*                    out_buf,
-                          size_t                   out_cap,
-                          size_t*                  out_len);
+                          const char*               in_buf,
+                          size_t                    in_len,
+                          bool                      is_final,
+                          char*                     out_buf,
+                          size_t                    out_cap,
+                          size_t*                   out_len);
 
 #ifdef __cplusplus
 }

@@ -455,11 +455,13 @@ TEST_CASE(test_metrics_reasoning_tokens_counter)
     TEST_ASSERT(um_total_reasoning_tokens(um) == 40, "total reasoning tokens is 40");
 
     char buf[16384];
-    int rc = metrics_render(um, buf, sizeof(buf));
+    int  rc = metrics_render(um, buf, sizeof(buf));
     TEST_ASSERT(rc == 0, "metrics rendered");
 
-    TEST_ASSERT(strstr(buf, "# HELP aigate_tokens_reasoning_total Total reasoning / thinking tokens.") != NULL,
-                "reasoning tokens help string present");
+    TEST_ASSERT(
+        strstr(buf, "# HELP aigate_tokens_reasoning_total Total reasoning / thinking tokens.") !=
+            NULL,
+        "reasoning tokens help string present");
     TEST_ASSERT(strstr(buf, "aigate_tokens_reasoning_total 40") != NULL,
                 "aigate_tokens_reasoning_total 40 present");
 

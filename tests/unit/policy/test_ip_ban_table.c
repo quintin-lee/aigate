@@ -34,8 +34,7 @@ TEST_CASE(test_ip_ban_table_lifecycle)
 
     rc = ip_ban_table_unban(tbl, "192.168.1.50");
     TEST_ASSERT(rc == 0, "unban succeeded");
-    TEST_ASSERT(!ip_ban_table_is_banned(tbl, "192.168.1.50", reason, sizeof(reason)),
-                "unbanned");
+    TEST_ASSERT(!ip_ban_table_is_banned(tbl, "192.168.1.50", reason, sizeof(reason)), "unbanned");
 
     /* Unban non-existent returns -1 */
     TEST_ASSERT(ip_ban_table_unban(tbl, "192.168.1.50") == -1, "unban non-existent fails");

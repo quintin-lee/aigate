@@ -4560,37 +4560,30 @@ TEST_CASE(test_admin_model_reasoning_crud)
     setup_admin(&db, &ops, &ps, &core, &adm, admin_hash);
 
     /* 1. POST /admin/v1/models with supports_reasoning=true, default_thinking_budget=4096, tag_emulation_default=true */
-    const char* post_body =
-        "{\"name\":\"deepseek-r1\",\"provider\":\"openai\",\"endpoint\":\"https://api.deepseek.com/v1\","
-        "\"supports_reasoning\":true,\"default_thinking_budget\":4096,\"tag_emulation_default\":true}";
-    int    status = 0;
-    char*  body = NULL;
-    size_t len = 0;
-    int    rc = admin_dispatch(&adm,
-                            "/admin/v1/models",
-                            "POST",
-                            NULL,
-                            "admin-secret-token",
-                            post_body,
-                            strlen(post_body),
-                            &status,
-                            &body,
-                            &len);
+    const char* post_body = "{\"name\":\"deepseek-r1\",\"provider\":\"openai\",\"endpoint\":"
+                            "\"https://api.deepseek.com/v1\","
+                            "\"supports_reasoning\":true,\"default_thinking_budget\":4096,\"tag_"
+                            "emulation_default\":true}";
+    int         status = 0;
+    char*       body = NULL;
+    size_t      len = 0;
+    int         rc = admin_dispatch(&adm,
+                                    "/admin/v1/models",
+                                    "POST",
+                                    NULL,
+                                    "admin-secret-token",
+                                    post_body,
+                                    strlen(post_body),
+                                    &status,
+                                    &body,
+                                    &len);
     TEST_ASSERT(rc == 0 && status == 201, "POST /models -> 201, got %d", status);
     free(body);
 
     /* 2. GET /admin/v1/models: verify fields */
     body = NULL;
-    rc = admin_dispatch(&adm,
-                        "/admin/v1/models",
-                        "GET",
-                        NULL,
-                        "admin-secret-token",
-                        NULL,
-                        0,
-                        &status,
-                        &body,
-                        &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/models", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "GET /models -> 200, got %d", status);
     json_t* root = json_loads(body, 0, NULL);
     free(body);
@@ -4624,16 +4617,8 @@ TEST_CASE(test_admin_model_reasoning_crud)
 
     /* 4. GET again and verify updated budget & tag emulation */
     body = NULL;
-    rc = admin_dispatch(&adm,
-                        "/admin/v1/models",
-                        "GET",
-                        NULL,
-                        "admin-secret-token",
-                        NULL,
-                        0,
-                        &status,
-                        &body,
-                        &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/models", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "GET /models -> 200");
     root = json_loads(body, 0, NULL);
     free(body);
@@ -4662,19 +4647,19 @@ TEST_CASE(test_admin_key_and_group_reasoning_quota_crud)
 
     /* 1. POST /admin/v1/groups with daily_reasoning_quota=50000 */
     const char* group_post = "{\"name\":\"dev-team\",\"daily_reasoning_quota\":50000}";
-    int    status = 0;
-    char*  body = NULL;
-    size_t len = 0;
-    int    rc = admin_dispatch(&adm,
-                               "/admin/v1/groups",
-                               "POST",
-                               NULL,
-                               "admin-secret-token",
-                               group_post,
-                               strlen(group_post),
-                               &status,
-                               &body,
-                               &len);
+    int         status = 0;
+    char*       body = NULL;
+    size_t      len = 0;
+    int         rc = admin_dispatch(&adm,
+                                    "/admin/v1/groups",
+                                    "POST",
+                                    NULL,
+                                    "admin-secret-token",
+                                    group_post,
+                                    strlen(group_post),
+                                    &status,
+                                    &body,
+                                    &len);
     TEST_ASSERT(rc == 0 && status == 201, "POST /groups -> 201, got %d", status);
     json_t* gj = json_loads(body, 0, NULL);
     free(body);
@@ -4686,16 +4671,8 @@ TEST_CASE(test_admin_key_and_group_reasoning_quota_crud)
 
     /* 2. GET /admin/v1/groups: verify daily_reasoning_quota */
     body = NULL;
-    rc = admin_dispatch(&adm,
-                        "/admin/v1/groups",
-                        "GET",
-                        NULL,
-                        "admin-secret-token",
-                        NULL,
-                        0,
-                        &status,
-                        &body,
-                        &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/groups", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "GET /groups -> 200, got %d", status);
     json_t* glist = json_loads(body, 0, NULL);
     free(body);
@@ -4726,8 +4703,10 @@ TEST_CASE(test_admin_key_and_group_reasoning_quota_crud)
 
     /* 4. POST /admin/v1/keys with group_id and daily_reasoning_quota=20000 */
     char key_post[256];
-    snprintf(key_post, sizeof(key_post),
-             "{\"name\":\"alice-key\",\"group_id\":%ld,\"daily_reasoning_quota\":20000}", gid);
+    snprintf(key_post,
+             sizeof(key_post),
+             "{\"name\":\"alice-key\",\"group_id\":%ld,\"daily_reasoning_quota\":20000}",
+             gid);
     body = NULL;
     rc = admin_dispatch(&adm,
                         "/admin/v1/keys",
@@ -4750,16 +4729,8 @@ TEST_CASE(test_admin_key_and_group_reasoning_quota_crud)
 
     /* 5. GET /admin/v1/keys: verify daily_reasoning_quota */
     body = NULL;
-    rc = admin_dispatch(&adm,
-                        "/admin/v1/keys",
-                        "GET",
-                        NULL,
-                        "admin-secret-token",
-                        NULL,
-                        0,
-                        &status,
-                        &body,
-                        &len);
+    rc = admin_dispatch(
+        &adm, "/admin/v1/keys", "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "GET /keys -> 200, got %d", status);
     json_t* klist = json_loads(body, 0, NULL);
     free(body);
@@ -4791,16 +4762,8 @@ TEST_CASE(test_admin_key_and_group_reasoning_quota_crud)
     char status_uri[64];
     snprintf(status_uri, sizeof(status_uri), "/admin/v1/reasoning/status?key_id=%ld", kid);
     body = NULL;
-    rc = admin_dispatch(&adm,
-                        status_uri,
-                        "GET",
-                        NULL,
-                        "admin-secret-token",
-                        NULL,
-                        0,
-                        &status,
-                        &body,
-                        &len);
+    rc = admin_dispatch(
+        &adm, status_uri, "GET", NULL, "admin-secret-token", NULL, 0, &status, &body, &len);
     TEST_ASSERT(rc == 0 && status == 200, "GET /reasoning/status -> 200, got %d", status);
     json_t* sj = json_loads(body, 0, NULL);
     free(body);

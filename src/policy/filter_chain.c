@@ -192,12 +192,11 @@ filter_jailbreak(chat_req_t* q)
         if (q->ac != NULL && q->ac->threat_whitelist != NULL &&
             threat_whitelist_is_bypassed(
                 q->ac->threat_whitelist, q->krec.key_id, q->model, res.rule_tag, NULL)) {
-            AIGATE_LOG_INFO(
-                "jailbreak block bypassed by threat whitelist (key_id=%" PRIu64
-                ", model=%s, tag=%s)",
-                q->krec.key_id,
-                q->model ? q->model : "*",
-                res.rule_tag[0] ? res.rule_tag : "*");
+            AIGATE_LOG_INFO("jailbreak block bypassed by threat whitelist (key_id=%" PRIu64
+                            ", model=%s, tag=%s)",
+                            q->krec.key_id,
+                            q->model ? q->model : "*",
+                            res.rule_tag[0] ? res.rule_tag : "*");
             snprintf(q->guardrail_act, sizeof q->guardrail_act, "whitelisted");
             return FILTER_CONTINUE;
         }

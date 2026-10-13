@@ -51,7 +51,8 @@ int threat_whitelist_remove(threat_whitelist_t* tw, int64_t rule_id);
  * @param count Number of rules in array.
  * @return 0 on success, -1 on error.
  */
-int threat_whitelist_load(threat_whitelist_t* tw, const threat_whitelist_rec_t* rules, size_t count);
+int
+threat_whitelist_load(threat_whitelist_t* tw, const threat_whitelist_rec_t* rules, size_t count);
 
 /**
  * @brief Check whether a request is bypassed by an active whitelist rule.
@@ -79,10 +80,7 @@ bool threat_whitelist_is_bypassed(threat_whitelist_t* tw,
  * @param out_n  Written with number of rules copied.
  * @return 0 on success, -1 on error.
  */
-int threat_whitelist_list(threat_whitelist_t*     tw,
-                          threat_whitelist_rec_t* out,
-                          int                     cap,
-                          int*                    out_n);
+int threat_whitelist_list(threat_whitelist_t* tw, threat_whitelist_rec_t* out, int cap, int* out_n);
 
 #ifdef __cplusplus
 }

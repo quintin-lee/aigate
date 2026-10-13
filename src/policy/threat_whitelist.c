@@ -191,10 +191,7 @@ threat_whitelist_is_bypassed(threat_whitelist_t* tw,
 }
 
 int
-threat_whitelist_list(threat_whitelist_t*     tw,
-                      threat_whitelist_rec_t* out,
-                      int                     cap,
-                      int*                    out_n)
+threat_whitelist_list(threat_whitelist_t* tw, threat_whitelist_rec_t* out, int cap, int* out_n)
 {
     if (tw == NULL || out == NULL || out_n == NULL || cap <= 0) {
         return -1;

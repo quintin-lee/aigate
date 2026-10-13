@@ -103,8 +103,8 @@ typedef struct aigate_core {
     cache_optimizer_rule_t cache_opt_rules[64];  /**< Cached prompt cache optimizer rules */
     int                    n_cache_opt_rules;    /**< Number of active cache optimizer rules */
     pthread_mutex_t        cache_opt_rules_lock; /**< Mutex protecting cache_opt_rules */
-    audit_logger_t*        audit;            /**< Dual-channel audit logger, may be NULL (disabled) */
-    ip_ban_table_t*        ip_ban_tbl;       /**< In-memory IP ban table */
+    audit_logger_t*        audit;      /**< Dual-channel audit logger, may be NULL (disabled) */
+    ip_ban_table_t*        ip_ban_tbl; /**< In-memory IP ban table */
     threat_whitelist_t*    threat_whitelist; /**< Dynamic threat defense whitelist engine */
 } aigate_core;
 
@@ -161,7 +161,10 @@ int aigate_handle_request(aigate_core* ac, aigate_request_ctx* rq, aigate_respon
  * @param key_id Canary key ID.
  * @param model Model requested.
  */
-void aigate_core_handle_canary_hit(aigate_core* ac, const char* client_ip, long key_id, const char* model);
+void aigate_core_handle_canary_hit(aigate_core* ac,
+                                   const char*  client_ip,
+                                   long         key_id,
+                                   const char*  model);
 
 /** @brief Write a JSON body with a status. Allocates the HTTP header
  *  block (Content-Type/Length) and one fin write. */

@@ -351,9 +351,8 @@ pq_get_key_by_hash(void* vctx, const char* key_hash, key_rec_t* out)
             }
             if (PQnfields(res) > 15) {
                 const char* can = PQgetvalue(res, 0, 15);
-                out->is_canary =
-                    (can != NULL &&
-                     (strcmp(can, "t") == 0 || strcmp(can, "1") == 0 || strcmp(can, "true") == 0));
+                out->is_canary = (can != NULL && (strcmp(can, "t") == 0 || strcmp(can, "1") == 0 ||
+                                                  strcmp(can, "true") == 0));
             } else {
                 out->is_canary = 0;
             }
@@ -624,7 +623,8 @@ fill_model_row(PGresult* res, int row, model_rec_t* out)
     }
     if (nfields > 16) {
         const char* ted = PQgetvalue(res, row, 16);
-        out->tag_emulation_default = (ted != NULL && (strcmp(ted, "t") == 0 || strcmp(ted, "true") == 0));
+        out->tag_emulation_default =
+            (ted != NULL && (strcmp(ted, "t") == 0 || strcmp(ted, "true") == 0));
     }
 
     /* Fallback: if no targets configured, synthesize targets[0] from primary fields */
@@ -726,7 +726,8 @@ pq_create_key(void* vctx, const key_rec_t* k, long* out_key_id)
     static const char q[] =
         "INSERT INTO api_keys(key_hash, name, allowed_models, rate_qps, "
         "daily_token_quota, expires_at, group_id, guardrails_enabled, monthly_cost_budget, "
-        "monthly_token_budget, system_prompt, prompt_mode, watermark_enabled, is_canary, daily_reasoning_quota) "
+        "monthly_token_budget, system_prompt, prompt_mode, watermark_enabled, is_canary, "
+        "daily_reasoning_quota) "
         "VALUES($1, $2, CASE WHEN $3 = '' THEN '{}'::text[] "
         "ELSE string_to_array($3, '|') END, $4, $5, "
         "CASE WHEN $6 = 'null' THEN NULL "
@@ -931,11 +932,8 @@ pq_update_key(void* vctx, const key_rec_t* k, int mask)
     }
     if (mask & KMASK_CANARY) {
         nv++;
-        off += snprintf(sql + off,
-                        sizeof sql - (size_t)off,
-                        "%sis_canary = $%d",
-                        nv > 1 ? ", " : "",
-                        nv);
+        off += snprintf(
+            sql + off, sizeof sql - (size_t)off, "%sis_canary = $%d", nv > 1 ? ", " : "", nv);
         vals[nv - 1] = can_str;
     }
     if (mask & KMASK_REASONING_QUOTA) {
@@ -1029,7 +1027,7 @@ serialize_targets_json(const model_rec_t* m)
     } else {
         for (int i = 0; i < m->n_targets && i < MAX_TARGETS_PER_MODEL; i++) {
             const upstream_target_t* tgt = &m->targets[i];
-            json_t*                  item = json_pack("{s:s, s:s, s:s, s:i, s:i, s:i}",
+            json_t* item = json_pack("{s:s, s:s, s:s, s:i, s:i, s:i}",
                                      "provider",
                                      tgt->provider[0] != '\0' ? tgt->provider : "openai",
                                      "endpoint",
@@ -2227,7 +2225,7 @@ pq_create_guardrails_rule(void* vctx, const guardrail_rule_t* rule, long* out_id
                            timeout_str,
                            fail_mode_str,
                            phase_str};
-    int plens[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
+    int         plens[9] = {0, 0, 0, 0, 0, 0, 0, 0, 0};
 
     pq_lock(px);
     PGresult* res = PQexecParams(px->db, q, 9, NULL, vals, plens, NULL, 0);
@@ -2961,15 +2959,15 @@ pq_list_threat_whitelists(void* vctx, threat_whitelist_rec_t** out_recs, size_t*
         recs[i].rule_id = atoll(PQgetvalue(res, i, 0));
         copy_field(recs[i].name, sizeof(recs[i].name), PQgetvalue(res, i, 1));
         const char* kid_str = PQgetvalue(res, i, 2);
-        recs[i].match_key_id = (kid_str != NULL && kid_str[0] != '\0')
-                                   ? (uint64_t)strtoull(kid_str, NULL, 10)
-                                   : 0;
+        recs[i].match_key_id =
+            (kid_str != NULL && kid_str[0] != '\0') ? (uint64_t)strtoull(kid_str, NULL, 10) : 0;
         copy_field(recs[i].match_model, sizeof(recs[i].match_model), PQgetvalue(res, i, 3));
         copy_field(recs[i].bypass_rule_tag, sizeof(recs[i].bypass_rule_tag), PQgetvalue(res, i, 4));
         copy_field(recs[i].reason, sizeof(recs[i].reason), PQgetvalue(res, i, 5));
         const char* en_str = PQgetvalue(res, i, 6);
-        recs[i].enabled = (en_str != NULL && (strcmp(en_str, "t") == 0 || strcmp(en_str, "1") == 0 ||
-                                              strcmp(en_str, "true") == 0));
+        recs[i].enabled =
+            (en_str != NULL &&
+             (strcmp(en_str, "t") == 0 || strcmp(en_str, "1") == 0 || strcmp(en_str, "true") == 0));
         const char* exp_str = PQgetvalue(res, i, 7);
         recs[i].expires_at = (exp_str != NULL && exp_str[0] != '\0') ? atoll(exp_str) : 0;
     }
@@ -2991,11 +2989,10 @@ static int
 pq_create_threat_whitelist(void* vctx, const threat_whitelist_rec_t* rec, int64_t* out_id)
 {
     struct pq_ctx*    px = vctx;
-    static const char q[] =
-        "INSERT INTO threat_rule_whitelists(name, match_key_id, match_model, "
-        "bypass_rule_tag, reason, enabled, expires_at) "
-        "VALUES($1, $2, $3, $4, $5, $6, CASE WHEN $7 = '0' THEN NULL "
-        "ELSE to_timestamp(($7)::double precision) END) RETURNING rule_id";
+    static const char q[] = "INSERT INTO threat_rule_whitelists(name, match_key_id, match_model, "
+                            "bypass_rule_tag, reason, enabled, expires_at) "
+                            "VALUES($1, $2, $3, $4, $5, $6, CASE WHEN $7 = '0' THEN NULL "
+                            "ELSE to_timestamp(($7)::double precision) END) RETURNING rule_id";
 
     char match_key_str[32], exp_str[32];
     snprintf(match_key_str, sizeof(match_key_str), "%lu", (unsigned long)rec->match_key_id);
@@ -3465,7 +3462,9 @@ audit_violation_record_free(audit_violation_record_t* rec)
 }
 
 int
-pg_store_list_threat_whitelists(pg_store_t* ps, threat_whitelist_rec_t** out_recs, size_t* out_count)
+pg_store_list_threat_whitelists(pg_store_t*              ps,
+                                threat_whitelist_rec_t** out_recs,
+                                size_t*                  out_count)
 {
     const pg_ops_t* ops = pg_store_ops(ps);
     return (ops != NULL && ops->list_threat_whitelists != NULL)
@@ -3689,7 +3688,7 @@ pg_store_rotate_master_key(pg_store_t*   ps,
                 const char* vals[3] = {new_kref[0] != '\0' ? new_kref : NULL,
                                        new_targets_str != NULL ? new_targets_str : targets_json,
                                        mname};
-                PGresult* ures = PQexecParams(px->db, upd_sql, 3, NULL, vals, NULL, NULL, 0);
+                PGresult*   ures = PQexecParams(px->db, upd_sql, 3, NULL, vals, NULL, NULL, 0);
                 if (ures == NULL || PQresultStatus(ures) != PGRES_COMMAND_OK) {
                     AIGATE_LOG_ERROR("pg rotate_master_key: update model %s failed: %s",
                                      mname,

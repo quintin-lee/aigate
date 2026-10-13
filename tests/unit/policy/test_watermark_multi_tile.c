@@ -20,7 +20,7 @@ TEST_CASE(test_watermark_multi_tile_injection_and_sliding_decode)
         "Confidential document verification requires robust forensic traceability.";
 
     size_t out_len = 0;
-    char* watermarked = watermark_inject_multi_tile(doc, strlen(doc), &in_p, 70, &out_len);
+    char*  watermarked = watermark_inject_multi_tile(doc, strlen(doc), &in_p, 70, &out_len);
     TEST_ASSERT(watermarked != NULL, "watermark_inject_multi_tile should succeed");
     TEST_ASSERT(out_len >= strlen(doc) + (2 * WATERMARK_UTF8_BYTES),
                 "Should have at least 2 watermark tiles injected, got len %zu vs orig %zu",
@@ -36,7 +36,7 @@ TEST_CASE(test_watermark_multi_tile_injection_and_sliding_decode)
 
     /* 2. Decode all tiles */
     watermark_payload_t all_tiles[8];
-    int n_tiles = 0;
+    int                 n_tiles = 0;
     TEST_ASSERT(watermark_decode_all(watermarked, out_len, all_tiles, 8, &n_tiles) == 0,
                 "decode_all should succeed");
     TEST_ASSERT(n_tiles >= 2, "Expected at least 2 valid tiles decoded, got %d", n_tiles);
@@ -51,9 +51,9 @@ TEST_CASE(test_watermark_multi_tile_injection_and_sliding_decode)
     TEST_ASSERT(out_p.key_id == 9901, "recovered key_id after tail truncation: %u", out_p.key_id);
 
     /* 4. Head truncation resilience: keep only the last 45% of the document */
-    size_t back_offset = out_len * 55 / 100;
+    size_t      back_offset = out_len * 55 / 100;
     const char* back_slice = watermarked + back_offset;
-    size_t back_len = out_len - back_offset;
+    size_t      back_len = out_len - back_offset;
     memset(&out_p, 0, sizeof(out_p));
     TEST_ASSERT(watermark_decode(back_slice, back_len, &out_p) == 0,
                 "head truncation (last 45%%) should still recover late watermark tile");
@@ -71,13 +71,12 @@ TEST_CASE(test_watermark_chinese_punctuation_anchoring)
         .crc_valid = false,
     };
 
-    const char* doc =
-        "人工智能正在深刻改变软件工程。"
-        "模型网关为企业级应用提供了安全屏障与审计追踪。"
-        "多段零宽水印技术能够在文本被截断或局部复制时，依然保持追溯能力！";
+    const char* doc = "人工智能正在深刻改变软件工程。"
+                      "模型网关为企业级应用提供了安全屏障与审计追踪。"
+                      "多段零宽水印技术能够在文本被截断或局部复制时，依然保持追溯能力！";
 
     size_t out_len = 0;
-    char* watermarked = watermark_inject_multi_tile(doc, strlen(doc), &in_p, 40, &out_len);
+    char*  watermarked = watermark_inject_multi_tile(doc, strlen(doc), &in_p, 40, &out_len);
     TEST_ASSERT(watermarked != NULL, "watermark_inject_multi_tile failed for chinese doc");
     TEST_ASSERT(out_len >= strlen(doc) + (2 * WATERMARK_UTF8_BYTES),
                 "Should have at least 2 tiles for chinese text");

@@ -174,11 +174,8 @@ extract_prompt_snippet(json_t* jbody, char* out, size_t out_sz)
  *  @param reasoning  Reasoning output tokens, priced at reasoning_mtok if configured, else out_mtok.
  *  @return Cost in USD; returns 0.0 if pricing missing/invalid. */
 double
-calc_req_cost_ext(const model_rec_t* route,
-                  long               prompt,
-                  long               completion,
-                  long               cached,
-                  long               reasoning)
+calc_req_cost_ext(
+    const model_rec_t* route, long prompt, long completion, long cached, long reasoning)
 {
     if (route == NULL || route->pricing_json[0] == '\0') {
         return 0.0;
@@ -220,10 +217,8 @@ calc_req_cost_ext(const model_rec_t* route,
     long normal_completion = (completion >= reasoning) ? (completion - reasoning) : 0;
     long billed_reasoning = (completion >= reasoning) ? reasoning : completion;
 
-    return ((double)unhit_prompt * in_mtok +
-            (double)cached * in_mtok * cached_discount +
-            (double)normal_completion * out_mtok +
-            (double)billed_reasoning * reasoning_mtok) /
+    return ((double)unhit_prompt * in_mtok + (double)cached * in_mtok * cached_discount +
+            (double)normal_completion * out_mtok + (double)billed_reasoning * reasoning_mtok) /
            1000000.0;
 }
 
@@ -875,7 +870,10 @@ chat_req_cleanup(chat_req_t* q)
 }
 
 void
-aigate_core_handle_canary_hit(aigate_core* ac, const char* client_ip, long key_id, const char* model)
+aigate_core_handle_canary_hit(aigate_core* ac,
+                              const char*  client_ip,
+                              long         key_id,
+                              const char*  model)
 {
     if (ac == NULL) {
         return;

@@ -16,6 +16,7 @@ __pycache__/
 compile_commands.json
 
 build-asan/
+build_asan/
 
 # doxygen 生成输出（Doxyfile OUTPUT_DIRECTORY=.）
 /html/

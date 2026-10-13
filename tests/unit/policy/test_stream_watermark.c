@@ -17,19 +17,21 @@ TEST_CASE(test_stream_watermark_openai_sse_injection)
     stream_watermark_state_t state;
     watermark_stream_init(&state, &in_p, "openai", 50);
 
-    const char* chunk1 =
-        "data: {\"choices\":[{\"delta\":{\"content\":\"This is confidential AI generated text.\"}}]}\n\n";
+    const char* chunk1 = "data: {\"choices\":[{\"delta\":{\"content\":\"This is confidential AI "
+                         "generated text.\"}}]}\n\n";
     const char* chunk2 = "data: [DONE]\n\n";
 
-    char out1[1024];
+    char   out1[1024];
     size_t out1_len = 0;
-    TEST_ASSERT(watermark_stream_feed(&state, chunk1, strlen(chunk1), false, out1, sizeof(out1), &out1_len) == 0,
+    TEST_ASSERT(watermark_stream_feed(
+                    &state, chunk1, strlen(chunk1), false, out1, sizeof(out1), &out1_len) == 0,
                 "feed chunk1");
     out1[out1_len] = '\0';
 
-    char out2[1024];
+    char   out2[1024];
     size_t out2_len = 0;
-    TEST_ASSERT(watermark_stream_feed(&state, chunk2, strlen(chunk2), true, out2, sizeof(out2), &out2_len) == 0,
+    TEST_ASSERT(watermark_stream_feed(
+                    &state, chunk2, strlen(chunk2), true, out2, sizeof(out2), &out2_len) == 0,
                 "feed chunk2");
     out2[out2_len] = '\0';
 
@@ -57,22 +59,24 @@ TEST_CASE(test_stream_watermark_anthropic_sse_injection)
     stream_watermark_state_t state;
     watermark_stream_init(&state, &in_p, "anthropic", 50);
 
-    const char* chunk1 =
-        "event: content_block_delta\n"
-        "data: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Internal enterprise strategy report.\"}}\n\n";
-    const char* chunk2 =
-        "event: message_stop\n"
-        "data: {\"type\":\"message_stop\"}\n\n";
+    const char* chunk1 = "event: content_block_delta\n"
+                         "data: "
+                         "{\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_"
+                         "delta\",\"text\":\"Internal enterprise strategy report.\"}}\n\n";
+    const char* chunk2 = "event: message_stop\n"
+                         "data: {\"type\":\"message_stop\"}\n\n";
 
-    char out1[1024];
+    char   out1[1024];
     size_t out1_len = 0;
-    TEST_ASSERT(watermark_stream_feed(&state, chunk1, strlen(chunk1), false, out1, sizeof(out1), &out1_len) == 0,
+    TEST_ASSERT(watermark_stream_feed(
+                    &state, chunk1, strlen(chunk1), false, out1, sizeof(out1), &out1_len) == 0,
                 "feed anthropic chunk1");
     out1[out1_len] = '\0';
 
-    char out2[1024];
+    char   out2[1024];
     size_t out2_len = 0;
-    TEST_ASSERT(watermark_stream_feed(&state, chunk2, strlen(chunk2), true, out2, sizeof(out2), &out2_len) == 0,
+    TEST_ASSERT(watermark_stream_feed(
+                    &state, chunk2, strlen(chunk2), true, out2, sizeof(out2), &out2_len) == 0,
                 "feed anthropic chunk2");
     out2[out2_len] = '\0';
 
@@ -99,16 +103,15 @@ TEST_CASE(test_stream_watermark_no_punctuation_fallback)
     watermark_stream_init(&state, &in_p, "openai", 100);
 
     /* Single word with no punctuation */
-    const char* chunk1 =
-        "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n";
+    const char* chunk1 = "data: {\"choices\":[{\"delta\":{\"content\":\"OK\"}}]}\n\n";
     const char* chunk2 = "data: [DONE]\n\n";
 
-    char out1[1024];
+    char   out1[1024];
     size_t out1_len = 0;
     watermark_stream_feed(&state, chunk1, strlen(chunk1), false, out1, sizeof(out1), &out1_len);
     out1[out1_len] = '\0';
 
-    char out2[1024];
+    char   out2[1024];
     size_t out2_len = 0;
     watermark_stream_feed(&state, chunk2, strlen(chunk2), true, out2, sizeof(out2), &out2_len);
     out2[out2_len] = '\0';

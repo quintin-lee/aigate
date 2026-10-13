@@ -18,18 +18,18 @@
 
 /** @brief Reasoning budget and configuration options */
 typedef struct reasoning_config {
-    bool     enabled;         /**< True if reasoning/thinking is active */
-    long     budget_tokens;   /**< Reasoning token budget cap (0 = unlimited / model default) */
-    char     effort[16];      /**< low | medium | high | none */
-    bool     tag_emulation;   /**< True to output <think>...</think> in content */
+    bool enabled;       /**< True if reasoning/thinking is active */
+    long budget_tokens; /**< Reasoning token budget cap (0 = unlimited / model default) */
+    char effort[16];    /**< low | medium | high | none */
+    bool tag_emulation; /**< True to output <think>...</think> in content */
 } reasoning_config_t;
 
 /** @brief SSE streaming thinking state machine state */
 typedef enum stream_thinking_state {
-    THINK_STATE_INIT = 0,     /**< Initial state, awaiting first payload */
-    THINK_STATE_THINKING,     /**< Receiving/emitting thinking process */
-    THINK_STATE_CONTENT,      /**< Receiving/emitting final content text */
-    THINK_STATE_DONE          /**< Stream terminated */
+    THINK_STATE_INIT = 0, /**< Initial state, awaiting first payload */
+    THINK_STATE_THINKING, /**< Receiving/emitting thinking process */
+    THINK_STATE_CONTENT,  /**< Receiving/emitting final content text */
+    THINK_STATE_DONE      /**< Stream terminated */
 } stream_thinking_state_t;
 
 /** @brief Parse reasoning parameters with 3-tier resolution:
@@ -37,9 +37,9 @@ typedef enum stream_thinking_state {
  *  Tier 2: Request Body ("thinking_format" or "thinking_mode": "tag" or "raw")
  *  Tier 3: Route default (route->tag_emulation_default: true or false)
  *  @return 0 on success (out_cfg filled), -1 on error. */
-int parse_reasoning_config_ext(json_t*            req_body,
-                               const model_rec_t* route,
-                               const char*        header_format,
+int parse_reasoning_config_ext(json_t*             req_body,
+                               const model_rec_t*  route,
+                               const char*         header_format,
                                reasoning_config_t* out_cfg);
 
 /** @brief Parse reasoning parameters from inbound request or route defaults.

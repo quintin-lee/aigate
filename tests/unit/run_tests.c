@@ -224,8 +224,7 @@ main(int argc, char** argv)
     test_register("metrics_ttft", test_metrics_ttft);
     test_register("metrics_concurrency_rejection_and_alloc",
                   test_metrics_concurrency_rejection_and_alloc);
-    test_register("metrics_reasoning_tokens_counter",
-                  test_metrics_reasoning_tokens_counter);
+    test_register("metrics_reasoning_tokens_counter", test_metrics_reasoning_tokens_counter);
     test_register("core_pipeline", test_core_pipeline);
     test_register("core_models_rate_limited", test_core_models_rate_limited);
     test_register("core_models_503", test_core_models_list_failure_503);
@@ -813,16 +812,19 @@ main(int argc, char** argv)
     test_register("reasoning_budget_parsing_effort", test_reasoning_budget_parsing_effort);
 
     extern void test_reasoning_budget_parsing_route_fallback(void);
-    test_register("reasoning_budget_parsing_route_fallback", test_reasoning_budget_parsing_route_fallback);
+    test_register("reasoning_budget_parsing_route_fallback",
+                  test_reasoning_budget_parsing_route_fallback);
 
     extern void test_reasoning_tag_emulation_parsing(void);
     test_register("reasoning_tag_emulation_parsing", test_reasoning_tag_emulation_parsing);
 
     extern void test_reasoning_tag_emulation_3tier_hierarchy(void);
-    test_register("reasoning_tag_emulation_3tier_hierarchy", test_reasoning_tag_emulation_3tier_hierarchy);
+    test_register("reasoning_tag_emulation_3tier_hierarchy",
+                  test_reasoning_tag_emulation_3tier_hierarchy);
 
     extern void test_anthropic_thinking_inbound_max_tokens_autolift(void);
-    test_register("anthropic_thinking_inbound_max_tokens_autolift", test_anthropic_thinking_inbound_max_tokens_autolift);
+    test_register("anthropic_thinking_inbound_max_tokens_autolift",
+                  test_anthropic_thinking_inbound_max_tokens_autolift);
 
     extern void test_gemini_thinking_inbound_budget(void);
     test_register("gemini_thinking_inbound_budget", test_gemini_thinking_inbound_budget);
@@ -834,10 +836,12 @@ main(int argc, char** argv)
     test_register("anthropic_thinking_outbound_stream", test_anthropic_thinking_outbound_stream);
 
     extern void test_anthropic_thinking_stream_tag_emulation(void);
-    test_register("anthropic_thinking_stream_tag_emulation", test_anthropic_thinking_stream_tag_emulation);
+    test_register("anthropic_thinking_stream_tag_emulation",
+                  test_anthropic_thinking_stream_tag_emulation);
 
     extern void test_anthropic_thinking_sync_tag_emulation(void);
-    test_register("anthropic_thinking_sync_tag_emulation", test_anthropic_thinking_sync_tag_emulation);
+    test_register("anthropic_thinking_sync_tag_emulation",
+                  test_anthropic_thinking_sync_tag_emulation);
 
     extern void test_openai_to_anthropic_thinking_sync(void);
     test_register("openai_to_anthropic_thinking_sync", test_openai_to_anthropic_thinking_sync);
@@ -855,13 +859,16 @@ main(int argc, char** argv)
     test_register("gemini_thinking_sync_tag_emulation", test_gemini_thinking_sync_tag_emulation);
 
     extern void test_gemini_thinking_raw_reasoning_content(void);
-    test_register("gemini_thinking_raw_reasoning_content", test_gemini_thinking_raw_reasoning_content);
+    test_register("gemini_thinking_raw_reasoning_content",
+                  test_gemini_thinking_raw_reasoning_content);
 
     extern void test_gemini_thinking_stream_tag_emulation(void);
-    test_register("gemini_thinking_stream_tag_emulation", test_gemini_thinking_stream_tag_emulation);
+    test_register("gemini_thinking_stream_tag_emulation",
+                  test_gemini_thinking_stream_tag_emulation);
 
     extern void test_gemini_thinking_stream_raw_reasoning_content(void);
-    test_register("gemini_thinking_stream_raw_reasoning_content", test_gemini_thinking_stream_raw_reasoning_content);
+    test_register("gemini_thinking_stream_raw_reasoning_content",
+                  test_gemini_thinking_stream_raw_reasoning_content);
 
     extern void test_claude_37_128k_budget_parsing(void);
     test_register("claude_37_128k_budget_parsing", test_claude_37_128k_budget_parsing);
@@ -879,7 +886,8 @@ main(int argc, char** argv)
     test_register("openai_reasoning_effort_mapping", test_openai_reasoning_effort_mapping);
 
     extern void test_openai_stream_reasoning_tag_emulation(void);
-    test_register("openai_stream_reasoning_tag_emulation", test_openai_stream_reasoning_tag_emulation);
+    test_register("openai_stream_reasoning_tag_emulation",
+                  test_openai_stream_reasoning_tag_emulation);
 
     extern void test_openai_stream_fallback_thought(void);
     test_register("openai_stream_fallback_thought", test_openai_stream_fallback_thought);
@@ -891,19 +899,23 @@ main(int argc, char** argv)
     test_register("pricing_reasoning_mtok_calculation", test_pricing_reasoning_mtok_calculation);
 
     extern void test_pricing_reasoning_fallback_calculation(void);
-    test_register("pricing_reasoning_fallback_calculation", test_pricing_reasoning_fallback_calculation);
+    test_register("pricing_reasoning_fallback_calculation",
+                  test_pricing_reasoning_fallback_calculation);
 
     extern void test_pricing_reasoning_more_than_completion_clamp(void);
-    test_register("pricing_reasoning_more_than_completion_clamp", test_pricing_reasoning_more_than_completion_clamp);
+    test_register("pricing_reasoning_more_than_completion_clamp",
+                  test_pricing_reasoning_more_than_completion_clamp);
 
     extern void test_rl_daily_reasoning_quota(void);
     test_register("rl_daily_reasoning_quota", test_rl_daily_reasoning_quota);
 
     extern void test_pipeline_reasoning_graceful_degradation(void);
-    test_register("pipeline_reasoning_graceful_degradation", test_pipeline_reasoning_graceful_degradation);
+    test_register("pipeline_reasoning_graceful_degradation",
+                  test_pipeline_reasoning_graceful_degradation);
 
     extern void test_admin_key_and_group_reasoning_quota_crud(void);
-    test_register("admin_key_and_group_reasoning_quota_crud", test_admin_key_and_group_reasoning_quota_crud);
+    test_register("admin_key_and_group_reasoning_quota_crud",
+                  test_admin_key_and_group_reasoning_quota_crud);
 
     int ran = 0;
     int failed = 0;

@@ -19,11 +19,11 @@
 
 /** @brief Per-key rate-limit bucket: key id/in-use flag/available tokens/capacity/last refill/daily total/date. */
 struct bucket {
-    long     key_id;         /**< API key id */
-    int      in_use;         /**< Slot occupancy flag. */
-    double   tokens;         /**< available request tokens */
-    double   capacity;       /**< Bucket capacity (QPS ceiling). */
-    uint64_t last_refill_ns; /**< CLOCK_MONOTONIC */
+    long     key_id;               /**< API key id */
+    int      in_use;               /**< Slot occupancy flag. */
+    double   tokens;               /**< available request tokens */
+    double   capacity;             /**< Bucket capacity (QPS ceiling). */
+    uint64_t last_refill_ns;       /**< CLOCK_MONOTONIC */
     long     daily_used;           /**< Tokens consumed today. */
     long     daily_reasoning_used; /**< Reasoning tokens consumed today. */
     time_t   day;                  /**< UTC midnight of the accounting window */
@@ -490,8 +490,8 @@ rl_reserve_reasoning_tokens(ratelimit_t* rl, long key_id, long daily_quota, long
         redisContext* c = redis_pool_acquire(rl->pool);
         if (c == NULL) {
             if (rl->fail_open) {
-                AIGATE_LOG_WARN(
-                    "ratelimit: redis acquire failed in reserve_reasoning_tokens, fallback to local");
+                AIGATE_LOG_WARN("ratelimit: redis acquire failed in reserve_reasoning_tokens, "
+                                "fallback to local");
                 return rl_reserve_reasoning_tokens_local(rl, key_id, daily_quota, tokens);
             }
             return -1;
@@ -512,8 +512,8 @@ rl_reserve_reasoning_tokens(ratelimit_t* rl, long key_id, long daily_quota, long
         snprintf(ttl_buf, sizeof(ttl_buf), "90000");
         const char* argv[3] = {tokens_buf, quota_buf, ttl_buf};
 
-        redisReply* reply = (redisReply*)
-            redis_eval_sha(c, rl->sha_quota, SCRIPT_DAILY_QUOTA_CONSUME, 1, keys, argv, 3);
+        redisReply* reply = (redisReply*)redis_eval_sha(
+            c, rl->sha_quota, SCRIPT_DAILY_QUOTA_CONSUME, 1, keys, argv, 3);
         if (reply == NULL || reply->type != REDIS_REPLY_ARRAY || reply->elements < 2 ||
             reply->element[0]->type != REDIS_REPLY_INTEGER) {
             if (reply != NULL) {

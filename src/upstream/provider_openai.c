@@ -94,15 +94,14 @@ provider_openai_build(const model_rec_t* route,
 
     /* Check if request has reasoning_effort */
     json_t* jeff = json_object_get(req, "reasoning_effort");
-    bool has_reasoning_effort = (jeff != NULL && json_is_string(jeff));
-    bool is_o_series = (strstr(route->name, "o1") != NULL ||
-                        strstr(route->name, "o3") != NULL ||
-                        (route->endpoint[0] != '\0' && strstr(route->endpoint, "o1") != NULL));
+    bool    has_reasoning_effort = (jeff != NULL && json_is_string(jeff));
+    bool    is_o_series = (strstr(route->name, "o1") != NULL || strstr(route->name, "o3") != NULL ||
+                           (route->endpoint[0] != '\0' && strstr(route->endpoint, "o1") != NULL));
 
     if (has_reasoning_effort) {
         const char* eff = json_string_value(jeff);
-        if (strcmp(eff, "low") != 0 && strcmp(eff, "medium") != 0 &&
-            strcmp(eff, "high") != 0 && strcmp(eff, "none") != 0) {
+        if (strcmp(eff, "low") != 0 && strcmp(eff, "medium") != 0 && strcmp(eff, "high") != 0 &&
+            strcmp(eff, "none") != 0) {
             json_object_set_new(req, "reasoning_effort", json_string("medium"));
         }
     }
@@ -257,7 +256,7 @@ provider_openai_resp_format_tag_emulation(const char* raw_body,
     }
 
     json_error_t err;
-    json_t* root = json_loadb(raw_body, raw_len, 0, &err);
+    json_t*      root = json_loadb(raw_body, raw_len, 0, &err);
     if (root == NULL) {
         return -1;
     }
@@ -301,15 +300,21 @@ provider_openai_resp_format_tag_emulation(const char* raw_body,
                 if (jrc != NULL && json_is_string(jrc)) {
                     const char* rtext = json_string_value(jrc);
                     if (rtext[0] != '\0') {
-                        json_t* jcontent = json_object_get(msg, "content");
-                        const char* ctext = (jcontent && json_is_string(jcontent)) ? json_string_value(jcontent) : "";
-                        size_t rlen = strlen(rtext);
-                        size_t clen = strlen(ctext);
-                        size_t new_len = rlen + clen + 32;
-                        char* new_content = malloc(new_len);
+                        json_t*     jcontent = json_object_get(msg, "content");
+                        const char* ctext = (jcontent && json_is_string(jcontent))
+                                                ? json_string_value(jcontent)
+                                                : "";
+                        size_t      rlen = strlen(rtext);
+                        size_t      clen = strlen(ctext);
+                        size_t      new_len = rlen + clen + 32;
+                        char*       new_content = malloc(new_len);
                         if (new_content != NULL) {
                             if (clen > 0) {
-                                snprintf(new_content, new_len, "<think>\n%s\n</think>\n\n%s", rtext, ctext);
+                                snprintf(new_content,
+                                         new_len,
+                                         "<think>\n%s\n</think>\n\n%s",
+                                         rtext,
+                                         ctext);
                             } else {
                                 snprintf(new_content, new_len, "<think>\n%s\n</think>", rtext);
                             }
@@ -357,7 +362,10 @@ openai_bridge_emit_sse(openai_bridge_t* b, const char* sse_str)
 }
 
 static void
-openai_bridge_emit_delta(openai_bridge_t* b, const char* field, const char* text, const char* finish_reason)
+openai_bridge_emit_delta(openai_bridge_t* b,
+                         const char*      field,
+                         const char*      text,
+                         const char*      finish_reason)
 {
     char id_buf[256];
     snprintf(id_buf, sizeof(id_buf), "chatcmpl-%s", b->model[0] ? b->model : "openai");
@@ -505,7 +513,8 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
                             if (jc != NULL && json_is_string(jc)) {
                                 const char* ctext = json_string_value(jc);
                                 if (acc->tag_opened && !acc->tag_closed) {
-                                    openai_bridge_emit_delta(acc, "content", "\n</think>\n\n", NULL);
+                                    openai_bridge_emit_delta(
+                                        acc, "content", "\n</think>\n\n", NULL);
                                     acc->tag_closed = true;
                                 }
                                 openai_bridge_emit_delta(acc, "content", ctext, NULL);
@@ -518,7 +527,8 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
                                 openai_bridge_emit_delta(acc, "content", "\n</think>\n\n", NULL);
                                 acc->tag_closed = true;
                             }
-                            const char* fr_str = json_is_string(jfr) ? json_string_value(jfr) : "stop";
+                            const char* fr_str =
+                                json_is_string(jfr) ? json_string_value(jfr) : "stop";
                             openai_bridge_emit_delta(acc, NULL, NULL, fr_str);
                         }
                     }
@@ -539,7 +549,7 @@ openai_stream_process_line(openai_bridge_t* acc, const char* line)
     if (jstart != NULL) {
         json_t* root = json_loads(jstart, 0, NULL);
         if (root != NULL) {
-            bool modified = false;
+            bool    modified = false;
             json_t* choices = json_object_get(root, "choices");
             if (choices != NULL && json_is_array(choices) && json_array_size(choices) > 0) {
                 json_t* c0 = json_array_get(choices, 0);
@@ -979,14 +989,14 @@ provider_openai_resp_to_anthropic(const char* oai_resp,
     }
 
     json_error_t err;
-    json_t* root = json_loads(oai_resp, 0, &err);
+    json_t*      root = json_loads(oai_resp, 0, &err);
     if (root == NULL) {
         return -1;
     }
 
     /* ID */
     const char* oai_id = "unknown";
-    json_t* jid = json_object_get(root, "id");
+    json_t*     jid = json_object_get(root, "id");
     if (jid != NULL && json_is_string(jid)) {
         oai_id = json_string_value(jid);
     }
@@ -999,7 +1009,7 @@ provider_openai_resp_to_anthropic(const char* oai_resp,
 
     /* Model */
     const char* model = req_model ? req_model : "unknown";
-    json_t* jm = json_object_get(root, "model");
+    json_t*     jm = json_object_get(root, "model");
     if (jm != NULL && json_is_string(jm)) {
         model = json_string_value(jm);
     }
@@ -1010,7 +1020,7 @@ provider_openai_resp_to_anthropic(const char* oai_resp,
     const char* finish_reason = "end_turn";
     const char* reasoning_text = NULL;
     const char* content_text = NULL;
-    json_t* tool_calls = NULL;
+    json_t*     tool_calls = NULL;
 
     if (c0 != NULL && json_is_object(c0)) {
         json_t* jfr = json_object_get(c0, "finish_reason");
@@ -1059,19 +1069,21 @@ provider_openai_resp_to_anthropic(const char* oai_resp,
 
     /* Tool calls blocks (if present) */
     if (tool_calls != NULL && json_is_array(tool_calls)) {
-        size_t ti;
+        size_t  ti;
         json_t* tc;
-        json_array_foreach(tool_calls, ti, tc) {
+        json_array_foreach(tool_calls, ti, tc)
+        {
             json_t* jtcid = json_object_get(tc, "id");
             json_t* jfn = json_object_get(tc, "function");
             if (jfn == NULL || !json_is_object(jfn)) {
                 continue;
             }
-            json_t* jname = json_object_get(jfn, "name");
-            json_t* jargs = json_object_get(jfn, "arguments");
+            json_t*     jname = json_object_get(jfn, "name");
+            json_t*     jargs = json_object_get(jfn, "arguments");
             const char* tcid = (jtcid && json_is_string(jtcid)) ? json_string_value(jtcid) : "";
             const char* name = (jname && json_is_string(jname)) ? json_string_value(jname) : "";
-            const char* args_str = (jargs && json_is_string(jargs)) ? json_string_value(jargs) : "{}";
+            const char* args_str =
+                (jargs && json_is_string(jargs)) ? json_string_value(jargs) : "{}";
 
             json_t* input_obj = json_loads(args_str, 0, NULL);
             if (input_obj == NULL) {
@@ -1088,7 +1100,7 @@ provider_openai_resp_to_anthropic(const char* oai_resp,
     }
 
     /* Usage */
-    long ptok = 0, ctok = 0;
+    long    ptok = 0, ctok = 0;
     json_t* jusage = json_object_get(root, "usage");
     if (jusage != NULL && json_is_object(jusage)) {
         json_t* jpin = json_object_get(jusage, "prompt_tokens");
@@ -1199,7 +1211,7 @@ oai_ant_process_line(openai_to_anthropic_bridge_t* b, const char* line)
     }
 
     json_error_t err;
-    json_t* root = json_loads(d, 0, &err);
+    json_t*      root = json_loads(d, 0, &err);
     if (root == NULL) {
         return;
     }
@@ -1229,19 +1241,26 @@ oai_ant_process_line(openai_to_anthropic_bridge_t* b, const char* line)
             snprintf(msg_id_clean, sizeof msg_id_clean, "msg_unknown");
         }
         json_t* ms = json_pack("{s:s,s:{s:s,s:s,s:s,s:s,s:[],s:n,s:n,s:{s:i,s:i}}}",
-                               "type", "message_start",
+                               "type",
+                               "message_start",
                                "message",
-                               "id", msg_id_clean,
-                               "type", "message",
-                               "role", "assistant",
-                               "model", b->model[0] ? b->model : "unknown",
+                               "id",
+                               msg_id_clean,
+                               "type",
+                               "message",
+                               "role",
+                               "assistant",
+                               "model",
+                               b->model[0] ? b->model : "unknown",
                                "content",
                                "stop_reason",
                                "stop_sequence",
                                "usage",
-                               "input_tokens", (int)b->input_tokens,
-                               "output_tokens", 0);
-        char* pms = json_dumps(ms, JSON_COMPACT);
+                               "input_tokens",
+                               (int)b->input_tokens,
+                               "output_tokens",
+                               0);
+        char*   pms = json_dumps(ms, JSON_COMPACT);
         json_decref(ms);
         if (pms) {
             char sse[2048];
@@ -1256,12 +1275,16 @@ oai_ant_process_line(openai_to_anthropic_bridge_t* b, const char* line)
     json_t* jusage = json_object_get(root, "usage");
     if (jusage && json_is_object(jusage)) {
         json_t* jin = json_object_get(jusage, "prompt_tokens");
-        if (jin == NULL) jin = json_object_get(jusage, "input_tokens");
+        if (jin == NULL) {
+            jin = json_object_get(jusage, "input_tokens");
+        }
         if (jin && json_is_integer(jin)) {
             b->input_tokens = json_integer_value(jin);
         }
         json_t* jout = json_object_get(jusage, "completion_tokens");
-        if (jout == NULL) jout = json_object_get(jusage, "output_tokens");
+        if (jout == NULL) {
+            jout = json_object_get(jusage, "output_tokens");
+        }
         if (jout && json_is_integer(jout)) {
             b->output_tokens = json_integer_value(jout);
         }
@@ -1292,16 +1315,21 @@ oai_ant_process_line(openai_to_anthropic_bridge_t* b, const char* line)
                     const char* rtext = json_string_value(jrc);
                     if (!b->thinking_started) {
                         json_t* bs = json_pack("{s:s,s:i,s:{s:s,s:s}}",
-                                               "type", "content_block_start",
-                                               "index", 0,
+                                               "type",
+                                               "content_block_start",
+                                               "index",
+                                               0,
                                                "content_block",
-                                               "type", "thinking",
-                                               "thinking", "");
-                        char* pbs = json_dumps(bs, JSON_COMPACT);
+                                               "type",
+                                               "thinking",
+                                               "thinking",
+                                               "");
+                        char*   pbs = json_dumps(bs, JSON_COMPACT);
                         json_decref(bs);
                         if (pbs) {
                             char sse[1024];
-                            snprintf(sse, sizeof sse, "event: content_block_start\ndata: %s\n\n", pbs);
+                            snprintf(
+                                sse, sizeof sse, "event: content_block_start\ndata: %s\n\n", pbs);
                             oai_ant_bridge_send(b, sse);
                             free(pbs);
                         }
@@ -1309,12 +1337,16 @@ oai_ant_process_line(openai_to_anthropic_bridge_t* b, const char* line)
                         b->in_thinking = true;
                     }
                     json_t* bd = json_pack("{s:s,s:i,s:{s:s,s:s}}",
-                                           "type", "content_block_delta",
-                                           "index", 0,
+                                           "type",
+                                           "content_block_delta",
+                                           "index",
+                                           0,
                                            "delta",
-                                           "type", "thinking_delta",
-                                           "thinking", rtext);
-                    char* pbd = json_dumps(bd, JSON_COMPACT);
+                                           "type",
+                                           "thinking_delta",
+                                           "thinking",
+                                           rtext);
+                    char*   pbd = json_dumps(bd, JSON_COMPACT);
                     json_decref(bd);
                     if (pbd) {
                         char sse[8192];
@@ -1329,14 +1361,14 @@ oai_ant_process_line(openai_to_anthropic_bridge_t* b, const char* line)
                 if (jc && json_is_string(jc)) {
                     const char* ctext = json_string_value(jc);
                     if (b->in_thinking && !b->thinking_closed) {
-                        json_t* bstop = json_pack("{s:s,s:i}",
-                                                  "type", "content_block_stop",
-                                                  "index", 0);
+                        json_t* bstop =
+                            json_pack("{s:s,s:i}", "type", "content_block_stop", "index", 0);
                         char* pbstop = json_dumps(bstop, JSON_COMPACT);
                         json_decref(bstop);
                         if (pbstop) {
                             char sse[512];
-                            snprintf(sse, sizeof sse, "event: content_block_stop\ndata: %s\n\n", pbstop);
+                            snprintf(
+                                sse, sizeof sse, "event: content_block_stop\ndata: %s\n\n", pbstop);
                             oai_ant_bridge_send(b, sse);
                             free(pbstop);
                         }
@@ -1346,28 +1378,37 @@ oai_ant_process_line(openai_to_anthropic_bridge_t* b, const char* line)
                     int text_idx = b->thinking_started ? 1 : 0;
                     if (!b->text_started) {
                         json_t* bs = json_pack("{s:s,s:i,s:{s:s,s:s}}",
-                                               "type", "content_block_start",
-                                               "index", text_idx,
+                                               "type",
+                                               "content_block_start",
+                                               "index",
+                                               text_idx,
                                                "content_block",
-                                               "type", "text",
-                                               "text", "");
-                        char* pbs = json_dumps(bs, JSON_COMPACT);
+                                               "type",
+                                               "text",
+                                               "text",
+                                               "");
+                        char*   pbs = json_dumps(bs, JSON_COMPACT);
                         json_decref(bs);
                         if (pbs) {
                             char sse[1024];
-                            snprintf(sse, sizeof sse, "event: content_block_start\ndata: %s\n\n", pbs);
+                            snprintf(
+                                sse, sizeof sse, "event: content_block_start\ndata: %s\n\n", pbs);
                             oai_ant_bridge_send(b, sse);
                             free(pbs);
                         }
                         b->text_started = true;
                     }
                     json_t* bd = json_pack("{s:s,s:i,s:{s:s,s:s}}",
-                                           "type", "content_block_delta",
-                                           "index", text_idx,
+                                           "type",
+                                           "content_block_delta",
+                                           "index",
+                                           text_idx,
                                            "delta",
-                                           "type", "text_delta",
-                                           "text", ctext);
-                    char* pbd = json_dumps(bd, JSON_COMPACT);
+                                           "type",
+                                           "text_delta",
+                                           "text",
+                                           ctext);
+                    char*   pbd = json_dumps(bd, JSON_COMPACT);
                     json_decref(bd);
                     if (pbd) {
                         char sse[8192];
@@ -1451,10 +1492,8 @@ provider_openai_to_anthropic_bridge_finish(stream_bridge_t* bridge)
     }
     if (!b->done_emitted) {
         if (b->in_thinking && !b->thinking_closed) {
-            json_t* bstop = json_pack("{s:s,s:i}",
-                                      "type", "content_block_stop",
-                                      "index", 0);
-            char* pbstop = json_dumps(bstop, JSON_COMPACT);
+            json_t* bstop = json_pack("{s:s,s:i}", "type", "content_block_stop", "index", 0);
+            char*   pbstop = json_dumps(bstop, JSON_COMPACT);
             json_decref(bstop);
             if (pbstop) {
                 char sse[512];
@@ -1466,11 +1505,9 @@ provider_openai_to_anthropic_bridge_finish(stream_bridge_t* bridge)
             b->in_thinking = false;
         }
         if (b->text_started && !b->text_closed) {
-            int text_idx = b->thinking_started ? 1 : 0;
-            json_t* bstop = json_pack("{s:s,s:i}",
-                                      "type", "content_block_stop",
-                                      "index", text_idx);
-            char* pbstop = json_dumps(bstop, JSON_COMPACT);
+            int     text_idx = b->thinking_started ? 1 : 0;
+            json_t* bstop = json_pack("{s:s,s:i}", "type", "content_block_stop", "index", text_idx);
+            char*   pbstop = json_dumps(bstop, JSON_COMPACT);
             json_decref(bstop);
             if (pbstop) {
                 char sse[512];
@@ -1482,14 +1519,17 @@ provider_openai_to_anthropic_bridge_finish(stream_bridge_t* bridge)
         }
 
         const char* sr = b->finish_reason[0] ? b->finish_reason : "end_turn";
-        json_t* md = json_pack("{s:s,s:{s:s,s:n},s:{s:i}}",
-                               "type", "message_delta",
-                               "delta",
-                               "stop_reason", sr,
-                               "stop_sequence",
-                               "usage",
-                               "output_tokens", (int)b->output_tokens);
-        char* pmd = json_dumps(md, JSON_COMPACT);
+        json_t*     md = json_pack("{s:s,s:{s:s,s:n},s:{s:i}}",
+                                   "type",
+                                   "message_delta",
+                                   "delta",
+                                   "stop_reason",
+                                   sr,
+                                   "stop_sequence",
+                                   "usage",
+                                   "output_tokens",
+                                   (int)b->output_tokens);
+        char*       pmd = json_dumps(md, JSON_COMPACT);
         json_decref(md);
         if (pmd) {
             char sse[1024];
@@ -1525,9 +1565,15 @@ provider_openai_to_anthropic_bridge_get_tokens(stream_bridge_t* bridge,
     if (b == NULL) {
         return;
     }
-    if (out_ptok) *out_ptok = b->input_tokens;
-    if (out_ctok) *out_ctok = b->output_tokens;
-    if (out_cached_tok) *out_cached_tok = b->cached_tokens;
+    if (out_ptok) {
+        *out_ptok = b->input_tokens;
+    }
+    if (out_ctok) {
+        *out_ctok = b->output_tokens;
+    }
+    if (out_cached_tok) {
+        *out_cached_tok = b->cached_tokens;
+    }
 }
 
 /** @brief OpenAI-compatible provider vtable instance (see the provider_adapter vtable). */

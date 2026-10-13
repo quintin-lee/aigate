@@ -366,7 +366,9 @@ budget_enforce_set_group_budget(budget_enforce_mgr_t* mgr, int64_t group_id, dou
 }
 
 void
-budget_enforce_set_group_reasoning_quota(budget_enforce_mgr_t* mgr, int64_t group_id, int64_t reasoning_quota)
+budget_enforce_set_group_reasoning_quota(budget_enforce_mgr_t* mgr,
+                                         int64_t               group_id,
+                                         int64_t               reasoning_quota)
 {
     if (mgr == NULL || group_id <= 0) {
         return;
@@ -428,7 +430,8 @@ budget_enforce_init_from_db(budget_enforce_mgr_t* mgr)
         if (ops->list_groups(ops->ctx, glist, 256, &gn) == 0) {
             for (int i = 0; i < gn; i++) {
                 budget_enforce_set_group_budget(mgr, glist[i].id, glist[i].monthly_budget_usd);
-                budget_enforce_set_group_reasoning_quota(mgr, glist[i].id, glist[i].daily_reasoning_quota);
+                budget_enforce_set_group_reasoning_quota(
+                    mgr, glist[i].id, glist[i].daily_reasoning_quota);
             }
         }
     }

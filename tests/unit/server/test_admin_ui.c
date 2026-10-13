@@ -55,32 +55,24 @@ TEST_CASE(admin_ui_content)
     TEST_ASSERT(strstr(html, "id=\"cacheOptDetailModal\"") != NULL, "missing cacheOptDetailModal");
     TEST_ASSERT(strstr(html, "id=\"mFormSupportsReasoning\"") != NULL,
                 "missing mFormSupportsReasoning");
-    TEST_ASSERT(strstr(html, "id=\"mFormThinkingBudget\"") != NULL,
-                "missing mFormThinkingBudget");
+    TEST_ASSERT(strstr(html, "id=\"mFormThinkingBudget\"") != NULL, "missing mFormThinkingBudget");
     TEST_ASSERT(strstr(html, "id=\"mFormTagEmulationDefault\"") != NULL,
                 "missing mFormTagEmulationDefault");
     TEST_ASSERT(strstr(html, "id=\"mFormPricingReasoning\"") != NULL,
                 "missing mFormPricingReasoning");
-    TEST_ASSERT(strstr(html, "id=\"kFormReasoningQuota\"") != NULL,
-                "missing kFormReasoningQuota");
+    TEST_ASSERT(strstr(html, "id=\"kFormReasoningQuota\"") != NULL, "missing kFormReasoningQuota");
     TEST_ASSERT(strstr(html, "id=\"gFormDailyReasoningQuota\"") != NULL,
                 "missing gFormDailyReasoningQuota");
-    TEST_ASSERT(strstr(html, "id=\"playReasoningFormat\"") != NULL,
-                "missing playReasoningFormat");
-    TEST_ASSERT(strstr(html, "id=\"playDegradedBanner\"") != NULL,
-                "missing playDegradedBanner");
+    TEST_ASSERT(strstr(html, "id=\"playReasoningFormat\"") != NULL, "missing playReasoningFormat");
+    TEST_ASSERT(strstr(html, "id=\"playDegradedBanner\"") != NULL, "missing playDegradedBanner");
     TEST_ASSERT(strstr(html, "id=\"playStatReasoningTokens\"") != NULL,
                 "missing playStatReasoningTokens");
     TEST_ASSERT(strstr(html, "aigate_tokens_reasoning_total") != NULL,
                 "missing aigate_tokens_reasoning_total");
-    TEST_ASSERT(strstr(html, "reasoning-accordion") != NULL,
-                "missing reasoning-accordion");
-    TEST_ASSERT(strstr(html, "thinking-accordion") != NULL,
-                "missing thinking-accordion");
+    TEST_ASSERT(strstr(html, "reasoning-accordion") != NULL, "missing reasoning-accordion");
+    TEST_ASSERT(strstr(html, "thinking-accordion") != NULL, "missing thinking-accordion");
     TEST_ASSERT(strstr(html, "X-Aigate-Reasoning-Degraded") != NULL,
                 "missing X-Aigate-Reasoning-Degraded");
-    TEST_ASSERT(strstr(html, "id=\"reasoning-box\"") != NULL,
-                "missing reasoning-box");
-    TEST_ASSERT(strstr(html, "badge-purple") != NULL,
-                "missing badge-purple");
+    TEST_ASSERT(strstr(html, "id=\"reasoning-box\"") != NULL, "missing reasoning-box");
+    TEST_ASSERT(strstr(html, "badge-purple") != NULL, "missing badge-purple");
 }

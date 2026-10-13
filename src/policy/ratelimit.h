@@ -55,7 +55,8 @@ long rl_remaining_daily(ratelimit_t* rl, long key_id, long daily_quota);
  * @param daily_reasoning_quota 0 = unlimited.
  * @param tokens reasoning token count to consume.
  * @return 0 within quota (or unlimited); -1 over quota or allocation failure. */
-int rl_reserve_reasoning_tokens(ratelimit_t* rl, long key_id, long daily_reasoning_quota, long tokens);
+int
+rl_reserve_reasoning_tokens(ratelimit_t* rl, long key_id, long daily_reasoning_quota, long tokens);
 
 /** @brief Remaining daily reasoning tokens; LONG_MAX when unlimited or unused yet. */
 long rl_remaining_daily_reasoning(ratelimit_t* rl, long key_id, long daily_reasoning_quota);

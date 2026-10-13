@@ -790,7 +790,7 @@ gemini_bridge_emit_delta(gemini_bridge_t* b, const char* key, const char* val)
     json_decref(chunk);
     if (packed != NULL) {
         char sse_line[8192];
-        int w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
+        int  w = snprintf(sse_line, sizeof sse_line, "data: %s\n\n", packed);
         if (w >= (int)sizeof sse_line) {
             AIGATE_LOG_WARN("stream sse chunk truncated for model %s",
                             b->model[0] ? b->model : "unknown");

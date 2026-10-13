@@ -727,7 +727,8 @@ key_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* qu
         json_object_set_new(o, "is_canary", json_boolean(recs[i].is_canary));
         json_object_set_new(o, "monthly_cost_budget", json_real(recs[i].monthly_cost_budget));
         json_object_set_new(o, "monthly_token_budget", json_integer(recs[i].monthly_token_budget));
-        json_object_set_new(o, "daily_reasoning_quota", json_integer(recs[i].daily_reasoning_quota));
+        json_object_set_new(
+            o, "daily_reasoning_quota", json_integer(recs[i].daily_reasoning_quota));
         json_object_set_new(o,
                             "system_prompt",
                             recs[i].system_prompt[0] != '\0' ? json_string(recs[i].system_prompt)
@@ -1318,8 +1319,10 @@ model_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
                                                              : json_null());
         json_object_set_new(o, "prompt_mode", json_string(prompt_mode_str(recs[i].prompt_mode)));
         json_object_set_new(o, "supports_reasoning", json_boolean(recs[i].supports_reasoning));
-        json_object_set_new(o, "default_thinking_budget", json_integer(recs[i].default_thinking_budget));
-        json_object_set_new(o, "tag_emulation_default", json_boolean(recs[i].tag_emulation_default));
+        json_object_set_new(
+            o, "default_thinking_budget", json_integer(recs[i].default_thinking_budget));
+        json_object_set_new(
+            o, "tag_emulation_default", json_boolean(recs[i].tag_emulation_default));
 
         json_array_append_new(arr, o);
         model_rec_free(&recs[i]);
@@ -2368,7 +2371,7 @@ group_create(admin_ctx_t* adm, int* status, char** body, size_t* len, const void
                 status, body, len, 400, "bad_request", "monthly_budget_usd must be a number");
         }
     }
-    long daily_reasoning_quota = 0;
+    long    daily_reasoning_quota = 0;
     json_t* jdrq = json_object_get(jbody, "daily_reasoning_quota");
     if (jdrq != NULL) {
         if (json_is_integer(jdrq)) {
@@ -2443,7 +2446,8 @@ group_list(admin_ctx_t* adm, int* status, char** body, size_t* len, const char* 
         json_object_set_new(o, "name", json_string(recs[i].name));
         json_object_set_new(o, "key_count", json_integer(recs[i].key_count));
         json_object_set_new(o, "monthly_budget_usd", json_real(recs[i].monthly_budget_usd));
-        json_object_set_new(o, "daily_reasoning_quota", json_integer(recs[i].daily_reasoning_quota));
+        json_object_set_new(
+            o, "daily_reasoning_quota", json_integer(recs[i].daily_reasoning_quota));
         if (recs[i].created_at > 0) {
             char      ts_iso[32];
             struct tm tmv;
@@ -2486,8 +2490,12 @@ group_patch(
     json_t*     jdrq = json_object_get(jbody, "daily_reasoning_quota");
     if ((name == NULL || name[0] == '\0') && jbudget == NULL && jdrq == NULL) {
         json_decref(jbody);
-        return finish_error(
-            status, body, len, 400, "bad_request", "name, monthly_budget_usd or daily_reasoning_quota is required");
+        return finish_error(status,
+                            body,
+                            len,
+                            400,
+                            "bad_request",
+                            "name, monthly_budget_usd or daily_reasoning_quota is required");
     }
     char            group_name[128] = {0};
     const pg_ops_t* ops = pg_store_ops(adm->ps);
@@ -2548,8 +2556,12 @@ group_patch(
         long rquota = json_integer_value(jdrq);
         if (rquota < 0) {
             json_decref(jbody);
-            return finish_error(
-                status, body, len, 400, "bad_request", "daily_reasoning_quota must be non-negative");
+            return finish_error(status,
+                                body,
+                                len,
+                                400,
+                                "bad_request",
+                                "daily_reasoning_quota must be non-negative");
         }
         int rc = ops->patch_group_reasoning_quota(ops->ctx, id, rquota);
         if (rc == 1) {
@@ -5377,16 +5389,18 @@ admin_model_sla_override(admin_ctx_t* adm,
         return finish_error(status, body, len, 400, "bad_request", "invalid JSON body");
     }
 
-    json_t*     jaction = json_object_get(jbody, "action");
-    const char* action =
-        (jaction != NULL && json_is_string(jaction)) ? json_string_value(jaction) : "";
+    json_t* jaction = json_object_get(jbody, "action");
+    char    action_buf[32] = {0};
+    if (jaction != NULL && json_is_string(jaction)) {
+        snprintf(action_buf, sizeof(action_buf), "%s", json_string_value(jaction));
+    }
 
     cb_state_t new_st = CB_CLOSED;
-    if (strcmp(action, "degrade") == 0) {
+    if (strcmp(action_buf, "degrade") == 0) {
         new_st = CB_SLA_DEGRADED;
-    } else if (strcmp(action, "reset") == 0) {
+    } else if (strcmp(action_buf, "reset") == 0) {
         new_st = CB_CLOSED;
-    } else if (strcmp(action, "open") == 0) {
+    } else if (strcmp(action_buf, "open") == 0) {
         new_st = CB_OPEN;
     } else {
         json_decref(jbody);
@@ -5432,7 +5446,7 @@ admin_model_sla_override(admin_ctx_t* adm,
     json_t* out = json_object();
     json_object_set_new(out, "status", json_string("ok"));
     json_object_set_new(out, "model", json_string(model_id));
-    json_object_set_new(out, "action", json_string(action));
+    json_object_set_new(out, "action", json_string(action_buf));
     json_object_set_new(out, "new_state", json_string(admin_sla_state_str(new_st)));
     json_object_set_new(out, "success", json_true());
     return finish_json(status, body, len, 200, out);
@@ -5832,7 +5846,8 @@ admin_threat_whitelists_delete(
 
 /** @brief GET /admin/v1/reasoning/status: query reasoning status and quotas. */
 static int
-admin_reasoning_status_get(admin_ctx_t* adm, int* status, char** out_body, size_t* len, const char* query)
+admin_reasoning_status_get(
+    admin_ctx_t* adm, int* status, char** out_body, size_t* len, const char* query)
 {
     const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
     if (ops == NULL) {
@@ -5853,7 +5868,8 @@ admin_reasoning_status_get(admin_ctx_t* adm, int* status, char** out_body, size_
         if (ops->get_key_by_id(ops->ctx, key_id, &k) == 0) {
             long effective_quota = k.daily_reasoning_quota;
             if (effective_quota <= 0 && adm->ac != NULL && adm->ac->be != NULL && k.group_id > 0) {
-                effective_quota = (long)budget_enforce_get_group_reasoning_quota(adm->ac->be, k.group_id);
+                effective_quota =
+                    (long)budget_enforce_get_group_reasoning_quota(adm->ac->be, k.group_id);
             }
             long remaining = LONG_MAX;
             bool degraded = false;
@@ -5887,8 +5903,10 @@ admin_reasoning_status_get(admin_ctx_t* adm, int* status, char** out_body, size_
                 json_t* mo = json_object();
                 json_object_set_new(mo, "name", json_string(recs[i].name));
                 json_object_set_new(mo, "supports_reasoning", json_true());
-                json_object_set_new(mo, "default_thinking_budget", json_integer(recs[i].default_thinking_budget));
-                json_object_set_new(mo, "tag_emulation_default", json_boolean(recs[i].tag_emulation_default));
+                json_object_set_new(
+                    mo, "default_thinking_budget", json_integer(recs[i].default_thinking_budget));
+                json_object_set_new(
+                    mo, "tag_emulation_default", json_boolean(recs[i].tag_emulation_default));
                 json_array_append_new(arr, mo);
             }
             model_rec_free(&recs[i]);
@@ -6046,7 +6064,8 @@ admin_dispatch(admin_ctx_t* adm,
         return usage_requests_query(adm, out_status, out_body, out_len, query);
     } else if (strcmp(rest, "usage") == 0 && strcmp(method, "GET") == 0) {
         return usage_query(adm, out_status, out_body, out_len, query);
-    } else if ((strcmp(rest, "reasoning/status") == 0 || strcmp(rest, "reasoning_status") == 0) && strcmp(method, "GET") == 0) {
+    } else if ((strcmp(rest, "reasoning/status") == 0 || strcmp(rest, "reasoning_status") == 0) &&
+               strcmp(method, "GET") == 0) {
         return admin_reasoning_status_get(adm, out_status, out_body, out_len, query);
     } else if (strncmp(rest, "guardrails", 10) == 0) {
         if (strcmp(rest, "guardrails") == 0) {

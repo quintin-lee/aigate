@@ -1842,7 +1842,8 @@ TEST_CASE(test_pg_store_schema_v20_models)
     TEST_ASSERT(m.default_thinking_budget == 4096, "default_thinking_budget stored");
     TEST_ASSERT(m.supports_reasoning == true, "supports_reasoning stored");
     TEST_ASSERT(m.tag_emulation_default == true, "tag_emulation_default stored");
-    TEST_ASSERT((MMASK_TAG_EMULATION_DEFAULT & (1 << 15)) != 0, "MMASK_TAG_EMULATION_DEFAULT defined");
+    TEST_ASSERT((MMASK_TAG_EMULATION_DEFAULT & (1 << 15)) != 0,
+                "MMASK_TAG_EMULATION_DEFAULT defined");
 
     key_rec_t k;
     memset(&k, 0, sizeof k);
