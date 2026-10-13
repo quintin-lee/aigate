@@ -6344,7 +6344,6 @@ admin_plugins_validate_post(admin_ctx_t* adm,
     return finish_json(status, out_body, len, 200, resp);
 }
 
-
 /* ------------------------------------------------------------ dispatch */
 
 int

@@ -639,4 +639,3 @@ test_lua_plugin_validate_api(void)
     free(body);
     body = NULL;
 }
-

@@ -75,4 +75,12 @@ TEST_CASE(admin_ui_content)
                 "missing X-Aigate-Reasoning-Degraded");
     TEST_ASSERT(strstr(html, "id=\"reasoning-box\"") != NULL, "missing reasoning-box");
     TEST_ASSERT(strstr(html, "badge-purple") != NULL, "missing badge-purple");
+    TEST_ASSERT(strstr(html, "id=\"tab-plugins\"") != NULL, "missing tab-plugins");
+    TEST_ASSERT(strstr(html, "id=\"monacoEditorContainer\"") != NULL,
+                "missing monacoEditorContainer");
+    TEST_ASSERT(strstr(html, "id=\"monacoDiffContainer\"") != NULL, "missing monacoDiffContainer");
+    TEST_ASSERT(strstr(html, "id=\"ideStatusBar\"") != NULL, "missing ideStatusBar");
+    TEST_ASSERT(strstr(html, "id=\"ideLintStatus\"") != NULL, "missing ideLintStatus");
+    TEST_ASSERT(strstr(html, "id=\"monacoFallbackBadge\"") != NULL, "missing monacoFallbackBadge");
+    TEST_ASSERT(strstr(html, "id=\"ideConsoleLogs\"") != NULL, "missing ideConsoleLogs");
 }

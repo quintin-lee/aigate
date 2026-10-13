@@ -3178,7 +3178,7 @@
             <span>🔄</span>
             <span>刷新数据</span>
           </button>
-          <button onclick="openPluginSandboxModal()" class="px-3 py-1.5 rounded-xl bg-purple-600/20 border border-purple-500/30 text-xs text-purple-300 hover:text-white hover:bg-purple-600/30 transition flex items-center space-x-1.5">
+          <button onclick="openPluginModal(null, true)" class="px-3 py-1.5 rounded-xl bg-purple-600/20 border border-purple-500/30 text-xs text-purple-300 hover:text-white hover:bg-purple-600/30 transition flex items-center space-x-1.5">
             <span>🧪</span>
             <span>在线运行沙箱</span>
           </button>
@@ -3708,169 +3708,184 @@
     </div>
   </div>
 
-  <!-- Lua Script Plugin Edit/Create Modal -->
-  <div id="pluginModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
-    <div class="glass-panel max-w-2xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] flex flex-col overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between pb-2 border-b border-slate-800">
-        <h3 class="text-lg font-bold text-white flex items-center space-x-2">
-          <span>🧩</span>
-          <span id="pluginModalTitle">添加 Lua 脚本插件</span>
-        </h3>
-        <button onclick="closePluginModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
-      </div>
-
-      <div class="space-y-3 text-xs">
-        <input type="hidden" id="pluginId">
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+  <!-- ==================== Lua Script Plugin Monaco IDE Workbench Modal ==================== -->
+  <div id="pluginModal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-2 sm:p-4 hidden">
+    <div class="glass-panel w-full max-w-7xl h-[94vh] p-4 sm:p-5 rounded-2xl border border-slate-700 shadow-2xl flex flex-col overflow-hidden">
+      <!-- 1. Top Navigation & Action Bar -->
+      <div class="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800 flex-shrink-0">
+        <div class="flex items-center space-x-3">
+          <span class="text-xl">🧩</span>
           <div>
-            <label class="block font-semibold text-slate-300 mb-1">插件唯一标识 (Name)</label>
-            <input type="text" id="pluginName" placeholder="例如 header_tagger, prompt_guard" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
-          </div>
-          <div>
-            <label class="block font-semibold text-slate-300 mb-1">执行阶段 (Phase)</label>
-            <select id="pluginPhase" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500">
-              <option value="request">request (请求阶段: req 拦截改写/鉴权)</option>
-              <option value="response">response (响应阶段: resp 状态/脱敏改写)</option>
-              <option value="both">both (双阶段挂载)</option>
-            </select>
+            <h3 class="text-base font-bold text-white flex items-center gap-2">
+              <span id="pluginModalTitle">Lua 插件工作台</span>
+              <span id="monacoFallbackBadge" class="hidden text-[10px] px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono">离线基础模式</span>
+            </h3>
+            <p class="text-[11px] text-slate-400">微秒级沙箱 • 500ms 实时语法校验 • 原生双屏并列 Diff 对比</p>
           </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <label class="block font-semibold text-slate-300 mb-1">优先级 (Priority 升序)</label>
-            <input type="number" id="pluginPriority" value="10" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
-          </div>
-          <div>
-            <label class="block font-semibold text-slate-300 mb-1">匹配模型 (Pattern, * 为全部)</label>
-            <input type="text" id="pluginMatchModel" value="*" placeholder="* 或 gpt-*, claude-*" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
-          </div>
-          <div class="flex items-center pt-5">
-            <label class="flex items-center gap-2 text-slate-300 text-xs cursor-pointer select-none">
-              <input type="checkbox" id="pluginEnabled" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
-              <span>立即启用插件</span>
-            </label>
-          </div>
-        </div>
-
-        <div>
-          <label class="block font-semibold text-slate-300 mb-1">插件描述 (Description)</label>
-          <input type="text" id="pluginDesc" placeholder="简要描述插件的功能与业务作用" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500">
-        </div>
-
-        <div>
-          <div class="flex items-center justify-between mb-1">
-            <label class="font-semibold text-slate-300">Lua 脚本源码 (Sandbox Script)</label>
-            <div class="flex items-center space-x-2">
-              <span class="text-[10px] text-slate-400">快速模板:</span>
-              <select id="pluginTemplateSelect" onchange="applyPluginTemplate(this.value)" class="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] text-brand-400 focus:outline-none focus:border-brand-500">
-                <option value="">-- 选择预设模板 --</option>
-                <option value="header_guard">请求头注入 / 审计追踪指纹</option>
-                <option value="model_rewrite">动态模型路由与降级</option>
-                <option value="prompt_guard">提示词越狱注入阻断 (aigate.abort)</option>
-                <option value="resp_mask">响应关键词/敏感信息脱敏</option>
-              </select>
-            </div>
-          </div>
-          <textarea id="pluginScriptCode" rows="12" spellcheck="false" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-emerald-400 font-mono focus:outline-none focus:border-brand-500 resize-y" placeholder="-- 在此编写 Lua 5.4 脚本&#10;-- 可用全局对象: req, resp, aigate&#10;-- req:get_header(k), req:set_header(k, v), req:get_model(), req:set_model(m), req:get_json()&#10;-- resp:get_status(), resp:set_status(s), resp:get_body(), resp:set_body(b)&#10;-- aigate.log_info(msg), aigate.abort(status, reason), aigate.sha256(str)"></textarea>
-          <p class="text-[10px] text-slate-500 mt-1">独立微秒级沙箱环境，自动禁止系统调用与高危库；最大执行步数 200,000。</p>
-        </div>
-      </div>
-
-      <div class="flex items-center justify-between pt-3 border-t border-slate-800">
         <div class="flex items-center space-x-2">
-          <button type="button" onclick="validatePluginCode()" class="px-3 py-1.5 rounded-xl text-xs bg-slate-900 border border-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1.5">
-            <span>🔍 语法检查</span>
+          <button type="button" onclick="formatPluginCode()" class="px-2.5 py-1.5 rounded-xl text-xs bg-slate-900 border border-slate-700 text-slate-300 hover:text-white transition flex items-center gap-1.5" title="格式化代码 (Alt+Shift+F)">
+            <span>🧹 格式化</span>
           </button>
-          <button type="button" onclick="testCurrentPluginInSandbox()" class="px-3 py-1.5 rounded-xl text-xs bg-purple-900/40 border border-purple-700/60 text-purple-300 hover:text-white transition flex items-center gap-1.5">
-            <span>🧪 沙箱中测试</span>
+          <button type="button" onclick="runPluginIdeDryRun()" class="px-3 py-1.5 rounded-xl text-xs font-semibold bg-purple-600/30 border border-purple-500/40 text-purple-300 hover:text-white hover:bg-purple-600/50 transition flex items-center gap-1.5" title="一键运行沙箱 (Ctrl+Enter)">
+            <span>⚡ 沙箱测试</span>
           </button>
-        </div>
-        <div class="flex items-center space-x-3">
-          <button onclick="closePluginModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition">取消</button>
-          <button onclick="savePlugin()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white transition">保存插件</button>
+          <button type="button" onclick="savePlugin()" class="px-3.5 py-1.5 rounded-xl text-xs font-semibold bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-600/20 transition flex items-center gap-1.5" title="保存并生效 (Ctrl+S)">
+            <span>💾 保存并生效</span>
+          </button>
+          <button type="button" onclick="closePluginModal()" class="text-slate-400 hover:text-white text-xl px-1.5">&times;</button>
         </div>
       </div>
-    </div>
-  </div>
 
-  <!-- Lua Plugin Dry-Run Sandbox Modal -->
-  <div id="pluginSandboxModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
-    <div class="glass-panel max-w-3xl w-full p-6 rounded-2xl border border-slate-700 shadow-2xl space-y-4 max-h-[92vh] flex flex-col overflow-y-auto custom-scroll">
-      <div class="flex items-center justify-between pb-2 border-b border-slate-800">
-        <h3 class="text-lg font-bold text-white flex items-center space-x-2">
-          <span>🧪</span>
-          <span>Lua 插件极速运行沙箱 (Dry-Run Sandbox)</span>
-        </h3>
-        <button onclick="closePluginSandboxModal()" class="text-slate-400 hover:text-white text-lg">&times;</button>
+      <!-- 2. Metadata Config Row -->
+      <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-2.5 py-2.5 border-b border-slate-800/80 text-xs flex-shrink-0">
+        <input type="hidden" id="pluginId">
+        <input type="hidden" id="pluginDesc" value="">
+        <div class="col-span-2 sm:col-span-1">
+          <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">插件唯一标识</label>
+          <input type="text" id="pluginName" placeholder="例如 header_guard" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">执行阶段</label>
+          <select id="pluginPhase" onchange="onPluginPhaseChange(this.value)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500">
+            <option value="request">request (请求阶段: req)</option>
+            <option value="response">response (响应阶段: resp)</option>
+            <option value="both">both (双阶段挂载)</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">优先级 (升序)</label>
+          <input type="number" id="pluginPriority" value="10" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">匹配模型 (*全部)</label>
+          <input type="text" id="pluginMatchModel" value="*" placeholder="* 或 gpt-*" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white font-mono focus:outline-none focus:border-brand-500">
+        </div>
+        <div class="col-span-2 sm:col-span-1">
+          <label class="block text-[11px] font-semibold text-slate-400 mb-0.5">预设代码模板</label>
+          <select id="pluginTemplateSelect" onchange="applyPluginTemplate(this.value)" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-[11px] text-brand-400 focus:outline-none focus:border-brand-500">
+            <option value="">-- 选择模板 --</option>
+            <option value="header_guard">请求头注入 / 审计指纹</option>
+            <option value="model_rewrite">动态模型路由改写</option>
+            <option value="prompt_guard">提示词越狱阻断 (abort)</option>
+            <option value="resp_mask">响应敏感信息脱敏替换</option>
+          </select>
+        </div>
+        <div class="flex items-center pt-3.5">
+          <label class="flex items-center gap-1.5 text-slate-300 text-xs cursor-pointer select-none">
+            <input type="checkbox" id="pluginEnabled" checked class="rounded border-slate-700 text-brand-600 focus:ring-brand-500">
+            <span>立即启用</span>
+          </label>
+        </div>
       </div>
 
-      <div class="space-y-3 text-xs">
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block font-semibold text-slate-300 mb-1">测试执行阶段 (Phase)</label>
-            <select id="sandboxPhase" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-white focus:outline-none focus:border-brand-500">
-              <option value="request">request (请求拦截阶段)</option>
-              <option value="response">response (响应改写阶段)</option>
-            </select>
-          </div>
-          <div>
-            <label class="block font-semibold text-slate-300 mb-1">快速预设 Payload</label>
-            <select id="sandboxPresetPayload" onchange="applySandboxMockPreset(this.value)" class="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs text-slate-300 focus:outline-none focus:border-brand-500">
-              <option value="standard_chat">标准 Chat 补全请求 (OpenAI 格式)</option>
-              <option value="jailbreak_prompt">含越狱关键词提示词 (触发拦截)</option>
-              <option value="standard_response">标准响应体 (包含手机号等待脱敏文本)</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block font-semibold text-slate-300 mb-1">Lua 待测代码 (Script Code)</label>
-            <textarea id="sandboxScriptCode" rows="10" spellcheck="false" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-emerald-400 font-mono focus:outline-none focus:border-brand-500 resize-y" placeholder="-- 在此输入待测试的 Lua 脚本"></textarea>
-          </div>
-          <div>
-            <label class="block font-semibold text-slate-300 mb-1">模拟输入 (Mock Request / Response JSON)</label>
-            <textarea id="sandboxMockPayload" rows="10" spellcheck="false" class="w-full px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-cyan-400 font-mono focus:outline-none focus:border-brand-500 resize-y" placeholder='{ "model": "gpt-4o", "headers": {"Authorization": "Bearer ..."}, "body": "..." }'></textarea>
-          </div>
-        </div>
-
-        <!-- Sandbox Output Result Box -->
-        <div id="sandboxResultBox" class="hidden glass-panel p-4 rounded-xl border border-slate-800 space-y-2">
-          <div class="flex items-center justify-between">
-            <span class="font-bold text-white flex items-center gap-1.5">
-              <span>📊</span>
-              <span>沙箱运行结果</span>
-            </span>
-            <div class="flex items-center space-x-3 text-[11px] font-mono">
-              <span id="sandboxResultStatus" class="px-2 py-0.5 rounded-full font-bold"></span>
-              <span id="sandboxResultLatency" class="text-purple-400"></span>
-              <span id="sandboxResultSteps" class="text-amber-400"></span>
+      <!-- 3. Main Split-Pane Workspace -->
+      <div class="flex-1 min-h-0 flex flex-col lg:flex-row gap-3 pt-3 overflow-hidden">
+        <!-- Left Pane: Monaco Lua Editor (60%) -->
+        <div class="flex-[1.25] min-w-0 flex flex-col rounded-xl border border-slate-800 bg-slate-950/70 overflow-hidden shadow-inner">
+          <div class="flex items-center justify-between px-3 py-1.5 bg-slate-900/80 border-b border-slate-800 text-[11px] flex-shrink-0">
+            <div class="flex items-center space-x-2 text-slate-300 font-mono">
+              <span class="text-blue-400 font-bold">Lua</span>
+              <span>plugin_code.lua</span>
+            </div>
+            <div class="flex items-center space-x-3 text-slate-400 font-mono text-[10px]">
+              <span id="ideCursorPos">Ln 1, Col 1</span>
+              <span>Lua 5.4</span>
+              <span>UTF-8</span>
             </div>
           </div>
-          <div id="sandboxResultLogsContainer" class="hidden p-2 rounded-lg bg-slate-950/80 border border-slate-900 text-[11px] font-mono text-slate-300 max-h-28 overflow-y-auto custom-scroll">
-            <div class="text-[10px] text-slate-500 mb-1">插件日志流 (Logs):</div>
-            <div id="sandboxResultLogs" class="space-y-0.5"></div>
-          </div>
-          <div>
-            <div class="text-[10px] text-slate-500 mb-1">改写后的输出对象 (Mutated Object):</div>
-            <pre id="sandboxResultJson" class="p-2.5 rounded-lg bg-slate-950 border border-slate-900 text-xs text-emerald-300 font-mono max-h-48 overflow-y-auto custom-scroll whitespace-pre-wrap"></pre>
+
+          <!-- Monaco Editor Mount Container -->
+          <div id="monacoEditorContainer" class="flex-1 w-full min-h-0 relative"></div>
+          <!-- Fallback Textarea if Monaco fails to load -->
+          <textarea id="pluginScriptCode" spellcheck="false" class="hidden flex-1 w-full min-h-0 p-3 bg-slate-950 text-xs text-emerald-400 font-mono focus:outline-none resize-none"></textarea>
+
+          <!-- Bottom Status Bar -->
+          <div id="ideStatusBar" class="flex items-center justify-between px-3 py-1 bg-slate-900/90 border-t border-slate-800 text-[11px] font-mono flex-shrink-0 select-none">
+            <div id="ideLintStatus" onclick="jumpToLintError()" class="cursor-pointer flex items-center space-x-1.5 text-emerald-400 hover:underline">
+              <span>🟢</span>
+              <span>语法检测：正常</span>
+            </div>
+            <div class="text-[10px] text-slate-500 flex items-center space-x-2">
+              <span>Ctrl+S 保存 • Ctrl+Enter 运行沙箱</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="flex justify-between items-center pt-3 border-t border-slate-800">
-        <span class="text-[10px] text-slate-500">沙箱单次测试独立运行，不影响线上网关运行状态</span>
-        <div class="flex items-center space-x-3">
-          <button onclick="closePluginSandboxModal()" class="px-4 py-2 rounded-xl text-xs text-slate-400 hover:text-white transition">关闭</button>
-          <button onclick="runSandboxTest()" class="px-4 py-2 rounded-xl text-xs font-semibold bg-purple-600 hover:bg-purple-500 text-white shadow-lg shadow-purple-600/20 transition flex items-center gap-1.5">
-            <span>⚡ 立即执行测试</span>
-          </button>
+        <!-- Right Pane: Mock Input + Monaco Diff + Console Output (40%) -->
+        <div class="flex-[0.95] min-w-0 flex flex-col gap-2.5 overflow-y-auto custom-scroll pr-0.5">
+          <!-- Right Section 1: Mock Request/Response Settings (Collapsible) -->
+          <div class="glass-panel p-3 rounded-xl border border-slate-800 flex-shrink-0 space-y-2">
+            <div class="flex items-center justify-between">
+              <div class="flex items-center space-x-2">
+                <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                  <span>🎯</span>
+                  <span>Mock 输入参数</span>
+                </span>
+                <select id="sandboxPresetPayload" onchange="applyIdeMockPreset(this.value)" class="px-2 py-0.5 rounded-lg bg-slate-900 border border-slate-700 text-[10px] text-slate-300 focus:outline-none">
+                  <option value="standard_chat">预设: 标准 Chat 请求 (OpenAI)</option>
+                  <option value="jailbreak_prompt">预设: 提示词越狱注入</option>
+                  <option value="standard_response">预设: 标准响应体 (待脱敏文本)</option>
+                </select>
+              </div>
+              <button type="button" onclick="toggleMockConfigPanel()" class="text-[11px] text-slate-400 hover:text-white flex items-center gap-1">
+                <span id="mockPanelToggleIco">▲</span>
+                <span id="mockPanelToggleTxt">收起</span>
+              </button>
+            </div>
+
+            <div id="mockConfigInputs" class="space-y-2 text-xs">
+              <textarea id="sandboxMockPayload" rows="4" spellcheck="false" class="w-full px-2.5 py-1.5 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-cyan-400 font-mono focus:outline-none focus:border-brand-500 resize-y" placeholder='{ "model": "gpt-4o", "headers": {"Authorization": "Bearer ..."}, "body": "{}" }'></textarea>
+            </div>
+          </div>
+
+          <!-- Right Section 2: Monaco Side-by-Side Diff Editor -->
+          <div class="glass-panel p-3 rounded-xl border border-slate-800 flex-1 min-h-[260px] flex flex-col space-y-2">
+            <div class="flex items-center justify-between flex-shrink-0">
+              <span class="text-xs font-bold text-white flex items-center gap-1.5">
+                <span>📊</span>
+                <span>沙箱修改对比 (Original vs Modified)</span>
+              </span>
+              <div class="flex items-center space-x-2">
+                <button type="button" id="toggleDiffSideBySideBtn" onclick="toggleDiffSideBySideMode()" class="px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-[10px] text-slate-300 hover:text-white transition">
+                  并排 ⇋ 内联
+                </button>
+                <span id="ideSandboxLatency" class="text-[10px] font-mono text-purple-400">0μs</span>
+                <span id="ideSandboxSteps" class="text-[10px] font-mono text-amber-400">0 steps</span>
+              </div>
+            </div>
+
+            <!-- Abort Alert Banner (if abort was called) -->
+            <div id="ideAbortBanner" class="hidden p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-mono flex items-center justify-between flex-shrink-0">
+              <div class="flex items-center space-x-2">
+                <span>🛑 [ABORTED]</span>
+                <span id="ideAbortReason">Request aborted by plugin</span>
+              </div>
+              <span id="ideAbortStatus" class="px-2 py-0.5 rounded bg-rose-500/20 text-[10px] font-bold">403</span>
+            </div>
+
+            <!-- Monaco Diff Mount Container -->
+            <div id="monacoDiffContainer" class="flex-1 w-full min-h-[180px] rounded-lg border border-slate-800 bg-slate-950 overflow-hidden relative"></div>
+            <!-- Fallback Diff Pre if Monaco not available -->
+            <pre id="fallbackDiffJson" class="hidden flex-1 w-full min-h-[180px] p-2 rounded-lg bg-slate-950 border border-slate-800 text-[11px] text-emerald-400 font-mono overflow-y-auto whitespace-pre-wrap"></pre>
+          </div>
+
+          <!-- Right Section 3: Console Logs Output -->
+          <div class="glass-panel p-3 rounded-xl border border-slate-800 h-28 flex-shrink-0 flex flex-col space-y-1">
+            <div class="flex items-center justify-between text-[11px] font-bold text-slate-400 flex-shrink-0">
+              <span>📟 控制台日志 (Console Logs)</span>
+              <button onclick="clearIdeLogs()" class="text-[10px] text-slate-500 hover:text-slate-300">清空</button>
+            </div>
+            <div id="ideConsoleLogs" class="flex-1 overflow-y-auto custom-scroll text-[11px] font-mono text-slate-300 space-y-0.5 bg-slate-950/70 p-2 rounded-lg border border-slate-900">
+              <div class="text-[10px] text-slate-600 italic">点击「⚡ 沙箱测试」后将在此捕获 aigate.log_* 实时输出</div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
   </div>
+
 
   <!-- 1. Admin token modal -->
   <div id="tokenModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 hidden">
@@ -12041,7 +12056,7 @@ end
             <td class="py-2.5 px-3 text-slate-500 whitespace-nowrap text-[10px]">${updatedStr}</td>
             <td class="py-2.5 px-3 whitespace-nowrap text-right space-x-2">
               <button onclick="openPluginModal(${p.id})" class="text-xs text-brand-400 hover:text-brand-300 font-medium">编辑</button>
-              <button onclick="openPluginSandboxModal(${p.id})" class="text-xs text-purple-400 hover:text-purple-300 font-medium">沙箱测试</button>
+              <button onclick="openPluginModal(${p.id}, true)" class="text-xs text-purple-400 hover:text-purple-300 font-medium">沙箱测试</button>
               <button onclick="deletePlugin(${p.id}, '${escapeHtml(p.name)}')" class="text-xs text-rose-400 hover:text-rose-300 font-medium">删除</button>
             </td>
           </tr>
@@ -12049,7 +12064,327 @@ end
       }).join("");
     }
 
-    function openPluginModal(id) {
+    let gMonacoEditor = null;
+    let gMonacoDiffEditor = null;
+    let gMonacoLoaded = false;
+    let gMonacoLoadingPromise = null;
+    let gSyntaxDebounceTimer = null;
+    let gLastSyntaxErrorLine = null;
+    let gDiffSideBySide = true;
+
+    function loadMonacoAsync() {
+      if (window.monaco && gMonacoLoaded) {
+        return Promise.resolve(window.monaco);
+      }
+      if (gMonacoLoadingPromise) {
+        return gMonacoLoadingPromise;
+      }
+      gMonacoLoadingPromise = new Promise((resolve, reject) => {
+        let timedOut = false;
+        const timer = setTimeout(() => {
+          timedOut = true;
+          console.warn("Monaco loader timeout: falling back to offline editor mode");
+          const fbBadge = document.getElementById("monacoFallbackBadge");
+          if (fbBadge) fbBadge.classList.remove("hidden");
+          const fbArea = document.getElementById("pluginScriptCode");
+          if (fbArea) fbArea.classList.remove("hidden");
+          const mcCont = document.getElementById("monacoEditorContainer");
+          if (mcCont) mcCont.classList.add("hidden");
+          const diffFallback = document.getElementById("fallbackDiffJson");
+          if (diffFallback) diffFallback.classList.remove("hidden");
+          const diffCont = document.getElementById("monacoDiffContainer");
+          if (diffCont) diffCont.classList.add("hidden");
+          reject(new Error("Monaco CDN timeout"));
+        }, 3000);
+
+        if (window.require && window.require.config) {
+          window.require(["vs/editor/editor.main"], () => {
+            if (timedOut) return;
+            clearTimeout(timer);
+            gMonacoLoaded = true;
+            registerLuaIntelliSense();
+            resolve(window.monaco);
+          });
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js";
+        script.async = true;
+        script.onload = () => {
+          if (timedOut) return;
+          try {
+            window.require.config({ paths: { vs: "https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs" } });
+            window.require(["vs/editor/editor.main"], () => {
+              if (timedOut) return;
+              clearTimeout(timer);
+              gMonacoLoaded = true;
+              registerLuaIntelliSense();
+              resolve(window.monaco);
+            });
+          } catch (e) {
+            clearTimeout(timer);
+            reject(e);
+          }
+        };
+        script.onerror = (e) => {
+          if (timedOut) return;
+          clearTimeout(timer);
+          reject(e);
+        };
+        document.head.appendChild(script);
+      });
+      return gMonacoLoadingPromise;
+    }
+
+    function registerLuaIntelliSense() {
+      if (!window.monaco) return;
+      monaco.languages.registerCompletionItemProvider('lua', {
+        provideCompletionItems: (model, position) => {
+          const suggestions = [
+            // aigate module
+            { label: 'aigate.log_info', kind: monaco.languages.CompletionItemKind.Function, insertText: 'aigate.log_info("${1:message}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '输出 INFO 级别运行日志' },
+            { label: 'aigate.log_warn', kind: monaco.languages.CompletionItemKind.Function, insertText: 'aigate.log_warn("${1:message}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '输出 WARN 级别运行日志' },
+            { label: 'aigate.log_error', kind: monaco.languages.CompletionItemKind.Function, insertText: 'aigate.log_error("${1:message}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '输出 ERROR 级别运行日志' },
+            { label: 'aigate.sha256', kind: monaco.languages.CompletionItemKind.Function, insertText: 'aigate.sha256(${1:str})', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '计算输入文本的 SHA-256 十六进制哈希摘要' },
+            { label: 'aigate.json_decode', kind: monaco.languages.CompletionItemKind.Function, insertText: 'aigate.json_decode(${1:json_str})', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '解析 JSON 字符串为 Lua Table 字典' },
+            { label: 'aigate.json_encode', kind: monaco.languages.CompletionItemKind.Function, insertText: 'aigate.json_encode(${1:table})', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '序列化 Lua Table 为紧凑 JSON 字符串' },
+            { label: 'aigate.abort', kind: monaco.languages.CompletionItemKind.Function, insertText: 'aigate.abort(${1:403}, "${2:forbidden}", "${3:Access denied}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '立即短路熔断并向客户端返回自定义 HTTP 错误状态' },
+            // req methods
+            { label: 'req:get_header', kind: monaco.languages.CompletionItemKind.Method, insertText: 'req:get_header("${1:header_name}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '获取指定请求头字段值 (忽略大小写)' },
+            { label: 'req:set_header', kind: monaco.languages.CompletionItemKind.Method, insertText: 'req:set_header("${1:header_name}", "${2:value}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '添加或覆盖指定请求头' },
+            { label: 'req:get_model', kind: monaco.languages.CompletionItemKind.Method, insertText: 'req:get_model()', documentation: '获取当前请求的大模型标识 (如 "gpt-4o")' },
+            { label: 'req:set_model', kind: monaco.languages.CompletionItemKind.Method, insertText: 'req:set_model("${1:new_model}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '动态改写路由大模型标识' },
+            { label: 'req:get_body', kind: monaco.languages.CompletionItemKind.Method, insertText: 'req:get_body()', documentation: '获取原始请求体 Body 字符串' },
+            { label: 'req:set_body', kind: monaco.languages.CompletionItemKind.Method, insertText: 'req:set_body(${1:new_body})', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '改写替换请求体 Body 内容' },
+            { label: 'req:get_json', kind: monaco.languages.CompletionItemKind.Method, insertText: 'req:get_json()', documentation: '解析请求体 JSON 为 Lua Table 对象' },
+            // resp methods
+            { label: 'resp:get_header', kind: monaco.languages.CompletionItemKind.Method, insertText: 'resp:get_header("${1:header_name}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '获取指定响应头字段值' },
+            { label: 'resp:set_header', kind: monaco.languages.CompletionItemKind.Method, insertText: 'resp:set_header("${1:header_name}", "${2:value}")', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '添加或覆盖响应头' },
+            { label: 'resp:get_status', kind: monaco.languages.CompletionItemKind.Method, insertText: 'resp:get_status()', documentation: '获取当前 HTTP 响应状态码 (如 200)' },
+            { label: 'resp:set_status', kind: monaco.languages.CompletionItemKind.Method, insertText: 'resp:set_status(${1:200})', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '改写 HTTP 响应状态码' },
+            { label: 'resp:get_body', kind: monaco.languages.CompletionItemKind.Method, insertText: 'resp:get_body()', documentation: '获取原始响应体 Body 字符串' },
+            { label: 'resp:set_body', kind: monaco.languages.CompletionItemKind.Method, insertText: 'resp:set_body(${1:new_body})', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '改写替换响应体 Body 内容 (如敏感数据脱敏替换)' },
+            { label: 'resp:get_json', kind: monaco.languages.CompletionItemKind.Method, insertText: 'resp:get_json()', documentation: '解析响应体 JSON 为 Lua Table 对象' },
+            // snippets
+            { label: 'on_request', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'function on_request(req)\n\t${1:-- 请求处理逻辑}\nend', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '请求阶段处理钩子入口函数' },
+            { label: 'on_response', kind: monaco.languages.CompletionItemKind.Snippet, insertText: 'function on_response(resp)\n\t${1:-- 响应处理逻辑}\nend', insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet, documentation: '响应阶段处理钩子入口函数' }
+          ];
+          return { suggestions };
+        }
+      });
+    }
+
+    function getEditorCode() {
+      if (gMonacoEditor && gMonacoLoaded) {
+        return gMonacoEditor.getValue();
+      }
+      return document.getElementById("pluginScriptCode")?.value || "";
+    }
+
+    function setEditorCode(val) {
+      if (gMonacoEditor && gMonacoLoaded) {
+        gMonacoEditor.setValue(val || "");
+      }
+      const fb = document.getElementById("pluginScriptCode");
+      if (fb) fb.value = val || "";
+    }
+
+    function ensureMonacoEditorInitialized(initialCode) {
+      const container = document.getElementById("monacoEditorContainer");
+      if (!container || !window.monaco) return;
+      if (!gMonacoEditor) {
+        gMonacoEditor = monaco.editor.create(container, {
+          value: initialCode || "",
+          language: "lua",
+          theme: "vs-dark",
+          automaticLayout: true,
+          fontSize: 13,
+          minimap: { enabled: true },
+          bracketPairColorization: { enabled: true },
+          scrollBeyondLastLine: false,
+          tabSize: 2,
+          wordWrap: "on"
+        });
+
+        gMonacoEditor.onDidChangeCursorPosition((e) => {
+          const posEl = document.getElementById("ideCursorPos");
+          if (posEl) posEl.textContent = `Ln ${e.position.lineNumber}, Col ${e.position.column}`;
+        });
+
+        gMonacoEditor.onDidChangeModelContent(() => {
+          clearTimeout(gSyntaxDebounceTimer);
+          gSyntaxDebounceTimer = setTimeout(() => {
+            const code = gMonacoEditor.getValue();
+            liveLintPluginCode(code);
+          }, 500);
+        });
+
+        gMonacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+          savePlugin();
+        });
+        gMonacoEditor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.Enter, () => {
+          runPluginIdeDryRun();
+        });
+        gMonacoEditor.addCommand(monaco.KeyMod.Alt | monaco.KeyMod.Shift | monaco.KeyCode.KeyF, () => {
+          formatPluginCode();
+        });
+      } else {
+        if (initialCode !== undefined) {
+          gMonacoEditor.setValue(initialCode);
+        }
+      }
+      liveLintPluginCode(gMonacoEditor.getValue());
+    }
+
+    function ensureMonacoDiffEditorInitialized() {
+      const container = document.getElementById("monacoDiffContainer");
+      if (!container || !window.monaco) return;
+      if (!gMonacoDiffEditor) {
+        gMonacoDiffEditor = monaco.editor.createDiffEditor(container, {
+          theme: "vs-dark",
+          readOnly: true,
+          renderSideBySide: gDiffSideBySide,
+          automaticLayout: true,
+          minimap: { enabled: false },
+          fontSize: 11,
+          scrollBeyondLastLine: false,
+          wordWrap: "on"
+        });
+      }
+    }
+
+    async function liveLintPluginCode(code) {
+      if (!code || !code.trim()) {
+        clearEditorErrorMarkers();
+        updateLintStatusUi(true, "语法检测：空代码");
+        return;
+      }
+      try {
+        const resp = await apiCall("/admin/v1/plugins/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ script_code: code })
+        });
+        if (resp && resp.ok) {
+          const res = await resp.json();
+          if (res.valid) {
+            clearEditorErrorMarkers();
+            updateLintStatusUi(true, "语法检测：正常 🟢");
+          } else {
+            const line = res.line || 1;
+            const msg = res.message || "语法解析失败";
+            setEditorErrorMarker(line, msg);
+            updateLintStatusUi(false, `第 ${line} 行语法错误: ${msg} ❌`, line);
+          }
+        }
+      } catch (err) {
+        console.error("Live linting failed:", err);
+      }
+    }
+
+    function setEditorErrorMarker(line, message) {
+      gLastSyntaxErrorLine = line;
+      if (!gMonacoEditor || !window.monaco) return;
+      const model = gMonacoEditor.getModel();
+      if (!model) return;
+      monaco.editor.setModelMarkers(model, "lua-linter", [{
+        startLineNumber: line,
+        startColumn: 1,
+        endLineNumber: line,
+        endColumn: 1000,
+        message: message,
+        severity: monaco.MarkerSeverity.Error
+      }]);
+    }
+
+    function clearEditorErrorMarkers() {
+      gLastSyntaxErrorLine = null;
+      if (!gMonacoEditor || !window.monaco) return;
+      const model = gMonacoEditor.getModel();
+      if (!model) return;
+      monaco.editor.setModelMarkers(model, "lua-linter", []);
+    }
+
+    function updateLintStatusUi(isValid, text, line) {
+      const el = document.getElementById("ideLintStatus");
+      if (!el) return;
+      if (isValid) {
+        el.className = "cursor-pointer flex items-center space-x-1.5 text-emerald-400 hover:underline";
+        el.innerHTML = `<span>🟢</span><span>${escapeHtml(text)}</span>`;
+      } else {
+        el.className = "cursor-pointer flex items-center space-x-1.5 text-rose-400 hover:underline font-semibold";
+        el.innerHTML = `<span>❌</span><span>${escapeHtml(text)}</span>`;
+      }
+    }
+
+    function jumpToLintError() {
+      if (gLastSyntaxErrorLine && gMonacoEditor) {
+        gMonacoEditor.revealLineInCenter(gLastSyntaxErrorLine);
+        gMonacoEditor.setPosition({ lineNumber: gLastSyntaxErrorLine, column: 1 });
+        gMonacoEditor.focus();
+      }
+    }
+
+    function toggleDiffSideBySideMode() {
+      gDiffSideBySide = !gDiffSideBySide;
+      if (gMonacoDiffEditor) {
+        gMonacoDiffEditor.updateOptions({ renderSideBySide: gDiffSideBySide });
+      }
+      const btn = document.getElementById("toggleDiffSideBySideBtn");
+      if (btn) {
+        btn.textContent = gDiffSideBySide ? "并排 ⇋ 内联" : "内联 ⇋ 并排";
+      }
+    }
+
+    function formatPluginCode() {
+      if (gMonacoEditor && gMonacoLoaded) {
+        gMonacoEditor.getAction("editor.action.formatDocument")?.run();
+      }
+    }
+
+    function toggleMockConfigPanel() {
+      const inputs = document.getElementById("mockConfigInputs");
+      const ico = document.getElementById("mockPanelToggleIco");
+      const txt = document.getElementById("mockPanelToggleTxt");
+      if (!inputs) return;
+      if (inputs.classList.contains("hidden")) {
+        inputs.classList.remove("hidden");
+        if (ico) ico.textContent = "▲";
+        if (txt) txt.textContent = "收起";
+      } else {
+        inputs.classList.add("hidden");
+        if (ico) ico.textContent = "▼";
+        if (txt) txt.textContent = "展开";
+      }
+    }
+
+    function clearIdeLogs() {
+      const el = document.getElementById("ideConsoleLogs");
+      if (el) el.innerHTML = `<div class="text-[10px] text-slate-600 italic">日志已清空</div>`;
+    }
+
+    function applyIdeMockPreset(key) {
+      const preset = sandboxMockPresets[key];
+      if (!preset) return;
+      const payloadArea = document.getElementById("sandboxMockPayload");
+      if (payloadArea) payloadArea.value = preset.payload;
+    }
+
+    function onPluginPhaseChange(phase) {
+      const presetSelect = document.getElementById("sandboxPresetPayload");
+      if (presetSelect) {
+        if (phase === "response") {
+          presetSelect.value = "standard_response";
+          applyIdeMockPreset("standard_response");
+        } else {
+          presetSelect.value = "standard_chat";
+          applyIdeMockPreset("standard_chat");
+        }
+      }
+    }
+
+    async function openPluginModal(id, openWithSandboxFocus) {
       const titleEl = document.getElementById("pluginModalTitle");
       const idInput = document.getElementById("pluginId");
       const nameInput = document.getElementById("pluginName");
@@ -12059,10 +12394,10 @@ end
       const enabledInput = document.getElementById("pluginEnabled");
       const descInput = document.getElementById("pluginDesc");
       const tplSelect = document.getElementById("pluginTemplateSelect");
-      const codeTextarea = document.getElementById("pluginScriptCode");
 
       if (tplSelect) tplSelect.value = "";
 
+      let initialCode = "";
       if (id) {
         const p = cachedPluginsList.find(x => x.id === id);
         if (!p) {
@@ -12077,9 +12412,9 @@ end
         if (matchModelInput) matchModelInput.value = p.match_model || "*";
         if (enabledInput) enabledInput.checked = !!p.enabled;
         if (descInput) descInput.value = p.description || "";
-        if (codeTextarea) codeTextarea.value = p.script_code || "";
+        initialCode = p.script_code || "";
       } else {
-        if (titleEl) titleEl.textContent = "添加 Lua 脚本插件";
+        if (titleEl) titleEl.textContent = "新建 Lua 脚本插件";
         if (idInput) idInput.value = "";
         if (nameInput) nameInput.value = "";
         if (phaseSelect) phaseSelect.value = "request";
@@ -12087,65 +12422,150 @@ end
         if (matchModelInput) matchModelInput.value = "*";
         if (enabledInput) enabledInput.checked = true;
         if (descInput) descInput.value = "";
-        if (codeTextarea) codeTextarea.value = pluginCodeTemplates.header_guard;
+        initialCode = pluginCodeTemplates.header_guard;
       }
 
+      onPluginPhaseChange(phaseSelect ? phaseSelect.value : "request");
+      setEditorCode(initialCode);
+
       document.getElementById("pluginModal").classList.remove("hidden");
+
+      try {
+        await loadMonacoAsync();
+        ensureMonacoEditorInitialized(initialCode);
+        ensureMonacoDiffEditorInitialized();
+      } catch (err) {
+        console.warn("Monaco initialization error:", err);
+        const fbArea = document.getElementById("pluginScriptCode");
+        if (fbArea) {
+          fbArea.value = initialCode;
+          fbArea.classList.remove("hidden");
+        }
+        const badge = document.getElementById("monacoFallbackBadge");
+        if (badge) badge.classList.remove("hidden");
+      }
+
+      if (openWithSandboxFocus) {
+        setTimeout(() => runPluginIdeDryRun(), 300);
+      }
     }
 
     function closePluginModal() {
       document.getElementById("pluginModal").classList.add("hidden");
+      clearEditorErrorMarkers();
     }
 
     function applyPluginTemplate(tplKey) {
       if (!tplKey || !pluginCodeTemplates[tplKey]) return;
-      const codeTextarea = document.getElementById("pluginScriptCode");
+      const tpl = pluginCodeTemplates[tplKey];
+      setEditorCode(tpl);
       const phaseSelect = document.getElementById("pluginPhase");
-      if (codeTextarea) codeTextarea.value = pluginCodeTemplates[tplKey];
       if (phaseSelect) {
         if (tplKey === "resp_mask") phaseSelect.value = "response";
         else phaseSelect.value = "request";
+        onPluginPhaseChange(phaseSelect.value);
       }
+      liveLintPluginCode(tpl);
     }
 
-    async function validatePluginCode() {
-      const code = document.getElementById("pluginScriptCode")?.value || "";
+    async function runPluginIdeDryRun() {
       const phase = document.getElementById("pluginPhase")?.value || "request";
-      if (!code.trim()) {
-        showToast("脚本内容不能为空", "warning");
+      const script_code = getEditorCode();
+      const payloadStr = document.getElementById("sandboxMockPayload")?.value || "{}";
+
+      if (!script_code.trim()) {
+        showToast("请输入待测 Lua 脚本", "warning");
         return;
       }
+
+      let mock_payload = {};
+      try {
+        mock_payload = JSON.parse(payloadStr);
+      } catch (e) {
+        showToast("模拟输入 JSON 格式错误: " + e.message, "error");
+        return;
+      }
+
       try {
         const resp = await apiCall("/admin/v1/plugins/test", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            script_code: code,
-            phase: phase,
-            mock_payload: {}
+            phase,
+            script_code,
+            mock_payload
           })
         });
+
+        const latencyEl = document.getElementById("ideSandboxLatency");
+        const stepsEl = document.getElementById("ideSandboxSteps");
+        const abortBanner = document.getElementById("ideAbortBanner");
+        const abortReasonEl = document.getElementById("ideAbortReason");
+        const abortStatusEl = document.getElementById("ideAbortStatus");
+        const consoleEl = document.getElementById("ideConsoleLogs");
+        const fallbackDiff = document.getElementById("fallbackDiffJson");
+
         if (resp && resp.ok) {
           const res = await resp.json();
-          if (res.success) {
-            showToast("Lua 5.4 语法校验通过，沙箱加载成功！", "success");
+          if (latencyEl) latencyEl.textContent = `${res.latency_us || 0}μs`;
+          if (stepsEl) stepsEl.textContent = `${res.instructions_executed || 0} steps`;
+
+          if (res.aborted) {
+            if (abortBanner) abortBanner.classList.remove("hidden");
+            if (abortReasonEl) abortReasonEl.textContent = res.abort_reason || "Request blocked by plugin";
+            if (abortStatusEl) abortStatusEl.textContent = res.abort_status || 403;
           } else {
-            showToast(`语法或执行异常: ${res.error || res.abort_reason || '未知错误'}`, "error");
+            if (abortBanner) abortBanner.classList.add("hidden");
+          }
+
+          // Build original vs modified objects for diff
+          const originalObj = {
+            phase: phase,
+            mock_input: mock_payload
+          };
+          const modifiedObj = {
+            phase: phase,
+            aborted: !!res.aborted,
+            success: !!res.success,
+            output: (phase === "response") ? res.response : res.request
+          };
+
+          if (gMonacoDiffEditor && window.monaco && gMonacoLoaded) {
+            const originalStr = JSON.stringify(originalObj, null, 2);
+            const modifiedStr = JSON.stringify(modifiedObj, null, 2);
+            const oldModel = gMonacoDiffEditor.getModel();
+            if (oldModel && oldModel.original) oldModel.original.dispose();
+            if (oldModel && oldModel.modified) oldModel.modified.dispose();
+
+            const oModel = monaco.editor.createModel(originalStr, "json");
+            const mModel = monaco.editor.createModel(modifiedStr, "json");
+            gMonacoDiffEditor.setModel({ original: oModel, modified: mModel });
+          } else if (fallbackDiff) {
+            fallbackDiff.classList.remove("hidden");
+            fallbackDiff.textContent = "=== ORIGINAL ===\n" + JSON.stringify(originalObj, null, 2) + "\n\n=== MODIFIED ===\n" + JSON.stringify(modifiedObj, null, 2);
+          }
+
+          // Render Console Logs
+          if (consoleEl) {
+            if (res.logs && Array.isArray(res.logs) && res.logs.length > 0) {
+              consoleEl.innerHTML = res.logs.map(log => {
+                let colorClass = "text-slate-300";
+                if (log.includes("[ERROR]")) colorClass = "text-rose-400 font-bold";
+                else if (log.includes("[WARN]")) colorClass = "text-amber-400";
+                else if (log.includes("[INFO]")) colorClass = "text-cyan-400";
+                return `<div class="${colorClass}">${escapeHtml(log)}</div>`;
+              }).join("");
+            } else {
+              consoleEl.innerHTML = `<div class="text-[10px] text-slate-500 italic">执行完成，无 aigate.log 输出</div>`;
+            }
           }
         } else {
           const err = await resp.json();
-          showToast(`校验失败: ${err.message || 'Lua 语法错误'}`, "error");
+          showToast(`沙箱测试请求失败: ${err.message || '未知错误'}`, "error");
         }
       } catch (err) {
-        showToast(`校验异常: ${err.message}`, "error");
+        showToast(`沙箱测试异常: ${err.message}`, "error");
       }
-    }
-
-    function testCurrentPluginInSandbox() {
-      const code = document.getElementById("pluginScriptCode")?.value || "";
-      const phase = document.getElementById("pluginPhase")?.value || "request";
-      closePluginModal();
-      openPluginSandboxModal(null, code, phase);
     }
 
     async function savePlugin() {
@@ -12156,10 +12576,10 @@ end
       const match_model = document.getElementById("pluginMatchModel")?.value.trim() || "*";
       const enabled = document.getElementById("pluginEnabled")?.checked;
       const description = document.getElementById("pluginDesc")?.value.trim() || "";
-      const script_code = document.getElementById("pluginScriptCode")?.value || "";
+      const script_code = getEditorCode();
 
       if (!name) {
-        showToast("请输入插件名称", "warning");
+        showToast("请输入插件唯一标识", "warning");
         return;
       }
       if (!script_code.trim()) {
@@ -12238,136 +12658,6 @@ end
         }
       } catch (err) {
         showToast(`删除异常: ${err.message}`, "error");
-      }
-    }
-
-    function openPluginSandboxModal(pluginId, customCode, customPhase) {
-      const phaseSelect = document.getElementById("sandboxPhase");
-      const codeTextarea = document.getElementById("sandboxScriptCode");
-      const presetSelect = document.getElementById("sandboxPresetPayload");
-      const resultBox = document.getElementById("sandboxResultBox");
-
-      if (resultBox) resultBox.classList.add("hidden");
-
-      if (customCode) {
-        if (codeTextarea) codeTextarea.value = customCode;
-        if (phaseSelect) phaseSelect.value = customPhase || "request";
-      } else if (pluginId) {
-        const p = cachedPluginsList.find(x => x.id === pluginId);
-        if (p) {
-          if (codeTextarea) codeTextarea.value = p.script_code || "";
-          if (phaseSelect) phaseSelect.value = (p.phase === "response") ? "response" : "request";
-        }
-      } else {
-        if (codeTextarea && !codeTextarea.value) codeTextarea.value = pluginCodeTemplates.header_guard;
-        if (phaseSelect) phaseSelect.value = "request";
-      }
-
-      if (presetSelect) {
-        if (phaseSelect && phaseSelect.value === "response") {
-          presetSelect.value = "standard_response";
-          applySandboxMockPreset("standard_response");
-        } else {
-          presetSelect.value = "standard_chat";
-          applySandboxMockPreset("standard_chat");
-        }
-      }
-
-      document.getElementById("pluginSandboxModal").classList.remove("hidden");
-    }
-
-    function closePluginSandboxModal() {
-      document.getElementById("pluginSandboxModal").classList.add("hidden");
-    }
-
-    function applySandboxMockPreset(presetKey) {
-      const preset = sandboxMockPresets[presetKey];
-      if (!preset) return;
-      const phaseSelect = document.getElementById("sandboxPhase");
-      const payloadTextarea = document.getElementById("sandboxMockPayload");
-      if (phaseSelect) phaseSelect.value = preset.phase;
-      if (payloadTextarea) payloadTextarea.value = preset.payload;
-    }
-
-    async function runSandboxTest() {
-      const phase = document.getElementById("sandboxPhase")?.value || "request";
-      const script_code = document.getElementById("sandboxScriptCode")?.value || "";
-      const payloadStr = document.getElementById("sandboxMockPayload")?.value || "{}";
-
-      if (!script_code.trim()) {
-        showToast("请输入待测 Lua 脚本", "warning");
-        return;
-      }
-
-      let mock_payload = {};
-      try {
-        mock_payload = JSON.parse(payloadStr);
-      } catch (e) {
-        showToast("模拟输入 JSON 格式错误: " + e.message, "error");
-        return;
-      }
-
-      try {
-        const resp = await apiCall("/admin/v1/plugins/test", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            phase,
-            script_code,
-            mock_payload
-          })
-        });
-
-        const resultBox = document.getElementById("sandboxResultBox");
-        const statusBadge = document.getElementById("sandboxResultStatus");
-        const latencyEl = document.getElementById("sandboxResultLatency");
-        const stepsEl = document.getElementById("sandboxResultSteps");
-        const logsContainer = document.getElementById("sandboxResultLogsContainer");
-        const logsEl = document.getElementById("sandboxResultLogs");
-        const jsonEl = document.getElementById("sandboxResultJson");
-
-        if (resp && resp.ok) {
-          const res = await resp.json();
-          if (resultBox) resultBox.classList.remove("hidden");
-
-          if (latencyEl) latencyEl.textContent = `${res.latency_us || 0}μs`;
-          if (stepsEl) stepsEl.textContent = `${res.instructions_executed || 0} steps`;
-
-          if (res.aborted) {
-            statusBadge.textContent = `🛑 ABORTED (${res.abort_status})`;
-            statusBadge.className = "px-2.5 py-0.5 rounded-full font-bold bg-amber-500/20 text-amber-400 border border-amber-500/30 font-mono";
-          } else if (res.success) {
-            statusBadge.textContent = "✅ SUCCESS";
-            statusBadge.className = "px-2.5 py-0.5 rounded-full font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 font-mono";
-          } else {
-            statusBadge.textContent = "❌ ERROR";
-            statusBadge.className = "px-2.5 py-0.5 rounded-full font-bold bg-rose-500/20 text-rose-400 border border-rose-500/30 font-mono";
-          }
-
-          if (res.logs && Array.isArray(res.logs) && res.logs.length > 0) {
-            if (logsContainer) logsContainer.classList.remove("hidden");
-            if (logsEl) {
-              logsEl.innerHTML = res.logs.map(log => `<div>${escapeHtml(log)}</div>`).join("");
-            }
-          } else {
-            if (logsContainer) logsContainer.classList.add("hidden");
-          }
-
-          const outObj = {
-            success: res.success,
-            aborted: res.aborted,
-            abort_status: res.abort_status,
-            abort_reason: res.abort_reason,
-            error: res.error,
-            mutated_object: (phase === "response") ? res.response : res.request
-          };
-          if (jsonEl) jsonEl.textContent = JSON.stringify(outObj, null, 2);
-        } else {
-          const err = await resp.json();
-          showToast(`沙箱测试请求失败: ${err.message || '未知错误'}`, "error");
-        }
-      } catch (err) {
-        showToast(`沙箱测试异常: ${err.message}`, "error");
       }
     }
   </script>
