@@ -3,7 +3,7 @@ FROM debian:bookworm-slim AS builder
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         build-essential cmake pkg-config ca-certificates \
-        libcurl4-openssl-dev libssl-dev libpq-dev libjansson-dev libhiredis-dev zlib1g-dev python3 \
+        libcurl4-openssl-dev libssl-dev libpq-dev libjansson-dev libhiredis-dev liblua5.4-dev zlib1g-dev python3 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /src
@@ -22,7 +22,7 @@ RUN cmake -B build -DCMAKE_BUILD_TYPE=Release -DAIGATE_FORMAT_ON_BUILD=OFF \
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        libcurl4 libssl3 libpq5 libjansson4 libhiredis0.14 ca-certificates curl \
+        libcurl4 libssl3 libpq5 libjansson4 libhiredis0.14 liblua5.4-0 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd -r aigate && useradd -r -g aigate -s /usr/sbin/nologin aigate
