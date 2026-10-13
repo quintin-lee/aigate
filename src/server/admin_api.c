@@ -33,6 +33,7 @@
 #include "policy/cache_optimizer.h"
 #include "policy/watermark_engine.h"
 #include "policy/ip_ban_table.h"
+#include "lua_plugin.h"
 #include "policy/threat_whitelist.h"
 #include "observe/audit_hash_chain.h"
 
@@ -5917,6 +5918,368 @@ admin_reasoning_status_get(
     return finish_json(status, out_body, len, 200, root);
 }
 
+static int
+admin_plugins_get(admin_ctx_t* adm, int* status, char** out_body, size_t* len)
+{
+    json_t* root = json_object();
+    json_t* arr = json_array();
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops != NULL && ops->list_script_plugins != NULL) {
+        lua_plugin_def_t* recs = NULL;
+        size_t            count = 0;
+        if (ops->list_script_plugins(ops->ctx, &recs, &count) == 0 && recs != NULL) {
+            for (size_t i = 0; i < count; i++) {
+                json_t* it = json_object();
+                json_object_set_new(it, "id", json_integer((json_int_t)recs[i].id));
+                json_object_set_new(it, "name", json_string(recs[i].name));
+                json_object_set_new(it, "phase", json_string(recs[i].phase));
+                json_object_set_new(it, "priority", json_integer(recs[i].priority));
+                json_object_set_new(it, "enabled", json_boolean(recs[i].enabled));
+                json_object_set_new(it, "match_model", json_string(recs[i].match_model));
+                json_object_set_new(it, "description", json_string(recs[i].description));
+                json_object_set_new(
+                    it, "script_code", json_string(recs[i].script_code ? recs[i].script_code : ""));
+                json_object_set_new(it, "created_at", json_integer((json_int_t)recs[i].created_at));
+                json_object_set_new(it, "updated_at", json_integer((json_int_t)recs[i].updated_at));
+                json_array_append_new(arr, it);
+                lua_plugin_def_free(&recs[i]);
+            }
+            free(recs);
+        }
+    }
+
+    json_object_set_new(root, "plugins", arr);
+    return finish_json(status, out_body, len, 200, root);
+}
+
+static int
+admin_plugins_get_id(
+    admin_ctx_t* adm, const char* id_str, int* status, char** out_body, size_t* len)
+{
+    if (id_str == NULL || id_str[0] == '\0') {
+        return finish_error(status, out_body, len, 400, "bad_request", "plugin id required");
+    }
+    int64_t id = (int64_t)atoll(id_str);
+    if (id <= 0) {
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid plugin id");
+    }
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->get_script_plugin == NULL) {
+        return finish_error(status, out_body, len, 500, "internal_error", "store ops unavailable");
+    }
+
+    lua_plugin_def_t rec;
+    memset(&rec, 0, sizeof(rec));
+    int rc = ops->get_script_plugin(ops->ctx, id, &rec);
+    if (rc != 0) {
+        return finish_error(status, out_body, len, 404, "not_found", "plugin not found");
+    }
+
+    json_t* it = json_object();
+    json_object_set_new(it, "id", json_integer((json_int_t)rec.id));
+    json_object_set_new(it, "name", json_string(rec.name));
+    json_object_set_new(it, "phase", json_string(rec.phase));
+    json_object_set_new(it, "priority", json_integer(rec.priority));
+    json_object_set_new(it, "enabled", json_boolean(rec.enabled));
+    json_object_set_new(it, "match_model", json_string(rec.match_model));
+    json_object_set_new(it, "description", json_string(rec.description));
+    json_object_set_new(it, "script_code", json_string(rec.script_code ? rec.script_code : ""));
+    json_object_set_new(it, "created_at", json_integer((json_int_t)rec.created_at));
+    json_object_set_new(it, "updated_at", json_integer((json_int_t)rec.updated_at));
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("ok"));
+    json_object_set(resp, "plugin", it);
+    json_object_set_new(resp, "id", json_integer((json_int_t)rec.id));
+    json_object_set_new(resp, "name", json_string(rec.name));
+    json_object_set_new(resp, "priority", json_integer(rec.priority));
+    json_object_set_new(resp, "enabled", json_boolean(rec.enabled));
+    json_decref(it);
+
+    lua_plugin_def_free(&rec);
+    return finish_json(status, out_body, len, 200, resp);
+}
+
+static int
+admin_plugins_post(admin_ctx_t* adm,
+                   const void*  req_body,
+                   size_t       req_len,
+                   int*         status,
+                   char**       out_body,
+                   size_t*      len)
+{
+    json_error_t jerr;
+    json_t*      root = json_loadb((const char*)req_body, req_len, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid json body");
+    }
+
+    json_t* jname = json_object_get(root, "name");
+    json_t* jcode = json_object_get(root, "script_code");
+    if (jname == NULL || !json_is_string(jname) || jcode == NULL || !json_is_string(jcode)) {
+        json_decref(root);
+        return finish_error(
+            status, out_body, len, 400, "bad_request", "name and script_code are required");
+    }
+
+    const char* script_code = json_string_value(jcode);
+    char        syn_err[256] = {0};
+    if (lua_plugin_validate_syntax(script_code, syn_err, sizeof(syn_err)) != 0) {
+        json_decref(root);
+        return finish_error(status, out_body, len, 400, "syntax_error", syn_err);
+    }
+
+    lua_plugin_def_t def;
+    memset(&def, 0, sizeof(def));
+    snprintf(def.name, sizeof(def.name), "%s", json_string_value(jname));
+    def.script_code = strdup(script_code);
+
+    json_t* jphase = json_object_get(root, "phase");
+    if (jphase != NULL && json_is_string(jphase)) {
+        snprintf(def.phase, sizeof(def.phase), "%s", json_string_value(jphase));
+    } else {
+        snprintf(def.phase, sizeof(def.phase), "request");
+    }
+
+    json_t* jprio = json_object_get(root, "priority");
+    def.priority = (jprio != NULL && json_is_integer(jprio)) ? (int)json_integer_value(jprio) : 100;
+
+    json_t* jen = json_object_get(root, "enabled");
+    def.enabled = (jen == NULL || !json_is_boolean(jen)) ? true : json_is_true(jen);
+
+    json_t* jmodel = json_object_get(root, "match_model");
+    if (jmodel != NULL && json_is_string(jmodel)) {
+        snprintf(def.match_model, sizeof(def.match_model), "%s", json_string_value(jmodel));
+    } else {
+        snprintf(def.match_model, sizeof(def.match_model), "*");
+    }
+
+    json_t* jdesc = json_object_get(root, "description");
+    if (jdesc != NULL && json_is_string(jdesc)) {
+        snprintf(def.description, sizeof(def.description), "%s", json_string_value(jdesc));
+    }
+
+    int64_t now = (int64_t)time(NULL);
+    def.created_at = now;
+    def.updated_at = now;
+
+    json_decref(root);
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    int64_t         out_id = 0;
+    if (ops != NULL && ops->create_script_plugin != NULL) {
+        if (ops->create_script_plugin(ops->ctx, &def, &out_id) != 0) {
+            lua_plugin_def_free(&def);
+            return finish_error(
+                status, out_body, len, 500, "internal_error", "failed to create script plugin");
+        }
+        if (adm->ac != NULL) {
+            aigate_core_reload_plugins(adm->ac);
+        }
+    } else {
+        static int64_t s_local_id = 1000;
+        out_id = ++s_local_id;
+        def.id = out_id;
+        if (adm->ac != NULL && adm->ac->plugins != NULL) {
+            lua_plugin_mgr_set_plugins(adm->ac->plugins, &def, 1);
+        }
+    }
+
+    lua_plugin_def_free(&def);
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("created"));
+    json_object_set_new(resp, "id", json_integer((json_int_t)out_id));
+    return finish_json(status, out_body, len, 201, resp);
+}
+
+static int
+admin_plugins_put_id(admin_ctx_t* adm,
+                     const char*  id_str,
+                     const void*  req_body,
+                     size_t       req_len,
+                     int*         status,
+                     char**       out_body,
+                     size_t*      len)
+{
+    if (id_str == NULL || id_str[0] == '\0') {
+        return finish_error(status, out_body, len, 400, "bad_request", "plugin id required");
+    }
+    int64_t id = (int64_t)atoll(id_str);
+    if (id <= 0) {
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid plugin id");
+    }
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops == NULL || ops->get_script_plugin == NULL || ops->update_script_plugin == NULL) {
+        return finish_error(status, out_body, len, 500, "internal_error", "store ops unavailable");
+    }
+
+    lua_plugin_def_t def;
+    memset(&def, 0, sizeof(def));
+    if (ops->get_script_plugin(ops->ctx, id, &def) != 0) {
+        return finish_error(status, out_body, len, 404, "not_found", "plugin not found");
+    }
+
+    json_error_t jerr;
+    json_t*      root = json_loadb((const char*)req_body, req_len, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        lua_plugin_def_free(&def);
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid json body");
+    }
+
+    json_t* jname = json_object_get(root, "name");
+    if (jname != NULL && json_is_string(jname)) {
+        snprintf(def.name, sizeof(def.name), "%s", json_string_value(jname));
+    }
+    json_t* jphase = json_object_get(root, "phase");
+    if (jphase != NULL && json_is_string(jphase)) {
+        snprintf(def.phase, sizeof(def.phase), "%s", json_string_value(jphase));
+    }
+    json_t* jprio = json_object_get(root, "priority");
+    if (jprio != NULL && json_is_integer(jprio)) {
+        def.priority = (int)json_integer_value(jprio);
+    }
+    json_t* jen = json_object_get(root, "enabled");
+    if (jen != NULL && json_is_boolean(jen)) {
+        def.enabled = json_is_true(jen);
+    }
+    json_t* jmodel = json_object_get(root, "match_model");
+    if (jmodel != NULL && json_is_string(jmodel)) {
+        snprintf(def.match_model, sizeof(def.match_model), "%s", json_string_value(jmodel));
+    }
+    json_t* jdesc = json_object_get(root, "description");
+    if (jdesc != NULL && json_is_string(jdesc)) {
+        snprintf(def.description, sizeof(def.description), "%s", json_string_value(jdesc));
+    }
+    json_t* jcode = json_object_get(root, "script_code");
+    if (jcode != NULL && json_is_string(jcode)) {
+        const char* script_code = json_string_value(jcode);
+        char        syn_err[256] = {0};
+        if (lua_plugin_validate_syntax(script_code, syn_err, sizeof(syn_err)) != 0) {
+            lua_plugin_def_free(&def);
+            json_decref(root);
+            return finish_error(status, out_body, len, 400, "syntax_error", syn_err);
+        }
+        if (def.script_code != NULL) {
+            free(def.script_code);
+        }
+        def.script_code = strdup(script_code);
+    }
+
+    def.updated_at = (int64_t)time(NULL);
+    json_decref(root);
+
+    if (ops->update_script_plugin(ops->ctx, &def) != 0) {
+        lua_plugin_def_free(&def);
+        return finish_error(
+            status, out_body, len, 500, "internal_error", "failed to update script plugin");
+    }
+
+    if (adm->ac != NULL) {
+        aigate_core_reload_plugins(adm->ac);
+    }
+    lua_plugin_def_free(&def);
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("updated"));
+    json_object_set_new(resp, "id", json_integer((json_int_t)id));
+    return finish_json(status, out_body, len, 200, resp);
+}
+
+static int
+admin_plugins_delete_id(
+    admin_ctx_t* adm, const char* id_str, int* status, char** out_body, size_t* len)
+{
+    if (id_str == NULL || id_str[0] == '\0') {
+        return finish_error(status, out_body, len, 400, "bad_request", "plugin id required");
+    }
+    int64_t id = (int64_t)atoll(id_str);
+    if (id <= 0) {
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid plugin id");
+    }
+
+    const pg_ops_t* ops = adm->ps != NULL ? pg_store_ops(adm->ps) : NULL;
+    if (ops != NULL && ops->delete_script_plugin != NULL) {
+        if (ops->delete_script_plugin(ops->ctx, id) != 0) {
+            return finish_error(
+                status, out_body, len, 500, "internal_error", "failed to delete script plugin");
+        }
+        if (adm->ac != NULL) {
+            aigate_core_reload_plugins(adm->ac);
+        }
+    }
+
+    json_t* resp = json_object();
+    json_object_set_new(resp, "status", json_string("deleted"));
+    json_object_set_new(resp, "id", json_integer((json_int_t)id));
+    return finish_json(status, out_body, len, 200, resp);
+}
+
+static int
+admin_plugins_test_post(admin_ctx_t* adm,
+                        const void*  req_body,
+                        size_t       req_len,
+                        int*         status,
+                        char**       out_body,
+                        size_t*      len)
+{
+    (void)adm;
+    json_error_t jerr;
+    json_t*      root = json_loadb((const char*)req_body, req_len, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid json body");
+    }
+
+    json_t* jcode = json_object_get(root, "script_code");
+    if (jcode == NULL || !json_is_string(jcode)) {
+        json_decref(root);
+        return finish_error(status, out_body, len, 400, "bad_request", "script_code is required");
+    }
+
+    const char* script_code = json_string_value(jcode);
+    const char* phase = "request";
+    json_t*     jphase = json_object_get(root, "phase");
+    if (jphase != NULL && json_is_string(jphase)) {
+        phase = json_string_value(jphase);
+    }
+
+    json_t* jmock = json_object_get(root, "mock_payload");
+    char*   mock_str = NULL;
+    if (jmock != NULL) {
+        mock_str = json_dumps(jmock, JSON_COMPACT);
+    } else {
+        mock_str = strdup("{}");
+    }
+
+    char*  result_json = NULL;
+    size_t result_len = 0;
+    int    rc = lua_plugin_test_dry_run(script_code, phase, mock_str, &result_json, &result_len);
+    free(mock_str);
+    json_decref(root);
+
+    if (rc != 0 || result_json == NULL) {
+        return finish_error(
+            status, out_body, len, 500, "internal_error", "sandbox test execution failed");
+    }
+
+    *status = 200;
+    *out_body = result_json;
+    *len = result_len;
+    return 0;
+}
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -6242,6 +6605,31 @@ admin_dispatch(admin_ctx_t* adm,
         }
         if (strncmp(rest, "threat-whitelists/", 18) == 0 && strcmp(method, "DELETE") == 0) {
             return admin_threat_whitelists_delete(adm, rest + 18, out_status, out_body, out_len);
+        }
+    } else if (strncmp(rest, "plugins", 7) == 0) {
+        if (strcmp(rest, "plugins") == 0) {
+            if (strcmp(method, "GET") == 0) {
+                return admin_plugins_get(adm, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "POST") == 0) {
+                return admin_plugins_post(adm, body, body_len, out_status, out_body, out_len);
+            }
+        }
+        if (strcmp(rest, "plugins/test") == 0 && strcmp(method, "POST") == 0) {
+            return admin_plugins_test_post(adm, body, body_len, out_status, out_body, out_len);
+        }
+        if (rest[7] == '/' && strcmp(rest + 8, "test") != 0) {
+            const char* id_str = rest + 8;
+            if (strcmp(method, "GET") == 0) {
+                return admin_plugins_get_id(adm, id_str, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "PUT") == 0 || strcmp(method, "PATCH") == 0) {
+                return admin_plugins_put_id(
+                    adm, id_str, body, body_len, out_status, out_body, out_len);
+            }
+            if (strcmp(method, "DELETE") == 0) {
+                return admin_plugins_delete_id(adm, id_str, out_status, out_body, out_len);
+            }
         }
     }
 

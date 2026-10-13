@@ -11,6 +11,11 @@ find_package(Threads REQUIRED)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBPQ REQUIRED libpq)
 pkg_check_modules(JANSSON REQUIRED jansson)
+pkg_check_modules(LUA lua-5.4 lua5.4 lua)
+if(NOT LUA_FOUND)
+    find_package(Lua REQUIRED)
+    set(LUA_INCLUDE_DIRS ${LUA_INCLUDE_DIR})
+endif()
 include(FetchContent)
 pkg_check_modules(HIREDIS hiredis)
 if(NOT HIREDIS_FOUND)
@@ -91,16 +96,17 @@ endif()
 
 add_library(libaigate STATIC ${AIGATE_SRC})
 add_dependencies(libaigate generate_admin_ui_html civetweb-c-library hdr_histogram_static)
-target_include_directories(libaigate PUBLIC src src/core src/common src/upstream src/policy src/store src/observe src/server ${CMAKE_BINARY_DIR}/generated)
+target_include_directories(libaigate PUBLIC src src/core src/common src/upstream src/policy src/store src/observe src/server src/plugin ${CMAKE_BINARY_DIR}/generated)
 target_compile_options(libaigate PRIVATE -Wall -Wextra -Werror)
 if(AIGATE_SANITIZERS)
     target_compile_options(libaigate PRIVATE ${AIGATE_SAN_FLAGS})
     target_link_libraries(libaigate PUBLIC ${AIGATE_SAN_FLAGS})
 endif()
-target_include_directories(libaigate PUBLIC ${JANSSON_INCLUDE_DIRS} ${LIBPQ_INCLUDE_DIRS} ${HIREDIS_INCLUDE_DIRS})
+target_include_directories(libaigate PUBLIC ${JANSSON_INCLUDE_DIRS} ${LIBPQ_INCLUDE_DIRS} ${HIREDIS_INCLUDE_DIRS} ${LUA_INCLUDE_DIRS})
 target_link_libraries(libaigate PUBLIC
   ${JANSSON_LIBRARIES}
   ${HIREDIS_LIBRARIES}
+  ${LUA_LIBRARIES}
   hdr_histogram_static
   civetweb-c-library
   CURL::libcurl ${LIBPQ_LIBRARIES} OpenSSL::SSL OpenSSL::Crypto ${CMAKE_THREAD_LIBS_INIT})

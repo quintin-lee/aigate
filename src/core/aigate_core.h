@@ -106,6 +106,7 @@ typedef struct aigate_core {
     audit_logger_t*        audit;      /**< Dual-channel audit logger, may be NULL (disabled) */
     ip_ban_table_t*        ip_ban_tbl; /**< In-memory IP ban table */
     threat_whitelist_t*    threat_whitelist; /**< Dynamic threat defense whitelist engine */
+    struct lua_plugin_mgr* plugins;          /**< Embedded Lua script plugin engine */
 } aigate_core;
 
 /** @brief Type alias for gateway pipeline context. */
@@ -133,6 +134,13 @@ int aigate_core_reload_cache_optimizer_rules(aigate_core* ac);
  * @return 0 on success, -1 on error.
  */
 int aigate_core_reload_threat_whitelist(aigate_core* ac);
+
+/**
+ * @brief Reload dynamic Lua script plugins from backing storage.
+ * @param ac Core context.
+ * @return 0 on success, -1 on error.
+ */
+int aigate_core_reload_plugins(aigate_core* ac);
 
 /** @brief Initialize the pipeline state. @return 0 ok, -1 on alloc failure. */
 int aigate_core_init(aigate_core*   ac,

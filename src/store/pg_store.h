@@ -19,6 +19,7 @@
 #include "policy/shadow.h"
 #include "policy/prompt_compressor.h"
 #include "policy/cache_optimizer.h"
+#include "lua_plugin.h"
 
 /** @brief Client API key record (api_keys row; allowed_models is a copy). */
 typedef struct key_rec {
@@ -426,6 +427,19 @@ typedef struct pg_ops {
                                    int64_t* out_id);  /**< Create threat defense whitelist. */
     int (*delete_threat_whitelist)(void*   ctx,
                                    int64_t rule_id);  /**< Delete threat defense whitelist by ID. */
+
+    int (*list_script_plugins)(void*              ctx,
+                               lua_plugin_def_t** out_recs,
+                               size_t*            out_count); /**< List all script plugins. */
+    int (*get_script_plugin)(void*             ctx,
+                             int64_t           id,
+                             lua_plugin_def_t* out_rec); /**< Get single script plugin by ID. */
+    int (*create_script_plugin)(void*                   ctx,
+                                const lua_plugin_def_t* rec,
+                                int64_t*                out_id); /**< Create new script plugin. */
+    int (*update_script_plugin)(void*                   ctx,
+                                const lua_plugin_def_t* rec);    /**< Update script plugin by ID. */
+    int (*delete_script_plugin)(void* ctx, int64_t id);          /**< Delete script plugin by ID. */
 } pg_ops_t;
 
 /** @brief Storage handle (opaque; holder of a libpq connection or a fake context). */
@@ -617,5 +631,38 @@ int pg_store_create_threat_whitelist(pg_store_t*                   ps,
  *  @param rule_id  Rule primary key.
  *  @return 0 on success, -1 on storage error. */
 int pg_store_delete_threat_whitelist(pg_store_t* ps, int64_t rule_id);
+
+/** @brief List all script plugins ordered by priority.
+ *  @param ps        Storage handle.
+ *  @param out_recs  Heap-allocated array of plugin definitions; caller frees each and the array.
+ *  @param out_count Number of records returned.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_list_script_plugins(pg_store_t* ps, lua_plugin_def_t** out_recs, size_t* out_count);
+
+/** @brief Get single script plugin by ID.
+ *  @param ps      Storage handle.
+ *  @param id      Plugin ID.
+ *  @param out_rec Output record.
+ *  @return 0 on success, 1 on not found, -1 on storage error. */
+int pg_store_get_script_plugin(pg_store_t* ps, int64_t id, lua_plugin_def_t* out_rec);
+
+/** @brief Create a new script plugin.
+ *  @param ps      Storage handle.
+ *  @param rec     Plugin definition.
+ *  @param out_id  Receives newly generated primary key id.
+ *  @return 0 on success, -1 on storage error. */
+int pg_store_create_script_plugin(pg_store_t* ps, const lua_plugin_def_t* rec, int64_t* out_id);
+
+/** @brief Update an existing script plugin.
+ *  @param ps  Storage handle.
+ *  @param rec Updated plugin definition.
+ *  @return 0 on success, 1 on not found, -1 on storage error. */
+int pg_store_update_script_plugin(pg_store_t* ps, const lua_plugin_def_t* rec);
+
+/** @brief Delete a script plugin by ID.
+ *  @param ps Storage handle.
+ *  @param id Plugin ID.
+ *  @return 0 on success, 1 on not found, -1 on storage error. */
+int pg_store_delete_script_plugin(pg_store_t* ps, int64_t id);
 
 #endif /* AIGATE_PG_STORE_H */

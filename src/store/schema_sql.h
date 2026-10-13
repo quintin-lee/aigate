@@ -302,6 +302,22 @@ static const char SCHEMA_SQL[] =
     "ALTER TABLE api_keys ADD COLUMN IF NOT EXISTS daily_reasoning_quota BIGINT NOT NULL DEFAULT "
     "0;\n"
     "ALTER TABLE groups ADD COLUMN IF NOT EXISTS daily_reasoning_quota BIGINT NOT NULL DEFAULT 0;\n"
-    "INSERT INTO schema_migrations(version) VALUES (20) ON CONFLICT (version) DO NOTHING;\n";
+    "INSERT INTO schema_migrations(version) VALUES (20) ON CONFLICT (version) DO NOTHING;\n"
+    "\n"
+    "-- Migration v21: dynamic lua script plugin engine\n"
+    "CREATE TABLE IF NOT EXISTS script_plugins (\n"
+    "  id          BIGSERIAL PRIMARY KEY,\n"
+    "  name        VARCHAR(64) UNIQUE NOT NULL,\n"
+    "  phase       VARCHAR(32) NOT NULL DEFAULT 'request',\n"
+    "  priority    INT NOT NULL DEFAULT 100,\n"
+    "  enabled     BOOLEAN NOT NULL DEFAULT true,\n"
+    "  match_model VARCHAR(64) NOT NULL DEFAULT '*',\n"
+    "  description TEXT NOT NULL DEFAULT '',\n"
+    "  script_code TEXT NOT NULL,\n"
+    "  created_at  BIGINT NOT NULL,\n"
+    "  updated_at  BIGINT NOT NULL\n"
+    ");\n"
+    "CREATE INDEX IF NOT EXISTS idx_script_plugins_priority ON script_plugins(enabled, priority);\n"
+    "INSERT INTO schema_migrations(version) VALUES (21) ON CONFLICT (version) DO NOTHING;\n";
 
 #endif /* AIGATE_SCHEMA_SQL_H */

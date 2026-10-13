@@ -12,6 +12,7 @@
 #include "response_cache.h"
 #include "filter_chain.h"
 #include "latency_tracker.h"
+#include "lua_plugin.h"
 
 #include <inttypes.h>
 #include <jansson.h>
@@ -128,6 +129,31 @@ aigate_core_reload_threat_whitelist(aigate_core* ac)
             if (ops->list_threat_whitelists(ops->ctx, &recs, &count) == 0) {
                 threat_whitelist_load(ac->threat_whitelist, recs, count);
                 if (recs != NULL) {
+                    free(recs);
+                }
+            }
+        }
+    }
+    return 0;
+}
+
+int
+aigate_core_reload_plugins(aigate_core* ac)
+{
+    if (ac == NULL || ac->plugins == NULL) {
+        return -1;
+    }
+    if (ac->ps != NULL) {
+        const pg_ops_t* ops = pg_store_ops(ac->ps);
+        if (ops != NULL && ops->list_script_plugins != NULL) {
+            lua_plugin_def_t* recs = NULL;
+            size_t            count = 0;
+            if (ops->list_script_plugins(ops->ctx, &recs, &count) == 0) {
+                lua_plugin_mgr_set_plugins(ac->plugins, recs, count);
+                if (recs != NULL) {
+                    for (size_t i = 0; i < count; i++) {
+                        lua_plugin_def_free(&recs[i]);
+                    }
                     free(recs);
                 }
             }
@@ -550,7 +576,14 @@ aigate_core_init(aigate_core*   ac,
     ac->cache_opt_cache = cache_optimizer_cache_create(200);
     aigate_core_reload_cache_optimizer_rules(ac);
 
+    ac->plugins = lua_plugin_mgr_create();
+    aigate_core_reload_plugins(ac);
+
     if (ac->rl == NULL || ac->router == NULL || ac->um == NULL || ac->cb == NULL) {
+        if (ac->plugins != NULL) {
+            lua_plugin_mgr_destroy(ac->plugins);
+            ac->plugins = NULL;
+        }
         if (ac->cache_opt_cache != NULL) {
             cache_optimizer_cache_destroy(ac->cache_opt_cache);
             ac->cache_opt_cache = NULL;
@@ -701,6 +734,10 @@ aigate_core_shutdown(aigate_core* ac)
     if (ac->threat_whitelist != NULL) {
         threat_whitelist_destroy(ac->threat_whitelist);
         ac->threat_whitelist = NULL;
+    }
+    if (ac->plugins != NULL) {
+        lua_plugin_mgr_destroy(ac->plugins);
+        ac->plugins = NULL;
     }
     auth_key_shutdown(&ac->keys);
 }

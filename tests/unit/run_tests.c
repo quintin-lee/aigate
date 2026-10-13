@@ -917,6 +917,25 @@ main(int argc, char** argv)
     test_register("admin_key_and_group_reasoning_quota_crud",
                   test_admin_key_and_group_reasoning_quota_crud);
 
+    extern void test_lua_plugin_syntax_validation(void);
+    test_register("lua_plugin_syntax_validation", test_lua_plugin_syntax_validation);
+
+    extern void test_lua_plugin_sandbox_restrictions(void);
+    test_register("lua_plugin_sandbox_restrictions", test_lua_plugin_sandbox_restrictions);
+
+    extern void test_lua_plugin_infinite_loop_protection(void);
+    test_register("lua_plugin_infinite_loop_protection", test_lua_plugin_infinite_loop_protection);
+
+    extern void test_lua_plugin_dry_run_request_and_response(void);
+    test_register("lua_plugin_dry_run_request_and_response",
+                  test_lua_plugin_dry_run_request_and_response);
+
+    extern void test_lua_plugin_mgr_lifecycle(void);
+    test_register("lua_plugin_mgr_lifecycle", test_lua_plugin_mgr_lifecycle);
+
+    extern void test_lua_plugin_admin_api_crud(void);
+    test_register("lua_plugin_admin_api_crud", test_lua_plugin_admin_api_crud);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

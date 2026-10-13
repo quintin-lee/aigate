@@ -4,6 +4,7 @@
 #include "jailbreak_detector.h"
 #include "threat_whitelist.h"
 #include "watermark_engine.h"
+#include "lua_plugin.h"
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -237,6 +238,78 @@ filter_jailbreak(chat_req_t* q)
     return FILTER_CONTINUE;
 }
 
+static filter_action_t
+filter_lua_plugins_inbound(chat_req_t* q)
+{
+    if (q == NULL || q->ac == NULL || q->ac->plugins == NULL) {
+        return FILTER_CONTINUE;
+    }
+
+    lua_req_ctx_t lctx;
+    memset(&lctx, 0, sizeof(lctx));
+    lctx.method = (q->rq != NULL && q->rq->method != NULL) ? q->rq->method : "POST";
+    lctx.path = (q->rq != NULL && q->rq->path != NULL) ? q->rq->path : "/v1/chat/completions";
+    lctx.client_ip = (q->rq != NULL && q->rq->client_ip != NULL) ? q->rq->client_ip : "127.0.0.1";
+    lctx.model = q->model;
+
+    char* dumped = NULL;
+    if (q->eff_body != NULL && q->eff_len > 0) {
+        lctx.raw_body = (const char*)q->eff_body;
+        lctx.raw_body_len = q->eff_len;
+    } else if (q->jbody != NULL) {
+        dumped = json_dumps(q->jbody, JSON_COMPACT);
+        if (dumped != NULL) {
+            lctx.raw_body = dumped;
+            lctx.raw_body_len = strlen(dumped);
+        }
+    }
+
+    lua_exec_result_t res = lua_plugin_mgr_exec_request(q->ac->plugins, &lctx);
+
+    if (res == LUA_EXEC_ABORT) {
+        int         status = lctx.abort_status > 0 ? lctx.abort_status : 403;
+        const char* ab_body =
+            lctx.abort_body ? lctx.abort_body : "{\"error\":\"aborted by plugin\"}";
+        aigate_write_json(q->rc, status, ab_body, strlen(ab_body));
+        if (dumped != NULL) {
+            free(dumped);
+        }
+        lua_req_ctx_cleanup(&lctx);
+        return FILTER_STOP;
+    }
+
+    /* Model rewrite */
+    if (lctx.model_rewritten && lctx.new_model[0] != '\0') {
+        snprintf(q->routed_model, sizeof(q->routed_model), "%s", lctx.new_model);
+        q->model = q->routed_model;
+    }
+
+    /* Request body rewrite */
+    if (lctx.new_body != NULL) {
+        if (q->sanitized_body != NULL) {
+            free(q->sanitized_body);
+        }
+        q->sanitized_body = lctx.new_body;
+        q->sanitized_len = lctx.new_body_len;
+        q->eff_body = q->sanitized_body;
+        q->eff_len = q->sanitized_len;
+        lctx.new_body = NULL; /* transfer ownership */
+
+        if (q->jbody != NULL) {
+            json_decref(q->jbody);
+            q->jbody = NULL;
+        }
+        json_error_t jerr;
+        q->jbody = json_loadb(q->sanitized_body, q->sanitized_len, 0, &jerr);
+    }
+
+    if (dumped != NULL) {
+        free(dumped);
+    }
+    lua_req_ctx_cleanup(&lctx);
+    return FILTER_CONTINUE;
+}
+
 filter_action_t
 filter_chain_execute_inbound(chat_req_t* q)
 {
@@ -256,6 +329,56 @@ filter_chain_execute_inbound(chat_req_t* q)
         return FILTER_STOP;
     }
 
+    if (filter_lua_plugins_inbound(q) == FILTER_STOP) {
+        return FILTER_STOP;
+    }
+
+    return FILTER_CONTINUE;
+}
+
+static filter_action_t
+filter_lua_plugins_outbound(
+    chat_req_t* q, const char* resp_body, size_t resp_len, char** out_body, size_t* out_len)
+{
+    if (q == NULL || q->ac == NULL || q->ac->plugins == NULL || resp_body == NULL) {
+        return FILTER_CONTINUE;
+    }
+
+    lua_resp_ctx_t lctx;
+    memset(&lctx, 0, sizeof(lctx));
+    lctx.status = (q->rc != NULL && q->rc->status != 0) ? q->rc->status : 200;
+    lctx.raw_body = (out_body != NULL && *out_body != NULL) ? *out_body : resp_body;
+    lctx.raw_body_len = (out_len != NULL && *out_len > 0) ? *out_len : resp_len;
+
+    lua_exec_result_t res = lua_plugin_mgr_exec_response(q->ac->plugins, q->model, &lctx);
+
+    if (res == LUA_EXEC_ABORT) {
+        int         status = lctx.abort_status > 0 ? lctx.abort_status : 403;
+        const char* ab_body =
+            lctx.abort_body ? lctx.abort_body : "{\"error\":\"aborted by plugin\"}";
+        aigate_write_json(q->rc, status, ab_body, strlen(ab_body));
+        lua_resp_ctx_cleanup(&lctx);
+        return FILTER_STOP;
+    }
+
+    if (lctx.new_status != 0 && q->rc != NULL) {
+        q->rc->status = lctx.new_status;
+    }
+
+    if (lctx.new_body != NULL) {
+        if (out_body != NULL && *out_body != NULL) {
+            free(*out_body);
+        }
+        if (out_body != NULL) {
+            *out_body = lctx.new_body;
+            lctx.new_body = NULL; /* transfer ownership */
+        }
+        if (out_len != NULL) {
+            *out_len = lctx.new_body_len;
+        }
+    }
+
+    lua_resp_ctx_cleanup(&lctx);
     return FILTER_CONTINUE;
 }
 
@@ -448,6 +571,11 @@ filter_chain_execute_outbound(
             }
             json_decref(root);
         }
+    }
+
+    /* 4. Lua Outbound Response Plugins */
+    if (filter_lua_plugins_outbound(q, resp_body, resp_len, out_body, out_len) == FILTER_STOP) {
+        return FILTER_STOP;
     }
 
     return FILTER_CONTINUE;

@@ -3056,6 +3056,245 @@ pq_delete_threat_whitelist(void* vctx, int64_t rule_id)
     return 0;
 }
 
+/** @brief libpq implementation of pg_ops.list_script_plugins. */
+static int
+pq_list_script_plugins(void* vctx, lua_plugin_def_t** out_recs, size_t* out_count)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT id, name, phase, priority, enabled, match_model, description, script_code, "
+        "created_at, updated_at FROM script_plugins ORDER BY priority ASC, id ASC";
+
+    if (out_recs != NULL) {
+        *out_recs = NULL;
+    }
+    if (out_count != NULL) {
+        *out_count = 0;
+    }
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 0, NULL, NULL, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg list_script_plugins: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    int nt = PQntuples(res);
+    if (nt == 0) {
+        PQclear(res);
+        return 0;
+    }
+
+    lua_plugin_def_t* recs = calloc((size_t)nt, sizeof(lua_plugin_def_t));
+    if (recs == NULL) {
+        PQclear(res);
+        return -1;
+    }
+
+    for (int i = 0; i < nt; i++) {
+        recs[i].id = atoll(PQgetvalue(res, i, 0));
+        copy_field(recs[i].name, sizeof(recs[i].name), PQgetvalue(res, i, 1));
+        copy_field(recs[i].phase, sizeof(recs[i].phase), PQgetvalue(res, i, 2));
+        recs[i].priority = atoi(PQgetvalue(res, i, 3));
+        recs[i].enabled = (strcmp(PQgetvalue(res, i, 4), "t") == 0);
+        copy_field(recs[i].match_model, sizeof(recs[i].match_model), PQgetvalue(res, i, 5));
+        copy_field(recs[i].description, sizeof(recs[i].description), PQgetvalue(res, i, 6));
+        const char* code = PQgetvalue(res, i, 7);
+        recs[i].script_code = code ? strdup(code) : strdup("");
+        recs[i].created_at = atoll(PQgetvalue(res, i, 8));
+        recs[i].updated_at = atoll(PQgetvalue(res, i, 9));
+    }
+
+    PQclear(res);
+    if (out_recs != NULL) {
+        *out_recs = recs;
+    } else {
+        for (int i = 0; i < nt; i++) {
+            lua_plugin_def_free(&recs[i]);
+        }
+        free(recs);
+    }
+    if (out_count != NULL) {
+        *out_count = (size_t)nt;
+    }
+    return 0;
+}
+
+/** @brief libpq implementation of pg_ops.get_script_plugin. */
+static int
+pq_get_script_plugin(void* vctx, int64_t id, lua_plugin_def_t* out_rec)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "SELECT id, name, phase, priority, enabled, match_model, description, script_code, "
+        "created_at, updated_at FROM script_plugins WHERE id = $1";
+
+    char id_str[32];
+    snprintf(id_str, sizeof(id_str), "%lld", (long long)id);
+    const char* vals[1] = {id_str};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK) {
+        AIGATE_LOG_ERROR("pg get_script_plugin: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    if (PQntuples(res) == 0) {
+        PQclear(res);
+        return 1;
+    }
+
+    if (out_rec != NULL) {
+        memset(out_rec, 0, sizeof(*out_rec));
+        out_rec->id = atoll(PQgetvalue(res, 0, 0));
+        copy_field(out_rec->name, sizeof(out_rec->name), PQgetvalue(res, 0, 1));
+        copy_field(out_rec->phase, sizeof(out_rec->phase), PQgetvalue(res, 0, 2));
+        out_rec->priority = atoi(PQgetvalue(res, 0, 3));
+        out_rec->enabled = (strcmp(PQgetvalue(res, 0, 4), "t") == 0);
+        copy_field(out_rec->match_model, sizeof(out_rec->match_model), PQgetvalue(res, 0, 5));
+        copy_field(out_rec->description, sizeof(out_rec->description), PQgetvalue(res, 0, 6));
+        const char* code = PQgetvalue(res, 0, 7);
+        out_rec->script_code = code ? strdup(code) : strdup("");
+        out_rec->created_at = atoll(PQgetvalue(res, 0, 8));
+        out_rec->updated_at = atoll(PQgetvalue(res, 0, 9));
+    }
+
+    PQclear(res);
+    return 0;
+}
+
+/** @brief libpq implementation of pg_ops.create_script_plugin. */
+static int
+pq_create_script_plugin(void* vctx, const lua_plugin_def_t* rec, int64_t* out_id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "INSERT INTO script_plugins(name, phase, priority, enabled, match_model, description, "
+        "script_code, created_at, updated_at) VALUES($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING "
+        "id";
+
+    char prio_str[16], en_str[8], cat_str[32], uat_str[32];
+    snprintf(prio_str, sizeof(prio_str), "%d", rec->priority);
+    snprintf(en_str, sizeof(en_str), "%s", rec->enabled ? "true" : "false");
+    snprintf(cat_str, sizeof(cat_str), "%lld", (long long)rec->created_at);
+    snprintf(uat_str, sizeof(uat_str), "%lld", (long long)rec->updated_at);
+
+    const char* vals[9] = {rec->name,
+                           rec->phase[0] != '\0' ? rec->phase : "request",
+                           prio_str,
+                           en_str,
+                           rec->match_model[0] != '\0' ? rec->match_model : "*",
+                           rec->description,
+                           rec->script_code ? rec->script_code : "",
+                           cat_str,
+                           uat_str};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 9, NULL, vals, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_TUPLES_OK || PQntuples(res) == 0) {
+        AIGATE_LOG_ERROR("pg create_script_plugin: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    if (out_id != NULL) {
+        *out_id = atoll(PQgetvalue(res, 0, 0));
+    }
+    PQclear(res);
+    return 0;
+}
+
+/** @brief libpq implementation of pg_ops.update_script_plugin. */
+static int
+pq_update_script_plugin(void* vctx, const lua_plugin_def_t* rec)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] =
+        "UPDATE script_plugins SET name = $1, phase = $2, priority = $3, enabled = $4, match_model "
+        "= $5, description = $6, script_code = $7, updated_at = $8 WHERE id = $9";
+
+    char id_str[32], prio_str[16], en_str[8], uat_str[32];
+    snprintf(id_str, sizeof(id_str), "%lld", (long long)rec->id);
+    snprintf(prio_str, sizeof(prio_str), "%d", rec->priority);
+    snprintf(en_str, sizeof(en_str), "%s", rec->enabled ? "true" : "false");
+    snprintf(uat_str, sizeof(uat_str), "%lld", (long long)rec->updated_at);
+
+    const char* vals[9] = {rec->name,
+                           rec->phase[0] != '\0' ? rec->phase : "request",
+                           prio_str,
+                           en_str,
+                           rec->match_model[0] != '\0' ? rec->match_model : "*",
+                           rec->description,
+                           rec->script_code ? rec->script_code : "",
+                           uat_str,
+                           id_str};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 9, NULL, vals, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
+        AIGATE_LOG_ERROR("pg update_script_plugin: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    char* cmd_tuples = PQcmdTuples(res);
+    int   affected = (cmd_tuples && cmd_tuples[0] != '\0') ? atoi(cmd_tuples) : 0;
+    PQclear(res);
+    return (affected > 0) ? 0 : 1;
+}
+
+/** @brief libpq implementation of pg_ops.delete_script_plugin. */
+static int
+pq_delete_script_plugin(void* vctx, int64_t id)
+{
+    struct pq_ctx*    px = vctx;
+    static const char q[] = "DELETE FROM script_plugins WHERE id = $1";
+    char              id_str[32];
+    snprintf(id_str, sizeof(id_str), "%lld", (long long)id);
+    const char* vals[1] = {id_str};
+
+    pq_lock(px);
+    PGresult* res = PQexecParams(px->db, q, 1, NULL, vals, NULL, NULL, 0);
+    pq_unlock(px);
+
+    if (res == NULL || PQresultStatus(res) != PGRES_COMMAND_OK) {
+        AIGATE_LOG_ERROR("pg delete_script_plugin: %s",
+                         res != NULL ? PQerrorMessage(px->db) : "query alloc failed");
+        if (res != NULL) {
+            PQclear(res);
+        }
+        return -1;
+    }
+
+    char* cmd_tuples = PQcmdTuples(res);
+    int   affected = (cmd_tuples && cmd_tuples[0] != '\0') ? atoi(cmd_tuples) : 0;
+    PQclear(res);
+    return (affected > 0) ? 0 : 1;
+}
+
 /* ------------------------------------------------------- store lifecycle */
 
 pg_store_t*
@@ -3162,6 +3401,11 @@ pg_store_open(const char* dsn, const pg_ops_t* ops)
     ps->ops.list_threat_whitelists = pq_list_threat_whitelists;
     ps->ops.create_threat_whitelist = pq_create_threat_whitelist;
     ps->ops.delete_threat_whitelist = pq_delete_threat_whitelist;
+    ps->ops.list_script_plugins = pq_list_script_plugins;
+    ps->ops.get_script_plugin = pq_get_script_plugin;
+    ps->ops.create_script_plugin = pq_create_script_plugin;
+    ps->ops.update_script_plugin = pq_update_script_plugin;
+    ps->ops.delete_script_plugin = pq_delete_script_plugin;
     ps->ops.ctx = px;
     ps->ctx = px;
     ps->owns_ctx = 1;
@@ -3487,6 +3731,51 @@ pg_store_delete_threat_whitelist(pg_store_t* ps, int64_t rule_id)
     const pg_ops_t* ops = pg_store_ops(ps);
     return (ops != NULL && ops->delete_threat_whitelist != NULL)
                ? ops->delete_threat_whitelist(ops->ctx, rule_id)
+               : -1;
+}
+
+int
+pg_store_list_script_plugins(pg_store_t* ps, lua_plugin_def_t** out_recs, size_t* out_count)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->list_script_plugins != NULL)
+               ? ops->list_script_plugins(ops->ctx, out_recs, out_count)
+               : -1;
+}
+
+int
+pg_store_get_script_plugin(pg_store_t* ps, int64_t id, lua_plugin_def_t* out_rec)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->get_script_plugin != NULL)
+               ? ops->get_script_plugin(ops->ctx, id, out_rec)
+               : -1;
+}
+
+int
+pg_store_create_script_plugin(pg_store_t* ps, const lua_plugin_def_t* rec, int64_t* out_id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->create_script_plugin != NULL)
+               ? ops->create_script_plugin(ops->ctx, rec, out_id)
+               : -1;
+}
+
+int
+pg_store_update_script_plugin(pg_store_t* ps, const lua_plugin_def_t* rec)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->update_script_plugin != NULL)
+               ? ops->update_script_plugin(ops->ctx, rec)
+               : -1;
+}
+
+int
+pg_store_delete_script_plugin(pg_store_t* ps, int64_t id)
+{
+    const pg_ops_t* ops = pg_store_ops(ps);
+    return (ops != NULL && ops->delete_script_plugin != NULL)
+               ? ops->delete_script_plugin(ops->ctx, id)
                : -1;
 }
 
