@@ -6280,6 +6280,71 @@ admin_plugins_test_post(admin_ctx_t* adm,
     return 0;
 }
 
+static int
+admin_plugins_validate_post(admin_ctx_t* adm,
+                            const void*  req_body,
+                            size_t       req_len,
+                            int*         status,
+                            char**       out_body,
+                            size_t*      len)
+{
+    (void)adm;
+    json_error_t jerr;
+    json_t*      root = json_loadb((const char*)req_body, req_len, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, out_body, len, 400, "bad_request", "invalid json body");
+    }
+
+    json_t* jcode = json_object_get(root, "script_code");
+    if (jcode == NULL || !json_is_string(jcode)) {
+        json_decref(root);
+        return finish_error(status, out_body, len, 400, "bad_request", "script_code is required");
+    }
+
+    const char* script_code = json_string_value(jcode);
+    char        syn_err[256] = {0};
+    int         valid_rc = lua_plugin_validate_syntax(script_code, syn_err, sizeof(syn_err));
+    json_decref(root);
+
+    json_t* resp = json_object();
+    if (valid_rc == 0) {
+        json_object_set_new(resp, "valid", json_true());
+    } else {
+        json_object_set_new(resp, "valid", json_false());
+        json_object_set_new(resp, "raw_error", json_string(syn_err));
+
+        /* Extract line number: [string "..."]:line: message */
+        int         line = 1;
+        const char* p = strchr(syn_err, ':');
+        if (p != NULL) {
+            int parsed_line = atoi(p + 1);
+            if (parsed_line > 0) {
+                line = parsed_line;
+            }
+            const char* msg_p = strchr(p + 1, ':');
+            if (msg_p != NULL) {
+                msg_p++;
+                while (*msg_p == ' ') {
+                    msg_p++;
+                }
+                json_object_set_new(resp, "message", json_string(msg_p));
+            } else {
+                json_object_set_new(resp, "message", json_string(syn_err));
+            }
+        } else {
+            json_object_set_new(resp, "message", json_string(syn_err));
+        }
+        json_object_set_new(resp, "line", json_integer(line));
+        json_object_set_new(resp, "column", json_integer(1));
+    }
+
+    return finish_json(status, out_body, len, 200, resp);
+}
+
+
 /* ------------------------------------------------------------ dispatch */
 
 int
@@ -6618,7 +6683,10 @@ admin_dispatch(admin_ctx_t* adm,
         if (strcmp(rest, "plugins/test") == 0 && strcmp(method, "POST") == 0) {
             return admin_plugins_test_post(adm, body, body_len, out_status, out_body, out_len);
         }
-        if (rest[7] == '/' && strcmp(rest + 8, "test") != 0) {
+        if (strcmp(rest, "plugins/validate") == 0 && strcmp(method, "POST") == 0) {
+            return admin_plugins_validate_post(adm, body, body_len, out_status, out_body, out_len);
+        }
+        if (rest[7] == '/' && strcmp(rest + 8, "test") != 0 && strcmp(rest + 8, "validate") != 0) {
             const char* id_str = rest + 8;
             if (strcmp(method, "GET") == 0) {
                 return admin_plugins_get_id(adm, id_str, out_status, out_body, out_len);

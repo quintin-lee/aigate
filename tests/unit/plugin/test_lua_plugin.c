@@ -569,3 +569,74 @@ TEST_CASE(test_lua_plugin_admin_api_crud)
         }
     }
 }
+
+void
+test_lua_plugin_validate_api(void)
+{
+    admin_ctx_t adm;
+    memset(&adm, 0, sizeof(adm));
+    adm.admin_token_hash = "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b";
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. Valid syntax */
+    const char* valid_code =
+        "{\"script_code\":\"function on_request(req)\\n  req:set_header('x-t', '1')\\nend\"}";
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/plugins/validate",
+                            "POST",
+                            NULL,
+                            "secret",
+                            valid_code,
+                            strlen(valid_code),
+                            &status,
+                            &body,
+                            &len);
+    TEST_ASSERT(rc == 0 && status == 200, "Validate valid syntax returns 200");
+    json_t* res = json_loads(body, 0, NULL);
+    free(body);
+    body = NULL;
+    TEST_ASSERT(res != NULL && json_is_true(json_object_get(res, "valid")), "Valid is true");
+    json_decref(res);
+
+    /* 2. Syntax error on line 2 */
+    const char* bad_code =
+        "{\"script_code\":\"function on_request(req)\\n  broken syntax here !!!\\nend\"}";
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/plugins/validate",
+                        "POST",
+                        NULL,
+                        "secret",
+                        bad_code,
+                        strlen(bad_code),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "Validate bad syntax returns 200");
+    res = json_loads(body, 0, NULL);
+    free(body);
+    body = NULL;
+    TEST_ASSERT(res != NULL && json_is_false(json_object_get(res, "valid")), "Valid is false");
+    TEST_ASSERT(json_integer_value(json_object_get(res, "line")) == 2, "Line is 2");
+    TEST_ASSERT(json_string_value(json_object_get(res, "message")) != NULL, "Message present");
+    json_decref(res);
+
+    /* 3. Missing script_code -> 400 bad_request */
+    const char* empty_code = "{}";
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/plugins/validate",
+                        "POST",
+                        NULL,
+                        "secret",
+                        empty_code,
+                        strlen(empty_code),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 400, "Missing script_code returns 400");
+    free(body);
+    body = NULL;
+}
+
