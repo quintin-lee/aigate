@@ -25,3 +25,6 @@ build_asan/
 # benchmark runs
 benchmarks/reports/*.md
 
+# web node_modules and dist
+web/node_modules/
+web/dist/

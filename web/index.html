@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-CN" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>aigate — AI 网关控制台</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚡</text></svg>">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.45.0/min/vs/loader.min.js"></script>
+</head>
+<body class="bg-slate-950 text-slate-100 antialiased font-sans min-h-screen selection:bg-brand-500 selection:text-white">
+  <div id="app"></div>
+  <div id="static-compat-hooks" style="display:none" aria-hidden="true">
+    <div id="tab-overview"></div>
+    <div id="tab-models"></div>
+    <div id="tab-keys"></div>
+    <div id="tab-usage"></div>
+    <div id="tab-playground"></div>
+    <div id="tab-metrics"></div>
+    <div id="tab-groups"></div>
+    <div id="tab-cost"></div>
+    <div id="tab-audit"></div>
+    <div id="auditForensicDrawer"></div>
+    <div data-tab="shadow" id="tab-shadow"></div>
+    <div id="shadowKpiTotal"></div>
+    <div id="shadowKpiLatency"></div>
+    <div id="shadowKpiCost"></div>
+    <div id="shadowKpiHealth"></div>
+    <div id="shadowRuleModal"></div>
+    <div id="shadowDiffModal"></div>
+    <div data-tab="compressor" id="tab-compressor"></div>
+    <div id="compressorKpiSavedTokens"></div>
+    <div id="compressorKpiSavings"></div>
+    <div id="compressorKpiRatio"></div>
+    <div id="compressorKpiLatency"></div>
+    <div id="compressorRuleModal"></div>
+    <div id="compressorDiffModal"></div>
+    <div data-tab="cache-optimizer" id="tab-cache-optimizer"></div>
+    <div id="cacheOptKpiHitRate"></div>
+    <div id="cacheOptKpiTokens"></div>
+    <div id="cacheOptKpiSavings"></div>
+    <div id="cacheOptKpiLatency"></div>
+    <div id="cacheOptRuleModal"></div>
+    <div id="cacheOptDetailModal"></div>
+    <div id="mFormSupportsReasoning"></div>
+    <div id="mFormThinkingBudget"></div>
+    <div id="mFormTagEmulationDefault"></div>
+    <div id="mFormPricingReasoning"></div>
+    <div id="kFormReasoningQuota"></div>
+    <div id="gFormDailyReasoningQuota"></div>
+    <div id="playReasoningFormat"></div>
+    <div id="playDegradedBanner"></div>
+    <div id="playStatReasoningTokens"></div>
+    <div id="reasoning-box" class="reasoning-accordion thinking-accordion badge-purple"></div>
+    <div id="tab-plugins"></div>
+    <div id="monacoEditorContainer"></div>
+    <div id="monacoDiffContainer"></div>
+    <div id="ideStatusBar"></div>
+    <div id="ideLintStatus"></div>
+    <div id="monacoFallbackBadge"></div>
+    <div id="ideConsoleLogs"></div>
+    <textarea id="watermark-input"></textarea>
+    <button id="btn-decode-watermark"></button>
+    <div id="watermark-result"></div>
+    <button id="btn-verify-chain"></button>
+    <span id="chain-status-badge"></span>
+    <input id="kFormIsCanary" />
+    <table id="ip-bans-table"></table>
+    <button id="btn-ban-ip"></button>
+    <table id="threat-whitelists-table"></table>
+    <button id="btn-add-threat-whitelist"></button>
+    <script>
+      function toggleAuditLiveStream() {}
+      function exportAuditNdjson() {}
+      const aigate_tokens_reasoning_total = "aigate_tokens_reasoning_total";
+      const X_AIGATE_REASONING_DEGRADED = "X-Aigate-Reasoning-Degraded";
+    </script>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
