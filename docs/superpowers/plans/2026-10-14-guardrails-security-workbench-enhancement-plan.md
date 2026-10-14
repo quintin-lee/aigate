@@ -22,7 +22,7 @@
 - Modify: `src/server/admin_api.c`
 - Test: `tests/unit/server/test_admin_api.c` (或在 `tests/unit/policy/test_filter_chain.c` / `tests/unit/run_tests.c`)
 
-- [ ] **Step 1: 编写新增端点单元测试 `test_admin_guardrails_jailbreak_test_api`**
+- [x] **Step 1: 编写新增端点单元测试 `test_admin_guardrails_jailbreak_test_api`**
 
 在测试文件中添加用例：
 ```c
@@ -89,13 +89,13 @@ test_admin_guardrails_jailbreak_test_api(void)
 }
 ```
 
-- [ ] **Step 2: 注册并运行单元测试验证失败 (TDD 预期 404)**
+- [x] **Step 2: 注册并运行单元测试验证失败 (TDD 预期 404)**
 
 ```bash
 make -C build -j$(nproc) && ./build/tests/aigate_unit_tests jailbreak_test_api
 ```
 
-- [ ] **Step 3: 在 `src/server/admin_api.c` 中实现 `admin_guardrails_jailbreak_test_post` 并注册路由**
+- [x] **Step 3: 在 `src/server/admin_api.c` 中实现 `admin_guardrails_jailbreak_test_post` 并注册路由**
 
 包含头文件 `#include "policy/jailbreak_detector.h"`：
 ```c
@@ -159,7 +159,7 @@ admin_guardrails_jailbreak_test_post(admin_ctx_t* adm,
 并在 `admin_dispatch` 的 POST 路由分发中注册：
 `DISPATCH_ROUTE("POST", "/admin/v1/guardrails/jailbreak/test", admin_guardrails_jailbreak_test_post);`
 
-- [ ] **Step 4: 重新编译并执行测试验证通过**
+- [x] **Step 4: 重新编译并执行测试验证通过**
 
 ```bash
 make -C build -j$(nproc) && ./build/tests/aigate_unit_tests jailbreak_test_api
@@ -172,7 +172,7 @@ make -C build -j$(nproc) && ./build/tests/aigate_unit_tests jailbreak_test_api
 **Files:**
 - Modify: `web/src/views/GuardrailsView.vue`
 
-- [ ] **Step 1: 在 `GuardrailsView.vue` 顶部增加 4 栅格雷达大盘卡片**
+- [x] **Step 1: 在 `GuardrailsView.vue` 顶部增加 4 栅格雷达大盘卡片**
 
 在顶部标题下方放置响应式卡片组：
 1. 🛡️ **活跃防御规则**：展示 `rules.length`，附带「关键词/正则/语义」标签；
@@ -180,7 +180,7 @@ make -C build -j$(nproc) && ./build/tests/aigate_unit_tests jailbreak_test_api
 3. ⚡ **越狱拦截健康度**：展示 `99.8%`；
 4. 🔒 **PII 保护实体**：展示 `5 类核心实体`。
 
-- [ ] **Step 2: 绑定统一样式与暗黑主题设计**
+- [x] **Step 2: 绑定统一样式与暗黑主题设计**
 
 保证与 Naive UI / Tailwind 风格统一。
 
@@ -191,11 +191,11 @@ make -C build -j$(nproc) && ./build/tests/aigate_unit_tests jailbreak_test_api
 **Files:**
 - Modify: `web/src/views/GuardrailsView.vue`
 
-- [ ] **Step 1: 在 `n-tabs` 增加第一项 `⚔️ 越狱与注入防御沙盒`**
+- [x] **Step 1: 在 `n-tabs` 增加第一项 `⚔️ 越狱与注入防御沙盒`**
 
 - 设置为默认选中的 Tab 项 (`name="jailbreak"`)。
 
-- [ ] **Step 2: 实现五大典型攻击用例预设按钮与事件**
+- [x] **Step 2: 实现五大典型攻击用例预设按钮与事件**
 
 定义预设常量数组：
 1. `DAN 角色扮演越权`
@@ -205,13 +205,13 @@ make -C build -j$(nproc) && ./build/tests/aigate_unit_tests jailbreak_test_api
 5. `合规正常 Prompt`
 点击按钮自动填入测试文本域并提示已填充。
 
-- [ ] **Step 3: 实现 `runJailbreakTest` 函数**
+- [x] **Step 3: 实现 `runJailbreakTest` 函数**
 
 - 发送 `POST /admin/v1/guardrails/jailbreak/test`；
 - 快捷键支持 <kbd>Ctrl+Enter</kbd> 触发探测；
 - 存储返回结果至响应式变量 `jailbreakResult`。
 
-- [ ] **Step 4: 渲染多级威胁评估卡片**
+- [x] **Step 4: 渲染多级威胁评估卡片**
 
 根据 `jailbreakResult.action` 动态展示：
 - `block` 渲染红色警告徽章 `⛔ 判定阻断 (BLOCK 403)`；
@@ -226,18 +226,18 @@ make -C build -j$(nproc) && ./build/tests/aigate_unit_tests jailbreak_test_api
 **Files:**
 - Modify: `web/src/views/GuardrailsView.vue`
 
-- [ ] **Step 1: 升级 PII 隐私脱敏 Tab 为双栏并排结构**
+- [x] **Step 1: 升级 PII 隐私脱敏 Tab 为双栏并排结构**
 
 - 左侧：待检测文本输入框，提供「典型客户隐私信息」与「云凭据 API Key」快捷填入按钮；
 - 右侧：脱敏输出文本，高亮显示掩码结果（手机号 `138****8000`、身份证等），附带「一键复制」按钮；
 - 底部统计浮条：计算并展示已掩码的敏感实体类型统计。
 
-- [ ] **Step 2: IP 封禁弹窗增加封禁时长选择与表格标签**
+- [x] **Step 2: IP 封禁弹窗增加封禁时长选择与表格标签**
 
 - 添加封禁 IP 弹窗增加 `封禁时长 (Duration)` 下拉选择（1 小时、24 小时、7 天、永久）；
 - 表格展示结构化标签。
 
-- [ ] **Step 3: 严格保留所有测试 DOM 探针**
+- [x] **Step 3: 严格保留所有测试 DOM 探针**
 
 检查并确保以下全部元素 ID 完备存在且可交互：
 - `#btn-ban-ip`
@@ -257,34 +257,34 @@ make -C build -j$(nproc) && ./build/tests/aigate_unit_tests jailbreak_test_api
 **Files:**
 - Modify: `web/admin.html`, `build/generated/admin_ui_html.h`
 
-- [ ] **Step 1: 前端生产编译打包**
+- [x] **Step 1: 前端生产编译打包**
 
 ```bash
 cd web && npm run build
 ```
 验证：Vite 成功生成 `web/dist/index.html` 并内嵌至 `web/admin.html`。
 
-- [ ] **Step 2: 烘焙嵌入 C 头文件**
+- [x] **Step 2: 烘焙嵌入 C 头文件**
 
 ```bash
 python3 scripts/embed_html.py web/admin.html build/generated/admin_ui_html.h
 ```
 
-- [ ] **Step 3: 全局编译 C 工程**
+- [x] **Step 3: 全局编译 C 工程**
 
 ```bash
 make -C build -j$(nproc)
 ```
 验证：`-Wall -Wextra -Werror` 零警告零错误通过。
 
-- [ ] **Step 4: 运行全量单元测试**
+- [x] **Step 4: 运行全量单元测试**
 
 ```bash
 ./build/tests/aigate_unit_tests
 ```
 验证：所有单元测试 100% 全部通过 (PASS 352/352, 0 failures)。
 
-- [ ] **Step 5: 提交所有代码与计划至 Git**
+- [x] **Step 5: 提交所有代码与计划至 Git**
 
 ```bash
 git add -A && git commit -m "feat(guardrails): add jailbreak defense sandbox, pii diff studio, and security radar kpis"

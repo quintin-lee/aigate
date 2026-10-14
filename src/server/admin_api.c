@@ -35,6 +35,7 @@
 #include "policy/ip_ban_table.h"
 #include "lua_plugin.h"
 #include "policy/threat_whitelist.h"
+#include "policy/jailbreak_detector.h"
 #include "observe/audit_hash_chain.h"
 
 #include <jansson.h>
@@ -3663,6 +3664,61 @@ guardrails_pii_test(admin_ctx_t* adm, int* status, char** body, size_t* len, con
     return finish_json(status, body, len, 200, out);
 }
 
+/** @brief POST /admin/v1/guardrails/jailbreak/test: inspect prompt for jailbreak and prompt injection. */
+static int
+guardrails_jailbreak_test(admin_ctx_t* adm, int* status, char** body, size_t* len, const void* req_body)
+{
+    (void)adm;
+    if (req_body == NULL) {
+        return finish_error(status, body, len, 400, "bad_request", "missing request body");
+    }
+    json_error_t jerr;
+    json_t*      root = json_loads((const char*)req_body, 0, &jerr);
+    if (root == NULL || !json_is_object(root)) {
+        if (root != NULL) {
+            json_decref(root);
+        }
+        return finish_error(status, body, len, 400, "bad_request", "invalid json object");
+    }
+
+    const char* prompt = json_string_value(json_object_get(root, "prompt"));
+    if (prompt == NULL) {
+        prompt = json_string_value(json_object_get(root, "text"));
+    }
+    if (prompt == NULL) {
+        json_decref(root);
+        return finish_error(status, body, len, 400, "bad_request", "missing 'prompt' field");
+    }
+
+    struct timespec ts_start, ts_end;
+    clock_gettime(CLOCK_MONOTONIC, &ts_start);
+
+    jailbreak_result_t res;
+    memset(&res, 0, sizeof(res));
+    jailbreak_action_t act = jailbreak_detector_inspect(NULL, prompt, strlen(prompt), &res);
+
+    clock_gettime(CLOCK_MONOTONIC, &ts_end);
+    long dur_us = (ts_end.tv_sec - ts_start.tv_sec) * 1000000L +
+                  (ts_end.tv_nsec - ts_start.tv_nsec) / 1000L;
+
+    json_t* out = json_object();
+    json_object_set_new(out, "status", json_string("ok"));
+    json_object_set_new(out, "detected", json_boolean(act != JAILBREAK_ACTION_PASS));
+    const char* act_str = (act == JAILBREAK_ACTION_BLOCK) ? "block"
+                          : (act == JAILBREAK_ACTION_FLAG) ? "flag"
+                                                          : "pass";
+    json_object_set_new(out, "action", json_string(act_str));
+    json_object_set_new(out, "action_code", json_integer((int)act));
+    json_object_set_new(out, "score", json_integer(res.risk_score));
+    json_object_set_new(out, "rule_tag", json_string(res.rule_tag[0] ? res.rule_tag : ""));
+    json_object_set_new(out, "description", json_string(res.reason[0] ? res.reason : ""));
+    json_object_set_new(out, "reason", json_string(res.reason[0] ? res.reason : ""));
+    json_object_set_new(out, "duration_us", json_integer(dur_us > 0 ? dur_us : 1));
+
+    json_decref(root);
+    return finish_json(status, body, len, 200, out);
+}
+
 /* ------------------------------------------------------------ response cache */
 
 static int
@@ -6528,6 +6584,11 @@ admin_dispatch(admin_ctx_t* adm,
         if (strcmp(rest, "guardrails/pii/test") == 0) {
             if (strcmp(method, "POST") == 0) {
                 return guardrails_pii_test(adm, out_status, out_body, out_len, body);
+            }
+        }
+        if (strcmp(rest, "guardrails/jailbreak/test") == 0) {
+            if (strcmp(method, "POST") == 0) {
+                return guardrails_jailbreak_test(adm, out_status, out_body, out_len, body);
             }
         }
         if (strcmp(rest, "guardrails/reload") == 0) {

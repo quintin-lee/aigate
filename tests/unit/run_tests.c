@@ -799,6 +799,9 @@ main(int argc, char** argv)
     extern void test_admin_threat_whitelists_crud(void);
     test_register("admin_threat_whitelists_crud", test_admin_threat_whitelists_crud);
 
+    extern void test_admin_guardrails_jailbreak_test_api(void);
+    test_register("admin_guardrails_jailbreak_test_api", test_admin_guardrails_jailbreak_test_api);
+
     extern void test_admin_key_is_canary_field(void);
     test_register("admin_key_is_canary_field", test_admin_key_is_canary_field);
 
