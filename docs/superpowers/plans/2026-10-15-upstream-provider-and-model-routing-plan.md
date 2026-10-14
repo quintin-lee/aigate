@@ -15,7 +15,7 @@
 **Files:**
 - Modify: `web/src/views/ProvidersView.vue`
 
-- [ ] **Step 1: 在 `ProvidersView.vue` 顶部引入 4 栅格健康态势雷达卡片**
+- [x] **Step 1: 在 `ProvidersView.vue` 顶部引入 4 栅格健康态势雷达卡片**
 
 在顶部控制栏下方放置响应式 4 栅格健康大盘：
 1. 🟢 **健康在线渠道**：统计当前处于 `CLOSED` / `healthy` 的服务商数量与在线率（如 4/5 80%）；
@@ -23,7 +23,7 @@
 3. ⚡ **全局平均探活 RTT**：计算各服务商探针测速的平均网络延迟（如 148 ms）；
 4. 📦 **承载模型总数**：统计当前所有供应商承载的公开模型总数。
 
-- [ ] **Step 2: 增强供应商表格列与全量并发探活巡检**
+- [x] **Step 2: 增强供应商表格列与全量并发探活巡检**
 
 - 增加状态呼吸灯（🟢 在线、🟡 SLA 降级、🔴 熔断摘除、⚪ 未知）；
 - Base URL 列清晰标识密钥形态（`env:VAR` 环境变量引用、`pg:BLOB` 加密凭证）；
@@ -37,7 +37,7 @@
 **Files:**
 - Modify: `web/src/views/ModelsView.vue`
 
-- [ ] **Step 1: 在模型配置弹窗中增加多目标路由池 (Upstream Targets Pool)**
+- [x] **Step 1: 在模型配置弹窗中增加多目标路由池 (Upstream Targets Pool)**
 
 支持动态添加/移除 1~8 个物理后端目标：
 - 目标渠道：下拉选择供应商（openai, azure, anthropic, deepseek 等）；
@@ -47,7 +47,7 @@
 - 分流权重 (`weight`)：支持调整数值权重（如 7:3）；
 - 单节点最大并发 (`max_concurrency`)：保护后端通道防超限。
 
-- [ ] **Step 2: 增加实时流量分配百分比预览条 (Traffic Ratio Preview) 与算法选择器**
+- [x] **Step 2: 增加实时流量分配百分比预览条 (Traffic Ratio Preview) 与算法选择器**
 
 - 动态响应式计算同一梯队内的权重占比（如 70% OpenAI 官方 + 30% Azure OpenAI）；
 - 渲染渐变彩色分流条，直观预览流量分发预期；
@@ -63,13 +63,13 @@
 **Files:**
 - Modify: `web/src/views/ModelsView.vue`
 
-- [ ] **Step 1: 实现 SLA 容灾降级兜底模型与熔断阈值配置**
+- [x] **Step 1: 实现 SLA 容灾降级兜底模型与熔断阈值配置**
 
 - 在模型表单中增加“SLA 容灾降级 (Fallback Model)”配置区：
   - `fallback_model` 下拉选择框（过滤除自身以外的所有可用模型，如切换至 `deepseek-v3` 或 `gpt-4o-mini`）；
   - 呈现熔断错误率阈值 (40%) 与 SLA 延迟劣化门限 (3000ms) 提示。
 
-- [ ] **Step 2: 完善深度思考推理视窗 (Reasoning) 并确保已有测试 DOM 契约完全保留**
+- [x] **Step 2: 完善深度思考推理视窗 (Reasoning) 并确保已有测试 DOM 契约完全保留**
 
 - 严格保留现有测试 DOM ID：
   - `id="mFormSupportsReasoning"`：支持深度推理开关；
@@ -85,11 +85,11 @@
 **Files:**
 - Modify: `web/src/views/ModelsView.vue`
 
-- [ ] **Step 1: 在模型表格操作列增加“🔬 仿真测试”按钮**
+- [x] **Step 1: 在模型表格操作列增加“🔬 仿真测试”按钮**
 
 在每个模型的“操作”列中加入“🔬 仿真测试”按钮，点击唤出右侧抽屉 `simulationDrawerVisible`。
 
-- [ ] **Step 2: 构建智能路由仿真沙箱抽屉 (Routing Simulator Drawer)**
+- [x] **Step 2: 构建智能路由仿真沙箱抽屉 (Routing Simulator Drawer)**
 
 - 仿真报告卡片：
   - 实时评估当前模型的 targets 数组与 `lb_policy`；
@@ -108,31 +108,31 @@
 **Files:**
 - Modify: `web/admin.html`, `build/generated/admin_ui_html.h`
 
-- [ ] **Step 1: 前端生产编译打包**
+- [x] **Step 1: 前端生产编译打包**
 
 ```bash
 cd web && npm run build
 ```
 验证：Vite 成功生成 `web/dist/index.html` 并内嵌至 `web/admin.html`。
 
-- [ ] **Step 2: 烘焙嵌入 C 头文件**
+- [x] **Step 2: 烘焙嵌入 C 头文件**
 
 ```bash
 python3 scripts/embed_html.py web/admin.html build/generated/admin_ui_html.h
 ```
 
-- [ ] **Step 3: 全局编译 C 工程**
+- [x] **Step 3: 全局编译 C 工程**
 
 ```bash
 make -C build -j$(nproc)
 ```
 验证：`-Wall -Wextra -Werror` 零警告零错误通过。
 
-- [ ] **Step 4: 运行全量单元测试**
+- [x] **Step 4: 运行全量单元测试**
 
 ```bash
 ./build/tests/aigate_unit_tests
 ```
 验证：所有单元测试 100% 全部通过 (PASS 352/352, 0 failures)。
 
-- [ ] **Step 5: 提交所有代码与计划至 Git**
+- [x] **Step 5: 提交所有代码与计划至 Git**
