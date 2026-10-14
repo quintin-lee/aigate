@@ -639,3 +639,84 @@ test_lua_plugin_validate_api(void)
     free(body);
     body = NULL;
 }
+
+void
+test_lua_plugin_admin_api_test_endpoint_compatibility(void)
+{
+    admin_ctx_t adm;
+    memset(&adm, 0, sizeof(adm));
+    adm.admin_token_hash = "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b";
+
+    int    status = 0;
+    char*  body = NULL;
+    size_t len = 0;
+
+    /* 1. Support 'script' key instead of 'script_code' and mock_payload object */
+    const char* req_payload =
+        "{\n"
+        "  \"script\": \"function on_request(req)\\n req:set_model('deepseek-chat')\\n aigate.log_info('test-ok')\\nend\",\n"
+        "  \"phase\": \"request\",\n"
+        "  \"mock_payload\": {\n"
+        "    \"model\": \"gpt-4o\"\n"
+        "  }\n"
+        "}";
+
+    int rc = admin_dispatch(&adm,
+                            "/admin/v1/plugins/test",
+                            "POST",
+                            NULL,
+                            "secret",
+                            req_payload,
+                            strlen(req_payload),
+                            &status,
+                            &body,
+                            &len);
+    TEST_ASSERT(rc == 0 && status == 200, "Test endpoint with 'script' key returns 200");
+    TEST_ASSERT(body != NULL, "Response body not null");
+
+    json_error_t jerr;
+    json_t* res = json_loads(body, 0, &jerr);
+    free(body);
+    body = NULL;
+
+    TEST_ASSERT(res != NULL, "Valid JSON returned");
+    TEST_ASSERT(json_is_true(json_object_get(res, "success")), "Dry run succeeded");
+    json_t* req_obj = json_object_get(res, "request");
+    TEST_ASSERT(req_obj != NULL, "Request object exists");
+    TEST_ASSERT(strcmp(json_string_value(json_object_get(req_obj, "model")), "deepseek-chat") == 0,
+                "Model rewritten to deepseek-chat");
+
+    json_t* logs = json_object_get(res, "logs");
+    TEST_ASSERT(logs != NULL && json_array_size(logs) > 0, "Captured logs returned");
+    json_decref(res);
+
+    /* 2. Support flat parameters (path, model, body) without nested mock_payload */
+    const char* flat_payload =
+        "{\n"
+        "  \"script\": \"function on_request(req)\\n req:set_model('deepseek-r1')\\n aigate.log_info('flat-ok')\\nend\",\n"
+        "  \"phase\": \"request\",\n"
+        "  \"model\": \"gpt-4o\"\n"
+        "}";
+
+    rc = admin_dispatch(&adm,
+                        "/admin/v1/plugins/test",
+                        "POST",
+                        NULL,
+                        "secret",
+                        flat_payload,
+                        strlen(flat_payload),
+                        &status,
+                        &body,
+                        &len);
+    TEST_ASSERT(rc == 0 && status == 200, "Test endpoint with flat payload returns 200");
+    TEST_ASSERT(body != NULL, "Response body not null");
+
+    res = json_loads(body, 0, &jerr);
+    free(body);
+    body = NULL;
+    TEST_ASSERT(res != NULL && json_is_true(json_object_get(res, "success")), "Flat payload dry run succeeded");
+    req_obj = json_object_get(res, "request");
+    TEST_ASSERT(req_obj != NULL && strcmp(json_string_value(json_object_get(req_obj, "model")), "deepseek-r1") == 0,
+                "Model rewritten from flat payload");
+    json_decref(res);
+}

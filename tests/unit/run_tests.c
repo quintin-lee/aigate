@@ -939,6 +939,10 @@ main(int argc, char** argv)
     extern void test_lua_plugin_validate_api(void);
     test_register("lua_plugin_validate_api", test_lua_plugin_validate_api);
 
+    extern void test_lua_plugin_admin_api_test_endpoint_compatibility(void);
+    test_register("lua_plugin_admin_api_test_endpoint_compatibility",
+                  test_lua_plugin_admin_api_test_endpoint_compatibility);
+
     int ran = 0;
     int failed = 0;
     for (int i = 0; i < g_n_tests; i++) {

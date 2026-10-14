@@ -6244,8 +6244,12 @@ admin_plugins_test_post(admin_ctx_t* adm,
 
     json_t* jcode = json_object_get(root, "script_code");
     if (jcode == NULL || !json_is_string(jcode)) {
+        jcode = json_object_get(root, "script");
+    }
+    if (jcode == NULL || !json_is_string(jcode)) {
         json_decref(root);
-        return finish_error(status, out_body, len, 400, "bad_request", "script_code is required");
+        return finish_error(
+            status, out_body, len, 400, "bad_request", "script_code or script is required");
     }
 
     const char* script_code = json_string_value(jcode);
@@ -6257,10 +6261,20 @@ admin_plugins_test_post(admin_ctx_t* adm,
 
     json_t* jmock = json_object_get(root, "mock_payload");
     char*   mock_str = NULL;
-    if (jmock != NULL) {
+    if (jmock != NULL && json_is_object(jmock)) {
         mock_str = json_dumps(jmock, JSON_COMPACT);
     } else {
-        mock_str = strdup("{}");
+        json_t*     flat_mock = json_object();
+        const char* mock_keys[] = {
+            "method", "path", "client_ip", "model", "headers", "body", "status"};
+        for (size_t i = 0; i < sizeof(mock_keys) / sizeof(mock_keys[0]); i++) {
+            json_t* val = json_object_get(root, mock_keys[i]);
+            if (val != NULL) {
+                json_object_set(flat_mock, mock_keys[i], val);
+            }
+        }
+        mock_str = json_dumps(flat_mock, JSON_COMPACT);
+        json_decref(flat_mock);
     }
 
     char*  result_json = NULL;
