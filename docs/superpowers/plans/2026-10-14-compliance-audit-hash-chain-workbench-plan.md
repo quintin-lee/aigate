@@ -20,7 +20,7 @@
 **Files:**
 - Modify: `web/src/views/AuditView.vue`
 
-- [ ] **Step 1: 在 `AuditView.vue` 顶部增加 4 栅格态势雷达大盘卡片**
+- [x] **Step 1: 在 `AuditView.vue` 顶部增加 4 栅格态势雷达大盘卡片**
 
 在顶部标题和操作栏之间放置 4 栅格响应式卡片组：
 1. 🔐 **已签名存证区块**：展示 `chainStatus ? chainStatus.total_records : auditEvents.length`，附带 `HMAC-SHA256` 徽章；
@@ -28,7 +28,7 @@
 3. 🚨 **安全阻断与违规事件**：展示 `violationCount`，玫瑰红 `text-rose-400` 突出显示；
 4. ⚡ **实时审计流状态**：展示 `livePolling ? '实时捕获中' : '静态就绪'`，带有状态指示灯。
 
-- [ ] **Step 2: 完善顶部快捷操作栏**
+- [x] **Step 2: 完善顶部快捷操作栏**
 
 保留并强化以下操作按钮：
 - `🔐 校验哈希链完整性`（`:loading="verifyingChain"`，调用 `verifyHashChain`）；
@@ -43,7 +43,7 @@
 **Files:**
 - Modify: `web/src/views/AuditView.vue`
 
-- [ ] **Step 1: 实现水平平滑滑动的 Hash Chain Ribbon 区块胶囊流**
+- [x] **Step 1: 实现水平平滑滑动的 Hash Chain Ribbon 区块胶囊流**
 
 在中部区域渲染区块流：
 - 动态从 `auditEvents` 计算并反向生成连续的已签名区块胶囊节点：
@@ -54,7 +54,7 @@
   - 状态指示圆点（翠绿色代表有效，最新区块带有青蓝光晕强调）；
 - 区块之间以单向箭头 `➔` 连接。
 
-- [ ] **Step 2: 实现哈希链断裂篡改预警 Banner 与排障诊断**
+- [x] **Step 2: 实现哈希链断裂篡改预警 Banner 与排障诊断**
 
 在验真接口返回 `valid === false` 时：
 - 展示猩红警告卡片：
@@ -63,7 +63,7 @@
   - `底层原因：broken_reason`；
 - 区块拓扑带中将断裂区块节点渲染为红框闪烁。
 
-- [ ] **Step 3: 点击区块胶囊穿透联动取证抽屉**
+- [x] **Step 3: 点击区块胶囊穿透联动取证抽屉**
 
 为每个区块胶囊绑定 `@click="viewDetails(event)"`，点击自动拉起 `#auditForensicDrawer` 并聚焦该区块密码学凭证。
 
@@ -74,7 +74,7 @@
 **Files:**
 - Modify: `web/src/views/AuditView.vue`
 
-- [ ] **Step 1: 实现多维过滤工具栏**
+- [x] **Step 1: 实现多维过滤工具栏**
 
 在数据表上方添加复合控制栏：
 - 全文模糊搜索框（绑定 `searchKeyword`，对 IP、Trace ID、规则、Prompt 文本即时过滤）；
@@ -83,7 +83,7 @@
 - 🚨 **「仅看违规拦截」一键切换按钮**（动态切换 `onlyViolations`，显示违规数量统计徽章）；
 - 实时流状态指示（实时轮询开启时显示动态脉冲绿点）。
 
-- [ ] **Step 2: 优化 `NDataTable` 列配置与渲染**
+- [x] **Step 2: 优化 `NDataTable` 列配置与渲染**
 
 重构数据表列：
 - **时间**：`created_at` 或 `timestamp_ms`，格式化为标准时间并附带相对时间 Tooltip；
@@ -95,7 +95,7 @@
 - **触发规则与状态**：阻断（`⛔ 阻断 [dan_prompt] (403)`）、告警（`⚠️ 告警 [pii_leak]`）或放行（`✅ 正常放行 (200)`）；
 - **操作**：`查看取证` 按钮唤起抽屉。
 
-- [ ] **Step 3: 保证数据拉取兼容性**
+- [x] **Step 3: 保证数据拉取兼容性**
 
 在 `loadEvents` 中协同对接 `GET /admin/v1/audit/events`：
 - 若返回 `{ events: [...] }` 则取 `data.events`；
@@ -109,7 +109,7 @@
 **Files:**
 - Modify: `web/src/views/AuditView.vue`
 
-- [ ] **Step 1: 升级 `#auditForensicDrawer` 抽屉布局与分层**
+- [x] **Step 1: 升级 `#auditForensicDrawer` 抽屉布局与分层**
 
 保持抽屉容器 `id="auditForensicDrawer"`：
 1. **基础元数据卡片**：事件序列号、全局 Trace ID、租户、客户端 IP、状态码、延迟拆解、Token 消耗；
@@ -119,12 +119,12 @@
    - 前驱哈希 `Previous Hash`；
    - 验证徽章 `● HMAC-SHA256 存证签名有效吻合`。
 
-- [ ] **Step 2: 实现取证凭据一键复制与报告导出**
+- [x] **Step 2: 实现取证凭据一键复制与报告导出**
 
 - `📋 复制存证凭据`：将包含 Trace ID、时间、哈希链指纹的 JSON 存证摘要复制至剪贴板；
 - `📄 导出取证报告 (Markdown)`：生成结构化事件调查报告供安全审计人员归档与司法取证。
 
-- [ ] **Step 3: 严格校验保留测试 DOM 契约**
+- [x] **Step 3: 严格校验保留测试 DOM 契约**
 
 确认以下四大探针 100% 存在且可交互：
 - `id="tab-audit"`
@@ -139,34 +139,34 @@
 **Files:**
 - Modify: `web/admin.html`, `build/generated/admin_ui_html.h`
 
-- [ ] **Step 1: 前端生产编译打包**
+- [x] **Step 1: 前端生产编译打包**
 
 ```bash
 cd web && npm run build
 ```
 验证：Vite 成功生成 `web/dist/index.html` 并内嵌至 `web/admin.html`。
 
-- [ ] **Step 2: 烘焙嵌入 C 头文件**
+- [x] **Step 2: 烘焙嵌入 C 头文件**
 
 ```bash
 python3 scripts/embed_html.py web/admin.html build/generated/admin_ui_html.h
 ```
 
-- [ ] **Step 3: 全局编译 C 工程**
+- [x] **Step 3: 全局编译 C 工程**
 
 ```bash
 make -C build -j$(nproc)
 ```
 验证：`-Wall -Wextra -Werror` 零警告零错误通过。
 
-- [ ] **Step 4: 运行全量单元测试**
+- [x] **Step 4: 运行全量单元测试**
 
 ```bash
 ./build/tests/aigate_unit_tests
 ```
 验证：所有单元测试 100% 全部通过 (PASS 352/352, 0 failures)。
 
-- [ ] **Step 5: 提交所有代码与计划至 Git**
+- [x] **Step 5: 提交所有代码与计划至 Git**
 
 ```bash
 git add -A && git commit -m "feat(audit): add hash chain ribbon, audit radar kpis, and enhanced forensic drawer"
